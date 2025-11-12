@@ -2,7 +2,7 @@
 
 
 export exp_name=test_olmo3_32b_rl_run_${RANDOM}
-export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 hamishivi/code_rlvr_mixture_dpo 1.0 hamishivi/IF_multi_constraints_upto5_filtered_dpo_0625_filter 30186 allenai/rlvr_general_mix-keyword-filtered 21387"
+export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 saurabh5/code_rlvr_mixture_dpo 1.0 hamishivi/IF_multi_constraints_upto5_filtered_dpo_0625_filter-keyword-filtered 30186 allenai/rlvr_general_mix-keyword-filtered 21387"
 export beaker_image=hamishivi/open_instruct_rl32_test10
 export model_path=/weka/oe-adapt-default/hamishi/model_checkpoints/olmo3-merge-32b-1e-4-5e-5/olmo3-merge-32b-1e-4-5e-5/
 
@@ -16,10 +16,11 @@ python mason.py \
     --priority urgent \
     --gs_model_name "sft_olmo3_32b_rl_run_testing" \
     --preemptible \
-    --num_nodes 18 \
+    --num_nodes 16 \
     --gpus 8 \
     --max_retries 0 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64 \
     --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
     --env HOSTED_VLLM_API_BASE=http://ceres-cs-aus-447.reviz.ai2.in:8001/v1 \
@@ -50,8 +51,8 @@ python mason.py \
         --sft_messages_key messages \
         --total_episodes 10000000 \
         --deepspeed_stage 3 \
-        --num_learners_per_node 8 8 8 8 8 8 8 8 8 8 8 8 \
-        --vllm_num_engines 6 \
+        --num_learners_per_node 8 8 8 8 8 8 \
+        --vllm_num_engines 8 \
         --gather_whole_model False \
         --vllm_tensor_parallel_size 8 \
         --lr_scheduler_type constant \
@@ -72,6 +73,7 @@ python mason.py \
         --use_fp8_kv_cache False \
         --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
         --code_pass_rate_reward_threshold 0.99 \
+        --code_max_execution_time 6 \
         --oe_eval_max_length 32768 \
         --checkpoint_state_freq 100 \
         --backend_timeout 1200 \
@@ -83,4 +85,4 @@ python mason.py \
         --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto \
         --oe_eval_tasks mmlu:cot::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,gpqa:0shot_cot::qwen3-instruct,zebralogic::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek \
         --vllm_enforce_eager \
-        --deepspeed_zpg 32
+        --deepspeed_zpg 1
