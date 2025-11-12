@@ -401,6 +401,7 @@ def get_cache_ref_logprobs(
                 active_dataloader,
                 disable=not accelerator.is_local_main_process,
                 desc=f"Generating reference cache (epoch {epoch})",
+                bar_format="{l_bar}{bar}{r_bar}\n",
             ):
                 if args.use_lora:
                     with accelerator.unwrap_model(model).disable_adapter():
@@ -833,7 +834,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     print_gpu_stats(init_gpu_memory)
     # Only show the progress bar once on each machine.
     start_time = time.perf_counter()
-    progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
+    progress_bar = tqdm(
+        range(args.max_train_steps), disable=not accelerator.is_local_main_process, bar_format="{l_bar}{bar}{r_bar}\n"
+    )
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
@@ -1053,7 +1056,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
-            workspace=args.eval_workspace,
+            eval_workspace=args.eval_workspace,
             eval_priority=args.eval_priority,
             gpu_multiplier=args.oe_eval_gpu_multiplier,
         )

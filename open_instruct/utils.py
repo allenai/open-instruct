@@ -1130,10 +1130,10 @@ def launch_ai2_evals_on_weka(
     oe_eval_tasks: list[str] | None = None,
     stop_strings: list[str] | None = None,
     gs_bucket_path: str | None = None,
-    eval_priority: str | None = "high",
+    eval_priority: str | None = "normal",
     beaker_image: str | None = None,
-    workspace: Optional[str] = "ai2/tulu-3-results",
-    gpu_multiplier: Optional[int] = None,
+    eval_workspace: Optional[str] = "ai2/tulu-3-results",
+    oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
     weka_cluster = "ai2/saturn ai2/neptune ai2/jupiter ai2/ceres"
     gcp_cluster = "ai2/augusta"
@@ -1167,7 +1167,7 @@ python scripts/submit_eval_jobs.py \
 --location {path} \
 --cluster {cluster} \
 --is_tuned \
---workspace {workspace} \
+--workspace {eval_workspace} \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
@@ -1189,8 +1189,8 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
     if beaker_image is not None:
         command += f" --beaker_image {beaker_image}"
-    if gpu_multiplier is not None:
-        command += f" --gpu_multiplier {gpu_multiplier}"
+    if oe_eval_gpu_multiplier is not None:
+        command += f" --gpu_multiplier {oe_eval_gpu_multiplier}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()

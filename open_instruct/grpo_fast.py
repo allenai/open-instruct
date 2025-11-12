@@ -270,6 +270,8 @@ class Args:
 
     active_sampling: bool = False
     """Whether to continue sampling responses until you get a full batch."""
+    no_resampling_pass_rate: float | None = None
+    """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
 
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
@@ -349,6 +351,12 @@ class Args:
     """vLLM top p for nucleus sampling"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
+    deepspeed_zpg: int = 8
+    """the deepspeed zpg value. Higher values are more memory efficient but slower. Set to 1 to disable zpg, which uses less memory but is significantly slower. Ideally is set to the number of GPUs per node (usually 8, default)."""
+    deepspeed_offload_param: bool = False
+    """whether to offload parameters to CPU (reduces GPU memory usage)"""
+    deepspeed_offload_optimizer: bool = False
+    """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
     enable_queue_dashboard: bool = True
@@ -405,6 +413,8 @@ class Args:
     """the max generation length for evaluation for oe-eval"""
     oe_eval_beaker_image: str | None = None
     """the docker image for evaluation for oe-eval"""
+    oe_eval_gpu_multiplier: int | None = None
+    """multiply the gpus used for each oe-eval task"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
@@ -668,9 +678,9 @@ class ShufflingIterator:
         self.epoch_number = 0
         self.rng = np.random.default_rng(seed)
         self.rng.shuffle(self.data)
+        self.exclude_list = []
 
-        # Ensure the effective dataset size is divisible by batch_size
-        self.effective_size = len(self.data) - (len(self.data) % batch_size)
+        self._update_effective_size()
 
     def __iter__(self) -> Iterator[list[int]]:
         return self
@@ -678,6 +688,7 @@ class ShufflingIterator:
     def __next__(self) -> list[int]:
         if self.index >= self.effective_size:
             self.index = 0
+            self._update_effective_size()
             self.epoch_number += 1
             self.rng.shuffle(self.data)
 
@@ -694,6 +705,7 @@ class ShufflingIterator:
             "epoch_number": self.epoch_number,
             "data": self.data.copy(),
             "rng_state": self.rng.bit_generator.state,
+            "exclude_list": self.exclude_list.copy(),
         }
 
     def set_state(self, state: dict[str, Any]) -> None:
@@ -702,6 +714,21 @@ class ShufflingIterator:
         self.epoch_number = state.get("epoch_number", 0)
         self.data = state["data"].copy()
         self.rng.bit_generator.state = state["rng_state"]
+        self.exclude_list = state.get("exclude_list", [])
+        self._update_effective_size()
+
+    def exclude_index(self, index: int) -> None:
+        """Exclude provided data points from future sampling."""
+        self.exclude_list.append(index)
+
+    def _update_effective_size(self) -> None:
+        """Ensure the effective dataset size is divisible by batch_size and filter out all the indices excluded in the last epoch"""
+        if self.exclude_list:
+            mask = ~np.isin(self.data, self.exclude_list)
+            self.data = self.data[mask]
+            self.exclude_list = []
+
+        self.effective_size = len(self.data) - (len(self.data) % self.batch_size)
 
 
 @ray.remote(num_gpus=1)
@@ -747,7 +774,13 @@ class PolicyTrainerRayProcess(RayProcess):
 
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
-        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
+        ds_config = get_train_ds_config(
+            offload=args.deepspeed_offload_param,
+            adam_offload=args.deepspeed_offload_optimizer,
+            stage=args.deepspeed_stage,
+            bf16=True,
+            zpg=args.deepspeed_zpg,
+        )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
@@ -842,7 +875,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # reference model
         ds_config = get_eval_ds_config(
-            offload=False,
+            offload=args.deepspeed_offload_param,
             # inference model only has stage 3 (sharding) or stage 0 (no sharding)
             # stage 2 is optimizer sharding which doesn't apply to inference
             stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
@@ -946,7 +979,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 group_name="openrlhf",
                 timeout=timedelta(minutes=self.args.backend_timeout),
             )
-            ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
+            ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
@@ -1257,6 +1290,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         args.masked_mean_denominator,
                     )
                     loss = loss / accumulation_steps
+                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
+                    torch.cuda.empty_cache()
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
@@ -1444,6 +1479,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.gs_bucket_path,
                 args.eval_priority,
                 args.oe_eval_beaker_image,
+                args.oe_eval_gpu_multiplier,
             )
 
 
@@ -1630,6 +1666,8 @@ class BatchStatistics:
     filtered_prompts_zero: int
     filtered_prompts_solved: int
     filtered_prompts_nonzero: int
+    percent_solved_mean: float
+    no_resampled_prompts: int
 
 
 def accumulate_inference_batches(
@@ -1644,6 +1682,8 @@ def accumulate_inference_batches(
     actor_manager=None,
     timeout: float | None = None,
     filter_zero_std_samples: bool = False,
+    no_resampling_pass_rate: float | None = None,
+    iter_dataloader: ShufflingIterator | None = None,
 ) -> tuple[GenerationResult, Batch, dict, BatchStatistics]:
     """Accumulate multiple inference results into a single training batch.
 
@@ -1654,6 +1694,10 @@ def accumulate_inference_batches(
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
+        filter_zero_std_samples: Whether to filter samples with zero reward std and continue sampling
+        no_resampling_pass_rate: Optional rate at which to note samples solved at greater than this rate
+            and exclude them from further sampling
+        iter_dataloader: Optional, used for no_resampling_pass_rate
 
     Raises:
         queue.Empty: If timeout is specified and no data is available within timeout.
@@ -1670,10 +1714,12 @@ def accumulate_inference_batches(
     all_decoded_responses = []
     all_reward_metrics = []
     all_scores = []
+    all_percent_solved = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
     filtered_prompt_nonzero = 0
+    total_no_resampled = 0
     progress_bar = tqdm(
         total=num_prompts,
         desc=f"Accumulating Responses and Rewarding {num_prompts} prompts",
@@ -1722,6 +1768,15 @@ def accumulate_inference_batches(
             )
         )
 
+        percent_solved = np.mean(scores).item() / args.max_possible_score
+        # Don't resample prompt that was solved at more than no_resample_positive_rate
+        if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
+            iter_dataloader.exclude_index(result.dataset_index)
+            total_no_resampled += 1
+            logging.debug(
+                f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
+            )
+
         # Filter out zero std prompts
         if filter_zero_std_samples and np.std(scores) == 0:
             total_filtered_prompts += 1
@@ -1744,6 +1799,7 @@ def accumulate_inference_batches(
         all_decoded_responses.extend(decoded_responses)
         all_scores.extend(scores)
         all_reward_metrics.append(reward_metrics)
+        all_percent_solved.append(percent_solved)
         progress_bar.update(1)
 
     # Combine all results into a single GenerationResult
@@ -1838,6 +1894,7 @@ def accumulate_inference_batches(
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
+    percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
 
     batch_stats = BatchStatistics(
         prompt_lengths=prompt_lengths,
@@ -1846,6 +1903,8 @@ def accumulate_inference_batches(
         filtered_prompts_zero=filtered_prompt_zero,
         filtered_prompts_solved=filtered_prompt_solved,
         filtered_prompts_nonzero=filtered_prompt_nonzero,
+        percent_solved_mean=percent_solved_mean,
+        no_resampled_prompts=total_no_resampled,
     )
     logging.info(
         f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"
@@ -1864,6 +1923,7 @@ def data_preparation_thread(
     num_training_steps: int,
     generation_config,
     resume_training_step: int,
+    iter_dataloader: ShufflingIterator,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
 ):
@@ -1881,6 +1941,8 @@ def data_preparation_thread(
                 reward_fn=reward_fn,
                 actor_manager=actor_manager,
                 filter_zero_std_samples=args.active_sampling,
+                no_resampling_pass_rate=args.no_resampling_pass_rate,
+                iter_dataloader=iter_dataloader,
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -2577,6 +2639,8 @@ def maybe_evaluate(
             actor_manager=actor_manager,
             timeout=timeout,
             filter_zero_std_samples=False,
+            no_resampling_pass_rate=None,
+            iter_dataloader=None,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -2887,6 +2951,7 @@ def run_training(
         args.num_training_steps,
         generation_configs["train"],
         resume_training_step,
+        iter_dataloader,
         actor_manager,
         model_dims,
     )
