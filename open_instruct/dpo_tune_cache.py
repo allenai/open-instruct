@@ -19,6 +19,7 @@ DPO tuning script. Adapted from our finetuning script.
 # isort: off
 import contextlib
 import os
+import re
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
@@ -58,7 +59,9 @@ from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
+    compute_config_hash,
     get_cached_dataset_tulu,
+    load_dataset_configs,
     visualize_token,
 )
 from open_instruct.dpo_utils import (
@@ -186,6 +189,9 @@ class FlatArguments:
     """Whether to skip the cache."""
     dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
+    )
+    ref_logprobs_cache_dir: str | None = field(
+        default=None, metadata={"help": "Directory to cache reference logprobs. If None, no disk caching is used."}
     )
     dataset_config_name: str | None = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
@@ -417,6 +423,109 @@ def get_cache_ref_logprobs(
         epoch_cached_reference_chosen_logps.append(cached_reference_chosen_logps)
         epoch_cached_reference_rejected_logps.append(cached_reference_rejected_logps)
     return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
+
+
+def get_ref_logprobs_cache_path(
+    cache_dir: str,
+    model_name_or_path: str,
+    dataset_config_hash: str,
+    max_train_samples: int | None = None,
+    world_size: int = 1,
+    process_rank: int = 0,
+    seed: int = 42,
+) -> str:
+    """Generate the cache file path for reference logprobs."""
+    model_name_sanitized = re.sub(r"[^\w\-_]", "_", model_name_or_path)
+    samples_str = f"_samples{max_train_samples}" if max_train_samples is not None else ""
+    cache_filename = (
+        f"{model_name_sanitized}_{dataset_config_hash}_ws{world_size}_rank{process_rank}{samples_str}_seed{seed}.pt"
+    )
+    return os.path.join(cache_dir, cache_filename)
+
+
+def maybe_save_ref_logprobs_to_disk(
+    cache_path: str | None, epoch_cached_reference_chosen_logps: list, epoch_cached_reference_rejected_logps: list
+) -> None:
+    """Save reference logprobs to disk if cache_path is provided."""
+    if cache_path is None:
+        return
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    cache_data = {
+        "epoch_cached_reference_chosen_logps": epoch_cached_reference_chosen_logps,
+        "epoch_cached_reference_rejected_logps": epoch_cached_reference_rejected_logps,
+    }
+    torch.save(cache_data, cache_path)
+    logger.info(f"Saved reference logprobs cache to {cache_path}")
+
+
+def load_ref_logprobs_from_disk(cache_path: str) -> tuple:
+    """Load reference logprobs from disk."""
+    if not os.path.exists(cache_path):
+        return None, None
+    logger.info(f"Loading reference logprobs cache from {cache_path}")
+    cache_data = torch.load(cache_path)
+    return (cache_data["epoch_cached_reference_chosen_logps"], cache_data["epoch_cached_reference_rejected_logps"])
+
+
+def maybe_load_reference_logprobs_from_disk(
+    args: FlatArguments, tc: TokenizerConfig, accelerator
+) -> tuple[list | None, list | None, str | None]:
+    """Load reference logprobs from disk if cache directory is configured."""
+    if args.num_train_epochs != 1:
+        raise ValueError("Only one epoch is supported for reference logprobs caching.")
+    if args.ref_logprobs_cache_dir is None:
+        return None, None, None
+
+    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    dcs = load_dataset_configs(
+        args.dataset_mixer_list,
+        args.dataset_mixer_list_splits,
+        args.dataset_transform_fn,
+        transform_fn_args,
+        args.dataset_target_columns,
+        args.seed,
+    )
+    config_hash = compute_config_hash(dcs, tc)
+    cache_location = get_ref_logprobs_cache_path(
+        args.ref_logprobs_cache_dir,
+        args.model_name_or_path,
+        config_hash,
+        args.max_train_samples,
+        accelerator.num_processes,
+        accelerator.process_index,
+        args.seed,
+    )
+    epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = load_ref_logprobs_from_disk(
+        cache_location
+    )
+
+    if epoch_cached_reference_chosen_logps is not None:
+        num_epochs = len(epoch_cached_reference_chosen_logps)
+        num_batches = len(epoch_cached_reference_chosen_logps[0]) if num_epochs > 0 else 0
+
+        total_elements = sum(
+            sum(tensor.numel() for tensor in epoch_batches) for epoch_batches in epoch_cached_reference_chosen_logps
+        )
+        total_elements += sum(
+            sum(tensor.numel() for tensor in epoch_batches) for epoch_batches in epoch_cached_reference_rejected_logps
+        )
+
+        total_size_bytes = sum(
+            sum(tensor.element_size() * tensor.numel() for tensor in epoch_batches)
+            for epoch_batches in epoch_cached_reference_chosen_logps
+        )
+        total_size_bytes += sum(
+            sum(tensor.element_size() * tensor.numel() for tensor in epoch_batches)
+            for epoch_batches in epoch_cached_reference_rejected_logps
+        )
+        total_size_mb = total_size_bytes / (1024 * 1024)
+
+        logger.info(
+            f"Loaded cached reference logprobs: {num_epochs} epochs, {num_batches} batches per epoch, "
+            f"{total_elements} total logprobs, {total_size_mb:.2f} MB"
+        )
+
+    return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
@@ -816,16 +925,26 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             raise NotImplementedError("seperate forward not implemented for packing/padding-free")
         forward_fn = partial(forward_fn, packing=True)
     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
-            model,
-            train_dataloader,
-            accelerator,
-            average_log_prob,
-            last_checkpoint_path,
-            resume_step,
-            range(starting_epoch, args.num_train_epochs),
-            forward_fn,
+        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location = (
+            maybe_load_reference_logprobs_from_disk(args, tc, accelerator)
         )
+
+        if epoch_cached_reference_chosen_logps is None:
+            epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
+                model,
+                train_dataloader,
+                accelerator,
+                average_log_prob,
+                last_checkpoint_path,
+                resume_step,
+                range(starting_epoch, args.num_train_epochs),
+                forward_fn,
+            )
+            maybe_save_ref_logprobs_to_disk(
+                cache_location, epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
+            )
+            accelerator.wait_for_everyone()
+
         print("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
         torch.cuda.empty_cache()  # clear cache
