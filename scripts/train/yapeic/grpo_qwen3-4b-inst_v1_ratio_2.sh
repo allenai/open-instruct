@@ -45,8 +45,6 @@ python mason.py \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
     --vllm_num_engines 4 \
-    --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.3 \
     --lr_scheduler_type linear \
     --seed 1 \
     --local_eval_every 40 \
