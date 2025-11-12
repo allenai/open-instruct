@@ -20,8 +20,8 @@ python mason.py \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name grpo_qwen3-4b-inst_v1_ratio_2 \
     --beta 0.0 \
-    --num_unique_prompts_rollout 8 \
-    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts_rollout 4 \
+    --num_samples_per_prompt_rollout 8 \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
     --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/batch_runs_prefiltered_4_15_new_filtered_v14_pp_v11_tools_v5_ff_v2/grpo_data/v1_ratio_2-format_100k.jsonl 1.0 \
@@ -29,15 +29,15 @@ python mason.py \
     --dataset_mixer_eval_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/batch_runs_prefiltered_4_15_new_filtered_v14_pp_v11_tools_v5_ff_v2/grpo_data/v1_ratio_2-format_100k_test.jsonl 1.0 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 1024 \
-    --response_length 5120 \
-    --pack_length 6144 \
+    --response_length 2048 \
+    --pack_length 3072 \
     --model_name_or_path Qwen/Qwen3-4B \
     --apply_verifiable_reward True \
     --llm_judge_model "hosted_vllm/yapeichang/distill_judge_qwen3-8b_sft_v6" \
     --non_stop_penalty True \
     --non_stop_penalty_value 0.0 \
     --temperature 1.0 \
-    --total_episodes 1648000 \
+    --total_episodes 200000 \
     --deepspeed_stage 3 \
     --per_device_train_batch_size 1 \
     --num_mini_batches 1 \
