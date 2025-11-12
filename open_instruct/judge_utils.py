@@ -155,30 +155,46 @@ Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}
 
 procedure_judge_template = """You are given a goal and two lists of steps, L1 and L2. L1 is one correct procedure that is guaranteed to achieve the goal. L2 is a candidate procedure whose correctness needs to be determined. Your task is to determine whether L2 has any **critical failures**, using the goal and L1 as the reference.
 
-# Important guidelines
+# Important Guidelines
 
-- **L1 as reference**
-  L1 is guaranteed to succeed but may not be the only correct method. Use it as a reliable reference, not the exclusive solution.
+## L1 as Reference
+L1 reliably achieves the goal as written, but it may not be the only valid way to do so. Use it as a reliable reference, not the exclusive solution.
 
-- **Definition of critical failure**
-  A critical failure is where:
-  - An L2 step directly contradicts or significantly diverges from an L1 step, preventing the goal from being achieved.
-  - An L2 step is inconsistent with another step within L2.
-  - An L2 step repeats one or more previous steps in L2, where no such repetition exists in L1.
-  - An L2 step introduces an action not present in L1 that is unnecessary or counterproductive.
-  - An essential L1 step required to achieve the goal is completely omitted in L2, with no equivalent or implied action present.
+## Definition of Critical Failure
+A **critical failure** is an issue that fundamentally prevents the goal from being achieved or makes L2 unusable as a set of followable instructions.
+Critical failures can take several forms:
 
-- **Acceptable variations**
-  Cases like the following do not count as failures:
-  - Differences between L1 and L2 in style or wording.
-  - Extra steps that are neutral or practical (e.g., cleanup, storage).
-  - Reasonable implicit equivalence (e.g., "follow manufacturer's instructions" instead of explicitly identifying the wheel finish).
+### Contradictions
+- **Contradiction to the goal:** An L2 step directly contradicts a condition specified in the goal.
+- **Contradiction to L1 steps:** An L2 step directly contradicts or significantly diverges from an L1 step, preventing the goal from being achieved.
 
-- **Style**
-  Ignore differences in style, wording, or level of detail. Focus only on the actions presented in L2. Extra verbosity or added detail does not make L2 better or worse.
+### Logical or Structural Issues
+- **Internal inconsistency:** An L2 step is inconsistent with another step within L2.
+- **Incoherence:** L2 has very low readability or logical flow and is hard to follow. This doesn't require reading L1 to determine.
+- **Severe vagueness:** As a whole, L2 lacks so much essential detail from L1 that it becomes basically unusable.
 
-- **External knowledge**
-  Base all decisions only on the provided Goal and L1. Minimize reliance on outside knowledge as much as possible.
+### Missing or Extraneous Actions
+- **Missing critical action:** An essential L1 step required to achieve the goal is completely omitted in L2, with no equivalent or implied action present.
+- **Unnecessary, confusing, or counterproductive extra action:** An L2 step introduces an action not present in L1 that is unnecessary or counterproductive.
+- **Redundant repetition:** An L2 step repeats one or more previous steps in L2 where no such repetition exists in L1.
+
+These categories are not exhaustive. In practice, a single critical failure may span multiple categories.
+
+## Acceptable Variations
+When assessing L2, focus on whether any issue is severe enough to prevent the goal from being achieved or to make L2 incoherent or unusable as a set of instructions.
+If not, the variation is acceptable.
+
+Acceptable variations include:
+- Minor differences in tone, phrasing, or level of detail.
+- Differences in emphasis or ordering that do not affect the outcome.
+- Additional steps that are neutral or practical.
+- Reasonable implicit equivalence, where an omitted action is implied by another step.
+
+Ignore stylistic or verbosity differences unless the omissions make L2 lack essential details from L1 to the point that it becomes unusable. In that case, treat it as a critical failure (severe vagueness).
+
+## External Knowledge
+Base all decisions only on the provided **Goal** and **L1**.
+Minimize reliance on outside knowledge as much as possible.
 
 # Examples
 
@@ -191,28 +207,43 @@ Note: The following examples are not listing all failures present in each L2; it
 Goal: Prepare Indian-style red lentil dhal for 8 portions using an oven and skillet.
 Summary of L1: Soak lentils 8 hours, rinse, steam at 100 °C with rice, spices, and aromatics, then finish with lime juice, seasoning, and coriander garnish.
 Summary of L2: Soak lentils only 30 minutes, then fry onions, garlic, chili, cumin, and salt in ghee, add lentils with water, and simmer until soft.
-Example failure: L2 soaks lentils for only 30 minutes, whereas L1 soaks for 8 hours. This is a critical difference in time.
-Example failure: L2 omits the oven entirely, using only stovetop simmering, which deviates from L1's oven-based preparation method and contradicts the goal.
+Example critical failure: L2 soaks lentils for only 30 minutes, whereas L1 soaks for 8 hours. This is a critical difference in time.
+Example critical failure: L2 omits the oven entirely, using only stovetop simmering, which deviates from L1's oven-based preparation method and contradicts the goal.
 
 Goal: To construct a traditional wooden Jacob's Ladder toy using wood, ribbon, and small nails.
 Summary of L1: Mark and cut the wood into equal pieces, sand coarse then fine, cut ribbon to equal lengths, stack the wood in Jacob's Ladder pattern, and nail ribbons to the pieces.
 Summary of L2: Cut the wood into 5 equal pieces, sand smooth, then arrange them from largest to smallest, nailing and wrapping ribbon around each piece in sequence.
-Example failure: L2 contradicts itself; if the 5 pieces are of equal size, there is no largest or smallest piece.
+Example critical failure: L2 contradicts itself; if the 5 pieces are of equal size, there is no largest or smallest piece.
 
 Goal: To treat head lice by applying a tea tree oil and apple cider vinegar solution to the hair.
 Summary of L1: Mix tea tree oil with apple cider vinegar, wash hair, apply solution, cover 15 minutes, rinse, then comb with a fine-tooth comb.
 Summary of L2: Wash hair with shampoo, apply diluted tea tree oil–vinegar spray under a cap for 1 hour, comb, and repeat treatment over 2 weeks, wash hair with shampoo.
-Example failure: L2 step 7 repeats the shampooing step almost verbatim, a redundancy not present in L1.
+Example critical failure: L2 step 7 repeats the shampooing step almost verbatim, a redundancy not present in L1.
 
 Goal: Prepare an alkyl chloride from a primary or secondary alcohol using thionyl chloride to avoid acid and rearrangements.
 Summary of L1: Place alcohol in a flask, add thionyl chloride, reflux, cool, then separate and dry the alkyl chloride with a drying agent.
 Summary of L2: Add alcohol and thionyl chloride to a flask, then add the drying agent, attach condenser, reflux, cool, and filter off the drying agent.
-Example failure: L2 adds the drying agent to the flask before heating the flask, while L1 uses the drying agent at the very end.
+Example critical failure: L2 adds the drying agent to the flask before heating the flask, while L1 uses the drying agent at the very end.
 
 Goal: Housebreak your Bichon Frise so that it reliably uses the designated outdoor bathroom location.
 Summary of L1: Take your Bichon Frise to the outdoor bathroom spot, praise it after use, crate when unsupervised, and repeat until accident free.
 Summary of L2: Put the dog in the crate, take the dog out of the crate, take the dog to the bathroom, put the dog back into the crate.
-Example failure: L2 omits praising the dog after outdoor bathroom use, removing the positive reinforcement step that is critical in L1 for reliable housebreaking.
+Example critical failure: L2 omits praising the dog after outdoor bathroom use, removing the positive reinforcement step that is critical in L1 for reliable housebreaking.
+
+Goal: To establish a clear, concise, and objective view of the accident based on evidence and actions.
+L1:
+1. Establish specific snapshots of the accident based on evidence.
+2. Consider these actions in light of what they establish individually, then in relation and combination with other actions.
+3. Order or sequence the entire series of actions using specific sequencing evidence and common sense.
+4. Audit actions where contradictions and questions arise to help decide what happened.
+5. Define the events and overall conclusions about the accident based on the established actions and evidence.
+L2:
+1. Get the basic facts.
+2. Do not make assumptions.
+3. Separate the people from the problem.
+4. Define the problem.
+5. Do not judge.
+Example critical failure: L2 as a whole omits many critical details present in L1, making it practically unusable as a set of instructions.
 
 ## Examples of acceptable variations that do not count as failures
 
@@ -227,19 +258,36 @@ Summary of L2: Place items in box with cushioning, tape securely, attach and ver
 Acceptable variation: L2 omits removing old labels, but this is not critical since it is reasonable to assume a new box without old labels.
 
 Goal: Clean and protect car wheels safely and effectively using appropriate products and techniques for the specific wheel finish.
-Summary of L1: Identify wheel finish, choose a safe cleaner, spray from bottom up, agitate with mitt/brush, and rinse thoroughly.
-Summary of L2: Follow manufacturer's cleaning recommendations, wash with mitt and cleaner, rinse, polish with metal polish, and apply protectant.
-Acceptable variation: L1 explicitly requires identifying the wheel finish, while L2 implies this through reading the manufacturer's recommendations — a reasonable equivalent rather than a critical omission.
+Summary of L1: Identify wheel finish by contacting the manufacturer, choose a safe cleaner for this finish, spray from bottom up, agitate with mitt/brush, and rinse thoroughly.
+Summary of L2: Follow manufacturer's cleaning recommendations for this wheel finish, wash with mitt and cleaner, rinse, polish with metal polish, and apply protectant.
+Acceptable variation: L1 explicitly requires identifying the wheel finish, while L2 implies this through reading the manufacturer's recommendations — a reasonable equivalent. This is not a critical omission.
 
-Goal: Create distressed terra cotta pots as baby shower favors, each with an herb seed packet in a stamped muslin bag.  
-Summary of L1: Paint pots with a base coat, dry, add a second coat, dry overnight, sand for a distressed look, add pebbles, tie twine with a thank-you note, stamp “GROW” on muslin bags, insert herb seed packets, and place the bags next to each pot.  
-Summary of L2: Paint pots in a contrasting color and dry, lightly sand, add pebbles and soil, tie twine with a handwritten thank-you card, stamp and label muslin bags with the herb name, fill with seed packets, tie shut, and place the bag in each pot.  
+Goal: Create distressed terra cotta pots as baby shower favors, each with an herb seed packet in a stamped muslin bag.
+Summary of L1: Paint pots with a base coat, dry, add a second coat, dry overnight, sand for a distressed look, add pebbles, tie twine with a thank-you note, stamp "GROW" on muslin bags, insert herb seed packets, and place the bags next to each pot.
+Summary of L2: Paint pots in a contrasting color and dry, lightly sand, add pebbles and soil, tie twine with a handwritten thank-you card, stamp and label muslin bags with the herb name, fill with seed packets, tie shut, and place the bag in each pot.
 Acceptable variation: L1 step 8 and L2 step 8 differ in what is written on each muslin bag, but this difference is trivial and does not change the intended presentation or functionality.
 
-Goal: Create a glowing mixture by combining Mountain Dew, dishwashing liquid, hydrogen peroxide, baking soda, and the contents of a glowstick in a glass beaker.  
-Summary of L1: Pour Mountain Dew into a beaker, add dishwashing liquid, hydrogen peroxide, and baking soda, cut open a glowstick and add its contents.  
-Summary of L2: Cut open a glowstick and add its contents to a beaker, add dishwashing liquid and baking soda, stir, add hydrogen peroxide, stir again, then add Mountain Dew and stir once more.  
-Acceptable variation: L1 adds Mountain Dew at the beginning while L2 adds it at the very end, but this mismatch is not critical and does not affect the outcome.
+Goal: To perform a basic sitting meditation focused on mental relaxation and body awareness.
+Summary of L1: Sit cross-legged and adjust posture until relaxed; focus attention and let the body readjust; maintain focus until fully relaxed; if distracted, return focus to the body.
+Summary of L2: Sit on a chair or cushion with feet flat; close eyes and relax shoulders and jaw; notice body sensations without change; when thoughts arise, return focus to the body.
+Acceptable variation: L2 substitutes a seated position with feet flat on the floor for L1's cross-legged posture. Considering the goal, this variation should not be considered a critical failure, as both represent valid meditation positions.
+
+Goal: Capture sharp, blur-free photos of moving subjects using Shutter Priority Mode on your camera.
+L1:
+1. Set your camera to Shutter Priority Mode.
+2. Select an appropriate shutter speed for the action you want to freeze (e.g., 250 for moderate movement, 1000 for fast action).
+3. If shooting in low light, increase the ISO setting to a higher value (e.g., 800 or higher) to allow for faster shutter speeds.
+4. Use a lens with a wide aperture (low f-number) to let in more light.
+5. Position yourself at an appropriate angle or level for the subject (e.g., get low to the ground for children or sports).
+6. Take the photo by pressing the shutter button.
+L2:
+1. Set the camera's mode dial to Shutter Priority.
+2. Set the ISO setting to a high value for adequate light sensitivity.
+3. Select a wide aperture to capture as much light as possible.
+4. Set the shutter speed to a fast value (at least 1/500 of a second) to freeze motion.
+5. Use the camera's viewfinder to frame and focus on your subject.
+6. Press the shutter button to take the photo.
+Acceptable variation: L2 simplifies the process a bit but retains all essential actions, so it is not a critical failure. However, if it used vague terms like "appropriate value" instead of specifying "high" or "fast," it would be a critical failure, as the instructions would no longer be useful.
 
 # Input data
 
@@ -254,14 +302,18 @@ L2:
 
 # Output format
 
+To ensure transparency, provide clear reasoning in the "reasoning" field. This part should explain why each potential issue in L2 does or does not qualify as a critical failure. The reasoning must not simply restate the failures — it should instead show your **thought process in determining correctness or failure severity**.
+
+Guidelines for marking critical failures:
 - Identify **all** critical failures in the given L2, and return them as a list called "critical_failures".
 - The "failure" field should provide a concise and clear explanation of what the failure is.
-- Each failure must be linked to **one or two** most relevant steps from L1 and/or L2. Record these in the "L1_steps" and "L2_steps" fields as lists of step numbers. Only in rare, exceptional cases—with clear justification—should you associate more than two steps.
+- Each failure must be linked to **one or two** most relevant steps from L1 and/or L2. Record these in the "L1_steps" and "L2_steps" fields as lists of step numbers. Only link to more than two steps if there is a good reason to do so.
 - If no failures are found, return "critical_failures": [].
 
 Return your response in the following JSON format:
 
 {{
+  "reasoning": "<string>",
   "critical_failures": [
     {{
       "failure": "<string>",
