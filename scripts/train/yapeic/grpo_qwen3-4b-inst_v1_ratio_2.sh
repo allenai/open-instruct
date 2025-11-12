@@ -2,7 +2,7 @@
 #     --name vllm_judge_qwen3-4b_v1_ratio_2 \
 #     --workspace ai2/oe-data
 
-JUDGE_BASE_URL=http://saturn-cs-aus-253.reviz.ai2.in:8001/v1
+JUDGE_BASE_URL=http://saturn-cs-aus-239.reviz.ai2.in:8001/v1
 
 python mason.py \
     --cluster ai2/jupiter \
