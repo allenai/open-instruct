@@ -38,6 +38,7 @@ from functools import partial
 from typing import Literal
 
 import datasets
+import numpy as np
 import torch
 import torch.utils
 import torch.utils.data
@@ -390,91 +391,157 @@ def get_cache_ref_logprobs(
     average_log_prob: bool,
     last_checkpoint_path: str | None,
     resume_step: int,
-    epoch_range: range,
     forward_fn: Callable,
+    args: FlatArguments,
 ):
-    epoch_cached_reference_chosen_logps = []
-    epoch_cached_reference_rejected_logps = []
-    for epoch in epoch_range:
-        active_dataloader.set_epoch(epoch)
-        if last_checkpoint_path and resume_step is not None:
-            # We skip the first `n` batches in the dataloader when resuming from a checkpoint
-            active_dataloader = accelerator.skip_first_batches(active_dataloader, resume_step)
-        cached_reference_chosen_logps = []
-        cached_reference_rejected_logps = []
-        with torch.no_grad():
-            for batch in tqdm(
-                active_dataloader,
-                disable=not accelerator.is_local_main_process,
-                desc=f"Generating reference cache (epoch {epoch})",
-                bar_format="{l_bar}{bar}{r_bar}\n",
-            ):
-                if args.use_lora:
-                    with accelerator.unwrap_model(model).disable_adapter():
-                        reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
-                            model, batch, average_log_prob=average_log_prob
-                        )
-                else:
+    active_dataloader.set_epoch(0)
+    if last_checkpoint_path and resume_step is not None:
+        active_dataloader = accelerator.skip_first_batches(active_dataloader, resume_step)
+
+    cached_indices = []
+    cached_reference_chosen_logps = []
+    cached_reference_rejected_logps = []
+
+    with torch.no_grad():
+        for batch in tqdm(
+            active_dataloader,
+            disable=not accelerator.is_local_main_process,
+            desc="Generating reference cache",
+            bar_format="{l_bar}{bar}{r_bar}\n",
+        ):
+            batch_indices = batch["dataset_index"]
+            cached_indices.extend(batch_indices)
+
+            if args.use_lora:
+                with accelerator.unwrap_model(model).disable_adapter():
                     reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
                         model, batch, average_log_prob=average_log_prob
                     )
-                cached_reference_chosen_logps.append(reference_chosen_logps.cpu())
-                cached_reference_rejected_logps.append(reference_rejected_logps.cpu())
-        epoch_cached_reference_chosen_logps.append(cached_reference_chosen_logps)
-        epoch_cached_reference_rejected_logps.append(cached_reference_rejected_logps)
-    return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
+            else:
+                reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
+                    model, batch, average_log_prob=average_log_prob
+                )
+            cached_reference_chosen_logps.append(reference_chosen_logps.cpu())
+            cached_reference_rejected_logps.append(reference_rejected_logps.cpu())
+
+    return cached_indices, cached_reference_chosen_logps, cached_reference_rejected_logps
+
+
+def save_per_process_ref_logprobs(
+    cache_dir: str,
+    process_rank: int,
+    world_size: int,
+    indices: list,
+    chosen_logps_tensors: list,
+    rejected_logps_tensors: list,
+) -> str:
+    os.makedirs(cache_dir, exist_ok=True)
+    temp_filename = f"temp_process_{process_rank}_of_{world_size}.npz"
+    temp_path = os.path.join(cache_dir, temp_filename)
+
+    indices_array = np.array(indices, dtype=np.int64)
+    chosen_logps_array = torch.cat(chosen_logps_tensors, dim=0).numpy()
+    rejected_logps_array = torch.cat(rejected_logps_tensors, dim=0).numpy()
+
+    np.savez(temp_path, indices=indices_array, chosen_logps=chosen_logps_array, rejected_logps=rejected_logps_array)
+    logger.info(f"Saved per-process cache for rank {process_rank} to {temp_path}")
+    return temp_path
+
+
+def merge_ref_logprobs_from_processes(cache_dir: str, world_size: int, merged_cache_path: str) -> None:
+    all_indices = []
+    all_chosen_logps = []
+    all_rejected_logps = []
+
+    for rank in range(world_size):
+        temp_filename = f"temp_process_{rank}_of_{world_size}.npz"
+        temp_path = os.path.join(cache_dir, temp_filename)
+
+        if not os.path.exists(temp_path):
+            logger.warning(f"Missing temp file for rank {rank}: {temp_path}")
+            continue
+
+        data = np.load(temp_path)
+        all_indices.append(data["indices"])
+        all_chosen_logps.append(data["chosen_logps"])
+        all_rejected_logps.append(data["rejected_logps"])
+
+    merged_indices = np.concatenate(all_indices)
+    merged_chosen_logps = np.concatenate(all_chosen_logps)
+    merged_rejected_logps = np.concatenate(all_rejected_logps)
+
+    sort_order = np.argsort(merged_indices)
+    merged_indices = merged_indices[sort_order]
+    merged_chosen_logps = merged_chosen_logps[sort_order]
+    merged_rejected_logps = merged_rejected_logps[sort_order]
+
+    os.makedirs(os.path.dirname(merged_cache_path), exist_ok=True)
+    np.savez(
+        merged_cache_path,
+        indices=merged_indices,
+        chosen_logps=merged_chosen_logps,
+        rejected_logps=merged_rejected_logps,
+    )
+    logger.info(f"Merged cache saved to {merged_cache_path}")
+
+    for rank in range(world_size):
+        temp_filename = f"temp_process_{rank}_of_{world_size}.npz"
+        temp_path = os.path.join(cache_dir, temp_filename)
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+            logger.info(f"Deleted temp file: {temp_path}")
 
 
 def get_ref_logprobs_cache_path(
-    cache_dir: str,
-    model_name_or_path: str,
-    dataset_config_hash: str,
-    max_train_samples: int | None = None,
-    world_size: int = 1,
-    process_rank: int = 0,
-    seed: int = 42,
+    cache_dir: str, model_name_or_path: str, dataset_config_hash: str, max_train_samples: int | None = None
 ) -> str:
-    """Generate the cache file path for reference logprobs."""
     model_name_sanitized = re.sub(r"[^\w\-_]", "_", model_name_or_path)
     samples_str = f"_samples{max_train_samples}" if max_train_samples is not None else ""
-    cache_filename = (
-        f"{model_name_sanitized}_{dataset_config_hash}_ws{world_size}_rank{process_rank}{samples_str}_seed{seed}.pt"
-    )
+    cache_filename = f"{model_name_sanitized}_{dataset_config_hash}{samples_str}.npz"
     return os.path.join(cache_dir, cache_filename)
 
 
-def maybe_save_ref_logprobs_to_disk(
-    cache_path: str | None, epoch_cached_reference_chosen_logps: list, epoch_cached_reference_rejected_logps: list
-) -> None:
-    """Save reference logprobs to disk if cache_path is provided."""
-    if cache_path is None:
-        return
-    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-    cache_data = {
-        "epoch_cached_reference_chosen_logps": epoch_cached_reference_chosen_logps,
-        "epoch_cached_reference_rejected_logps": epoch_cached_reference_rejected_logps,
-    }
-    torch.save(cache_data, cache_path)
-    logger.info(f"Saved reference logprobs cache to {cache_path}")
-
-
-def load_ref_logprobs_from_disk(cache_path: str) -> tuple:
-    """Load reference logprobs from disk."""
+def load_ref_logprobs_from_disk(
+    cache_path: str, train_dataloader: torch.utils.data.DataLoader, accelerator: Accelerator
+) -> dict | None:
     if not os.path.exists(cache_path):
-        return None, None
+        return None
+
     logger.info(f"Loading reference logprobs cache from {cache_path}")
-    cache_data = torch.load(cache_path)
-    return (cache_data["epoch_cached_reference_chosen_logps"], cache_data["epoch_cached_reference_rejected_logps"])
+    data = np.load(cache_path)
+    all_indices = data["indices"]
+    all_chosen_logps = data["chosen_logps"]
+    all_rejected_logps = data["rejected_logps"]
+
+    shard_indices = set()
+    for batch in train_dataloader:
+        batch_indices = batch["dataset_index"]
+        shard_indices.update(batch_indices)
+
+    logprobs_dict = {}
+    for i, idx in enumerate(all_indices):
+        if idx in shard_indices:
+            logprobs_dict[int(idx)] = (
+                torch.tensor(all_chosen_logps[i], dtype=torch.float32),
+                torch.tensor(all_rejected_logps[i], dtype=torch.float32),
+            )
+
+    total_size_mb = (len(all_chosen_logps) + len(all_rejected_logps)) * 4 / (1024 * 1024)
+    logger.info(
+        f"Loaded cached reference logprobs: {len(logprobs_dict)} examples for this shard, "
+        f"{len(all_indices)} total examples, {total_size_mb:.2f} MB"
+    )
+
+    return logprobs_dict
 
 
 def maybe_load_reference_logprobs_from_disk(
-    args: FlatArguments, tc: TokenizerConfig, accelerator
-) -> tuple[list | None, list | None, str | None]:
-    """Load reference logprobs from disk if cache directory is configured."""
+    args: FlatArguments, tc: TokenizerConfig, accelerator: Accelerator, train_dataloader: torch.utils.data.DataLoader
+) -> tuple[dict | None, str | None]:
     if args.num_train_epochs != 1:
         raise ValueError("Only one epoch is supported for reference logprobs caching.")
     if args.ref_logprobs_cache_dir is None:
-        return None, None, None
+        return None, None
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     dcs = load_dataset_configs(
@@ -487,45 +554,12 @@ def maybe_load_reference_logprobs_from_disk(
     )
     config_hash = compute_config_hash(dcs, tc)
     cache_location = get_ref_logprobs_cache_path(
-        args.ref_logprobs_cache_dir,
-        args.model_name_or_path,
-        config_hash,
-        args.max_train_samples,
-        accelerator.num_processes,
-        accelerator.process_index,
-        args.seed,
-    )
-    epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = load_ref_logprobs_from_disk(
-        cache_location
+        args.ref_logprobs_cache_dir, args.model_name_or_path, config_hash, args.max_train_samples
     )
 
-    if epoch_cached_reference_chosen_logps is not None:
-        num_epochs = len(epoch_cached_reference_chosen_logps)
-        num_batches = len(epoch_cached_reference_chosen_logps[0]) if num_epochs > 0 else 0
+    logprobs_dict = load_ref_logprobs_from_disk(cache_location, train_dataloader, accelerator)
 
-        total_elements = sum(
-            sum(tensor.numel() for tensor in epoch_batches) for epoch_batches in epoch_cached_reference_chosen_logps
-        )
-        total_elements += sum(
-            sum(tensor.numel() for tensor in epoch_batches) for epoch_batches in epoch_cached_reference_rejected_logps
-        )
-
-        total_size_bytes = sum(
-            sum(tensor.element_size() * tensor.numel() for tensor in epoch_batches)
-            for epoch_batches in epoch_cached_reference_chosen_logps
-        )
-        total_size_bytes += sum(
-            sum(tensor.element_size() * tensor.numel() for tensor in epoch_batches)
-            for epoch_batches in epoch_cached_reference_rejected_logps
-        )
-        total_size_mb = total_size_bytes / (1024 * 1024)
-
-        logger.info(
-            f"Loaded cached reference logprobs: {num_epochs} epochs, {num_batches} batches per epoch, "
-            f"{total_elements} total logprobs, {total_size_mb:.2f} MB"
-        )
-
-    return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location
+    return logprobs_dict, cache_location
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
@@ -661,6 +695,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
         )
+        train_dataset = train_dataset.add_column("dataset_index", list(range(len(train_dataset))))
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
     if accelerator.is_main_process:
@@ -925,25 +960,39 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             raise NotImplementedError("seperate forward not implemented for packing/padding-free")
         forward_fn = partial(forward_fn, packing=True)
     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location = (
-            maybe_load_reference_logprobs_from_disk(args, tc, accelerator)
+        reference_logprobs_dict, cache_location = maybe_load_reference_logprobs_from_disk(
+            args, tc, accelerator, train_dataloader
         )
 
-        if epoch_cached_reference_chosen_logps is None:
-            epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
+        if reference_logprobs_dict is None:
+            cached_indices, cached_reference_chosen_logps, cached_reference_rejected_logps = get_cache_ref_logprobs(
                 model,
                 train_dataloader,
                 accelerator,
                 average_log_prob,
                 last_checkpoint_path,
                 resume_step,
-                range(starting_epoch, args.num_train_epochs),
                 forward_fn,
+                args,
             )
-            maybe_save_ref_logprobs_to_disk(
-                cache_location, epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
+
+            save_per_process_ref_logprobs(
+                args.ref_logprobs_cache_dir,
+                accelerator.process_index,
+                accelerator.num_processes,
+                cached_indices,
+                cached_reference_chosen_logps,
+                cached_reference_rejected_logps,
             )
             accelerator.wait_for_everyone()
+
+            if accelerator.is_main_process:
+                merge_ref_logprobs_from_processes(
+                    args.ref_logprobs_cache_dir, accelerator.num_processes, cache_location
+                )
+            accelerator.wait_for_everyone()
+
+            reference_logprobs_dict = load_ref_logprobs_from_disk(cache_location, train_dataloader, accelerator)
 
         print("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
@@ -971,18 +1020,24 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
         else:
             active_dataloader = train_dataloader
-        # we need to average the log probs for simpo loss
-        for step, batch in enumerate(active_dataloader):
+        for batch in active_dataloader:
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
             with accelerator.accumulate(model):
                 policy_chosen_logps, policy_rejected_logps, aux_loss = forward_fn(
                     model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
-                )  # `aux_loss` is only used when `args.load_balancing_loss = True`
+                )
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                     p_device = policy_chosen_logps.device
-                    reference_chosen_logps = epoch_cached_reference_chosen_logps[epoch][step].to(p_device)
-                    reference_rejected_logps = epoch_cached_reference_rejected_logps[epoch][step].to(p_device)
+                    batch_indices = batch["dataset_index"]
+                    reference_chosen_logps_list = []
+                    reference_rejected_logps_list = []
+                    for idx in batch_indices:
+                        ref_chosen, ref_rejected = reference_logprobs_dict[idx]
+                        reference_chosen_logps_list.append(ref_chosen)
+                        reference_rejected_logps_list.append(ref_rejected)
+                    reference_chosen_logps = torch.stack(reference_chosen_logps_list).to(p_device)
+                    reference_rejected_logps = torch.stack(reference_rejected_logps_list).to(p_device)
                     losses, _, _ = dpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
