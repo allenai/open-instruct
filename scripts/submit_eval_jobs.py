@@ -70,13 +70,16 @@ WEKA_CLUSTERS = [
     "ai2/neptune",
     "ai2/ceres"
 ]
+GCP_CLUSTERS = [
+    "ai2/augusta"
+]
 
 
 today = date.today().strftime("%m%d%Y")
 
 parser = argparse.ArgumentParser()
 # Require fully-qualified workspace or use a fully-qualified default.
-parser.add_argument("--workspace", type=str, default="ai2/oe-adapt-general")
+parser.add_argument("--workspace", type=str, default="ai2/tulu-3-results")
 parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--hf_revision", type=str, default=None)
 parser.add_argument("--location", type=str, default=None)
