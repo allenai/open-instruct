@@ -138,7 +138,7 @@ class VerifierFunction(ABC):
             tokenized_prediction (List[int]): Tokenized representation (unused by most verifiers).
             prediction (str): The model output.
             label (Any): The ground truth answer or evaluation constraint.
-            query (Optional[str]): The original query
+            query (str | None): The original query
 
         Returns:
             VerificationResult
@@ -155,7 +155,7 @@ class VerifierFunction(ABC):
             tokenized_prediction (List[int]): Tokenized representation (unused by most verifiers).
             prediction (str): The model output.
             label (Any): The ground truth answer or evaluation constraint.
-            query (Optional[str]): The original query.
+            query (str | None): The original query.
 
         Returns:
             VerificationResult
@@ -1046,7 +1046,7 @@ class ProcedureFormatVerifier(VerifierFunction):
     Verifier for procedures, check whether the format matches the schema.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("procedure_format", verifier_config=verifier_config, weight=1.0)
 
     class FailureAllNoLabelStep(BaseModel):
@@ -1058,7 +1058,7 @@ class ProcedureFormatVerifier(VerifierFunction):
         critical_failures: list["ProcedureFormatVerifier.FailureAllNoLabelStep"]
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
     ) -> VerificationResult:
         answer_string = prediction.split("</think>")[-1].split("<|im_end|>")[0].strip()
         try:
@@ -1073,11 +1073,11 @@ class ProcedureBinaryVerifier(VerifierFunction):
     Verifier for procedures, check whether the binary fail / no fail judgment matches.
     """
     
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("procedure_binary", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
     ) -> VerificationResult:
         answer_string = prediction.split("</think>")[-1].split("<|im_end|>")[0].strip()
         try:
@@ -1113,11 +1113,11 @@ class ProcedureStepFormatVerifier(VerifierFunction):
       3) Otherwise, try to infer K by counting numbered steps in the L1 section within the query text.
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("procedure_step_format", verifier_config=verifier_config, weight=1.0)
 
     @staticmethod
-    def _extract_expected_k_from_label(label: Any) -> Optional[int]:
+    def _extract_expected_k_from_label(label: Any) -> int | None:
         # int-like label
         try:
             if isinstance(label, (int, float)):
@@ -1151,7 +1151,7 @@ class ProcedureStepFormatVerifier(VerifierFunction):
         return len(nums)
 
     @staticmethod
-    def _extract_l1_block(query: Optional[str]) -> Optional[str]:
+    def _extract_l1_block(query: str | None) -> str | None:
         if not isinstance(query, str):
             return None
         # Try to isolate the L1 section: anything after a line starting with "L1:" until next section marker
@@ -1175,7 +1175,7 @@ class ProcedureStepFormatVerifier(VerifierFunction):
             return None
 
     @staticmethod
-    def _infer_k_from_query(query: Optional[str]) -> Optional[int]:
+    def _infer_k_from_query(query: str | None) -> int | None:
         l1_block = ProcedureStepFormatVerifier._extract_l1_block(query)
         if not l1_block:
             return None
@@ -1188,7 +1188,7 @@ class ProcedureStepFormatVerifier(VerifierFunction):
         return [int(m.group(1)) for m in pattern.finditer(prediction or "")]
 
     def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
     ) -> VerificationResult:
         try:
             expected_k = self._extract_expected_k_from_label(label)
