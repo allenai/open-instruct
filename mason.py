@@ -113,7 +113,7 @@ def get_args():
     parser.add_argument(
         "--hostname", type=str, nargs="+", help="Beaker hostname on which the job could be run.", default=None
     )
-    parser.add_argument("--max_retries", type=int, help="Number of retries", default=2)
+    parser.add_argument("--max_retries", type=int, help="Number of retries", default=0)
     parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
     parser.add_argument(
