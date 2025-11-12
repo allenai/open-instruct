@@ -7,6 +7,8 @@ from datetime import date
 
 import yaml
 
+import mason
+
 ########################################
 
 # Helper functions.
@@ -64,17 +66,6 @@ def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
 ########################################
 # Launcher
 
-WEKA_CLUSTERS = [
-    "ai2/jupiter",
-    "ai2/saturn",
-    "ai2/neptune",
-    "ai2/ceres"
-]
-GCP_CLUSTERS = [
-    "ai2/augusta"
-]
-
-
 today = date.today().strftime("%m%d%Y")
 
 parser = argparse.ArgumentParser()
@@ -87,12 +78,7 @@ parser.add_argument("--beaker_image", type=str, default="oe-eval-beaker/oe_eval_
 # image refernece: https://github.com/allenai/oe-eval-internal/blob/493660aca07d05384c6bd1860c4180860ccc7d53/oe_eval_internal/utilities/launch_utils.py#L143
 # image: https://legacy.beaker.org/im/01JRZWRN4FSGK7FWKV1DRPP1R1/details
 parser.add_argument("--beaker_subfolder", type=str, default=None)
-parser.add_argument("--cluster", nargs='+', default=[
-    "ai2/ceres",
-    "ai2/neptune",
-    "ai2/saturn",
-    "ai2/jupiter",
-])
+parser.add_argument("--cluster", nargs='+', default=mason.WEKA_CLUSTERS)
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 parser.add_argument("--priority", type=str, default="low")
@@ -145,7 +131,7 @@ d1['tasks'][0]['resources']['gpuCount'] = 1
 
 # remove nfs if asked or jupiter in cluster list.
 weka_available = False
-if all(c in WEKA_CLUSTERS for c in cluster):
+if all(c in mason.WEKA_CLUSTERS for c in cluster):
     d1['tasks'][0]['datasets'].append({
         'mountPath': "/weka/oe-adapt-default",
         "source": {
