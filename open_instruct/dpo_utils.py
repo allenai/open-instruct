@@ -169,7 +169,7 @@ def _get_batch_logps(
     # dummy token; we'll ignore the losses on these tokens later
     labels[labels == -100] = 0
 
-    per_token_logps = log_softmax_and_gather(logits, labels)
+    per_token_logps = log_softmax_and_gather(logits, index=labels)
 
     if average_log_prob:
         return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
@@ -177,15 +177,12 @@ def _get_batch_logps(
         return (per_token_logps * loss_mask).sum(-1)
 
 
-def process_batch(
-    batch: dict[str, list | torch.LongTensor], prefix: str, pad_value: int = 0
-) -> dict[str, torch.LongTensor]:
+def process_batch(batch: dict[str, list | torch.LongTensor], prefix: str) -> dict[str, torch.LongTensor]:
     """Process either chosen or rejected inputs separately.
 
     Args:
         batch: Input batch dictionary
         prefix: Either 'chosen' or 'rejected'
-        pad_value: Value to use for padding (0 for input_ids, -100 for labels)
 
     Returns:
         Processed batch dictionary for the specified prefix
@@ -212,12 +209,12 @@ def concatenated_inputs(batch: dict[str, list | torch.LongTensor]) -> dict[str, 
     concatenated_batch = {}
     for k in batch:
         if k.startswith("chosen") and isinstance(batch[k], torch.Tensor):
-            pad_value = -100 if "labels" in k else 0
+            pad_value = -100 if "labels" in k else 0  # labels vs attention mask
             concatenated_key = k.replace("chosen", "concatenated")
             concatenated_batch[concatenated_key] = pad_to_length(batch[k], max_length, pad_value=pad_value)
     for k in batch:
         if k.startswith("rejected") and isinstance(batch[k], torch.Tensor):
-            pad_value = -100 if "labels" in k else 0
+            pad_value = -100 if "labels" in k else 0  # labels vs attention mask
             concatenated_key = k.replace("rejected", "concatenated")
             concatenated_batch[concatenated_key] = torch.cat(
                 (concatenated_batch[concatenated_key], pad_to_length(batch[k], max_length, pad_value=pad_value)), dim=0

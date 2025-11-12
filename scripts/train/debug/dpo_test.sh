@@ -2,7 +2,7 @@ MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b
 NUM_NODES=8
 BEAKER_IMAGE=$1
 
-LR=6e-8
+LR=6e-6  # 6e-8
 EXP_NAME="olmo3-32b-DPO-dbg-tr-shrd64-ofldopt-cat-${LR}"
 
 HF_HUB_ENABLE_HF_TRANSFER=1 uv run python mason.py \
