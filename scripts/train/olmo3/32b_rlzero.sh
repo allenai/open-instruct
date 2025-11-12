@@ -8,7 +8,7 @@ DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_templat
 
 # math evals
 # EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
-EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
+# EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
 
 # AIME 2024, 2025 local evals
 LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
@@ -29,7 +29,7 @@ python mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 9 \
+    --num_nodes 8 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
@@ -58,17 +58,18 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
     --response_length 16000 \
-    --pack_length 65536 \
+    --pack_length 18048 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name olmo_thinker_dapo \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 12800 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 8 8 8 \
-    --vllm_num_engines 3 \
+    --num_learners_per_node 8 8 8 8 \
+    --vllm_num_engines 8 \
     --gather_whole_model False \
-    --vllm_tensor_parallel_size 8 \
+    --vllm_tensor_parallel_size 4 \
+    --inference_batch_size 160 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
@@ -83,7 +84,8 @@ python open_instruct/grpo_fast.py \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
-    --oe_eval_tasks $EVALS \
-    --oe_eval_gpu_multiplier 4 \
     --vllm_enforce_eager \
     --deepspeed_zpg 32
+
+    # --oe_eval_tasks $EVALS \
+    # --oe_eval_gpu_multiplier 4 \
