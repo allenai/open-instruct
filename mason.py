@@ -477,14 +477,21 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 try:
                     model_arg_idx = filtered_command.index("--model_name_or_path")
                     model_name_idx = model_arg_idx + 1
-                    model_name_or_path = filtered_command[model_name_idx]
+                    model_name_or_path = filtered_command[model_name_idx].rstrip("/")
 
                     if model_name_or_path.startswith("gs://"):
                         model_name_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
-                        local_cache_folder = f"{args.auto_output_dir_path}/{whoami}/tokenizer_{model_name_hash}"
+                        local_cache_folder = f"{args.auto_output_dir_path}/{whoami}/tokenizer_{model_name_hash}/"
 
                         if not os.path.exists(local_cache_folder):
-                            download_from_gs_bucket(f"{model_name_or_path}/tokenizer*", local_cache_folder)
+                            download_from_gs_bucket(
+                                [
+                                    f"{model_name_or_path}/tokenizer.json",
+                                    f"{model_name_or_path}/tokenizer_config.json",
+                                    f"{model_name_or_path}/config.json",
+                                ],
+                                local_cache_folder,
+                            )
 
                         filtered_command[model_name_idx] = local_cache_folder
                 except ValueError:
