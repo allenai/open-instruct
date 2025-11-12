@@ -1682,7 +1682,7 @@ def accumulate_inference_batches(
         while len(results) < num_prompts:
             result = inference_results_Q.get(timeout=timeout)
             shutdown_result = process_result(result)
-            if shutdown_result[0] is not None:
+            if shutdown_result is not None and shutdown_result[0] is not None:
                 return shutdown_result
     else:
         # Without active_sampling, use for loop for exactly num_prompts iterations
@@ -1691,7 +1691,7 @@ def accumulate_inference_batches(
         for _ in range(num_prompts):
             result = inference_results_Q.get(timeout=timeout)
             shutdown_result = process_result(result)
-            if shutdown_result[0] is not None:
+            if shutdown_result is not None and shutdown_result[0] is not None:
                 return shutdown_result
 
     # Combine all results into a single GenerationResult
