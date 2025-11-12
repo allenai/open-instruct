@@ -49,7 +49,7 @@ from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass
 from multiprocessing import resource_tracker as _rt
-from typing import Any, NewType, Optional
+from typing import Any, NewType
 
 import beaker
 import numpy as np

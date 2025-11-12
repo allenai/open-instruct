@@ -34,7 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
-from typing import Literal, Optional
+from typing import Literal
 
 import datasets
 import torch
@@ -346,11 +346,11 @@ class FlatArguments:
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
-    oe_eval_gpu_multiplier: Optional[int] = None
+    oe_eval_gpu_multiplier: int | None = None
     """the multiplier for the number of GPUs for evaluation"""
-    eval_workspace: Optional[str] = "ai2/tulu-3-results"
+    eval_workspace: str | None = "ai2/tulu-3-results"
     """The workspace to launch evaluation jobs on"""
-    eval_priority: Optional[str] = "high"
+    eval_priority: str | None = "high"
     """The priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
