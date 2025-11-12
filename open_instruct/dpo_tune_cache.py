@@ -1058,7 +1058,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             gs_bucket_path=args.gs_bucket_path,
             eval_workspace=args.eval_workspace,
             eval_priority=args.eval_priority,
-            gpu_multiplier=args.oe_eval_gpu_multiplier,
+            oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
         )
     if args.push_to_hub:
         push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)

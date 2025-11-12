@@ -1131,8 +1131,8 @@ def launch_ai2_evals_on_weka(
     stop_strings: list[str] | None = None,
     gs_bucket_path: str | None = None,
     eval_priority: str | None = "normal",
+    eval_workspace: str | None = "ai2/tulu-3-results",
     beaker_image: str | None = None,
-    eval_workspace: Optional[str] = "ai2/tulu-3-results",
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
     weka_cluster = "ai2/saturn ai2/neptune ai2/jupiter ai2/ceres"
