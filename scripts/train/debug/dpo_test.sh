@@ -2,8 +2,8 @@ MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b
 NUM_NODES=8
 BEAKER_IMAGE=$1
 
-LR=6e-6  # 6e-8
-EXP_NAME="olmo3-32b-DPO-dbg-tr-shrd64-ofldopt-sep-${LR}"
+LR=7e-8
+EXP_NAME="olmo3-32b-DPO-dbg-tr-shrd8-sep-dedup${LR}"
 
 HF_HUB_ENABLE_HF_TRANSFER=1 uv run python mason.py \
     --cluster ai2/augusta \
@@ -22,38 +22,45 @@ HF_HUB_ENABLE_HF_TRANSFER=1 uv run python mason.py \
     --num_nodes $NUM_NODES \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
-    --gpus 8 -- source /var/lib/tcpxo/lib64/nccl-env-profile.sh \&\& accelerate launch \
+    --gpus 8 \
+    -- \
+    source /var/lib/tcpxo/lib64/nccl-env-profile.sh && accelerate launch \
     --mixed_precision bf16 \
     --num_processes 8 \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
-    open_instruct/dpo_tune_cache.py \
-    --exp_name $EXP_NAME \
-    --model_name_or_path $MODEL_NAME \
-    --tokenizer_name $MODEL_NAME \
-    --use_slow_tokenizer False \
-    --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-filtered 1.0 \
-    --max_train_samples 15000 \
-    --dataset_skip_cache \
-    --zero_stage 3 \
-    --concatenated_forward False \
-    --max_seq_length 16384 \
-    --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 1 \
-    --learning_rate $LR \
-    --lr_scheduler_type linear \
-    --warmup_ratio 0.1 \
-    --weight_decay 0.0 \
-    --num_train_epochs 1 \
-    --logging_steps 1 \
-    --dpo_loss_type dpo_norm \
-    --dpo_beta 5 \
-    --use_flash_attn \
-    --gradient_checkpointing \
-    --report_to wandb \
-    --chat_template_name olmo123 \
-    --with_tracking \
-    --log_grad_norm True \
-    --zero_hpz_partition_size 64 \
-    --offload_optimizer True
+        open_instruct/dpo_tune_cache.py \
+        --exp_name $EXP_NAME \
+        --model_name_or_path $MODEL_NAME \
+        --tokenizer_name $MODEL_NAME \
+        --use_slow_tokenizer False \
+        --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-ftd-topic-ftd-dedup5_take2 1.0 \
+        --max_train_samples 150000 \
+        --dataset_skip_cache \
+        --zero_stage 3 \
+        --concatenated_forward False \
+        --max_seq_length 16384 \
+        --per_device_train_batch_size 1 \
+        --gradient_accumulation_steps 1 \
+        --learning_rate $LR \
+        --lr_scheduler_type linear \
+        --warmup_ratio 0.1 \
+        --weight_decay 0.0 \
+        --num_train_epochs 1 \
+        --logging_steps 1 \
+        --dpo_loss_type dpo_norm \
+        --dpo_beta 5 \
+        --use_flash_attn \
+        --gradient_checkpointing \
+        --report_to wandb \
+        --chat_template_name olmo123 \
+        --with_tracking \
+        --log_grad_norm True \
+        --zero_hpz_partition_size 8 \
+        --seed 87 \
+        --oe_eval_max_length 32768 \
+        --oe_eval_tasks gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu_humanities:cot::hamish_zs_reasoning_deepseek,mmlu_other:cot::hamish_zs_reasoning_deepseek,mmlu_social_sciences:cot::hamish_zs_reasoning_deepseek,mmlu_stem:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek
+
+
+        # --offload_optimizer True \
