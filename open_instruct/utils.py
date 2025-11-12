@@ -87,24 +87,24 @@ class MetricsTracker:
         self.current_idx = 0
         self.max_metrics = max_metrics
 
-    def __getitem__(self, name: str) -> torch.Tensor:
+    def _register_metric(self, name: str) -> int:
         if name not in self.names2idx:
             if self.current_idx >= self.max_metrics:
                 raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
             self.names2idx[name] = self.current_idx
             self.current_idx += 1
-            self.metrics[self.names2idx[name]] = 0
-        return self.metrics[self.names2idx[name]]
+        return self.names2idx[name]
+
+    def __getitem__(self, name: str) -> torch.Tensor:
+        idx = self._register_metric(name)
+        return self.metrics[idx]
 
     def __setitem__(self, name: str, value):
-        if name not in self.names2idx:
-            if self.current_idx >= self.max_metrics:
-                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
-            self.names2idx[name] = self.current_idx
-            self.current_idx += 1
-        self.metrics[self.names2idx[name]] = value
+        idx = self._register_metric(name)
+        self.metrics[idx] = value
 
     def get_metrics_list(self) -> dict[str, float]:
+        # Convert to Python floats for logging systems (wandb, tensorboard)
         metrics_list = self.metrics.tolist()
         return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 

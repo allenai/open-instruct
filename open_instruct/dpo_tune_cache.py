@@ -944,9 +944,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
                     mfu_interval_end = time.perf_counter()
                     training_time = mfu_interval_end - mfu_interval_start
-                    total_tokens = int(global_metrics["token_count"])
-                    total_tokens_processed += total_tokens
-                    avg_sequence_length = total_tokens / (
+                    total_tokens_step = int(global_metrics["token_count"])
+                    total_tokens_processed += total_tokens_step
+                    avg_sequence_length = total_tokens_step / (
                         args.per_device_train_batch_size
                         * accelerator.num_processes
                         * args.gradient_accumulation_steps
@@ -954,7 +954,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         * 2
                     )
 
-                    step_tokens_per_second = total_tokens / training_time
+                    step_tokens_per_second = total_tokens_step / training_time
                     total_time_elapsed = time.perf_counter() - start_time
                     total_tokens_per_second = total_tokens_processed / total_time_elapsed
 
@@ -982,7 +982,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         metrics_to_log["aux_loss"] = global_metrics["aux_loss"]
 
                     metrics_to_log["perf/mfu_step"] = model_dims.approximate_learner_utilization(
-                        total_tokens=total_tokens,
+                        total_tokens=total_tokens_step,
                         avg_sequence_length=avg_sequence_length,
                         training_time=training_time,
                         num_training_gpus=accelerator.num_processes,
