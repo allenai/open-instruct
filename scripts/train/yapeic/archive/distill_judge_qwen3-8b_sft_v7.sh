@@ -1,25 +1,33 @@
 python mason.py \
-    --cluster ai2/augusta \
-    --task_name distill_judge_qwen3-8b_sft_v4 \
-    --description "distill judge (v4 data)" \
+    --cluster ai2/jupiter \
+    --task_name distill_judge_qwen3-8b_sft_v7 \
+    --description "distill judge (v7 data)" \
     --workspace ai2/oe-data \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-base \
-    --gpus 8 -- bash -lc "git clone --branch your-branch --depth 1 https://github.com/you/open-instruct.git /code && cd /code && accelerate launch --mixed_precision bf16 --num_processes 8 --use_deepspeed --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf --deepspeed_multinode_launcher standard \
+    --gpus 8 -- \
+    git clone --depth 1 --branch yapeic/exp https://github.com/allenai/open-instruct.git /workspace/open-instruct \&\& \
+    cd /workspace/open-instruct \&\& \
+    accelerate launch \
+    --mixed_precision bf16 \
+    --num_processes 8 \
+    --use_deepspeed \
+    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --hf_entity yapeichang \
-    --hf_repo_id distill_judge_qwen3-8b_sft_v4 \
-    --exp_name distill_judge_qwen3-8b_sft_v4 \
+    --hf_repo_id distill_judge_qwen3-8b_sft_v7 \
+    --exp_name distill_judge_qwen3-8b_sft_v7 \
     --model_name_or_path Qwen/Qwen3-8B \
     --model_revision main \
     --tokenizer_name Qwen/Qwen3-8B \
     --tokenizer_revision main \
-    --use_slow_tokenizer \
+    --use_slow_tokenizer False \
     --dataset_transform_fn sft_qwen3_tokenize_and_truncate_no_thinking_v1 sft_tulu_filter_v1 \
-    --dataset_mixer_list yapeichang/gpt-5_v8_train_111031 1.0 \
+    --dataset_mixer_list yapeichang/gpt-5-minimal_v9_train_balanced_28766 1.0 \
     --clean_checkpoints_at_end false \
     --max_seq_length 8192 \
     --per_device_train_batch_size 2 \
@@ -28,9 +36,9 @@ python mason.py \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
-    --num_train_epochs 3 \
+    --num_train_epochs 5 \
     --checkpointing_steps epoch \
-    --keep_last_n_checkpoints 3 \
+    --keep_last_n_checkpoints 5 \
     --use_flash_attn \
     --gradient_checkpointing \
     --report_to wandb \
@@ -39,4 +47,4 @@ python mason.py \
     --with_tracking \
     --logging_steps 1 \
     --try_launch_beaker_eval_jobs false \
-    --seed 8"
+    --seed 8
