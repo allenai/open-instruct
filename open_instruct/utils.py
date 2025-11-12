@@ -1133,6 +1133,7 @@ def launch_ai2_evals_on_weka(
     stop_strings: list[str] | None = None,
     gs_bucket_path: str | None = None,
     eval_priority: str | None = "urgent",
+    eval_workspace: str | None = "ai2/olmo-instruct",
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
@@ -1168,7 +1169,7 @@ python scripts/submit_eval_jobs.py \
 --location {path} \
 --cluster {cluster} \
 --is_tuned \
---workspace "ai2/olmo-instruct" \
+--workspace {eval_workspace} \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
