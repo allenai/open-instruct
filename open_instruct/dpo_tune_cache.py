@@ -840,7 +840,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
-    local_metrics = utils.MetricsTracker(max_metrics=32, device=accelerator.device)
+    local_metrics = utils.MetricsTracker(device=accelerator.device)
     episode = 0
     total_tokens_processed = 0
     mfu_interval_start = time.perf_counter()
@@ -938,10 +938,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     global_metrics_tensor = accelerator.reduce(local_metrics.metrics, reduction="mean")
                     global_metrics_tensor /= args.gradient_accumulation_steps * args.logging_steps
                     global_metrics_tensor[local_metrics.names2idx["token_count"]] *= accelerator.num_processes
-                    global_metrics = utils.MetricsTracker(max_metrics=32, device=accelerator.device)
-                    global_metrics.metrics = global_metrics_tensor
-                    global_metrics.names2idx = local_metrics.names2idx
-                    global_metrics.current_idx = local_metrics.current_idx
+                    global_metrics = {
+                        name: global_metrics_tensor[index].item() for name, index in local_metrics.names2idx.items()
+                    }
 
                     mfu_interval_end = time.perf_counter()
                     training_time = mfu_interval_end - mfu_interval_start
@@ -963,29 +962,35 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         "training_step": completed_steps,
                         "learning_rate": lr_scheduler.get_last_lr()[0],
                         "epoch": episode / len(train_dataset),
-                        "train_loss": global_metrics["train_loss"].item(),
-                        "logps/chosen": global_metrics["logps/chosen"].item(),
-                        "logps/rejected": global_metrics["logps/rejected"].item(),
+                        "train_loss": global_metrics["train_loss"],
+                        "logps/chosen": global_metrics["logps/chosen"],
+                        "logps/rejected": global_metrics["logps/rejected"],
                     }
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         metrics_to_log.update(
                             {
-                                "rewards/chosen": global_metrics["rewards/chosen"].item(),
-                                "rewards/rejected": global_metrics["rewards/rejected"].item(),
-                                "rewards/average": global_metrics["rewards/average"].item(),
-                                "rewards/accuracy": global_metrics["rewards/accuracy"].item(),
-                                "rewards/margin": global_metrics["rewards/margin"].item(),
+                                "rewards/chosen": global_metrics["rewards/chosen"],
+                                "rewards/rejected": global_metrics["rewards/rejected"],
+                                "rewards/average": global_metrics["rewards/average"],
+                                "rewards/accuracy": global_metrics["rewards/accuracy"],
+                                "rewards/margin": global_metrics["rewards/margin"],
                             }
                         )
-                    logger_str = f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics['train_loss'].item()}"
+                    logger_str = f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics['train_loss']}"
                     if args.load_balancing_loss:
-                        logger_str += f" Aux Loss: {global_metrics['aux_loss'].item()}"
-                        metrics_to_log["aux_loss"] = global_metrics["aux_loss"].item()
+                        logger_str += f" Aux Loss: {global_metrics['aux_loss']}"
+                        metrics_to_log["aux_loss"] = global_metrics["aux_loss"]
 
-                    metrics_to_log["perf/mfu"] = model_dims.approximate_learner_utilization(
+                    metrics_to_log["perf/mfu_step"] = model_dims.approximate_learner_utilization(
                         total_tokens=total_tokens,
                         avg_sequence_length=avg_sequence_length,
                         training_time=training_time,
+                        num_training_gpus=accelerator.num_processes,
+                    )["mfu"]
+                    metrics_to_log["perf/mfu_total"] = model_dims.approximate_learner_utilization(
+                        total_tokens=total_tokens_processed,
+                        avg_sequence_length=avg_sequence_length,
+                        training_time=total_time_elapsed,
                         num_training_gpus=accelerator.num_processes,
                     )["mfu"]
                     metrics_to_log["perf/tokens_per_second_step"] = step_tokens_per_second

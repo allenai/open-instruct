@@ -583,7 +583,7 @@ class PolicyTrainerRayProcess(RayProcess):
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
-        self.local_metrics = utils.MetricsTracker(max_metrics=32, device=self.device)
+        self.local_metrics = utils.MetricsTracker(device=self.device)
 
         self.offload_to_cpu(self.model)
         self.offload_to_cpu(self.value_model)

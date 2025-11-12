@@ -885,7 +885,7 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 self.ref_policy.load_state_dict(state_dict)
             logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
-        self.local_metrics = utils.MetricsTracker(max_metrics=32, device=self.device)
+        self.local_metrics = utils.MetricsTracker(device=self.device)
         return optimization_steps_done
 
     def forward(
