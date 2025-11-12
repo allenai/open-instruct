@@ -409,8 +409,7 @@ def get_cache_ref_logprobs(
             desc="Generating reference cache",
             bar_format="{l_bar}{bar}{r_bar}\n",
         ):
-            batch_indices = batch["dataset_index"]
-            cached_indices.extend(batch_indices)
+            cached_indices.extend(batch["dataset_index"])
 
             if args.use_lora:
                 with accelerator.unwrap_model(model).disable_adapter():
@@ -427,6 +426,11 @@ def get_cache_ref_logprobs(
     return cached_indices, cached_reference_chosen_logps, cached_reference_rejected_logps
 
 
+def get_temp_cache_filename(merged_cache_path: str, process_rank: int, world_size: int) -> str:
+    base_name = os.path.splitext(os.path.basename(merged_cache_path))[0]
+    return f"{base_name}_temp_process_{process_rank}_of_{world_size}.npz"
+
+
 def save_per_process_ref_logprobs(
     cache_dir: str,
     process_rank: int,
@@ -434,9 +438,10 @@ def save_per_process_ref_logprobs(
     indices: list,
     chosen_logps_tensors: list,
     rejected_logps_tensors: list,
+    merged_cache_path: str,
 ) -> str:
     os.makedirs(cache_dir, exist_ok=True)
-    temp_filename = f"temp_process_{process_rank}_of_{world_size}.npz"
+    temp_filename = get_temp_cache_filename(merged_cache_path, process_rank, world_size)
     temp_path = os.path.join(cache_dir, temp_filename)
 
     indices_array = np.array(indices, dtype=np.int64)
@@ -454,7 +459,7 @@ def merge_ref_logprobs_from_processes(cache_dir: str, world_size: int, merged_ca
     all_rejected_logps = []
 
     for rank in range(world_size):
-        temp_filename = f"temp_process_{rank}_of_{world_size}.npz"
+        temp_filename = get_temp_cache_filename(merged_cache_path, rank, world_size)
         temp_path = os.path.join(cache_dir, temp_filename)
 
         if not os.path.exists(temp_path):
@@ -485,7 +490,7 @@ def merge_ref_logprobs_from_processes(cache_dir: str, world_size: int, merged_ca
     logger.info(f"Merged cache saved to {merged_cache_path}")
 
     for rank in range(world_size):
-        temp_filename = f"temp_process_{rank}_of_{world_size}.npz"
+        temp_filename = get_temp_cache_filename(merged_cache_path, rank, world_size)
         temp_path = os.path.join(cache_dir, temp_filename)
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -983,6 +988,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 cached_indices,
                 cached_reference_chosen_logps,
                 cached_reference_rejected_logps,
+                cache_location,
             )
             accelerator.wait_for_everyone()
 
