@@ -852,6 +852,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
 
+                # Save reference policy path to load later (after ref_policy is initialized)
                 self.ref_policy_checkpoint_path = None
                 if args.load_ref_policy and states.get("ref_policy_saved", False):
                     ref_policy_dir = os.path.join(args.checkpoint_state_dir, "ref_policy")
@@ -866,8 +867,13 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model.train()
 
         if args.load_ref_policy:
+            # reference model
             ds_config = get_eval_ds_config(
-                offload=False, stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0, bf16=True
+                offload=False,
+                # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+                # stage 2 is optimizer sharding which doesn't apply to inference
+                stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+                bf16=True,
             )
             ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
             ds_config["gradient_accumulation_steps"] = 1
@@ -889,9 +895,11 @@ class PolicyTrainerRayProcess(RayProcess):
             self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
             self.ref_policy.eval()
 
+            # Load reference policy checkpoint if available
             if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
                 state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device)
                 if hasattr(self.ref_policy, "module"):
+                    # If wrapped by DeepSpeed
                     self.ref_policy.module.load_state_dict(state_dict)
                 else:
                     self.ref_policy.load_state_dict(state_dict)
@@ -1026,6 +1034,42 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
+    def _calculate_ref_logprobs(
+        self,
+        collated_query_responses,
+        collated_tool_masks,
+        collated_attention_masks,
+        collated_position_ids,
+        collated_response_masks,
+        pad_token_id,
+    ):
+        args = self.args
+        collated_ref_logprobs = []
+        with torch.no_grad():
+            for i in range(len(collated_query_responses)):
+                query_response = collated_query_responses[i]
+                tool_mask = collated_tool_masks[i]
+                attention_mask = collated_attention_masks[i]
+                position_id = collated_position_ids[i]
+                response_mask = collated_response_masks[i]
+                ref_logprob, _ = self.forward(
+                    self.ref_policy,
+                    query_response,
+                    attention_mask,
+                    position_id,
+                    pad_token_id,
+                    args.temperature,
+                    return_entropy=False,
+                )
+                if args.mask_tool_use and args.tool_use:
+                    response_mask = response_mask.bool() & tool_mask.bool()
+                else:
+                    response_mask = response_mask.bool()
+                ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                collated_ref_logprobs.append(ref_logprob)
+                torch.cuda.empty_cache()
+        return collated_ref_logprobs
+
     def train(
         self,
         collated_query_responses,
@@ -1064,29 +1108,15 @@ class PolicyTrainerRayProcess(RayProcess):
 
         collated_ref_logprobs = []
         if args.load_ref_policy:
-            with Timer("Inference Calculation", noop=self.rank != 0), torch.no_grad():
-                for i in range(len(collated_query_responses)):
-                    query_response = collated_query_responses[i]
-                    tool_mask = collated_tool_masks[i]
-                    attention_mask = collated_attention_masks[i]
-                    position_id = collated_position_ids[i]
-                    response_mask = collated_response_masks[i]
-                    ref_logprob, _ = self.forward(
-                        self.ref_policy,
-                        query_response,
-                        attention_mask,
-                        position_id,
-                        pad_token_id,
-                        args.temperature,
-                        return_entropy=False,
-                    )
-                    if args.mask_tool_use and args.tool_use:
-                        response_mask = response_mask.bool() & tool_mask.bool()
-                    else:
-                        response_mask = response_mask.bool()
-                    ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                    collated_ref_logprobs.append(ref_logprob)
-                    torch.cuda.empty_cache()
+            with Timer("Inference Calculation", noop=self.rank != 0):
+                collated_ref_logprobs = self._calculate_ref_logprobs(
+                    collated_query_responses,
+                    collated_tool_masks,
+                    collated_attention_masks,
+                    collated_position_ids,
+                    collated_response_masks,
+                    pad_token_id,
+                )
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
         # from the generator (note that async mode means these are a bit diff!)
@@ -1256,10 +1286,13 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     if args.load_ref_policy:
                         mb_ref_logprob = collated_ref_logprobs[i]
+                        # Here we recalculate kl: we want the KL loss to backpropagate through the model
+                        # We also clamp the KL loss to avoid numerical instability
+                        # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
                         ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
                         kl1 = ref_logprobs_diff
                         kl2 = (ref_logprobs_diff) ** 2 / 2
-                        kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff
+                        kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
                         kl4 = ratio * ref_logprobs_diff
                         if args.kl_estimator == "kl1":
                             kl = kl1
@@ -1269,6 +1302,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl = kl3
                         elif args.kl_estimator == "kl4":
                             kl = kl4
+                        # grpo change: directly subtract KL in loss (add)
                         loss = masked_mean(
                             pg_loss_max + (args.beta * kl),
                             mb_response_masks_bool,
@@ -1286,6 +1320,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
                     with torch.no_grad():
                         if args.load_ref_policy:
+                            # NOTE: in packed implementation, kl calculation are averages over response tokens
                             kl1_stats[i] = masked_mean(
                                 kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
                             ).float()
@@ -1362,8 +1397,13 @@ class PolicyTrainerRayProcess(RayProcess):
             ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
             os.makedirs(ref_policy_dir, exist_ok=True)
 
+            # For reference policy, we save just the model weights
+            # We can't use save_checkpoint because it would try to save DummyOptim
+            # which doesn't have state_dict
             if self.rank == 0:
+                # Only rank 0 saves the model state
                 model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
+                # Save the state dict
                 torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
 
