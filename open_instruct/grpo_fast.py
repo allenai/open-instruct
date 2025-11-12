@@ -510,16 +510,16 @@ class Args:
             for tool in self.tools:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-        if not self.load_ref_policy and self.beta != 0.0:
-            raise ValueError(
-                "When load_ref_policy=False, beta must be 0.0. "
-                f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
-            )
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
             if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
                 assert self.mask_tool_use, (
                     "Must mask tool use when using vLLM logprobs or truncated importance sampling."
                 )
+        if not self.load_ref_policy and self.beta != 0.0:
+            raise ValueError(
+                "When load_ref_policy=False, beta must be 0.0. "
+                f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
+            )
 
         # Figure out max possible RLVR score
         self.max_possible_score = 0
@@ -2554,6 +2554,7 @@ def one_training_step(
             update_ref_policy_future.extend(
                 [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
             )
+            ray_get_with_progress(update_ref_policy_future, desc=f"Updating reference policy at step {training_step}")
 
     save_time = 0
     if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
