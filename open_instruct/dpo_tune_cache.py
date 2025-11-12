@@ -395,6 +395,7 @@ def get_cache_ref_logprobs(
                 active_dataloader,
                 disable=not accelerator.is_local_main_process,
                 desc=f"Generating reference cache (epoch {epoch})",
+                bar_format="{l_bar}{bar}{r_bar}\n",
             ):
                 if args.use_lora:
                     with accelerator.unwrap_model(model).disable_adapter():
@@ -827,7 +828,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     print_gpu_stats(init_gpu_memory)
     # Only show the progress bar once on each machine.
     start_time = time.perf_counter()
-    progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
+    progress_bar = tqdm(
+        range(args.max_train_steps), disable=not accelerator.is_local_main_process, bar_format="{l_bar}{bar}{r_bar}\n"
+    )
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
