@@ -1018,13 +1018,26 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def _calculate_ref_logprobs(
         self,
-        collated_query_responses,
-        collated_tool_masks,
-        collated_attention_masks,
-        collated_position_ids,
-        collated_response_masks,
-        pad_token_id,
-    ):
+        collated_query_responses: list[torch.Tensor],
+        collated_tool_masks: list[torch.Tensor],
+        collated_attention_masks: list[torch.Tensor],
+        collated_position_ids: list[torch.Tensor],
+        collated_response_masks: list[torch.Tensor],
+        pad_token_id: int,
+    ) -> list[torch.Tensor]:
+        """Calculate reference policy log probabilities for query-response pairs.
+
+        Args:
+            collated_query_responses: List of query-response token tensors
+            collated_tool_masks: List of tool usage mask tensors
+            collated_attention_masks: List of attention mask tensors
+            collated_position_ids: List of position ID tensors
+            collated_response_masks: List of response mask tensors indicating valid response tokens
+            pad_token_id: Token ID used for padding
+
+        Returns:
+            List of reference log probability tensors, one per query-response pair
+        """
         collated_ref_logprobs = []
         with torch.no_grad():
             for i in range(len(collated_query_responses)):
