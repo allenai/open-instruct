@@ -270,6 +270,8 @@ class Args:
 
     active_sampling: bool = False
     """Whether to continue sampling responses until you get a full batch."""
+    filter_zero_std_samples: bool = True
+    """Whether to filter out prompts with zero reward std (all samples have the same score). Must be True when active_sampling is True."""
     no_resampling_pass_rate: float | None = None
     """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
 
@@ -523,6 +525,10 @@ class Args:
                 "With active_sampling, you should set async_steps > 1 to account for filtering of the first batch. "
                 "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
                 "prompt will cause the trainer to stall waiting for more data  . "
+            )
+            assert self.filter_zero_std_samples, (
+                "filter_zero_std_samples must be True when active_sampling is True. "
+                "Active sampling requires filtering to work correctly."
             )
 
 
@@ -1940,7 +1946,7 @@ def data_preparation_thread(
                 tokenizer=tokenizer,
                 reward_fn=reward_fn,
                 actor_manager=actor_manager,
-                filter_zero_std_samples=args.active_sampling,
+                filter_zero_std_samples=args.filter_zero_std_samples,
                 no_resampling_pass_rate=args.no_resampling_pass_rate,
                 iter_dataloader=iter_dataloader,
             )
