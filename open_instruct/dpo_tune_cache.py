@@ -53,7 +53,7 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, utils
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     TOKENIZED_PREFERENCE_DATASET_KEYS,
@@ -840,7 +840,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
-    local_metrics = torch.zeros((21), device=accelerator.device)
+    local_metrics = utils.MetricsTracker(max_metrics=32, device=accelerator.device)
     episode = 0
     total_tokens_processed = 0
     mfu_interval_start = time.perf_counter()
@@ -908,26 +908,26 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
                 # We keep track of the loss at each logged step
                 with torch.no_grad():
-                    local_metrics[0] += loss
+                    local_metrics["train_loss"] += loss
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
                         rejected_rewards = (args.dpo_beta * (policy_rejected_logps - reference_rejected_logps)).mean()
                         average_rewards = (chosen_rewards + rejected_rewards) / 2
                         accuracy = (chosen_rewards > rejected_rewards).float().mean()
                         margin = (chosen_rewards - rejected_rewards).mean()
-                        local_metrics[1] += chosen_rewards
-                        local_metrics[2] += rejected_rewards
-                        local_metrics[3] += average_rewards
-                        local_metrics[4] += accuracy
-                        local_metrics[5] += margin
-                    local_metrics[6] += policy_chosen_logps.mean()
-                    local_metrics[7] += policy_rejected_logps.mean()
+                        local_metrics["rewards/chosen"] += chosen_rewards
+                        local_metrics["rewards/rejected"] += rejected_rewards
+                        local_metrics["rewards/average"] += average_rewards
+                        local_metrics["rewards/accuracy"] += accuracy
+                        local_metrics["rewards/margin"] += margin
+                    local_metrics["logps/chosen"] += policy_chosen_logps.mean()
+                    local_metrics["logps/rejected"] += policy_rejected_logps.mean()
                     if args.load_balancing_loss:
-                        local_metrics[19] += weighted_aux_loss
+                        local_metrics["aux_loss"] += weighted_aux_loss
 
                     chosen_lengths = (batch["chosen_labels"] != -100).sum(dim=1)
                     rejected_lengths = (batch["rejected_labels"] != -100).sum(dim=1)
-                    local_metrics[20] += chosen_lengths.sum() + rejected_lengths.sum()
+                    local_metrics["token_count"] += chosen_lengths.sum() + rejected_lengths.sum()
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
@@ -935,13 +935,17 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 completed_steps += 1
                 if args.logging_steps and completed_steps % args.logging_steps == 0:
                     # single all reduce to save time, avoiding per metric all reduce
-                    global_metrics = accelerator.reduce(local_metrics, reduction="mean")
-                    global_metrics /= args.gradient_accumulation_steps * args.logging_steps
-                    global_metrics = global_metrics.tolist()
+                    global_metrics_tensor = accelerator.reduce(local_metrics.metrics, reduction="mean")
+                    global_metrics_tensor /= args.gradient_accumulation_steps * args.logging_steps
+                    global_metrics_tensor[local_metrics.names2idx["token_count"]] *= accelerator.num_processes
+                    global_metrics = utils.MetricsTracker(max_metrics=32, device=accelerator.device)
+                    global_metrics.metrics = global_metrics_tensor
+                    global_metrics.names2idx = local_metrics.names2idx
+                    global_metrics.current_idx = local_metrics.current_idx
 
                     mfu_interval_end = time.perf_counter()
                     training_time = mfu_interval_end - mfu_interval_start
-                    total_tokens = int(global_metrics[20])
+                    total_tokens = int(global_metrics["token_count"])
                     total_tokens_processed += total_tokens
                     avg_sequence_length = total_tokens / (
                         args.per_device_train_batch_size
@@ -959,26 +963,24 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         "training_step": completed_steps,
                         "learning_rate": lr_scheduler.get_last_lr()[0],
                         "epoch": episode / len(train_dataset),
-                        "train_loss": global_metrics[0],
-                        "logps/chosen": global_metrics[6],
-                        "logps/rejected": global_metrics[7],
+                        "train_loss": global_metrics["train_loss"].item(),
+                        "logps/chosen": global_metrics["logps/chosen"].item(),
+                        "logps/rejected": global_metrics["logps/rejected"].item(),
                     }
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         metrics_to_log.update(
                             {
-                                "rewards/chosen": global_metrics[1],
-                                "rewards/rejected": global_metrics[2],
-                                "rewards/average": global_metrics[3],
-                                "rewards/accuracy": global_metrics[4],
-                                "rewards/margin": global_metrics[5],
+                                "rewards/chosen": global_metrics["rewards/chosen"].item(),
+                                "rewards/rejected": global_metrics["rewards/rejected"].item(),
+                                "rewards/average": global_metrics["rewards/average"].item(),
+                                "rewards/accuracy": global_metrics["rewards/accuracy"].item(),
+                                "rewards/margin": global_metrics["rewards/margin"].item(),
                             }
                         )
-                    logger_str = (
-                        f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics[0]}"
-                    )
+                    logger_str = f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics['train_loss'].item()}"
                     if args.load_balancing_loss:
-                        logger_str += f" Aux Loss: {global_metrics[19]}"
-                        metrics_to_log["aux_loss"] = global_metrics[19]
+                        logger_str += f" Aux Loss: {global_metrics['aux_loss'].item()}"
+                        metrics_to_log["aux_loss"] = global_metrics["aux_loss"].item()
 
                     metrics_to_log["perf/mfu"] = model_dims.approximate_learner_utilization(
                         total_tokens=total_tokens,
@@ -1000,7 +1002,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                             wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
                         )
                     # Reset the local metrics
-                    local_metrics.zero_()
+                    local_metrics.metrics.zero_()
                     mfu_interval_start = mfu_interval_end
 
                 if isinstance(checkpointing_steps, int) and completed_steps % checkpointing_steps == 0:

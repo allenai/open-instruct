@@ -395,31 +395,6 @@ def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: int | None = Non
         return (values * mask).sum() / mask.sum()
 
 
-class MetricsTracker:
-    """A simple class to prellocate all metrics in an array
-    so we can do only one allreduce operation to get the metrics mean"""
-
-    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
-        self.metrics = torch.zeros(max_metrics, device=device)
-        self.names2idx = {}
-        self.current_idx = 0
-        self.max_metrics = max_metrics
-
-    def add(self, name: str, value: torch.tensor):
-        if name not in self.names2idx:
-            if self.current_idx >= self.max_metrics:
-                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
-            self.names2idx[name] = self.current_idx
-            self.current_idx += 1
-
-        self.metrics[self.names2idx[name]] = value
-        return self
-
-    def get_metrics_list(self) -> dict[str, float]:
-        metrics_list = self.metrics.tolist()
-        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
-
-
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
     padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
     if pin_memory:
@@ -608,7 +583,7 @@ class PolicyTrainerRayProcess(RayProcess):
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
-        self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
+        self.local_metrics = utils.MetricsTracker(max_metrics=32, device=self.device)
 
         self.offload_to_cpu(self.model)
         self.offload_to_cpu(self.value_model)
@@ -922,7 +897,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
 
             with torch.no_grad():
-                self.local_metrics.add("loss/value", value_losses.mean())
+                self.local_metrics["loss/value"] = value_losses.mean()
         with Timer("Offload Value Model", noop=self.rank != 0):
             self.offload_to_cpu(self.value_model)
 
@@ -1031,26 +1006,26 @@ class PolicyTrainerRayProcess(RayProcess):
                             ).float()
 
             with torch.no_grad():
-                self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
-                self.local_metrics.add("objective/kl2_avg", kl2_stats.mean())
-                self.local_metrics.add("objective/kl3_avg", kl3_stats.mean())
-                self.local_metrics.add("objective/kl4_avg", kl4_stats.mean())
-                self.local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
-                self.local_metrics.add("loss/kl_avg", kl_loss_stats.mean())
-                self.local_metrics.add("loss/total_avg", loss_stats.mean())
-                self.local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
-                self.local_metrics.add("val/ratio", ratio_stats.mean())
-                self.local_metrics.add("val/ratio_var", ratio_stats.var())
-                self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
-                self.local_metrics.add("lr_value", self.value_scheduler.get_last_lr()[0])
-                self.local_metrics.add("policy_optimizer_step", policy_optimizer_step)
-                self.local_metrics.add("value_optimizer_step", value_optimizer_step)
-                self.local_metrics.add("val/adv_mean", adv_mean)
-                self.local_metrics.add("val/adv_abs_mean", adv_abs_mean)
-                self.local_metrics.add("val/adv_std", adv_std)
+                self.local_metrics["objective/kl_avg"] = kl1_stats.mean()
+                self.local_metrics["objective/kl2_avg"] = kl2_stats.mean()
+                self.local_metrics["objective/kl3_avg"] = kl3_stats.mean()
+                self.local_metrics["objective/kl4_avg"] = kl4_stats.mean()
+                self.local_metrics["loss/policy_avg"] = pg_loss_stats.mean()
+                self.local_metrics["loss/kl_avg"] = kl_loss_stats.mean()
+                self.local_metrics["loss/total_avg"] = loss_stats.mean()
+                self.local_metrics["policy/clipfrac_avg"] = pg_clipfrac_stats.mean()
+                self.local_metrics["val/ratio"] = ratio_stats.mean()
+                self.local_metrics["val/ratio_var"] = ratio_stats.var()
+                self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
+                self.local_metrics["lr_value"] = self.value_scheduler.get_last_lr()[0]
+                self.local_metrics["policy_optimizer_step"] = policy_optimizer_step
+                self.local_metrics["value_optimizer_step"] = value_optimizer_step
+                self.local_metrics["val/adv_mean"] = adv_mean
+                self.local_metrics["val/adv_abs_mean"] = adv_abs_mean
+                self.local_metrics["val/adv_std"] = adv_std
                 if args.record_entropy:
-                    self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
-                self.local_metrics.add("policy/entropy_var", entropy_stats.var())
+                    self.local_metrics["policy/entropy_avg"] = entropy_stats.mean()
+                self.local_metrics["policy/entropy_var"] = entropy_stats.var()
                 metrics_list = self.local_metrics.get_metrics_list()
                 # metrics_list["val/advantages_mean"] = adv.mean()
                 # metrics_list["val/advantages_min"] = adv.min()
