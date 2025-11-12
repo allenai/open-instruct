@@ -530,6 +530,11 @@ class Args:
                 "filter_zero_std_samples must be True when active_sampling is True. "
                 "Active sampling requires filtering to work correctly."
             )
+        if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
+            raise ValueError(
+                "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
+                "as the reward standard deviation will always be 0, causing all samples to be filtered."
+            )
 
 
 def next_batch(dataset_indices: list[int], dataset: datasets.Dataset) -> Batch:
