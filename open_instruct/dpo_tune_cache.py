@@ -987,12 +987,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         training_time=training_time,
                         num_training_gpus=accelerator.num_processes,
                     )["mfu"]
-                    metrics_to_log["perf/mfu_total"] = model_dims.approximate_learner_utilization(
-                        total_tokens=total_tokens_processed,
-                        avg_sequence_length=avg_sequence_length,
-                        training_time=total_time_elapsed,
-                        num_training_gpus=accelerator.num_processes,
-                    )["mfu"]
                     metrics_to_log["perf/tokens_per_second_step"] = step_tokens_per_second
                     metrics_to_log["perf/tokens_per_second_total"] = total_tokens_per_second
 
