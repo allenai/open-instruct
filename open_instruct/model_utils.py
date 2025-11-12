@@ -157,6 +157,20 @@ def load_ref_policy(
     rank: int,
     checkpoint_path: str | None = None,
 ) -> PreTrainedModel:
+    """Loads a reference policy model for evaluation.
+
+    Args:
+        model_config: Configuration containing model name and revision.
+        ds_config: DeepSpeed configuration dictionary.
+        deepspeed_stage: DeepSpeed ZeRO stage.
+        local_rank: Local GPU rank for device mapping.
+        device: Target device for loading checkpoint.
+        rank: Global process rank for logging.
+        checkpoint_path: Optional path to model checkpoint to load.
+
+    Returns:
+        Initialized reference policy model in evaluation mode.
+    """
     ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
         model_config.model_name_or_path,
         revision=model_config.model_revision,

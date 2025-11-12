@@ -1393,7 +1393,27 @@ def get_train_ds_config(
     }
 
 
-def get_eval_ds_config(offload, stage=0, bf16=True, per_device_train_batch_size=1):
+def get_eval_ds_config(
+    offload: bool, stage: int = 0, bf16: bool = True, per_device_train_batch_size: int = 1
+) -> dict[str, Any]:
+    """Creates a DeepSpeed configuration for evaluation.
+
+    Args:
+        offload: Whether to offload parameters to CPU.
+        stage: ZeRO optimization stage. Only 0 or 3 are relevant as there's no optimizer for eval.
+        bf16: Whether to enable bfloat16 precision.
+        per_device_train_batch_size: Batch size per GPU.
+
+    Returns:
+        Dictionary containing DeepSpeed configuration.
+
+    Raises:
+        ValueError: If stage is not 0 or 3.
+    """
+    if stage not in (0, 3):
+        raise ValueError(
+            f"stage must be 0 or 3 for evaluation (got {stage}). 1 or 2 only differ from stage 0 by optimizer sharding, which is irrelevant for evaluation."
+        )
     zero_opt_dict = {
         "stage": stage,
         "stage3_param_persistence_threshold": "auto",
@@ -1408,10 +1428,9 @@ def get_eval_ds_config(offload, stage=0, bf16=True, per_device_train_batch_size=
     }
     ds_config["train_micro_batch_size_per_gpu"] = per_device_train_batch_size
     ds_config["gradient_accumulation_steps"] = 1
-    dschf = None
     if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-        dschf = HfDeepSpeedConfig(ds_config)
-    logger.info(f"DeepSpeed config: {dschf=}")
+        # This is needed as it apparently has mysterious side effects.
+        logger.info(f"DeepSpeed config: {HfDeepSpeedConfig(ds_config)}")
     return ds_config
 
 
