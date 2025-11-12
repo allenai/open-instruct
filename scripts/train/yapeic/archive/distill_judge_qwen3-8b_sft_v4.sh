@@ -1,0 +1,50 @@
+python mason.py \
+    --cluster ai2/augusta \
+    --task_name distill_judge_qwen3-8b_sft_v4 \
+    --description "distill judge (v4 data)" \
+    --workspace ai2/oe-data \
+    --priority normal \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
+    --preemptible \
+    --num_nodes 1 \
+    --budget ai2/oe-base \
+    --gpus 8 -- \
+    git clone --depth 1 --branch yapeic/exp https://github.com/allenai/open-instruct.git /workspace/open-instruct \&\& \
+    cd /workspace/open-instruct \&\& \
+    accelerate launch \
+    --mixed_precision bf16 \
+    --num_processes 8 \
+    --use_deepspeed \
+    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_multinode_launcher standard \
+    open_instruct/finetune.py \
+    --hf_entity yapeichang \
+    --hf_repo_id distill_judge_qwen3-8b_sft_v4 \
+    --exp_name distill_judge_qwen3-8b_sft_v4 \
+    --model_name_or_path Qwen/Qwen3-8B \
+    --model_revision main \
+    --tokenizer_name Qwen/Qwen3-8B \
+    --tokenizer_revision main \
+    --use_slow_tokenizer \
+    --dataset_transform_fn sft_qwen3_tokenize_and_truncate_no_thinking_v1 sft_tulu_filter_v1 \
+    --dataset_mixer_list yapeichang/gpt-5_v8_train_111031 1.0 \
+    --clean_checkpoints_at_end false \
+    --max_seq_length 8192 \
+    --per_device_train_batch_size 2 \
+    --gradient_accumulation_steps 4 \
+    --learning_rate 5e-06 \
+    --lr_scheduler_type linear \
+    --warmup_ratio 0.03 \
+    --weight_decay 0.0 \
+    --num_train_epochs 3 \
+    --checkpointing_steps epoch \
+    --keep_last_n_checkpoints 3 \
+    --use_flash_attn \
+    --gradient_checkpointing \
+    --report_to wandb \
+    --wandb_project_name yapeic-exp \
+    --wandb_entity ai2-llm \
+    --with_tracking \
+    --logging_steps 1 \
+    --try_launch_beaker_eval_jobs false \
+    --seed 8

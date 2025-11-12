@@ -403,6 +403,7 @@ JUDGE_PROMPT_MAP = {
     # Aliases reuse the same template
     "procedure_judge_binary": procedure_judge_template,
     "procedure_judge_ratio": procedure_judge_template,
+    "procedure_judge_ratio_2": procedure_judge_template,
 }
 
 EXTRACTOR_MAP = {
@@ -418,4 +419,5 @@ EXTRACTOR_MAP = {
     "procedure_judge": extract_json_score_with_fallback,
     "procedure_judge_binary": extract_binary_from_critical_failures,
     "procedure_judge_ratio": extract_json_score_with_fallback,
+    "procedure_judge_ratio_2": extract_json_score_with_fallback,
 }

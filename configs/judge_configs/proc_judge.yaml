@@ -13,11 +13,11 @@ tasks:
     arguments:
       [
         "pip install vllm && \
-          VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve yapeichang/distill_judge_qwen3-8b_sft_v2_fixed_data \
-            --revision epoch_4 \
+          VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve yapeichang/distill_judge_qwen3-8b_sft_v6 \
+            --revision distill_judge_qwen3-8b_sft_v6__8__1762751165 \
             --tensor-parallel-size 1 \
             --max-model-len 32768 \
-            --override-generation-config \"{\\\"temperature\\\": 0.0, \\\"max_new_tokens\\\": 2048}\" \
+            --override-generation-config \"{\\\"temperature\\\": 0.0, \\\"max_new_tokens\\\": 4096}\" \
             --trust-remote-code \
             --port 8001 \
             --enforce-eager \

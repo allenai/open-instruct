@@ -795,6 +795,48 @@ class LMJudgeVerifier(VerifierFunction):
                                 score = max(0.0, min(1.0, (K - N) / K))
                             else:
                                 score = 0.0
+                        elif self.judge_type == "procedure_judge_ratio_2":
+                            # Compute 1 - max(ratio_L1, ratio_L2) where both ratios use K as denominator:
+                            # ratio_L1 = (# unique L1 steps referenced in failures) / K
+                            # ratio_L2 = (# unique L2 steps referenced in failures) / K
+                            # Determine K from label.reference_steps numbered lines (same as ratio variant)
+                            K = 0
+                            try:
+                                label_obj = json.loads(label) if isinstance(label, str) else label
+                                ref = ""
+                                if isinstance(label_obj, dict):
+                                    ref = label_obj.get("reference_steps", "") or ""
+                                if ref:
+                                    K = sum(1 for line in ref.splitlines() if line.strip())
+                            except Exception:
+                                K = 0
+                            # Collect unique L1/L2 step indices mentioned in failures
+                            try:
+                                l1_steps_mentioned = set()
+                                l2_steps_mentioned = set()
+                                if isinstance(failures, list):
+                                    for f in failures:
+                                        if isinstance(f, dict):
+                                            l1s = f.get("L1_steps", []) or []
+                                            l2s = f.get("L2_steps", []) or []
+                                            if isinstance(l1s, list):
+                                                for s in l1s:
+                                                    try:
+                                                        l1_steps_mentioned.add(int(s))
+                                                    except Exception:
+                                                        pass
+                                            if isinstance(l2s, list):
+                                                for s in l2s:
+                                                    try:
+                                                        l2_steps_mentioned.add(int(s))
+                                                    except Exception:
+                                                        pass
+                                # Compute ratios with K as denominator for both; if K==0, fall back to 0.0 (no penalty)
+                                ratio_l1 = (len(l1_steps_mentioned) / K) if K > 0 else 0.0
+                                ratio_l2 = (len(l2_steps_mentioned) / K) if K > 0 else 0.0
+                                score = max(0.0, min(1.0, 1.0 - max(ratio_l1, ratio_l2)))
+                            except Exception:
+                                score = 0.0
                         else:
                             # plain procedure_judge returns no score; default to 0/1 by emptiness for safety
                             score = 1.0 if (isinstance(failures, list) and len(failures) == 0) else 0.0
