@@ -99,6 +99,7 @@ from open_instruct.model_utils import (
     disable_dropout_in_model,
     entropy_from_logits,
     get_olmo3_generation_config,
+    load_ref_policy,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -122,7 +123,6 @@ from open_instruct.utils import (
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
-    load_ref_policy,
     maybe_get_beaker_config,
     maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
@@ -868,7 +868,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model.train()
 
         if args.load_ref_policy:
-            ds_config, dschf = get_eval_ds_config(
+            ds_config = get_eval_ds_config(
                 offload=False,
                 stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
                 bf16=True,

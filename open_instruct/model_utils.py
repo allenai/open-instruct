@@ -27,6 +27,7 @@ except ImportError:
     pass
 import asyncio
 
+import deepspeed
 import pandas as pd
 import torch
 import transformers
@@ -38,7 +39,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
-from transformers import PreTrainedModel, PreTrainedTokenizer
+from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct import logger_utils
 from open_instruct.ground_truth_utils import VerifierFunction
@@ -145,6 +146,38 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
     for module in model.modules():
         if isinstance(module, torch.nn.Dropout):
             module.p = 0
+
+
+def load_ref_policy(
+    model_config: "ModelConfig",
+    ds_config: dict,
+    deepspeed_stage: int,
+    local_rank: int,
+    device: torch.device,
+    rank: int,
+    checkpoint_path: str | None = None,
+) -> PreTrainedModel:
+    ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+        model_config.model_name_or_path,
+        revision=model_config.model_revision,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+        use_cache=False,
+        **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
+    )
+    disable_dropout_in_model(ref_policy)
+    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config)
+    ref_policy.eval()
+
+    if checkpoint_path:
+        state_dict = torch.load(checkpoint_path, map_location=device)
+        if hasattr(ref_policy, "module"):
+            ref_policy.module.load_state_dict(state_dict)
+        else:
+            ref_policy.load_state_dict(state_dict)
+        logger_utils.setup_logger(__name__).info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
+
+    return ref_policy
 
 
 def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
