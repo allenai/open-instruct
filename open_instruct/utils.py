@@ -32,6 +32,7 @@ import dataclasses
 import functools
 import json
 import logging
+import math
 import multiprocessing as mp
 import os
 import random
@@ -42,6 +43,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import defaultdict
 from collections.abc import Iterable
 from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
@@ -73,6 +75,38 @@ MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+class MetricsTracker:
+    """A simple class to preallocate all metrics in an array
+    so we can do only one allreduce operation to get the metrics mean"""
+
+    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
+        self.metrics = torch.zeros(max_metrics, device=device)
+        self.names2idx = {}
+        self.current_idx = 0
+        self.max_metrics = max_metrics
+
+    def _maybe_register_metric(self, name: str) -> int:
+        if name not in self.names2idx:
+            if self.current_idx >= self.max_metrics:
+                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
+            self.names2idx[name] = self.current_idx
+            self.current_idx += 1
+        return self.names2idx[name]
+
+    def __getitem__(self, name: str) -> torch.Tensor:
+        idx = self._maybe_register_metric(name)
+        return self.metrics[idx]
+
+    def __setitem__(self, name: str, value):
+        idx = self._maybe_register_metric(name)
+        self.metrics[idx] = value
+
+    def get_metrics_list(self) -> dict[str, float]:
+        # Convert to Python floats for logging systems (wandb, tensorboard)
+        metrics_list = self.metrics.tolist()
+        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 
 
 def max_num_processes() -> int:
@@ -1129,9 +1163,11 @@ def launch_ai2_evals_on_weka(
     stop_strings: list[str] | None = None,
     gs_bucket_path: str | None = None,
     eval_priority: str | None = "normal",
+    eval_workspace: str | None = "ai2/tulu-3-results",
     beaker_image: str | None = None,
+    oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    weka_cluster = "ai2/saturn ai2/neptune"
+    weka_cluster = "ai2/saturn ai2/neptune ai2/jupiter ai2/ceres"
     gcp_cluster = "ai2/augusta"
     cluster = weka_cluster if gs_bucket_path is None else gcp_cluster
     beaker_users = get_beaker_whoami()
@@ -1163,7 +1199,7 @@ python scripts/submit_eval_jobs.py \
 --location {path} \
 --cluster {cluster} \
 --is_tuned \
---workspace "tulu-3-results" \
+--workspace {eval_workspace} \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
@@ -1185,6 +1221,8 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
     if beaker_image is not None:
         command += f" --beaker_image {beaker_image}"
+    if oe_eval_gpu_multiplier is not None:
+        command += f" --gpu_multiplier {oe_eval_gpu_multiplier}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
@@ -1672,13 +1710,15 @@ def check_oe_eval_internal():
 # For FLOPS, we assume bf16 and ignore sparsity.
 # Memory bandwidth values are peak theoretical bandwidth.
 GPU_SPECS = {
-    "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 1.6e12},  # 1.6 TB/s HBM2e
+    "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 2.0e12},  # 2.0 TB/s HBM2e (80GB variant)
     "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
     "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
     "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
+    # Specs from https://www.techpowerup.com/gpu-specs/geforce-rtx-4090-mobile.c3949.
+    "4090 laptop": {"flops": 32.98e12, "memory_size": 24e9, "memory_bandwidth": 576e9},
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
@@ -1697,11 +1737,16 @@ class ModelDims:
     num_attn_heads: int
     head_dim: int
     num_kv_heads: int | None = None
+    num_params: int | None = None
     device_name: str | None = None
+    sliding_window: int | None = None
+    num_sliding_window_layers: int = 0
 
     def __post_init__(self):
         if self.num_kv_heads is None:
             self.num_kv_heads = self.num_attn_heads
+
+        self.num_params = self.num_params or self._calculate_num_params()
 
         if self.device_name is None:
             self.device_name = get_device_name(torch.cuda.get_device_name(0))
@@ -1710,6 +1755,25 @@ class ModelDims:
         assert self.num_attn_heads % self.num_kv_heads == 0, (
             "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
         )
+        assert self.num_sliding_window_layers <= self.num_layers, (
+            f"num_sliding_window_layers ({self.num_sliding_window_layers}) cannot exceed num_layers ({self.num_layers})"
+        )
+
+    def _calculate_num_params(self) -> int:
+        embedding_params = self.vocab_size * self.hidden_size
+
+        q_params = self.hidden_size * (self.num_attn_heads * self.head_dim)
+        kv_params = self.hidden_size * (self.num_kv_heads * self.head_dim) * 2
+        o_params = (self.num_attn_heads * self.head_dim) * self.hidden_size
+        mlp_up_params = self.hidden_size * self.intermediate_size * 2
+        mlp_down_params = self.intermediate_size * self.hidden_size
+
+        per_layer_params = q_params + kv_params + o_params + mlp_up_params + mlp_down_params
+        layer_params = self.num_layers * per_layer_params
+
+        lm_head_params = self.vocab_size * self.hidden_size
+
+        return embedding_params + layer_params + lm_head_params
 
     @classmethod
     def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
@@ -1720,14 +1784,25 @@ class ModelDims:
         # Try to get intermediate_size, default to 4x hidden_size if not present
         intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
 
+        sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
+        num_sliding_window_layers = 0
+
+        if sliding_window is not None:
+            layer_types = getattr(model_config.hf_text_config, "layer_types", None)
+            if layer_types is not None:
+                num_sliding_window_layers = sum(1 for lt in layer_types if lt == "sliding_attention")
+
         return cls(
             num_layers=model_config.get_num_layers(vllm_config.parallel_config),
             hidden_size=hidden_size,
             intermediate_size=intermediate_size,
             vocab_size=model_config.get_vocab_size(),
-            num_attn_heads=model_config.get_num_attention_heads(vllm_config.parallel_config),
+            num_attn_heads=model_config.hf_text_config.num_attention_heads,
+            num_kv_heads=model_config.hf_text_config.num_key_value_heads,
             head_dim=model_config.get_head_size(),
-            num_kv_heads=model_config.get_num_kv_heads(vllm_config.parallel_config),
+            sliding_window=sliding_window,
+            num_sliding_window_layers=num_sliding_window_layers,
+            device_name=get_device_name(torch.cuda.get_device_name(0)),
         )
 
     @property
@@ -1742,7 +1817,7 @@ class ModelDims:
         assert self.device_name in GPU_SPECS, f"Unknown device: {self.device_name}"
         return GPU_SPECS[self.device_name]["memory_bandwidth"]
 
-    def attn_flops(self, query_len: int, kv_len: int) -> int:
+    def attn_flops(self, query_len: int, kv_len: int, sliding_window: int | None = None) -> int:
         """FLOPs for one layer of self-attention given query_len and kv_len.
 
         Assumptions:
@@ -1756,6 +1831,8 @@ class ModelDims:
 
         q_dim = self.num_attn_heads * d
         kv_dim = self.num_kv_heads * d
+
+        kv_len = min(kv_len, sliding_window or float("inf"))
 
         # Projections for the query_len new tokens
         q_proj = mul * query_len * self.hidden_size * q_dim
@@ -1781,11 +1858,22 @@ class ModelDims:
 
     def prefill_flops(self, prompt_lengths: list[int]) -> int:
         """Prefill builds the KV cache; logits are computed once after each prompt."""
+        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
+        num_sliding_layers = self.num_sliding_window_layers
+
         total = 0
         for L in prompt_lengths:
-            total += self.num_layers * (self.attn_flops(L, L) + self.mlp_flops(L))
+            if num_full_attn_layers > 0:
+                total += num_full_attn_layers * (self.attn_flops(L, L, sliding_window=None) + self.mlp_flops(L))
+
+            if num_sliding_layers > 0:
+                total += num_sliding_layers * (
+                    self.attn_flops(L, L, sliding_window=self.sliding_window) + self.mlp_flops(L)
+                )
+
             # Always include a single LM head after prefill (next-token logits)
             total += FLOP_PER_MAC * self.hidden_size * self.vocab_size
+
         return total
 
     def decode_flops(self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1) -> int:
@@ -1802,6 +1890,9 @@ class ModelDims:
             f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
         )
 
+        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
+        num_sliding_layers = self.num_sliding_window_layers
+
         total = 0
         response_idx = 0
         for P in prompt_lengths:
@@ -1811,7 +1902,14 @@ class ModelDims:
                 total += R * self.num_layers * self.mlp_flops(seq_len=1)
                 for t in range(R):
                     kv_len = P + t + 1  # prompt + generated so far + current
-                    total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
+                    if num_full_attn_layers > 0:
+                        total += num_full_attn_layers * self.attn_flops(
+                            query_len=1, kv_len=kv_len, sliding_window=None
+                        )
+                    if num_sliding_layers > 0:
+                        total += num_sliding_layers * self.attn_flops(
+                            query_len=1, kv_len=kv_len, sliding_window=self.sliding_window
+                        )
                 total += R * FLOP_PER_MAC * self.hidden_size * self.vocab_size
                 response_idx += 1
         return total
@@ -1849,9 +1947,8 @@ class ModelDims:
         Returns:
             Total bytes for weight reads across all layers
         """
-        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
         hidden_q = self.num_attn_heads * self.head_dim
-        hidden_kv = num_kv * self.head_dim
+        hidden_kv = self.num_kv_heads * self.head_dim
 
         # Per-layer weight params (Q, K, V, O, MLP up, MLP down)
         w_q = self.hidden_size * hidden_q
@@ -1874,10 +1971,8 @@ class ModelDims:
         Returns:
             Total bytes for KV cache writes across all layers
         """
-        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-
         # 2x for K and V
-        kv_write_bytes_per_token = 2 * num_kv * self.head_dim * dtype_bytes
+        kv_write_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
         return self.num_layers * num_tokens * kv_write_bytes_per_token
 
     def kv_cache_read_bytes(
@@ -1901,7 +1996,8 @@ class ModelDims:
             f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
         )
 
-        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
+        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
+        num_sliding_layers = self.num_sliding_window_layers
 
         # For batched sampling with shared prompt KV cache:
         # - Prompt KV is read once per new token position across ALL samples (not per sample)
@@ -1919,26 +2015,28 @@ class ModelDims:
             # Prompt KV reads: In synchronized batch generation with vLLM n>1,
             # the prompt KV cache is stored once but each sample reads it independently.
             # At each decoding position, each sample reads the prompt KV cache.
-            # Number of positions = max response length (all generate synchronously)
+            # Number of positions = max response length (all generate synchronously).
             max_response_length = max(prompt_responses) if prompt_responses else 0
             # Each of the samples_per_prompt samples reads prompt KV at each position
-            kv_read_terms += max_response_length * samples_per_prompt * P
+            kv_read_terms += max_response_length * samples_per_prompt * P * num_full_attn_layers
 
             # Per-sample generated KV reads: Each sample reads its own previously generated tokens
             for R in prompt_responses:
                 # Each token in this sample reads its previously generated tokens
-                # sum_{i=0}^{R-1} i = R*(R-1)/2
-                kv_read_terms += R * (R - 1) // 2
-
+                kv_read_terms += num_full_attn_layers * R * (R - 1) // 2
+                if num_sliding_layers > 0:
+                    # ... unless we have a sliding window, at which point we cap the max tokens to read.
+                    # Note that we also account for the prompt KV values here as well.
+                    kv_read_terms += num_sliding_layers * sum(min(P + t, self.sliding_window) for t in range(R))
         # 2x for K and V
-        kv_bytes_per_token = 2 * num_kv * self.head_dim * dtype_bytes
-        return self.num_layers * kv_bytes_per_token * kv_read_terms
+        kv_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
+        return kv_bytes_per_token * kv_read_terms
 
     def prefill_memory_bytes(self, prompt_lengths: list[int], dtype_bytes: int = 2) -> int:
         """Memory bytes for prefill phase.
 
         During prefill:
-        - Read weights once for the entire batch (batched matmul)
+        - Read weights once per prefill operation
         - Write KV cache for each token
 
         Args:
@@ -1948,12 +2046,8 @@ class ModelDims:
         Returns:
             Total memory bytes for prefill
         """
-        # In batched prefill, weights are read once for the entire operation,
-        # not once per token. We process all prompts in a single batch.
-        num_prefill_batches = len(prompt_lengths)  # Each prompt is a "batch"
-        weight_bytes = self.weight_memory_bytes(num_prefill_batches, dtype_bytes)
-
-        # KV cache is written for every token
+        num_prefill_ops = 1
+        weight_bytes = self.weight_memory_bytes(num_prefill_ops, dtype_bytes)
         total_prefill_tokens = sum(prompt_lengths)
         kv_write_bytes = self.kv_cache_write_bytes(total_prefill_tokens, dtype_bytes)
         return weight_bytes + kv_write_bytes
@@ -2002,41 +2096,214 @@ class ModelDims:
     def memory_bytes(
         self,
         prompt_lengths: list[int],
+        num_engines: int,
+        num_gpus_per_engine: int,
         response_lengths: list[int] | None = None,
         samples_per_prompt: int = 1,
         dtype_bytes: int = 2,
     ) -> int:
-        """Approximate total HBM bytes moved for prefill + decode.
+        """Approximate total HBM bytes moved per engine for prefill + decode.
 
-        Returns an integer number of bytes. Divide by elapsed seconds to get B/s;
-        compare against peak bandwidth to get utilization.
+        When multiple engines process work in parallel, this calculates the bytes
+        moved by ONE engine processing its fraction of the prompts.
 
         Args:
-            prompt_lengths: List of prompt lengths (one per unique prompt)
+            prompt_lengths: List of ALL prompt lengths across all engines
+            num_engines: Number of vLLM engines working in parallel
+            num_gpus_per_engine: Number of GPUs per engine (tensor parallelism)
             response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
             samples_per_prompt: Number of samples generated per prompt
             dtype_bytes: Bytes per element (2 for FP16/BF16)
 
         Returns:
-            Total memory bytes moved
+            Memory bytes moved by ONE engine (not total across all engines)
 
         Assumptions:
+          - Prompts are evenly distributed across engines
+          - Each engine processes its subset independently
           - Weights are read once per token per layer (Q,K,V,O + MLP up/down)
           - KV cache: write K/V for every token; during decode, read all past K/V per new token
           - When batching samples, prompt KV cache is shared across samples
           - Embedding and LM head reads are ignored (usually dominated by matmul weight traffic)
         """
-        total = self.prefill_memory_bytes(prompt_lengths, dtype_bytes)
+        if num_engines < 1:
+            raise ValueError(f"num_engines must be >= 1, got {num_engines}")
+        if num_gpus_per_engine < 1:
+            raise ValueError(f"num_gpus_per_engine must be >= 1, got {num_gpus_per_engine}")
 
+        if not prompt_lengths:
+            return 0
+
+        def _split_evenly(seq: list[int], parts: int) -> list[list[int]]:
+            base, extra = divmod(len(seq), parts)
+            result: list[list[int]] = []
+            start = 0
+            for i in range(parts):
+                size = base + (1 if i < extra else 0)
+                result.append(seq[start : start + size])
+                start += size
+            return result
+
+        prompt_chunks = _split_evenly(prompt_lengths, num_engines)
+
+        response_chunks: list[list[int] | None]
         if response_lengths is not None:
             assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
                 f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
             )
+            response_chunks = []
+            response_idx = 0
+            for chunk in prompt_chunks:
+                num_responses = len(chunk) * samples_per_prompt
+                response_chunks.append(response_lengths[response_idx : response_idx + num_responses])
+                response_idx += num_responses
+        else:
+            response_chunks = [None] * num_engines
 
-            # Pass original prompt_lengths with samples_per_prompt to correctly handle shared KV cache
-            total += self.decode_memory_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
+        per_engine_totals: list[int] = []
+        for chunk_prompts, chunk_responses in zip(prompt_chunks, response_chunks):
+            if not chunk_prompts:
+                per_engine_totals.append(0)
+                continue
 
-        return total
+            total = self.prefill_memory_bytes(chunk_prompts, dtype_bytes)
+            if chunk_responses is not None:
+                total += self.decode_memory_bytes(chunk_prompts, chunk_responses, samples_per_prompt, dtype_bytes)
+            per_engine_totals.append(total)
+
+        if len(per_engine_totals) < num_engines:
+            per_engine_totals.extend([0] * (num_engines - len(per_engine_totals)))
+
+        avg_bytes_per_engine = math.ceil(sum(per_engine_totals) / num_engines)
+        return avg_bytes_per_engine
+
+    def calculate_mfu(
+        self,
+        prompt_lengths: list[int],
+        generation_time: float,
+        response_lengths: list[int] | None = None,
+        samples_per_prompt: int = 1,
+        num_gpus: int = 1,
+    ) -> float:
+        total_flops = self.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
+        flops_per_second = total_flops / generation_time if generation_time > 0 else 0
+        total_device_flops = self.device_flops * num_gpus
+        return 100 * flops_per_second / total_device_flops
+
+    def calculate_mbu(
+        self,
+        prompt_lengths: list[int],
+        generation_time: float,
+        response_lengths: list[int] | None = None,
+        samples_per_prompt: int = 1,
+        num_engines: int = 1,
+        num_gpus_per_engine: int = 1,
+    ) -> float:
+        total_memory_bytes = self.memory_bytes(
+            prompt_lengths,
+            num_engines,
+            num_gpus_per_engine,
+            response_lengths=response_lengths,
+            samples_per_prompt=samples_per_prompt,
+        )
+        bytes_per_second = total_memory_bytes / generation_time if generation_time > 0 else 0
+        # Normalize against total system bandwidth. This is correct because prompt_lengths and
+        # generation_time represent aggregated data from all engines already.
+        total_device_bandwidth = self.device_memory_bandwidth * num_engines * num_gpus_per_engine
+        return 100 * bytes_per_second / total_device_bandwidth
+
+    def calculate_actor_utilization(
+        self,
+        prompt_lengths: list[int],
+        response_lengths: list[int],
+        total_generation_time: float,
+        samples_per_prompt: int,
+        num_engines: int,
+        num_gpus_per_engine: int,
+    ) -> dict[str, float]:
+        actor_mfu = self.calculate_mfu(
+            prompt_lengths,
+            total_generation_time,
+            response_lengths=response_lengths,
+            samples_per_prompt=samples_per_prompt,
+            num_gpus=num_engines * num_gpus_per_engine,
+        )
+        actor_mbu = self.calculate_mbu(
+            prompt_lengths,
+            total_generation_time,
+            response_lengths=response_lengths,
+            samples_per_prompt=samples_per_prompt,
+            num_engines=num_engines,
+            num_gpus_per_engine=num_gpus_per_engine,
+        )
+
+        check_calculation(
+            actor_mfu,
+            "Actor MFU",
+            self,
+            total_generation_time,
+            prompt_lengths,
+            response_lengths,
+            samples_per_prompt,
+            num_engines,
+            num_gpus_per_engine,
+        )
+
+        check_calculation(
+            actor_mbu,
+            "Actor MBU",
+            self,
+            total_generation_time,
+            prompt_lengths,
+            response_lengths,
+            samples_per_prompt,
+            num_engines,
+            num_gpus_per_engine,
+        )
+
+        return {"mfu": actor_mfu, "mbu": actor_mbu}
+
+    def calculate_learner_utilization(
+        self,
+        prompt_lengths: list[int],
+        response_lengths: list[int],
+        training_time: float,
+        samples_per_prompt: int,
+        num_training_gpus: int,
+    ) -> dict[str, float]:
+        total_sequence_lengths = [
+            prompt_lengths[i // samples_per_prompt] + response_len for i, response_len in enumerate(response_lengths)
+        ]
+
+        training_flops = self.flops(
+            prompt_lengths=total_sequence_lengths, response_lengths=None, samples_per_prompt=1, is_training=True
+        )
+
+        training_flops_per_second = training_flops / training_time
+        total_training_device_flops = self.device_flops * num_training_gpus
+        learner_mfu = 100 * training_flops_per_second / total_training_device_flops
+
+        check_calculation(
+            learner_mfu, "Learner MFU", self, training_time, total_sequence_lengths, None, 1, 1, num_training_gpus
+        )
+
+        return {"mfu": learner_mfu}
+
+    def approximate_learner_utilization(
+        self, total_tokens: int, avg_sequence_length: float, training_time: float, num_training_gpus: int
+    ) -> dict[str, float]:
+        num_sequences = int(total_tokens / avg_sequence_length)
+        sequence_lengths = [int(avg_sequence_length)] * num_sequences
+
+        training_flops = self.flops(
+            prompt_lengths=sequence_lengths, response_lengths=None, samples_per_prompt=1, is_training=True
+        )
+
+        training_flops_per_second = training_flops / training_time
+        total_training_device_flops = self.device_flops * num_training_gpus
+        learner_mfu = 100 * training_flops_per_second / total_training_device_flops
+
+        return {"mfu": learner_mfu}
 
 
 def get_device_name(device_name: str) -> str:
@@ -2070,3 +2337,97 @@ def get_device_name(device_name: str) -> str:
         f"Unknown device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}. "
         f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the device you need. In the interim, you can add the specs for your device using the name {normalized_device_name} to the GPU_SPECS dictionary in utils.py."
     )
+
+
+def check_calculation(
+    percentage: float,
+    metric_name: str,
+    model_dims: ModelDims,
+    timing: float,
+    prompt_lengths: list[int],
+    response_lengths: list[int] | None,
+    samples_per_prompt: int,
+    num_engines: int,
+    num_gpus_per_engine: int,
+) -> None:
+    if percentage <= 100:
+        return
+
+    import json
+
+    full_device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+
+    avg_prompt_length = sum(prompt_lengths) / len(prompt_lengths)
+    avg_response_length = sum(response_lengths) / len(response_lengths) if response_lengths else 0
+
+    test_case_json = {
+        "model_name": "REPLACE_WITH_MODEL_NAME",
+        "total_generation_time": timing,
+        "samples_per_prompt": samples_per_prompt,
+        "num_engines": num_engines,
+        "num_gpus_per_engine": num_gpus_per_engine,
+        "training_time": "REPLACE_WITH_TRAINING_TIME",
+        "num_training_gpus": "REPLACE_WITH_NUM_TRAINING_GPUS",
+        "prompt_lengths": prompt_lengths,
+        "response_lengths": response_lengths,
+    }
+
+    warning_message = (
+        f"{metric_name} exceeded 100%: {percentage:.2f}%\n"
+        f"\n"
+        f"{model_dims}\n"
+        f"\n"
+        f"Timing and GPU info:\n"
+        f"  timing: {timing:.6f}s\n"
+        f"  num_engines: {num_engines}\n"
+        f"  num_gpus_per_engine: {num_gpus_per_engine}\n"
+        f"  full_device_name: {full_device_name}\n"
+        f"\n"
+        f"Batch/sequence info:\n"
+        f"  num_prompts: {len(prompt_lengths)}\n"
+        f"  samples_per_prompt: {samples_per_prompt}\n"
+        f"  avg_prompt_length: {avg_prompt_length:.1f}\n"
+        f"  avg_response_length: {avg_response_length:.1f}\n"
+        f"\n"
+        f"To reproduce this calculation, use these exact parameters:\n"
+        f"  prompt_lengths = {prompt_lengths}\n"
+        f"  response_lengths = {response_lengths}\n"
+        f"  timing = {timing}\n"
+        f"  samples_per_prompt = {samples_per_prompt}\n"
+        f"  num_engines = {num_engines}\n"
+        f"  num_gpus_per_engine = {num_gpus_per_engine}\n"
+        f"\n"
+        f"JSON format for test case (copy this to mbu_reproduction_cases.json):\n"
+        f"{json.dumps(test_case_json, indent=2)}\n"
+        f"\n"
+        f"This may indicate an issue with the MFU/MBU calculation logic or GPU specifications.\n"
+        f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the above information."
+    )
+
+    logger.warning(warning_message)
+
+
+def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, Any]:
+    """Assumes same number of metric_records in each dict in the list"""
+    buckets = defaultdict(list)
+    for metrics in reward_metrics:
+        for key, value in metrics.items():
+            buckets[key].append(value)
+
+    combined: dict[str, Any] = {}
+    for key, records in buckets.items():
+        sample_value = records[0]
+        if isinstance(sample_value, np.ndarray):
+            combined[key] = [x for value in records for x in value]
+        elif isinstance(sample_value, (list | tuple)):
+            concatenated: list[Any] = []
+            for value in records:
+                concatenated.extend(list(value))
+            combined[key] = concatenated
+        elif isinstance(sample_value, (int | float | bool | np.integer | np.floating)):
+            # combine and get average value
+            combined[key] = sum(value for value in records) / len(records) if len(records) > 0 else sample_value
+        else:
+            # Fallback: keep the latest value if aggregation strategy is unclear.
+            combined[key] = records[-1]
+    return combined

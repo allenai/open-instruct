@@ -70,6 +70,9 @@ WEKA_CLUSTERS = [
     "ai2/neptune",
     "ai2/ceres"
 ]
+GCP_CLUSTERS = [
+    "ai2/augusta"
+]
 
 
 today = date.today().strftime("%m%d%Y")

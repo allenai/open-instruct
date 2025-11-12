@@ -14,7 +14,6 @@ uv run python open_instruct/grpo_fast.py \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --stop_strings "</answer>" \
-    --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
@@ -36,4 +35,5 @@ uv run python open_instruct/grpo_fast.py \
     --single_gpu_mode \
     --push_to_hub false \
     --system_prompt_override_file scripts/train/debug/cute_debug_system_prompt.txt \
+    --active_sampling --async_steps 8
     # --with_tracking

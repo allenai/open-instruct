@@ -1,12 +1,13 @@
 import shutil
 import tempfile
+import time
 import unittest
 
 import numpy as np
 import torch
 import transformers
 
-import open_instruct.rl_utils
+from open_instruct import rl_utils
 
 PACK_LENGTH = 40
 PROMPT_MAX_LEN = 20
@@ -40,13 +41,66 @@ class TestRLUtils(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    def test_timer_context_manager(self):
+        """Test Timer works as a context manager and measures time."""
+        with self.assertLogs("open_instruct.rl_utils", level="INFO") as cm:  # noqa: SIM117 - nested to capture Timer's log output
+            with rl_utils.Timer("test operation"):
+                time.sleep(0.1)
+
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("test operation", cm.output[0])
+        self.assertIn("seconds", cm.output[0])
+        log_message = cm.output[0]
+        duration = float(log_message.split(": ")[1].split(" ")[0])
+        self.assertGreaterEqual(duration, 0.1)
+        self.assertLess(duration, 0.2)
+
+    def test_timer_decorator(self):
+        """Test Timer works as a decorator and measures time."""
+
+        @rl_utils.Timer("decorated function")
+        def slow_function():
+            time.sleep(0.1)
+            return 42
+
+        with self.assertLogs("open_instruct.rl_utils", level="INFO") as cm:
+            result = slow_function()
+
+        self.assertEqual(result, 42)
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("decorated function", cm.output[0])
+        self.assertIn("seconds", cm.output[0])
+        log_message = cm.output[0]
+        duration = float(log_message.split(": ")[1].split(" ")[0])
+        self.assertGreaterEqual(duration, 0.1)
+        self.assertLess(duration, 0.2)
+
+    def test_timer_noop(self):
+        """Test Timer with noop=True does not log."""
+        with self.assertNoLogs("open_instruct.rl_utils", level="INFO"):  # noqa: SIM117 - nested to verify no log output
+            with rl_utils.Timer("should not log", noop=True):
+                time.sleep(0.05)
+
+    def test_timer_decorator_noop(self):
+        """Test Timer decorator with noop=True does not log."""
+
+        @rl_utils.Timer("should not log", noop=True)
+        def silent_function():
+            time.sleep(0.05)
+            return "done"
+
+        with self.assertNoLogs("open_instruct.rl_utils", level="INFO"):
+            result = silent_function()
+
+        self.assertEqual(result, "done")
+
     def test_pack_sequences(self):
         """Test that pack_sequences correctly concatenates queries and responses into packed format."""
         queries, responses, pad_token_id = get_test_data()
         masks = [[1] * len(response) for response in responses]
         vllm_logprobs = [[0.0] * len(response) for response in responses]
-        with open_instruct.rl_utils.Timer("pack_sequences"):
-            packed_sequences = open_instruct.rl_utils.pack_sequences(
+        with rl_utils.Timer("pack_sequences"):
+            packed_sequences = rl_utils.pack_sequences(
                 queries=queries,
                 responses=responses,
                 masks=masks,
@@ -84,14 +138,14 @@ class TestRLUtils(unittest.TestCase):
         unpacked_rewards[0, 5] = 10
         unpacked_rewards[1, 6] = 20
         unpacked_rewards[2, 12] = 30
-        unpacked_advantages, unpacked_returns = open_instruct.rl_utils.calculate_advantages(
+        unpacked_advantages, unpacked_returns = rl_utils.calculate_advantages(
             unpacked_values, unpacked_rewards, GAMMA, LAMBDA
         )
 
         packed_values, packed_rewards, packed_dones, packed_response_masks = self._create_packed_arrays_with_padding()
         packed_values_masked = np.where(packed_response_masks[:, 1:] == 0, 0, packed_values)
 
-        packed_advantages, packed_returns = open_instruct.rl_utils.calculate_advantages_packed(
+        packed_advantages, packed_returns = rl_utils.calculate_advantages_packed(
             packed_values_masked,
             packed_rewards[:, 1:],
             GAMMA,
@@ -103,7 +157,7 @@ class TestRLUtils(unittest.TestCase):
         packed_values_v2, packed_rewards_v2, packed_dones_v2, packed_response_masks_v2 = (
             self._create_packed_arrays_no_padding(pad_token_id)
         )
-        packed_advantages_v2, packed_returns_v2 = open_instruct.rl_utils.calculate_advantages_packed(
+        packed_advantages_v2, packed_returns_v2 = rl_utils.calculate_advantages_packed(
             packed_values_v2, packed_rewards_v2, GAMMA, LAMBDA, packed_dones_v2, packed_response_masks_v2
         )
 
@@ -176,8 +230,8 @@ class TestRLUtils(unittest.TestCase):
 
         masks = [[1] * len(response) for response in responses]
         vllm_logprobs = [[0.0] * len(response) for response in responses]
-        with open_instruct.rl_utils.Timer("pack_sequences"):
-            packed_sequences = open_instruct.rl_utils.pack_sequences(
+        with rl_utils.Timer("pack_sequences"):
+            packed_sequences = rl_utils.pack_sequences(
                 queries=queries,
                 responses=responses,
                 masks=masks,
@@ -199,7 +253,7 @@ class TestRLUtils(unittest.TestCase):
         rewards = np.zeros_like(values.detach().float().numpy())
         rewards[:, 21] = 0.1
         rewards[:, -1] = 1
-        advantages, returns = open_instruct.rl_utils.calculate_advantages_packed(
+        advantages, returns = rl_utils.calculate_advantages_packed(
             values=values.detach().float().numpy(),
             rewards=rewards,
             gamma=GAMMA,

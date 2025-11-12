@@ -1804,7 +1804,7 @@ requires-dist = [
     { name = "bitsandbytes", marker = "sys_platform != 'darwin'", specifier = ">=0.44.1" },
     { name = "datasets", specifier = ">=4.0.0" },
     { name = "debugpy", specifier = ">=1.8.13" },
-    { name = "deepspeed", specifier = "<0.17.6" },
+    { name = "deepspeed", specifier = "<0.17.3" },
     { name = "fastapi", marker = "extra == 'code'", specifier = ">=0.100.0" },
     { name = "flash-attn", marker = "sys_platform != 'darwin'", specifier = ">=2.8.3" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
