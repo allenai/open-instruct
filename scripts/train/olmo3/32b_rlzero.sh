@@ -36,7 +36,6 @@ python mason.py \
     --budget ai2/oe-adapt \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \&\& \
-source configs/beaker_configs/code_api_setup.sh \&\& \
 python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
@@ -75,7 +74,7 @@ python open_instruct/grpo_fast.py \
     --seed 1 \
     --local_eval_every 25 \
     --save_freq 25 \
-    --checkpoint_state_freq 25 \
+    --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
@@ -85,7 +84,7 @@ python open_instruct/grpo_fast.py \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
     --vllm_enforce_eager \
-    --deepspeed_zpg 32
+    --deepspeed_zpg 1 # this could also be num_GPUs of the trainer, acheives same effect (allow model to be sharded across all trainer GPUs)
 
     # --oe_eval_tasks $EVALS \
     # --oe_eval_gpu_multiplier 4 \
