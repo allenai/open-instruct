@@ -52,6 +52,7 @@ from multiprocessing import resource_tracker as _rt
 from typing import Any, NewType
 
 import beaker
+import deepspeed
 import numpy as np
 import ray
 import requests
@@ -64,9 +65,11 @@ from huggingface_hub import HfApi
 from ray.util import state as ray_state
 from rich.pretty import pprint
 from tqdm import tqdm
-from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
+from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoModelForCausalLM, HfArgumentParser, PreTrainedModel
+from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils
+from open_instruct.model_utils import ModelConfig, disable_dropout_in_model
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -1356,19 +1359,59 @@ def get_train_ds_config(
     }
 
 
-def get_eval_ds_config(offload, stage=0, bf16=True):
+def get_eval_ds_config(offload, stage=0, bf16=True, per_device_train_batch_size=1):
     zero_opt_dict = {
         "stage": stage,
         "stage3_param_persistence_threshold": "auto",
         "offload_param": {"device": "cpu" if offload else "none", "pin_memory": True},
     }
-    return {
+    ds_config = {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
         "bf16": {"enabled": bf16},
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
     }
+    ds_config["train_micro_batch_size_per_gpu"] = per_device_train_batch_size
+    ds_config["gradient_accumulation_steps"] = 1
+    if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+        dschf = HfDeepSpeedConfig(ds_config)
+    else:
+        dschf = None
+    logger.info(f"DeepSpeed config: {dschf=}")
+    return ds_config, dschf
+
+
+def load_ref_policy(
+    model_config: ModelConfig,
+    ds_config: dict,
+    deepspeed_stage: int,
+    local_rank: int,
+    device: torch.device,
+    rank: int,
+    checkpoint_path: str | None = None,
+) -> PreTrainedModel:
+    ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+        model_config.model_name_or_path,
+        revision=model_config.model_revision,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+        use_cache=False,
+        **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
+    )
+    disable_dropout_in_model(ref_policy)
+    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config)
+    ref_policy.eval()
+
+    if checkpoint_path:
+        state_dict = torch.load(checkpoint_path, map_location=device)
+        if hasattr(ref_policy, "module"):
+            ref_policy.module.load_state_dict(state_dict)
+        else:
+            ref_policy.load_state_dict(state_dict)
+        logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
+
+    return ref_policy
 
 
 def get_optimizer_grouped_parameters(

@@ -122,6 +122,7 @@ from open_instruct.utils import (
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
+    load_ref_policy,
     maybe_get_beaker_config,
     maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
@@ -867,43 +868,24 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model.train()
 
         if args.load_ref_policy:
-            # reference model
-            ds_config = get_eval_ds_config(
+            ds_config, dschf = get_eval_ds_config(
                 offload=False,
-                # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-                # stage 2 is optimizer sharding which doesn't apply to inference
                 stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
                 bf16=True,
+                per_device_train_batch_size=args.per_device_train_batch_size,
             )
-            ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-            ds_config["gradient_accumulation_steps"] = 1
-            if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-                dschf = HfDeepSpeedConfig(ds_config)
-            else:
-                dschf = None
-            logger.info(f"DeepSpeed config: {dschf=}")
 
-            self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-                model_config.model_name_or_path,
-                revision=model_config.model_revision,
-                torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
-                use_cache=False,
-                **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
+            self.ref_policy: PreTrainedModel = load_ref_policy(
+                model_config=model_config,
+                ds_config=ds_config,
+                deepspeed_stage=args.deepspeed_stage,
+                local_rank=self.local_rank,
+                device=self.device,
+                rank=self.rank,
+                checkpoint_path=self.ref_policy_checkpoint_path
+                if hasattr(self, "ref_policy_checkpoint_path")
+                else None,
             )
-            disable_dropout_in_model(self.ref_policy)
-            self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
-            self.ref_policy.eval()
-
-            # Load reference policy checkpoint if available
-            if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
-                state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device)
-                if hasattr(self.ref_policy, "module"):
-                    # If wrapped by DeepSpeed
-                    self.ref_policy.module.load_state_dict(state_dict)
-                else:
-                    self.ref_policy.load_state_dict(state_dict)
-                logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
         else:
             self.ref_policy = None
             logger.info(f"{self.rank=}: Skipping reference policy loading (load_ref_policy=False)")
