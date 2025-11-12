@@ -1913,6 +1913,8 @@ def data_preparation_thread(
             )
 
             batch_metrics = asdict(batch_stats)
+            total_reward_groups = real_num_responses / args.num_samples_per_prompt_rollout
+            batch_metrics["percent_filtered_groups"] = batch_metrics["total_prompts"] / total_reward_groups
             batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics.items()}
 
             metrics = {
@@ -1921,7 +1923,7 @@ def data_preparation_thread(
                 "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                 "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
                 "val/solve_rate_hist": None,
-                "val/total_reward_groups": real_num_responses / args.num_samples_per_prompt_rollout,
+                "val/total_reward_groups": total_reward_groups,
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
                 "val/sequence_lengths_max": sequence_lengths.max(),
