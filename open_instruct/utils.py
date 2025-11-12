@@ -87,7 +87,7 @@ class MetricsTracker:
         self.current_idx = 0
         self.max_metrics = max_metrics
 
-    def _register_metric(self, name: str) -> int:
+    def _maybe_register_metric(self, name: str) -> int:
         if name not in self.names2idx:
             if self.current_idx >= self.max_metrics:
                 raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
@@ -96,11 +96,11 @@ class MetricsTracker:
         return self.names2idx[name]
 
     def __getitem__(self, name: str) -> torch.Tensor:
-        idx = self._register_metric(name)
+        idx = self._maybe_register_metric(name)
         return self.metrics[idx]
 
     def __setitem__(self, name: str, value):
-        idx = self._register_metric(name)
+        idx = self._maybe_register_metric(name)
         self.metrics[idx] = value
 
     def get_metrics_list(self) -> dict[str, float]:
