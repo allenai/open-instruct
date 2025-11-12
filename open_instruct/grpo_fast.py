@@ -270,7 +270,7 @@ class Args:
     active_sampling: bool = False
     """Whether to continue sampling responses until you get a full batch."""
     filter_zero_std_samples: bool = True
-    """Whether to filter out prompts with zero reward std (all samples have the same score). Must be True when active_sampling is True."""
+    """Whether to filter out prompts with zero reward std (all samples have the same score)."""
     no_resampling_pass_rate: float | None = None
     """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
 
@@ -530,10 +530,6 @@ class Args:
                 "With active_sampling, you should set async_steps > 1 to account for filtering of the first batch. "
                 "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
                 "prompt will cause the trainer to stall waiting for more data  . "
-            )
-            assert self.filter_zero_std_samples, (
-                "filter_zero_std_samples must be True when active_sampling is True. "
-                "Active sampling requires filtering to work correctly."
             )
 
 
@@ -1539,6 +1535,7 @@ def accumulate_inference_batches(
     actor_manager=None,
     timeout: float | None = None,
     filter_zero_std_samples: bool = False,
+    active_sampling: bool = False,
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: ShufflingIterator | None = None,
 ) -> tuple[GenerationResult, Batch, dict, BatchStatistics]:
@@ -1551,7 +1548,8 @@ def accumulate_inference_batches(
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
-        filter_zero_std_samples: Whether to filter samples with zero reward std and continue sampling
+        filter_zero_std_samples: Whether to filter out samples with zero reward std
+        active_sampling: Whether to continue sampling when a sample is filtered (try again)
         no_resampling_pass_rate: Optional rate at which to note samples solved at greater than this rate
             and exclude them from further sampling
         iter_dataloader: Optional, used for no_resampling_pass_rate
@@ -1583,8 +1581,25 @@ def accumulate_inference_batches(
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     )
-    while len(results) < num_prompts:
-        result = inference_results_Q.get(timeout=timeout)
+
+    def process_result(result):
+        """Process a single result and optionally add it to results."""
+        nonlocal \
+            total_filtered_prompts, \
+            filtered_prompt_zero, \
+            filtered_prompt_solved, \
+            filtered_prompt_nonzero, \
+            total_no_resampled
+        nonlocal \
+            results, \
+            all_queries, \
+            all_ground_truths, \
+            all_datasets, \
+            all_raw_queries, \
+            all_decoded_responses, \
+            all_scores, \
+            all_reward_metrics, \
+            all_percent_solved
 
         if isinstance(result, ShutdownSentinel):
             return result, None, None, None
@@ -1646,8 +1661,10 @@ def accumulate_inference_batches(
             logging.debug(
                 f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
             )
-            continue
+            # Don't add filtered samples - return early
+            return None
 
+        # Add the result if not filtered
         results.append(result)
         all_queries.extend(k_queries)
         all_ground_truths.extend(k_ground_truths)
@@ -1658,6 +1675,24 @@ def accumulate_inference_batches(
         all_reward_metrics.append(reward_metrics)
         all_percent_solved.append(percent_solved)
         progress_bar.update(1)
+        return None
+
+    if active_sampling:
+        # With active_sampling, use while loop to retry when filtering
+        while len(results) < num_prompts:
+            result = inference_results_Q.get(timeout=timeout)
+            shutdown_result = process_result(result)
+            if shutdown_result[0] is not None:
+                return shutdown_result
+    else:
+        # Without active_sampling, use for loop for exactly num_prompts iterations
+        # note we may filter out samples and end up with less than num_prompts
+        # if zero_std_filtering is True.
+        for _ in range(num_prompts):
+            result = inference_results_Q.get(timeout=timeout)
+            shutdown_result = process_result(result)
+            if shutdown_result[0] is not None:
+                return shutdown_result
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1798,6 +1833,7 @@ def data_preparation_thread(
                 reward_fn=reward_fn,
                 actor_manager=actor_manager,
                 filter_zero_std_samples=args.filter_zero_std_samples,
+                active_sampling=args.active_sampling,
                 no_resampling_pass_rate=args.no_resampling_pass_rate,
                 iter_dataloader=iter_dataloader,
             )
