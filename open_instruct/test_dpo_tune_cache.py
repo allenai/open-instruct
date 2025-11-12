@@ -70,14 +70,18 @@ class TestDPOCacheCompatibility(unittest.TestCase):
         )
         mock_accelerator = Mock()
 
-        logprobs_dict = dpo_cache.load_ref_logprobs_from_disk(merged_cache_path, mock_dataloader, mock_accelerator)
+        cached_chosen, cached_rejected = dpo_cache.load_ref_logprobs_from_disk(
+            merged_cache_path, mock_dataloader, mock_accelerator
+        )
 
-        self.assertIsNotNone(logprobs_dict)
-        self.assertEqual(len(logprobs_dict), len(load_shard_indices))
+        self.assertIsNotNone(cached_chosen)
+        self.assertIsNotNone(cached_rejected)
+        self.assertEqual(len(cached_chosen), len(load_shard_indices))
+        self.assertEqual(len(cached_rejected), len(load_shard_indices))
 
-        for idx in load_shard_indices:
-            self.assertIn(idx, logprobs_dict)
-            chosen_logp, rejected_logp = logprobs_dict[idx]
+        for batch_idx, idx in enumerate(load_shard_indices):
+            chosen_logp = cached_chosen[batch_idx][0]
+            rejected_logp = cached_rejected[batch_idx][0]
             self.assertAlmostEqual(chosen_logp.item(), all_chosen[idx].item(), places=5)
             self.assertAlmostEqual(rejected_logp.item(), all_rejected[idx].item(), places=5)
 
@@ -117,13 +121,15 @@ class TestDPOCacheCompatibility(unittest.TestCase):
         )
         mock_accelerator = Mock()
 
-        logprobs_dict = dpo_cache.load_ref_logprobs_from_disk(merged_cache_path, mock_dataloader, mock_accelerator)
+        cached_chosen, cached_rejected = dpo_cache.load_ref_logprobs_from_disk(
+            merged_cache_path, mock_dataloader, mock_accelerator
+        )
 
-        for idx in load_shard_indices:
-            self.assertIn(idx, logprobs_dict)
-            actual_chosen, actual_rejected = logprobs_dict[idx]
-            self.assertAlmostEqual(actual_chosen.item(), all_chosen[idx].item(), places=5)
-            self.assertAlmostEqual(actual_rejected.item(), all_rejected[idx].item(), places=5)
+        for batch_idx, idx in enumerate(load_shard_indices):
+            chosen_logp = cached_chosen[batch_idx][0]
+            rejected_logp = cached_rejected[batch_idx][0]
+            self.assertAlmostEqual(chosen_logp.item(), all_chosen[idx].item(), places=5)
+            self.assertAlmostEqual(rejected_logp.item(), all_rejected[idx].item(), places=5)
 
     def test_save_with_world_size_2_load_with_world_size_4(self, mock_logger):
         merged_cache_path = os.path.join(self.tmpdir, "model_hash.npz")
@@ -161,15 +167,18 @@ class TestDPOCacheCompatibility(unittest.TestCase):
         )
         mock_accelerator = Mock()
 
-        logprobs_dict = dpo_cache.load_ref_logprobs_from_disk(merged_cache_path, mock_dataloader, mock_accelerator)
+        cached_chosen, cached_rejected = dpo_cache.load_ref_logprobs_from_disk(
+            merged_cache_path, mock_dataloader, mock_accelerator
+        )
 
-        self.assertEqual(len(logprobs_dict), len(load_shard_indices))
+        self.assertEqual(len(cached_chosen), len(load_shard_indices))
+        self.assertEqual(len(cached_rejected), len(load_shard_indices))
 
-        for idx in load_shard_indices:
-            self.assertIn(idx, logprobs_dict)
-            actual_chosen, actual_rejected = logprobs_dict[idx]
-            self.assertAlmostEqual(actual_chosen.item(), all_chosen[idx].item(), places=5)
-            self.assertAlmostEqual(actual_rejected.item(), all_rejected[idx].item(), places=5)
+        for batch_idx, idx in enumerate(load_shard_indices):
+            chosen_logp = cached_chosen[batch_idx][0]
+            rejected_logp = cached_rejected[batch_idx][0]
+            self.assertAlmostEqual(chosen_logp.item(), all_chosen[idx].item(), places=5)
+            self.assertAlmostEqual(rejected_logp.item(), all_rejected[idx].item(), places=5)
 
 
 if __name__ == "__main__":

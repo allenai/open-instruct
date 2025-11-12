@@ -508,9 +508,9 @@ def get_ref_logprobs_cache_path(
 
 def load_ref_logprobs_from_disk(
     cache_path: str, train_dataloader: torch.utils.data.DataLoader, accelerator: Accelerator
-) -> dict | None:
+) -> tuple[list | None, list | None]:
     if not os.path.exists(cache_path):
-        return None
+        return None, None
 
     logger.info(f"Loading reference logprobs cache from {cache_path}")
     data = np.load(cache_path)
@@ -518,35 +518,43 @@ def load_ref_logprobs_from_disk(
     all_chosen_logps = data["chosen_logps"]
     all_rejected_logps = data["rejected_logps"]
 
-    shard_indices = set()
-    for batch in train_dataloader:
-        batch_indices = batch["dataset_index"]
-        shard_indices.update(batch_indices)
-
     logprobs_dict = {}
     for i, idx in enumerate(all_indices):
-        if idx in shard_indices:
-            logprobs_dict[int(idx)] = (
-                torch.tensor(all_chosen_logps[i], dtype=torch.float32),
-                torch.tensor(all_rejected_logps[i], dtype=torch.float32),
-            )
+        logprobs_dict[int(idx)] = (
+            torch.tensor(all_chosen_logps[i], dtype=torch.float32),
+            torch.tensor(all_rejected_logps[i], dtype=torch.float32),
+        )
+
+    cached_reference_chosen_logps = []
+    cached_reference_rejected_logps = []
+
+    for batch in train_dataloader:
+        batch_indices = batch["dataset_index"]
+        batch_chosen = []
+        batch_rejected = []
+        for idx in batch_indices:
+            chosen_logp, rejected_logp = logprobs_dict[idx]
+            batch_chosen.append(chosen_logp)
+            batch_rejected.append(rejected_logp)
+        cached_reference_chosen_logps.append(torch.stack(batch_chosen))
+        cached_reference_rejected_logps.append(torch.stack(batch_rejected))
 
     total_size_mb = (len(all_chosen_logps) + len(all_rejected_logps)) * 4 / (1024 * 1024)
     logger.info(
-        f"Loaded cached reference logprobs: {len(logprobs_dict)} examples for this shard, "
+        f"Loaded cached reference logprobs: {len(cached_reference_chosen_logps)} batches, "
         f"{len(all_indices)} total examples, {total_size_mb:.2f} MB"
     )
 
-    return logprobs_dict
+    return cached_reference_chosen_logps, cached_reference_rejected_logps
 
 
 def maybe_load_reference_logprobs_from_disk(
     args: FlatArguments, tc: TokenizerConfig, accelerator: Accelerator, train_dataloader: torch.utils.data.DataLoader
-) -> tuple[dict | None, str | None]:
+) -> tuple[list | None, list | None, str | None]:
     if args.num_train_epochs != 1:
         raise ValueError("Only one epoch is supported for reference logprobs caching.")
     if args.ref_logprobs_cache_dir is None:
-        return None, None
+        return None, None, None
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     dcs = load_dataset_configs(
@@ -562,9 +570,11 @@ def maybe_load_reference_logprobs_from_disk(
         args.ref_logprobs_cache_dir, args.model_name_or_path, config_hash, args.max_train_samples
     )
 
-    logprobs_dict = load_ref_logprobs_from_disk(cache_location, train_dataloader, accelerator)
+    cached_reference_chosen_logps, cached_reference_rejected_logps = load_ref_logprobs_from_disk(
+        cache_location, train_dataloader, accelerator
+    )
 
-    return logprobs_dict, cache_location
+    return cached_reference_chosen_logps, cached_reference_rejected_logps, cache_location
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
@@ -965,11 +975,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             raise NotImplementedError("seperate forward not implemented for packing/padding-free")
         forward_fn = partial(forward_fn, packing=True)
     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-        reference_logprobs_dict, cache_location = maybe_load_reference_logprobs_from_disk(
-            args, tc, accelerator, train_dataloader
+        cached_reference_chosen_logps, cached_reference_rejected_logps, cache_location = (
+            maybe_load_reference_logprobs_from_disk(args, tc, accelerator, train_dataloader)
         )
 
-        if reference_logprobs_dict is None:
+        if cached_reference_chosen_logps is None:
             cached_indices, cached_reference_chosen_logps, cached_reference_rejected_logps = get_cache_ref_logprobs(
                 model,
                 train_dataloader,
@@ -998,7 +1008,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 )
             accelerator.wait_for_everyone()
 
-            reference_logprobs_dict = load_ref_logprobs_from_disk(cache_location, train_dataloader, accelerator)
+            cached_reference_chosen_logps, cached_reference_rejected_logps = load_ref_logprobs_from_disk(
+                cache_location, train_dataloader, accelerator
+            )
 
         print("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
@@ -1026,7 +1038,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
         else:
             active_dataloader = train_dataloader
-        for batch in active_dataloader:
+        for step, batch in enumerate(active_dataloader):
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
             with accelerator.accumulate(model):
@@ -1035,15 +1047,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 )
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                     p_device = policy_chosen_logps.device
-                    batch_indices = batch["dataset_index"]
-                    reference_chosen_logps_list = []
-                    reference_rejected_logps_list = []
-                    for idx in batch_indices:
-                        ref_chosen, ref_rejected = reference_logprobs_dict[idx]
-                        reference_chosen_logps_list.append(ref_chosen)
-                        reference_rejected_logps_list.append(ref_rejected)
-                    reference_chosen_logps = torch.stack(reference_chosen_logps_list).to(p_device)
-                    reference_rejected_logps = torch.stack(reference_rejected_logps_list).to(p_device)
+                    reference_chosen_logps = cached_reference_chosen_logps[step].to(p_device)
+                    reference_rejected_logps = cached_reference_rejected_logps[step].to(p_device)
                     losses, _, _ = dpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
