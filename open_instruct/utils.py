@@ -78,6 +78,38 @@ logger = logger_utils.setup_logger(__name__)
 DataClassType = NewType("DataClassType", Any)
 
 
+class MetricsTracker:
+    """A simple class to preallocate all metrics in an array
+    so we can do only one allreduce operation to get the metrics mean"""
+
+    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
+        self.metrics = torch.zeros(max_metrics, device=device)
+        self.names2idx = {}
+        self.current_idx = 0
+        self.max_metrics = max_metrics
+
+    def _maybe_register_metric(self, name: str) -> int:
+        if name not in self.names2idx:
+            if self.current_idx >= self.max_metrics:
+                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
+            self.names2idx[name] = self.current_idx
+            self.current_idx += 1
+        return self.names2idx[name]
+
+    def __getitem__(self, name: str) -> torch.Tensor:
+        idx = self._maybe_register_metric(name)
+        return self.metrics[idx]
+
+    def __setitem__(self, name: str, value):
+        idx = self._maybe_register_metric(name)
+        self.metrics[idx] = value
+
+    def get_metrics_list(self) -> dict[str, float]:
+        # Convert to Python floats for logging systems (wandb, tensorboard)
+        metrics_list = self.metrics.tolist()
+        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
+
+
 def max_num_processes() -> int:
     """Returns a reasonable default number of processes to run for multiprocessing."""
     if hasattr(os, "sched_getaffinity"):
@@ -1132,9 +1164,11 @@ def launch_ai2_evals_on_weka(
     stop_strings: list[str] | None = None,
     gs_bucket_path: str | None = None,
     eval_priority: str | None = "normal",
+    eval_workspace: str | None = "ai2/tulu-3-results",
     beaker_image: str | None = None,
+    oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    weka_cluster = "ai2/saturn ai2/neptune"
+    weka_cluster = "ai2/saturn ai2/neptune ai2/jupiter ai2/ceres"
     gcp_cluster = "ai2/augusta"
     cluster = weka_cluster if gs_bucket_path is None else gcp_cluster
     beaker_users = get_beaker_whoami()
@@ -1166,7 +1200,7 @@ python scripts/submit_eval_jobs.py \
 --location {path} \
 --cluster {cluster} \
 --is_tuned \
---workspace "tulu-3-results" \
+--workspace {eval_workspace} \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
@@ -1188,6 +1222,8 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
     if beaker_image is not None:
         command += f" --beaker_image {beaker_image}"
+    if oe_eval_gpu_multiplier is not None:
+        command += f" --gpu_multiplier {oe_eval_gpu_multiplier}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
@@ -1689,6 +1725,8 @@ GPU_SPECS = {
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
     "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
     "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
+    # Specs from https://www.techpowerup.com/gpu-specs/geforce-rtx-4090-mobile.c3949.
+    "4090 laptop": {"flops": 32.98e12, "memory_size": 24e9, "memory_bandwidth": 576e9},
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)

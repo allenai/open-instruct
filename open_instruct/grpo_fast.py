@@ -273,6 +273,8 @@ class Args:
 
     active_sampling: bool = False
     """Whether to continue sampling responses until you get a full batch."""
+    filter_zero_std_samples: bool = True
+    """Whether to filter out prompts with zero reward std (all samples have the same score). Must be True when active_sampling is True."""
     no_resampling_pass_rate: float | None = None
     """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
 
@@ -354,6 +356,12 @@ class Args:
     """vLLM top p for nucleus sampling"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
+    deepspeed_zpg: int = 8
+    """the deepspeed zpg value. Higher values are more memory efficient but slower. Set to 1 to disable zpg, which uses less memory but is significantly slower. Ideally is set to the number of GPUs per node (usually 8, default)."""
+    deepspeed_offload_param: bool = False
+    """whether to offload parameters to CPU (reduces GPU memory usage)"""
+    deepspeed_offload_optimizer: bool = False
+    """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
     enable_queue_dashboard: bool = True
@@ -410,6 +418,8 @@ class Args:
     """the max generation length for evaluation for oe-eval"""
     oe_eval_beaker_image: str | None = None
     """the docker image for evaluation for oe-eval"""
+    oe_eval_gpu_multiplier: int | None = None
+    """multiply the gpus used for each oe-eval task"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
@@ -524,6 +534,15 @@ class Args:
                 "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
                 "prompt will cause the trainer to stall waiting for more data  . "
             )
+            assert self.filter_zero_std_samples, (
+                "filter_zero_std_samples must be True when active_sampling is True. "
+                "Active sampling requires filtering to work correctly."
+            )
+        if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
+            raise ValueError(
+                "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
+                "as the reward standard deviation will always be 0, causing all samples to be filtered."
+            )
 
 
 def next_batch(dataset_indices: list[int], dataset: datasets.Dataset) -> Batch:
@@ -547,31 +566,6 @@ def masked_mean(
     numerator = (values * mask).sum(axis=axis)
     denom = mask.sum(axis=axis) if denominator is None else denominator
     return (numerator / denom).mean()
-
-
-class MetricsTracker:
-    """A simple class to prellocate all metrics in an array
-    so we can do only one allreduce operation to get the metrics mean"""
-
-    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
-        self.metrics = torch.zeros(max_metrics, device=device)
-        self.names2idx = {}
-        self.current_idx = 0
-        self.max_metrics = max_metrics
-
-    def add(self, name: str, value: torch.tensor):
-        if name not in self.names2idx:
-            if self.current_idx >= self.max_metrics:
-                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
-            self.names2idx[name] = self.current_idx
-            self.current_idx += 1
-
-        self.metrics[self.names2idx[name]] = value
-        return self
-
-    def get_metrics_list(self) -> dict[str, float]:
-        metrics_list = self.metrics.tolist()
-        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
@@ -774,7 +768,13 @@ class PolicyTrainerRayProcess(RayProcess):
 
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
-        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
+        ds_config = get_train_ds_config(
+            offload=args.deepspeed_offload_param,
+            adam_offload=args.deepspeed_offload_optimizer,
+            stage=args.deepspeed_stage,
+            bf16=True,
+            zpg=args.deepspeed_zpg,
+        )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
@@ -889,7 +889,7 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             self.ref_policy = None
             logger.info(f"{self.rank=}: Skipping reference policy loading (load_ref_policy=False)")
-        self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
+        self.local_metrics = utils.MetricsTracker(device=self.device)
         return optimization_steps_done
 
     def forward(
@@ -958,7 +958,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 group_name="openrlhf",
                 timeout=timedelta(minutes=self.args.backend_timeout),
             )
-            ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
+            ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
@@ -1186,14 +1186,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         max_diff = masked_diff.max()
                         std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
 
-                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff.item())
-                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
-                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_std", std_diff.item())
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = std_diff.item()
 
                         reverse_kl = torch.exp(mb_vllm_logprobs) * (mb_vllm_logprobs - mb_local_logprobs)
                         masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
                         mean_reverse_kl = masked_reverse_kl.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
-                        self.local_metrics.add("debug/vllm_local_reverse_kl", mean_reverse_kl.item())
+                        self.local_metrics["debug/vllm_local_reverse_kl"] = mean_reverse_kl.item()
 
                     mb_new_logprobs = mb_local_logprobs
 
@@ -1295,6 +1295,8 @@ class PolicyTrainerRayProcess(RayProcess):
                             pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
                         )
                     loss = loss / accumulation_steps
+                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
+                    torch.cuda.empty_cache()
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
@@ -1342,14 +1344,20 @@ class PolicyTrainerRayProcess(RayProcess):
                             ).float()
 
             with torch.no_grad():
-                self.local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
-                self.local_metrics.add("loss/total_avg", loss_stats.mean())
-                self.local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
-                self.local_metrics.add("val/ratio", ratio_stats.mean())
-                self.local_metrics.add("val/ratio_var", ratio_stats.var())
+                if args.load_ref_policy:
+                    self.local_metrics["objective/kl_avg"] = kl1_stats.mean()
+                    self.local_metrics["objective/kl2_avg"] = kl2_stats.mean()
+                    self.local_metrics["objective/kl3_avg"] = kl3_stats.mean()
+                    self.local_metrics["objective/kl4_avg"] = kl4_stats.mean()
+                    self.local_metrics["loss/kl_avg"] = kl_loss_stats.mean()
+                self.local_metrics["loss/policy_avg"] = pg_loss_stats.mean()
+                self.local_metrics["loss/total_avg"] = loss_stats.mean()
+                self.local_metrics["policy/clipfrac_avg"] = pg_clipfrac_stats.mean()
+                self.local_metrics["val/ratio"] = ratio_stats.mean()
+                self.local_metrics["val/ratio_var"] = ratio_stats.var()
                 if args.record_entropy:
-                    self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
-                self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
+                    self.local_metrics["policy/entropy_avg"] = entropy_stats.mean()
+                self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
                 return self.local_metrics.get_metrics_list()
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
@@ -1477,6 +1485,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.gs_bucket_path,
                 args.eval_priority,
                 args.oe_eval_beaker_image,
+                args.oe_eval_gpu_multiplier,
             )
 
 
@@ -1937,7 +1946,7 @@ def data_preparation_thread(
                 tokenizer=tokenizer,
                 reward_fn=reward_fn,
                 actor_manager=actor_manager,
-                filter_zero_std_samples=args.active_sampling,
+                filter_zero_std_samples=args.filter_zero_std_samples,
                 no_resampling_pass_rate=args.no_resampling_pass_rate,
                 iter_dataloader=iter_dataloader,
             )
