@@ -52,7 +52,7 @@ python mason.py \
         --total_episodes 10000000 \
         --deepspeed_stage 3 \
         --num_learners_per_node 8 8 8 8 8 8 \
-        --vllm_num_engines 8 \
+        --vllm_num_engines 10 \
         --gather_whole_model False \
         --vllm_tensor_parallel_size 8 \
         --lr_scheduler_type constant \
