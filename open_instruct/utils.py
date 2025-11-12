@@ -1136,10 +1136,10 @@ def launch_ai2_evals_on_weka(
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    cluster = mason.WEKA_CLUSTERS if gs_bucket_path is None else mason.GCP_CLUSTERS
     beaker_users = get_beaker_whoami()
 
     if gs_bucket_path is not None:
+        cluster_str = f"--cluster {' '.join(mason.GCP_CLUSTERS)}"
         if beaker_users is not None:
             gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
         else:
@@ -1159,12 +1159,12 @@ def launch_ai2_evals_on_weka(
 
         # Update path to use the GS bucket path for evaluation
         path = gs_saved_path
-
+    else:
+        cluster_str = ""
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \
---location {path} \
---cluster {" ".join(cluster)} \
+--location {path} {cluster_str} \
 --is_tuned \
 --workspace {eval_workspace} \
 --priority {eval_priority} \
