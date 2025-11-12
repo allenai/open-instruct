@@ -23,8 +23,7 @@ HF_HUB_ENABLE_HF_TRANSFER=1 uv run python mason.py \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --gpus 8 \
-    -- \
-    source /var/lib/tcpxo/lib64/nccl-env-profile.sh && accelerate launch \
+    -- source /var/lib/tcpxo/lib64/nccl-env-profile.sh \&\& accelerate launch \
     --mixed_precision bf16 \
     --num_processes 8 \
     --use_deepspeed \
