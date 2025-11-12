@@ -481,12 +481,11 @@ class Args:
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
 
-        if self.beaker_eval_freq > 0 and self.save_freq > 0:
-            if self.beaker_eval_freq % self.save_freq != 0:
-                raise ValueError(
-                    f"`beaker_eval_freq` (={self.beaker_eval_freq}) must be a multiple of `save_freq` (={self.save_freq}) "
-                    "because beaker eval jobs require checkpoints to exist."
-                )
+        if self.beaker_eval_freq > 0 and self.save_freq > 0 and self.beaker_eval_freq % self.save_freq != 0:
+            raise ValueError(
+                f"`beaker_eval_freq` (={self.beaker_eval_freq}) must be a multiple of `save_freq` (={self.save_freq}) "
+                "because beaker eval jobs require checkpoints to exist."
+            )
 
         if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):
             raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
@@ -2389,7 +2388,12 @@ def one_training_step(
                 ],
                 desc=f"Saving model at step {training_step}",
             )
-            if args.beaker_eval_freq > 0 and training_step % args.beaker_eval_freq == 0 and args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+            if (
+                args.beaker_eval_freq > 0
+                and training_step % args.beaker_eval_freq == 0
+                and args.try_launch_beaker_eval_jobs_on_weka
+                and is_beaker_job()
+            ):
                 leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
                 for i in range(args.world_size):
                     policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
