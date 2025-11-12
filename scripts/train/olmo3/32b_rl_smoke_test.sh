@@ -60,6 +60,7 @@ python mason.py \
         --seed 1 \
         --local_eval_every 50 \
         --save_freq 25 \
+        --beaker_eval_freq 50 \
         --eval_priority urgent \
         --try_launch_beaker_eval_jobs_on_weka True \
         --gradient_checkpointing \
