@@ -36,6 +36,8 @@ uv run python mason.py \
    --max_train_samples 150000 \
    --dataset_skip_cache \
    --zero_stage 3 \
+   --zero_hpz_partition_size 1 \
+   --offload_optimizer True \
    --ref_logprobs_cache_dir "/filestore/.cache/" \
    --concatenated_forward False \
    --max_seq_length 16384 \

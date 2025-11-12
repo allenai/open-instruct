@@ -19,6 +19,7 @@ DPO tuning script. Adapted from our finetuning script.
 # isort: off
 import contextlib
 import os
+import re
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
@@ -44,7 +45,7 @@ import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
-from accelerate.utils import InitProcessGroupKwargs, set_seed
+from accelerate.utils import DeepSpeedPlugin, DistributedType, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
@@ -58,7 +59,9 @@ from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
+    compute_config_hash,
     get_cached_dataset_tulu,
+    load_dataset_configs,
     visualize_token,
 )
 from open_instruct.dpo_utils import (
@@ -148,6 +151,22 @@ class FlatArguments:
     )
     sync_each_batch: bool = False
     """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
+    zero_stage: int | None = field(
+        default=None,
+        metadata={
+            "help": "DeepSpeed ZeRO optimization stage (0, 1, 2, or 3). If None, DeepSpeed config must be provided via accelerate launch."
+        },
+    )
+    offload_optimizer: bool = field(
+        default=False,
+        metadata={"help": "Offload optimizer states to CPU to save GPU memory. Only used if zero_stage is set."},
+    )
+    offload_param: bool = field(
+        default=False, metadata={"help": "Offload parameters to CPU to save GPU memory. Only used with zero_stage 3."}
+    )
+    zero_hpz_partition_size: int = field(
+        default=8, metadata={"help": "Hierarchical partition size for ZeRO stage 3. Only used with zero_stage 3."}
+    )
     low_cpu_mem_usage: bool = field(
         default=False,
         metadata={
@@ -187,6 +206,9 @@ class FlatArguments:
     dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
+    ref_logprobs_cache_dir: str | None = field(
+        default=None, metadata={"help": "Directory to cache reference logprobs. If None, no disk caching is used."}
+    )
     dataset_config_name: str | None = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
@@ -224,6 +246,12 @@ class FlatArguments:
     learning_rate: float = field(default=2e-5, metadata={"help": "The initial learning rate for AdamW optimizer."})
     logging_steps: int | None = field(
         default=None, metadata={"help": "Log the training loss and learning rate every logging_steps steps."}
+    )
+    log_grad_norm: bool = field(
+        default=False,
+        metadata={
+            "help": "Compute and log gradient norm every logging interval. Enables extra GPU syncs and may slow training."
+        },
     )
     lora_rank: int = field(default=64, metadata={"help": "The rank of lora."})
     lora_alpha: float = field(default=16, metadata={"help": "The alpha parameter of lora."})
@@ -348,10 +376,10 @@ class FlatArguments:
     """the max generation length for evaluation for oe-eval"""
     oe_eval_gpu_multiplier: int | None = None
     """the multiplier for the number of GPUs for evaluation"""
-    eval_workspace: str | None = "ai2/tulu-3-results"
-    """The workspace to launch evaluation jobs on"""
-    eval_priority: str | None = "high"
-    """The priority of auto-launched evaluation jobs"""
+    eval_workspace: str | None = "ai2/olmo-instruct"
+    """the workspace for evaluation"""
+    eval_priority: Literal["low", "normal", "high", "urgent"] = "high"
+    """the priority for evaluation"""
 
     def __post_init__(self):
         if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
@@ -364,6 +392,12 @@ class FlatArguments:
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
+
+        if self.zero_stage is not None:
+            if self.zero_stage not in [0, 1, 2, 3]:
+                raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
+            if self.offload_param and self.zero_stage != 3:
+                raise ValueError("offload_param can only be used with zero_stage 3")
 
         # Parse in args that could be `dict` sent in from the CLI as a string
         for dict_feld in self._VALID_DICT_FIELDS:
@@ -419,6 +453,177 @@ def get_cache_ref_logprobs(
     return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
 
 
+def get_ref_logprobs_cache_path(
+    cache_dir: str,
+    model_name_or_path: str,
+    dataset_config_hash: str,
+    max_train_samples: int | None = None,
+    world_size: int = 1,
+    process_rank: int = 0,
+    seed: int = 42,
+) -> str:
+    """Generate the cache file path for reference logprobs."""
+    model_name_sanitized = re.sub(r"[^\w\-_]", "_", model_name_or_path)
+    samples_str = f"_samples{max_train_samples}" if max_train_samples is not None else ""
+    cache_filename = (
+        f"{model_name_sanitized}_{dataset_config_hash}_ws{world_size}_rank{process_rank}{samples_str}_seed{seed}.pt"
+    )
+    return os.path.join(cache_dir, cache_filename)
+
+
+def maybe_save_ref_logprobs_to_disk(
+    cache_path: str | None, epoch_cached_reference_chosen_logps: list, epoch_cached_reference_rejected_logps: list
+) -> None:
+    """Save reference logprobs to disk if cache_path is provided."""
+    if cache_path is None:
+        return
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    cache_data = {
+        "epoch_cached_reference_chosen_logps": epoch_cached_reference_chosen_logps,
+        "epoch_cached_reference_rejected_logps": epoch_cached_reference_rejected_logps,
+    }
+    torch.save(cache_data, cache_path)
+    logger.info(f"Saved reference logprobs cache to {cache_path}")
+
+
+def load_ref_logprobs_from_disk(cache_path: str) -> tuple:
+    """Load reference logprobs from disk."""
+    if not os.path.exists(cache_path):
+        return None, None
+    logger.info(f"Loading reference logprobs cache from {cache_path}")
+    cache_data = torch.load(cache_path)
+    return (cache_data["epoch_cached_reference_chosen_logps"], cache_data["epoch_cached_reference_rejected_logps"])
+
+
+def maybe_load_reference_logprobs_from_disk(
+    args: FlatArguments, tc: TokenizerConfig, accelerator
+) -> tuple[list | None, list | None, str | None]:
+    """Load reference logprobs from disk if cache directory is configured."""
+    if args.num_train_epochs != 1:
+        raise ValueError("Only one epoch is supported for reference logprobs caching.")
+    if args.ref_logprobs_cache_dir is None:
+        return None, None, None
+
+    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    dcs = load_dataset_configs(
+        args.dataset_mixer_list,
+        args.dataset_mixer_list_splits,
+        args.dataset_transform_fn,
+        transform_fn_args,
+        args.dataset_target_columns,
+        args.seed,
+    )
+    config_hash = compute_config_hash(dcs, tc)
+    cache_location = get_ref_logprobs_cache_path(
+        args.ref_logprobs_cache_dir,
+        args.model_name_or_path,
+        config_hash,
+        args.max_train_samples,
+        accelerator.num_processes,
+        accelerator.process_index,
+        args.seed,
+    )
+    epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = load_ref_logprobs_from_disk(
+        cache_location
+    )
+
+    if epoch_cached_reference_chosen_logps is not None:
+        num_epochs = len(epoch_cached_reference_chosen_logps)
+        num_batches = len(epoch_cached_reference_chosen_logps[0]) if num_epochs > 0 else 0
+
+        total_elements = sum(
+            sum(tensor.numel() for tensor in epoch_batches) for epoch_batches in epoch_cached_reference_chosen_logps
+        )
+        total_elements += sum(
+            sum(tensor.numel() for tensor in epoch_batches) for epoch_batches in epoch_cached_reference_rejected_logps
+        )
+
+        total_size_bytes = sum(
+            sum(tensor.element_size() * tensor.numel() for tensor in epoch_batches)
+            for epoch_batches in epoch_cached_reference_chosen_logps
+        )
+        total_size_bytes += sum(
+            sum(tensor.element_size() * tensor.numel() for tensor in epoch_batches)
+            for epoch_batches in epoch_cached_reference_rejected_logps
+        )
+        total_size_mb = total_size_bytes / (1024 * 1024)
+
+        logger.info(
+            f"Loaded cached reference logprobs: {num_epochs} epochs, {num_batches} batches per epoch, "
+            f"{total_elements} total logprobs, {total_size_mb:.2f} MB"
+        )
+
+    return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location
+
+
+def build_deepspeed_config(
+    zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, zero_hpz_partition_size: int = 8
+) -> dict:
+    """Build a DeepSpeed configuration dict from the provided settings."""
+    config = {
+        "bf16": {"enabled": "auto"},
+        "zero_optimization": {
+            "stage": zero_stage,
+            "overlap_comm": True,
+            "contiguous_gradients": True,
+            "reduce_bucket_size": "auto",
+        },
+        "gradient_accumulation_steps": "auto",
+        "gradient_clipping": "auto",
+        "steps_per_print": 1e5,
+        "train_batch_size": "auto",
+        "train_micro_batch_size_per_gpu": "auto",
+        "wall_clock_breakdown": False,
+    }
+
+    if zero_stage == 3:
+        config["zero_optimization"].update(
+            {
+                "sub_group_size": 1e9,
+                "stage3_prefetch_bucket_size": "auto",
+                "stage3_param_persistence_threshold": "auto",
+                "stage3_max_live_parameters": 1e9,
+                "stage3_max_reuse_distance": 1e9,
+                "stage3_gather_16bit_weights_on_model_save": True,
+                "zero_hpz_partition_size": zero_hpz_partition_size,
+            }
+        )
+
+    if offload_optimizer:
+        config["zero_optimization"]["offload_optimizer"] = {"device": "cpu", "pin_memory": True}
+
+    if offload_param:
+        config["zero_optimization"]["offload_param"] = {"device": "cpu", "pin_memory": True}
+
+    return config
+
+
+def compute_grad_norm(model: torch.nn.Module, accelerator: Accelerator) -> torch.Tensor | None:
+    """
+    Compute the global L2 gradient norm across all parameters.
+    Uses DeepSpeed's cached norm when available so ZeRO-sharded grads are handled correctly.
+    Returns None if the norm cannot be computed (e.g., no grads yet).
+    """
+    if accelerator.distributed_type == DistributedType.DEEPSPEED:
+        ds_engine_wrapper = getattr(accelerator, "deepspeed_engine_wrapped", None)
+        if ds_engine_wrapper is not None and hasattr(ds_engine_wrapper, "get_global_grad_norm"):
+            grad_norm = ds_engine_wrapper.get_global_grad_norm()
+            if grad_norm is not None:
+                return torch.as_tensor(grad_norm, device=accelerator.device, dtype=torch.float32)
+
+    unwrapped_model = accelerator.unwrap_model(model)
+    total_norm = torch.zeros((), device="cpu")
+    has_grads = False
+    for param in unwrapped_model.parameters():
+        if param.grad is None:
+            continue
+        has_grads = True
+        total_norm += param.grad.detach().float().pow(2).sum().cpu()
+    if not has_grads:
+        return None
+    return total_norm.sqrt().to(accelerator.device)
+
+
 def main(args: FlatArguments, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
@@ -431,6 +636,17 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # if you get timeouts (e.g. due to long tokenization) increase this.
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
     dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
+
+    deepspeed_plugin = None
+    if args.zero_stage is not None:
+        deepspeed_config = build_deepspeed_config(
+            zero_stage=args.zero_stage,
+            offload_optimizer=args.offload_optimizer,
+            offload_param=args.offload_param,
+            zero_hpz_partition_size=args.zero_hpz_partition_size,
+        )
+        deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=deepspeed_config)
+
     accelerator = Accelerator(
         dataloader_config=dataloader_config,
         **accelerator_log_kwargs,
@@ -438,6 +654,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         gradient_accumulation_plugin=GradientAccumulationPlugin(
             num_steps=args.gradient_accumulation_steps, sync_each_batch=args.sync_each_batch
         ),
+        deepspeed_plugin=deepspeed_plugin,
     )
 
     # ------------------------------------------------------------
@@ -495,15 +712,16 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         if accelerator.is_main_process and is_beaker_job():
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
+
+        wandb_tags = []
+        if accelerator.is_main_process:
+            wandb_tags = get_wandb_tags()
+
         accelerator.init_trackers(
             args.wandb_project_name,
             experiment_config,
             init_kwargs={
-                "wandb": {
-                    "name": args.exp_name,
-                    "entity": args.wandb_entity,
-                    "tags": [args.exp_name] + get_wandb_tags(),
-                }
+                "wandb": {"name": args.exp_name, "entity": args.wandb_entity, "tags": [args.exp_name] + wandb_tags}
             },
         )
 
@@ -816,16 +1034,26 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             raise NotImplementedError("seperate forward not implemented for packing/padding-free")
         forward_fn = partial(forward_fn, packing=True)
     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
-            model,
-            train_dataloader,
-            accelerator,
-            average_log_prob,
-            last_checkpoint_path,
-            resume_step,
-            range(starting_epoch, args.num_train_epochs),
-            forward_fn,
+        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location = (
+            maybe_load_reference_logprobs_from_disk(args, tc, accelerator)
         )
+
+        if epoch_cached_reference_chosen_logps is None:
+            epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
+                model,
+                train_dataloader,
+                accelerator,
+                average_log_prob,
+                last_checkpoint_path,
+                resume_step,
+                range(starting_epoch, args.num_train_epochs),
+                forward_fn,
+            )
+            maybe_save_ref_logprobs_to_disk(
+                cache_location, epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
+            )
+            accelerator.wait_for_everyone()
+
         print("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
         torch.cuda.empty_cache()  # clear cache
@@ -895,19 +1123,37 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     raise ValueError(f"Invalid dpo loss type {args.dpo_loss_type}.")
                 # TODO: metric logging
                 loss = losses.mean()
+                grad_norm = None
                 if args.load_balancing_loss:
                     weighted_aux_loss = args.load_balancing_weight * aux_loss
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
+
+                # compute gradient norm before any clipping (only on sync steps to reduce overhead)
+                grad_norm_this_step = None
+                if args.log_grad_norm and accelerator.sync_gradients:
+                    grad_norm_this_step = accelerator.clip_grad_norm_(model.parameters(), float("inf"))
+
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                if args.log_grad_norm and accelerator.sync_gradients:
+                    grad_norm = compute_grad_norm(model, accelerator)
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()
 
                 # We keep track of the loss at each logged step
                 with torch.no_grad():
+                    if grad_norm_this_step is not None and args.log_grad_norm:
+                        # scale by grad accumulation since we'll divide later to get a per-step average
+                        grad_norm_value = (
+                            grad_norm_this_step.item()
+                            if isinstance(grad_norm_this_step, torch.Tensor)
+                            else float(grad_norm_this_step)
+                        )
+                        local_metrics[9] += grad_norm_value * args.gradient_accumulation_steps
+
                     local_metrics[0] += loss
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
@@ -922,6 +1168,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         local_metrics[5] += margin
                     local_metrics[6] += policy_chosen_logps.mean()
                     local_metrics[7] += policy_rejected_logps.mean()
+                    if args.log_grad_norm and grad_norm is not None:
+                        # Multiply by grad_accum steps because we divide by it later when averaging.
+                        local_metrics[8] += grad_norm * args.gradient_accumulation_steps
                     if args.load_balancing_loss:
                         local_metrics[19] += weighted_aux_loss
 
@@ -963,6 +1212,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         "logps/chosen": global_metrics[6],
                         "logps/rejected": global_metrics[7],
                     }
+                    if args.log_grad_norm:
+                        metrics_to_log["grad_norm"] = global_metrics[8]
+                        metrics_to_log["grad_norm_tyler"] = global_metrics[9]
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         metrics_to_log.update(
                             {
