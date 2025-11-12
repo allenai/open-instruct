@@ -1172,7 +1172,6 @@ python scripts/submit_eval_jobs.py \
 --is_tuned \
 --workspace {eval_workspace} \
 --priority {eval_priority} \
---gpu_multiplier {oe_eval_gpu_multiplier} \
 --preemptible \
 --use_hf_tokenizer_template \
 --run_oe_eval_experiments \
