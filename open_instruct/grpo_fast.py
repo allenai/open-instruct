@@ -1043,7 +1043,6 @@ class PolicyTrainerRayProcess(RayProcess):
         collated_response_masks,
         pad_token_id,
     ):
-        args = self.args
         collated_ref_logprobs = []
         with torch.no_grad():
             for i in range(len(collated_query_responses)):
@@ -1058,10 +1057,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     attention_mask,
                     position_id,
                     pad_token_id,
-                    args.temperature,
+                    self.args.temperature,
                     return_entropy=False,
                 )
-                if args.mask_tool_use and args.tool_use:
+                if self.args.mask_tool_use and self.args.tool_use:
                     response_mask = response_mask.bool() & tool_mask.bool()
                 else:
                     response_mask = response_mask.bool()
