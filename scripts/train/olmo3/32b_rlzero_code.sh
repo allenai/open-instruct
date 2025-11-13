@@ -11,7 +11,7 @@ DATASETS="saurabh5/rlvr_acecoder_filtered_filtered_olmo_completions_filtered ${n
 #code evals
 EVALS="codex_humanevalplus:0-shot-chat::tulu-thinker_RL0,mbppplus:0-shot-chat::tulu-thinker_RL0,livecodebench_codegeneration::tulu-thinker_RL0_no_think_tags_lite"
 LOCAL_EVALS="saurabh5/rlvr_acecoder_filtered_filtered_olmo_completions_filtered 4 hamishivi/klear-code-rlvr_filtered 4"
-
+LOCAL_EVAL_SPLITS="train train"
 
 EXP_NAME="olmo3-32b_rlzero_code_${SHORT_MODEL_NAME}"
 
@@ -53,6 +53,7 @@ python mason.py \
     --dataset_mixer_list $DATASETS \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list $LOCAL_EVALS \
+    --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
     --pack_length 18432 \
