@@ -621,6 +621,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     break
 
             if model_name_or_path.startswith("gs://"):
+                model_name_or_path = model_name_or_path.rstrip("/")
                 gs_saved_path = model_name_or_path
             else:
                 commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")

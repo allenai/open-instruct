@@ -77,7 +77,7 @@ python mason.py \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
-    --checkpoint_state_dir /output \
+    --output_dir /output/olmo3-32b-rlzero/checkpoints \
     --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-32b_rlzero/ \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
