@@ -1520,6 +1520,7 @@ class BatchStatistics:
     filtered_prompts_nonzero: int
     percent_solved_mean: float
     no_resampled_prompts: int
+    total_prompts: int
 
 
 def accumulate_inference_batches(
@@ -1757,6 +1758,7 @@ def accumulate_inference_batches(
         filtered_prompts_nonzero=filtered_prompt_nonzero,
         percent_solved_mean=percent_solved_mean,
         no_resampled_prompts=total_no_resampled,
+        total_prompts=len(results),
     )
     logging.info(
         f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"

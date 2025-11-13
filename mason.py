@@ -858,67 +858,67 @@ def main():
         budget=args.budget,
         retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
     )
-    
+
     # Increase timeout for HTTP requests and add retry logic
     # The beaker library uses requests internally, and large experiment specs can take longer to process
     max_retries = 3
     retry_delay = 5  # Start with 5 seconds
     timeout_seconds = 300  # Increase timeout to 300 seconds (5 minutes) for large experiment specs
-    
+
     # Monkey-patch requests.Session to intercept and increase timeout values
     # The beaker library hardcodes a 5-second timeout, so we need to patch at the requests level
     original_session_request = requests.Session.request
     original_session_post = requests.Session.post
-    
+
     def patched_session_request(self, method, url, **kwargs):
         # Override timeout if it's set to a low value (less than our desired timeout)
-        if 'timeout' in kwargs and kwargs['timeout'] is not None:
-            current_timeout = kwargs['timeout']
+        if "timeout" in kwargs and kwargs["timeout"] is not None:
+            current_timeout = kwargs["timeout"]
             # Handle tuple timeouts (connect, read) or single value
             if isinstance(current_timeout, tuple):
                 if len(current_timeout) == 2 and current_timeout[1] < timeout_seconds:
-                    kwargs['timeout'] = (current_timeout[0], timeout_seconds)
+                    kwargs["timeout"] = (current_timeout[0], timeout_seconds)
             elif isinstance(current_timeout, (int, float)) and current_timeout < timeout_seconds:
-                kwargs['timeout'] = timeout_seconds
-        elif 'timeout' not in kwargs:
-            kwargs['timeout'] = timeout_seconds
+                kwargs["timeout"] = timeout_seconds
+        elif "timeout" not in kwargs:
+            kwargs["timeout"] = timeout_seconds
         return original_session_request(self, method, url, **kwargs)
-    
+
     def patched_session_post(self, url, **kwargs):
         # Override timeout if it's set to a low value
-        if 'timeout' in kwargs and kwargs['timeout'] is not None:
-            current_timeout = kwargs['timeout']
+        if "timeout" in kwargs and kwargs["timeout"] is not None:
+            current_timeout = kwargs["timeout"]
             if isinstance(current_timeout, tuple):
                 if len(current_timeout) == 2 and current_timeout[1] < timeout_seconds:
-                    kwargs['timeout'] = (current_timeout[0], timeout_seconds)
+                    kwargs["timeout"] = (current_timeout[0], timeout_seconds)
             elif isinstance(current_timeout, (int, float)) and current_timeout < timeout_seconds:
-                kwargs['timeout'] = timeout_seconds
-        elif 'timeout' not in kwargs:
-            kwargs['timeout'] = timeout_seconds
+                kwargs["timeout"] = timeout_seconds
+        elif "timeout" not in kwargs:
+            kwargs["timeout"] = timeout_seconds
         return original_session_post(self, url, **kwargs)
-    
+
     # Apply the patches
     requests.Session.request = patched_session_request
     requests.Session.post = patched_session_post
     console.log(f"✅ Patched requests.Session to use minimum {timeout_seconds} second timeout")
-    
+
     # Also try to increase the timeout on the beaker client itself
     try:
-        if hasattr(beaker_client, '_timeout'):
+        if hasattr(beaker_client, "_timeout"):
             beaker_client._timeout = timeout_seconds
             console.log(f"✅ Set beaker client timeout to {timeout_seconds} seconds")
     except Exception as e:
         console.log(f"⚠️  Could not modify beaker client timeout: {e}. Will rely on retries.")
-    
+
     # Retry logic with exponential backoff for timeout errors
     for attempt in range(max_retries):
         try:
             exp = beaker_client.experiment.create(spec=experiment_spec)
             console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.experiment.id}")
             break
-        except (requests.exceptions.ReadTimeout, requests.exceptions.Timeout) as e:
+        except (requests.exceptions.ReadTimeout, requests.exceptions.Timeout):
             if attempt < max_retries - 1:
-                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff: 5s, 10s, 20s
+                wait_time = retry_delay * (2**attempt)  # Exponential backoff: 5s, 10s, 20s
                 console.log(
                     f"⚠️  Timeout occurred (attempt {attempt + 1}/{max_retries}). "
                     f"Retrying in {wait_time} seconds... "
@@ -931,7 +931,7 @@ def main():
                     f"The experiment spec may be too large or the Beaker API may be experiencing issues."
                 )
                 raise
-        except Exception as e:
+        except Exception:
             # For other exceptions, don't retry
             raise
 
