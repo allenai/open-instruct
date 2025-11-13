@@ -3,6 +3,43 @@ import unittest
 import torch
 
 import open_instruct.model_utils
+from open_instruct.model_utils import Batch
+
+
+class TestBatchSlicing(unittest.TestCase):
+    def test_batch_slicing_with_all_fields(self):
+        batch = Batch(
+            queries=[[1, 2], [3, 4], [5, 6]],
+            ground_truths=[[7, 8], [9, 10], [11, 12]],
+            datasets=["ds1", "ds2", "ds3"],
+            raw_queries=["q1", "q2", "q3"],
+            decoded_responses=["r1", "r2", "r3"],
+            indices=[0, 1, 2],
+            scores=[0.1, 0.2, 0.3],
+        )
+
+        sliced = batch[[0, 2]]
+        assert len(sliced.queries) == 2
+        assert sliced.queries == [[1, 2], [5, 6]]
+        assert sliced.decoded_responses == ["r1", "r3"]
+        assert sliced.scores == [0.1, 0.3]
+
+    def test_batch_slicing_with_none_fields(self):
+        batch = Batch(
+            queries=[[1, 2], [3, 4], [5, 6]],
+            ground_truths=[[7, 8], [9, 10], [11, 12]],
+            datasets=["ds1", "ds2", "ds3"],
+            raw_queries=None,
+            decoded_responses=None,
+            indices=None,
+            scores=None,
+        )
+
+        sliced = batch[[0, 2]]
+        assert len(sliced.queries) == 2
+        assert sliced.queries == [[1, 2], [5, 6]]
+        assert sliced.decoded_responses is None
+        assert sliced.scores is None
 
 
 class TestLogSoftmaxAndGather(unittest.TestCase):
