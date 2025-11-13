@@ -11,7 +11,7 @@ DATASETS="saurabh5/rlvr_acecoder_filtered_filtered_olmo_completions_filtered ${n
 #code evals
 EVALS="codex_humanevalplus:0-shot-chat::tulu-thinker_RL0,mbppplus:0-shot-chat::tulu-thinker_RL0,livecodebench_codegeneration::tulu-thinker_RL0_no_think_tags_lite"
 LOCAL_EVALS="saurabh5/rlvr_acecoder_filtered_filtered_olmo_completions_filtered 4 hamishivi/klear-code-rlvr_filtered 4"
-LOCAL_EVAL_SPLITS="train train"
+LOCAL_EVAL_SPLITS="train train train train"
 
 EXP_NAME="olmo3-32b_rlzero_code_${SHORT_MODEL_NAME}"
 
