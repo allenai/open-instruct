@@ -59,5 +59,5 @@ uv run python mason.py \
     --gradient_checkpointing \
     --push_to_hub false \
     --active_sampling \
-    --async_steps 2 \
+    --async_steps 3 \
     --single_gpu_mode
