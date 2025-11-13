@@ -68,6 +68,10 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
 from open_instruct import logger_utils
 
+WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
+GCP_CLUSTERS = ["ai2/augusta"]
+INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
+
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
@@ -75,6 +79,38 @@ MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+class MetricsTracker:
+    """A simple class to preallocate all metrics in an array
+    so we can do only one allreduce operation to get the metrics mean"""
+
+    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
+        self.metrics = torch.zeros(max_metrics, device=device)
+        self.names2idx = {}
+        self.current_idx = 0
+        self.max_metrics = max_metrics
+
+    def _maybe_register_metric(self, name: str) -> int:
+        if name not in self.names2idx:
+            if self.current_idx >= self.max_metrics:
+                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
+            self.names2idx[name] = self.current_idx
+            self.current_idx += 1
+        return self.names2idx[name]
+
+    def __getitem__(self, name: str) -> torch.Tensor:
+        idx = self._maybe_register_metric(name)
+        return self.metrics[idx]
+
+    def __setitem__(self, name: str, value):
+        idx = self._maybe_register_metric(name)
+        self.metrics[idx] = value
+
+    def get_metrics_list(self) -> dict[str, float]:
+        # Convert to Python floats for logging systems (wandb, tensorboard)
+        metrics_list = self.metrics.tolist()
+        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 
 
 def max_num_processes() -> int:
@@ -1138,12 +1174,10 @@ def launch_ai2_evals_on_weka(
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    weka_cluster = "ai2/saturn ai2/neptune ai2/jupiter ai2/ceres"
-    gcp_cluster = "ai2/augusta"
-    cluster = weka_cluster if gs_bucket_path is None else gcp_cluster
     beaker_users = get_beaker_whoami()
 
     if gs_bucket_path is not None:
+        cluster_str = f"--cluster {' '.join(GCP_CLUSTERS)}"
         if beaker_users is not None:
             gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
         else:
@@ -1163,12 +1197,12 @@ def launch_ai2_evals_on_weka(
 
         # Update path to use the GS bucket path for evaluation
         path = gs_saved_path
-
+    else:
+        cluster_str = ""
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \
---location {path} \
---cluster {cluster} \
+--location {path} {cluster_str} \
 --is_tuned \
 --workspace {eval_workspace} \
 --priority {eval_priority} \
@@ -1184,7 +1218,7 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
         command += f" --step {training_step}"
-    if cluster == weka_cluster:
+    if gs_bucket_path is None:
         command += " --evaluate_on_weka"
     if oe_eval_tasks is not None:
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"

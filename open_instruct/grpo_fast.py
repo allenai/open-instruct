@@ -269,6 +269,8 @@ class Args:
 
     active_sampling: bool = False
     """Whether to continue sampling responses until you get a full batch."""
+    filter_zero_std_samples: bool = True
+    """Whether to filter out prompts with zero reward std (all samples have the same score)."""
     no_resampling_pass_rate: float | None = None
     """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
 
@@ -529,6 +531,15 @@ class Args:
                 "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
                 "prompt will cause the trainer to stall waiting for more data  . "
             )
+            assert self.filter_zero_std_samples, (
+                "filter_zero_std_samples must be True when active_sampling is True. "
+                "Active sampling requires filtering to work correctly."
+            )
+        if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
+            raise ValueError(
+                "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
+                "as the reward standard deviation will always be 0, causing all samples to be filtered."
+            )
 
 
 def next_batch(dataset_indices: list[int], dataset: datasets.Dataset) -> Batch:
@@ -552,31 +563,6 @@ def masked_mean(
     numerator = (values * mask).sum(axis=axis)
     denom = mask.sum(axis=axis) if denominator is None else denominator
     return (numerator / denom).mean()
-
-
-class MetricsTracker:
-    """A simple class to prellocate all metrics in an array
-    so we can do only one allreduce operation to get the metrics mean"""
-
-    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
-        self.metrics = torch.zeros(max_metrics, device=device)
-        self.names2idx = {}
-        self.current_idx = 0
-        self.max_metrics = max_metrics
-
-    def add(self, name: str, value: torch.tensor):
-        if name not in self.names2idx:
-            if self.current_idx >= self.max_metrics:
-                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
-            self.names2idx[name] = self.current_idx
-            self.current_idx += 1
-
-        self.metrics[self.names2idx[name]] = value
-        return self
-
-    def get_metrics_list(self) -> dict[str, float]:
-        metrics_list = self.metrics.tolist()
-        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
@@ -868,7 +854,44 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
         self.model.train()
 
-        self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
+        # reference model
+        ds_config = get_eval_ds_config(
+            offload=args.deepspeed_offload_param,
+            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+            # stage 2 is optimizer sharding which doesn't apply to inference
+            stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+            bf16=True,
+        )
+        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+        ds_config["gradient_accumulation_steps"] = 1
+        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+            dschf = HfDeepSpeedConfig(ds_config)
+        else:
+            dschf = None
+        logger.info(f"DeepSpeed config: {dschf=}")
+
+        self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+            model_config.model_name_or_path,
+            revision=model_config.model_revision,
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+            use_cache=False,
+            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
+        )
+        disable_dropout_in_model(self.ref_policy)
+        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
+        self.ref_policy.eval()
+
+        # Load reference policy checkpoint if available
+        if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
+            state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device)
+            if hasattr(self.ref_policy, "module"):
+                # If wrapped by DeepSpeed
+                self.ref_policy.module.load_state_dict(state_dict)
+            else:
+                self.ref_policy.load_state_dict(state_dict)
+            logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
+        self.local_metrics = utils.MetricsTracker(device=self.device)
         return optimization_steps_done
 
     def forward(
@@ -1103,14 +1126,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         max_diff = masked_diff.max()
                         std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
 
-                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff.item())
-                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
-                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_std", std_diff.item())
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = std_diff.item()
 
                         reverse_kl = torch.exp(mb_vllm_logprobs) * (mb_vllm_logprobs - mb_local_logprobs)
                         masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
                         mean_reverse_kl = masked_reverse_kl.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
-                        self.local_metrics.add("debug/vllm_local_reverse_kl", mean_reverse_kl.item())
+                        self.local_metrics["debug/vllm_local_reverse_kl"] = mean_reverse_kl.item()
 
                     mb_new_logprobs = mb_local_logprobs
 
@@ -1213,14 +1236,28 @@ class PolicyTrainerRayProcess(RayProcess):
                             ).float()
 
             with torch.no_grad():
+<<<<<<< HEAD
                 self.local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
                 self.local_metrics.add("loss/total_avg", loss_stats.mean())
                 self.local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
                 self.local_metrics.add("val/ratio", ratio_stats.mean())
                 self.local_metrics.add("val/ratio_var", ratio_stats.var())
+=======
+                self.local_metrics["loss/policy_avg"] = pg_loss_stats.mean()
+                self.local_metrics["loss/total_avg"] = loss_stats.mean()
+                self.local_metrics["policy/clipfrac_avg"] = pg_clipfrac_stats.mean()
+                self.local_metrics["val/ratio"] = ratio_stats.mean()
+                self.local_metrics["val/ratio_var"] = ratio_stats.var()
+
+                self.local_metrics["objective/kl_avg"] = kl1_stats.mean()
+                self.local_metrics["objective/kl2_avg"] = kl2_stats.mean()
+                self.local_metrics["objective/kl3_avg"] = kl3_stats.mean()
+                self.local_metrics["objective/kl4_avg"] = kl4_stats.mean()
+                self.local_metrics["loss/kl_avg"] = kl_loss_stats.mean()
+>>>>>>> 733bf925d31ed2bac05dfc73b74ba5d71287b1d8
                 if args.record_entropy:
-                    self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
-                self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
+                    self.local_metrics["policy/entropy_avg"] = entropy_stats.mean()
+                self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
                 return self.local_metrics.get_metrics_list()
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
@@ -1520,6 +1557,7 @@ class BatchStatistics:
     filtered_prompts_nonzero: int
     percent_solved_mean: float
     no_resampled_prompts: int
+    total_prompts: int
 
 
 def accumulate_inference_batches(
@@ -1533,6 +1571,7 @@ def accumulate_inference_batches(
     reward_fn: Callable,
     actor_manager=None,
     timeout: float | None = None,
+    active_sampling: bool = False,
     filter_zero_std_samples: bool = False,
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: ShufflingIterator | None = None,
@@ -1546,7 +1585,8 @@ def accumulate_inference_batches(
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
-        filter_zero_std_samples: Whether to filter samples with zero reward std and continue sampling
+        active_sampling: Whether to continue sampling until we have sampled num_prompts prompts with non-zero std
+        filter_zero_std_samples: Whether to filter samples with zero reward std
         no_resampling_pass_rate: Optional rate at which to note samples solved at greater than this rate
             and exclude them from further sampling
         iter_dataloader: Optional, used for no_resampling_pass_rate
@@ -1578,7 +1618,8 @@ def accumulate_inference_batches(
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     )
-    while len(results) < num_prompts:
+    num_prompts_sampled = 0
+    while num_prompts_sampled < num_prompts:
         result = inference_results_Q.get(timeout=timeout)
 
         if isinstance(result, ShutdownSentinel):
@@ -1631,6 +1672,11 @@ def accumulate_inference_batches(
 
         # Filter out zero std prompts
         if filter_zero_std_samples and np.std(scores) == 0:
+            # If we're not active sampling, still count this as a sample
+            if not active_sampling:
+                num_prompts_sampled += 1
+                progress_bar.update(1)
+
             total_filtered_prompts += 1
             if scores[0] == 0:
                 filtered_prompt_zero += 1
@@ -1642,6 +1688,9 @@ def accumulate_inference_batches(
                 f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
             )
             continue
+        else:
+            num_prompts_sampled += 1
+            progress_bar.update(1)
 
         results.append(result)
         all_queries.extend(k_queries)
@@ -1652,7 +1701,6 @@ def accumulate_inference_batches(
         all_scores.extend(scores)
         all_reward_metrics.append(reward_metrics)
         all_percent_solved.append(percent_solved)
-        progress_bar.update(1)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1757,6 +1805,7 @@ def accumulate_inference_batches(
         filtered_prompts_nonzero=filtered_prompt_nonzero,
         percent_solved_mean=percent_solved_mean,
         no_resampled_prompts=total_no_resampled,
+        total_prompts=len(results),
     )
     logging.info(
         f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"
@@ -1792,7 +1841,8 @@ def data_preparation_thread(
                 tokenizer=tokenizer,
                 reward_fn=reward_fn,
                 actor_manager=actor_manager,
-                filter_zero_std_samples=args.active_sampling,
+                active_sampling=args.active_sampling,
+                filter_zero_std_samples=args.filter_zero_std_samples,
                 no_resampling_pass_rate=args.no_resampling_pass_rate,
                 iter_dataloader=iter_dataloader,
             )
@@ -2484,6 +2534,7 @@ def maybe_evaluate(
             reward_fn=reward_fn,
             actor_manager=actor_manager,
             timeout=timeout,
+            active_sampling=False,
             filter_zero_std_samples=False,
             no_resampling_pass_rate=None,
             iter_dataloader=None,
