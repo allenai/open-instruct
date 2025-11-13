@@ -8,7 +8,7 @@ DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_templat
 
 # math evals
 # EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
-EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
+EVALS="minerva_math_500::hamish_zs_reasoning_dapo,aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo,omega_500:0-shot-chat_dapo,gsm8k::zs_cot_latex_dapo"
 
 # AIME 2024, 2025 local evals
 LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
@@ -83,10 +83,11 @@ python mason.py \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions True \
-    --oe_eval_tasks $EVALS \
     --oe_eval_gpu_multiplier 4 \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
     --vllm_enforce_eager \
-    --deepspeed_zpg 1 # this could also be num_GPUs of the trainer, acheives same effect (allow model to be sharded across all trainer GPUs)
+    --deepspeed_zpg 1 \
+    --oe_eval_tasks $EVALS \
+    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo3_auto $@ 

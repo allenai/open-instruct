@@ -9,7 +9,7 @@ num_prompts_stdio=3328
 DATASETS="saurabh5/rlvr_acecoder_filtered_filtered_olmo_completions_filtered ${num_prompts_fn} hamishivi/synthetic2-rlvr-code-compressed_filtered ${num_prompts_stdio} hamishivi/klear-code-rlvr_filtered ${num_prompts_stdio}"
 
 #code evals
-EVALS="codex_humanevalplus:0-shot-chat-n5,mbppplus::openinstruct,truthfulqa::tulu,cruxeval_input:pass@5,cruxeval_output:pass@5,ifeval::tulu"
+EVALS="codex_humanevalplus:0-shot-chat::tulu-thinker_RL0,mbppplus:0-shot-chat::tulu-thinker_RL0,livecodebench_codegeneration::tulu-thinker_RL0_no_think_tags_lite"
 LOCAL_EVALS="saurabh5/rlvr_acecoder_filtered_filtered_olmo_completions_filtered 4 hamishivi/klear-code-rlvr_filtered 4"
 
 
@@ -83,10 +83,11 @@ python mason.py \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions True \
-    --oe_eval_tasks $EVALS \
     --oe_eval_gpu_multiplier 4 \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
     --vllm_enforce_eager \
-    --deepspeed_zpg 1 # this could also be num_GPUs of the trainer, acheives same effect (allow model to be sharded across all trainer GPUs)
+    --deepspeed_zpg 1 \
+    --oe_eval_tasks $EVALS \
+    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo3_auto $@ 
