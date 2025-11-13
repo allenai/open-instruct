@@ -8,7 +8,7 @@ DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_templat
 
 # math evals
 # EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
-# EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
+EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
 
 # AIME 2024, 2025 local evals
 LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
@@ -17,6 +17,7 @@ LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
 
 EXP_NAME="olmo3-32b_rlzero_${SHORT_MODEL_NAME}"
 
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 cluster=ai2/augusta
@@ -81,11 +82,10 @@ python mason.py \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions True \
+    --oe_eval_tasks $EVALS \
+    --oe_eval_gpu_multiplier 4 \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
     --vllm_enforce_eager \
     --deepspeed_zpg 1 # this could also be num_GPUs of the trainer, acheives same effect (allow model to be sharded across all trainer GPUs)
-
-    # --oe_eval_tasks $EVALS \
-    # --oe_eval_gpu_multiplier 4 \
