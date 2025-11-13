@@ -542,7 +542,7 @@ CHAT_TEMPLATES = {
         "{{ '\n\n' if not loop.first else '' }}"
         "{{ message['content'] + '\n' }}"
         "{% if loop.last and add_generation_prompt %}"
-        "{{ '\nRemember to put your solution inside the ```\npython\nCODE\n``` tags}}"
+        f"\nRemember to put your solution inside the ```\npython\nCODE\n``` tags"
         "{% endif %}"
         "{% endfor %}"
     ),
