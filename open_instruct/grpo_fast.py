@@ -855,7 +855,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
                 )
         self.model.train()
-        self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
+        self.local_metrics = utils.MetricsTracker(device=self.device)
         return optimization_steps_done
 
     def forward(
