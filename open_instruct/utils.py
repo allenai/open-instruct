@@ -66,12 +66,8 @@ from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
+import mason
 from open_instruct import logger_utils
-
-WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
-GCP_CLUSTERS = ["ai2/augusta"]
-
-INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -1175,7 +1171,7 @@ def launch_ai2_evals_on_weka(
     beaker_users = get_beaker_whoami()
 
     if gs_bucket_path is not None:
-        cluster_str = f"--cluster {' '.join(GCP_CLUSTERS)}"
+        cluster_str = f"--cluster {' '.join(mason.GCP_CLUSTERS)}"
         if beaker_users is not None:
             gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
         else:
@@ -1259,31 +1255,6 @@ def wandb_url_to_run_path(url: str) -> str:
     run_id = path_parts[3]  # Skip 'runs' at index 2
 
     return f"{entity}/{project}/{run_id}"
-
-
-def send_slack_alert(message: str) -> None:
-    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
-    if not slack_webhook_url:
-        logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
-        return
-    payload = {"text": message}
-    response = requests.post(slack_webhook_url, json=payload)
-    if not response.ok:
-        logger.warning(
-            "Failed to send Slack alert with status %s: %s",
-            response.status_code,
-            response.text,
-        )
-
-
-def get_beaker_experiment_url() -> str | None:
-    try:
-        beaker_client = beaker.Beaker.from_env()
-        workload = beaker_client.workload.get(os.environ["BEAKER_WORKLOAD_ID"])
-        url = beaker_client.experiment.url(workload.experiment)
-        return url
-    except Exception:
-        return None
 
 
 # ----------------------------------------------------------------------------
