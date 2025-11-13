@@ -14,6 +14,8 @@ import requests
 from rich.console import Console
 from rich.text import Text
 
+from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS
+
 console = Console()
 
 
@@ -87,11 +89,6 @@ def parse_env_var(env_var_str: str) -> dict[str, str]:
         raise argparse.ArgumentTypeError("Environment variable name cannot be empty")
     return {"name": name, "value": value}
 
-
-WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
-GCP_CLUSTERS = ["ai2/augusta"]
-
-INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
 
 # by default, we turn off vllm compile cache
 # torch compile caching seems consistently broken, but the actual compiling isn't.
@@ -293,6 +290,7 @@ def get_env_vars(
         "AZURE_API_KEY",
         "AZURE_API_BASE",
         "ANTHROPIC_API_KEY",
+        "SLACK_WEBHOOK",
     ]
     for useful_secret in useful_secrets:
         if f"{whoami}_{useful_secret}" in beaker_secrets:

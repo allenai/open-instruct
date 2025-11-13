@@ -305,6 +305,7 @@ class TestUtilityFunctions(unittest.TestCase):
             ("NVIDIA A100-SXM4-80GB", "a100"),
             ("NVIDIA RTX PRO 6000 Blackwell Server Edition", "pro 6000"),
             ("NVIDIA RTX 6000 Ada Generation", "6000"),
+            ("NVIDIA GeForce RTX 4090 Laptop GPU", "4090 laptop"),
         ]
     )
     def test_get_device_name(self, device_name: str, expected_name: str):

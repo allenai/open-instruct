@@ -533,6 +533,15 @@ class Args:
                 "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
                 "prompt will cause the trainer to stall waiting for more data  . "
             )
+            assert self.filter_zero_std_samples, (
+                "filter_zero_std_samples must be True when active_sampling is True. "
+                "Active sampling requires filtering to work correctly."
+            )
+        if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
+            raise ValueError(
+                "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
+                "as the reward standard deviation will always be 0, causing all samples to be filtered."
+            )
 
 
 def next_batch(dataset_indices: list[int], dataset: datasets.Dataset) -> Batch:
@@ -556,31 +565,6 @@ def masked_mean(
     numerator = (values * mask).sum(axis=axis)
     denom = mask.sum(axis=axis) if denominator is None else denominator
     return (numerator / denom).mean()
-
-
-class MetricsTracker:
-    """A simple class to prellocate all metrics in an array
-    so we can do only one allreduce operation to get the metrics mean"""
-
-    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
-        self.metrics = torch.zeros(max_metrics, device=device)
-        self.names2idx = {}
-        self.current_idx = 0
-        self.max_metrics = max_metrics
-
-    def add(self, name: str, value: torch.tensor):
-        if name not in self.names2idx:
-            if self.current_idx >= self.max_metrics:
-                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
-            self.names2idx[name] = self.current_idx
-            self.current_idx += 1
-
-        self.metrics[self.names2idx[name]] = value
-        return self
-
-    def get_metrics_list(self) -> dict[str, float]:
-        metrics_list = self.metrics.tolist()
-        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
@@ -1106,14 +1090,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         max_diff = masked_diff.max()
                         std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
 
-                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff.item())
-                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
-                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_std", std_diff.item())
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = std_diff.item()
 
                         reverse_kl = torch.exp(mb_vllm_logprobs) * (mb_vllm_logprobs - mb_local_logprobs)
                         masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
                         mean_reverse_kl = masked_reverse_kl.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
-                        self.local_metrics.add("debug/vllm_local_reverse_kl", mean_reverse_kl.item())
+                        self.local_metrics["debug/vllm_local_reverse_kl"] = mean_reverse_kl.item()
 
                     mb_new_logprobs = mb_local_logprobs
 
@@ -1222,8 +1206,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("val/ratio", ratio_stats.mean())
                 self.local_metrics.add("val/ratio_var", ratio_stats.var())
                 if args.record_entropy:
-                    self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
-                self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
+                    self.local_metrics["policy/entropy_avg"] = entropy_stats.mean()
+                self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
                 return self.local_metrics.get_metrics_list()
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
@@ -3137,6 +3121,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             model_dims,
             checkpoint_state,
         )
+    except Exception as e:
+        beaker_url = utils.get_beaker_experiment_url()
+        if beaker_url:
+            error_message = f"<!here> A RL job has died. Check it out: {beaker_url}. Error message: {str(e)}"
+        else:
+            error_message = f"<!here> A RL job has died. Error message: {str(e)}"
+        utils.send_slack_alert(error_message)
+        raise
     finally:
         cleanup_training_resources(
             stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
