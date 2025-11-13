@@ -1717,6 +1717,7 @@ def accumulate_inference_batches(
 
     def process_result(result):
         """Process a single result and optionally add it to results."""
+        # TODO: refactor this to use a class instance instead of nonlocal variables
         nonlocal \
             total_filtered_prompts, \
             filtered_prompt_zero, \
@@ -1815,7 +1816,7 @@ def accumulate_inference_batches(
         while len(results) < num_prompts:
             result = inference_results_Q.get(timeout=timeout)
             shutdown_result = process_result(result)
-            if shutdown_result is not None and shutdown_result[0] is not None:
+            if shutdown_result is not None:
                 return shutdown_result
     else:
         # Without active_sampling, use for loop for exactly num_prompts iterations
@@ -1824,7 +1825,7 @@ def accumulate_inference_batches(
         for _ in range(num_prompts):
             result = inference_results_Q.get(timeout=timeout)
             shutdown_result = process_result(result)
-            if shutdown_result is not None and shutdown_result[0] is not None:
+            if shutdown_result is not None:
                 return shutdown_result
 
     # Combine all results into a single GenerationResult
