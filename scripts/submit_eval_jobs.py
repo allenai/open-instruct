@@ -7,7 +7,7 @@ from datetime import date
 
 import yaml
 
-import mason
+from open_instruct import utils
 
 ########################################
 
@@ -181,7 +181,7 @@ d1["tasks"][0]["resources"]["gpuCount"] = 1
 
 # remove nfs if asked or jupiter in cluster list.
 weka_available = False
-if all(c in mason.WEKA_CLUSTERS for c in cluster):
+if all(c in utils.WEKA_CLUSTERS for c in cluster):
     d1["tasks"][0]["datasets"].append({"mountPath": "/weka/oe-adapt-default", "source": {"weka": "oe-adapt-default"}})
     d1["tasks"][0]["datasets"].append(
         {"mountPath": "/weka/oe-training-default", "source": {"weka": "oe-training-default"}}
