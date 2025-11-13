@@ -66,8 +66,12 @@ from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
-import mason
 from open_instruct import logger_utils
+
+WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
+GCP_CLUSTERS = ["ai2/augusta"]
+
+INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -1171,7 +1175,7 @@ def launch_ai2_evals_on_weka(
     beaker_users = get_beaker_whoami()
 
     if gs_bucket_path is not None:
-        cluster_str = f"--cluster {' '.join(mason.GCP_CLUSTERS)}"
+        cluster_str = f"--cluster {' '.join(GCP_CLUSTERS)}"
         if beaker_users is not None:
             gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
         else:
