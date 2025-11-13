@@ -68,8 +68,10 @@ class Batch:
                 queries=self.queries[key],
                 ground_truths=self.ground_truths[key],
                 datasets=self.datasets[key],
-                raw_queries=self.raw_queries[key],
-                indices=self.indices[key] if self.indices else None,
+                raw_queries=self.raw_queries[key] if self.raw_queries is not None else None,
+                decoded_responses=self.decoded_responses[key] if self.decoded_responses is not None else None,
+                indices=self.indices[key] if self.indices is not None else None,
+                scores=self.scores[key] if self.scores is not None else None,
             )
         elif isinstance(key, int):
             # Handle single index: batch[5]
@@ -77,8 +79,10 @@ class Batch:
                 queries=[self.queries[key]],
                 ground_truths=[self.ground_truths[key]],
                 datasets=[self.datasets[key]],
-                raw_queries=[self.raw_queries[key]],
-                indices=[self.indices[key]] if self.indices else None,
+                raw_queries=[self.raw_queries[key]] if self.raw_queries is not None else None,
+                decoded_responses=[self.decoded_responses[key]] if self.decoded_responses is not None else None,
+                indices=[self.indices[key]] if self.indices is not None else None,
+                scores=[self.scores[key]] if self.scores is not None else None,
             )
         else:
             # Handle list of indices: batch[[1,3,5]]
@@ -86,8 +90,12 @@ class Batch:
                 queries=[self.queries[i] for i in key],
                 ground_truths=[self.ground_truths[i] for i in key],
                 datasets=[self.datasets[i] for i in key],
-                raw_queries=[self.raw_queries[i] for i in key],
-                indices=[self.indices[i] for i in key] if self.indices else None,
+                raw_queries=[self.raw_queries[i] for i in key] if self.raw_queries is not None else None,
+                decoded_responses=[self.decoded_responses[i] for i in key]
+                if self.decoded_responses is not None
+                else None,
+                indices=[self.indices[i] for i in key] if self.indices is not None else None,
+                scores=[self.scores[i] for i in key] if self.scores is not None else None,
             )
 
 
