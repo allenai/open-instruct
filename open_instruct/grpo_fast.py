@@ -3240,9 +3240,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     except Exception as e:
         beaker_url = utils.get_beaker_experiment_url()
         if beaker_url:
-            error_message = f"@here A RL job has died. Check it out: {beaker_url}. Error message: {str(e)}"
+            error_message = f"<!here> A RL job has died. Check it out: {beaker_url}. Error message: {str(e)}"
         else:
-            error_message = f"@here A RL job has died. Error message: {str(e)}"
+            error_message = f"<!here> A RL job has died. Error message: {str(e)}"
         utils.send_slack_alert(error_message)
         raise
     finally:
