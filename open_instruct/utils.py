@@ -67,6 +67,7 @@ from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
 
+import mason
 from open_instruct import logger_utils
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
@@ -1168,12 +1169,10 @@ def launch_ai2_evals_on_weka(
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    weka_cluster = "ai2/saturn ai2/neptune ai2/jupiter ai2/ceres"
-    gcp_cluster = "ai2/augusta"
-    cluster = weka_cluster if gs_bucket_path is None else gcp_cluster
     beaker_users = get_beaker_whoami()
 
     if gs_bucket_path is not None:
+        cluster_str = f"--cluster {' '.join(mason.GCP_CLUSTERS)}"
         if beaker_users is not None:
             gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
         else:
@@ -1193,12 +1192,12 @@ def launch_ai2_evals_on_weka(
 
         # Update path to use the GS bucket path for evaluation
         path = gs_saved_path
-
+    else:
+        cluster_str = ""
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \
---location {path} \
---cluster {cluster} \
+--location {path} {cluster_str} \
 --is_tuned \
 --workspace {eval_workspace} \
 --priority {eval_priority} \
@@ -1214,7 +1213,7 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
         command += f" --step {training_step}"
-    if cluster == weka_cluster:
+    if gs_bucket_path is None:
         command += " --evaluate_on_weka"
     if oe_eval_tasks is not None:
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
