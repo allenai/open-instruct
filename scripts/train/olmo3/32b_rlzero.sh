@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # OLMo 3 model
-MODEL_NAME_OR_PATH="gs://ai2-llm/checkpoints/stego32-longcontext-run-3/step11921+11000+10000-nooptim-hf/"
+MODEL_NAME_OR_PATH="gs://ai2-llm/checkpoints/stego32-longcontext-run-3/step11921+11000+10000-nooptim-hf"
 SHORT_MODEL_NAME="olmo3_32b_lc"
 
 DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_template_filtered 1.0 saurabh5/MATH_3000_Filtered_olmo_completions_new_template_filtered 1.0"
@@ -73,7 +73,7 @@ python mason.py \
     --apply_verifiable_reward true \
     --seed 1 \
     --local_eval_every 25 \
-    --save_freq 25 \
+    --save_freq 100 \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
