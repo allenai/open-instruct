@@ -292,6 +292,7 @@ def get_env_vars(
         "AZURE_API_KEY",
         "AZURE_API_BASE",
         "ANTHROPIC_API_KEY",
+        "SLACK_WEBHOOK",
     ]
     for useful_secret in useful_secrets:
         if f"{whoami}_{useful_secret}" in beaker_secrets:

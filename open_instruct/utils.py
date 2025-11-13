@@ -1257,6 +1257,26 @@ def wandb_url_to_run_path(url: str) -> str:
     return f"{entity}/{project}/{run_id}"
 
 
+def send_slack_alert(message: str) -> None:
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
+    if not slack_webhook_url:
+        logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
+        return
+    payload = {"text": message}
+    response = requests.post(slack_webhook_url, json=payload)
+    response.raise_for_status()
+
+
+def get_beaker_experiment_url() -> str | None:
+    try:
+        beaker_client = beaker.Beaker.from_env()
+        workload = beaker_client.workload.get(os.environ["BEAKER_WORKLOAD_ID"])
+        url = beaker_client.experiment.url(workload.experiment)
+        return url
+    except Exception:
+        return None
+
+
 # ----------------------------------------------------------------------------
 # HF utilities
 

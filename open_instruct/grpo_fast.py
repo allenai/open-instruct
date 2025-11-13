@@ -2907,6 +2907,8 @@ def run_training(
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
+    raise ValueError("I'm a fake error.")
+
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
     weight_sync_thread_future = executor.submit(
@@ -3235,6 +3237,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             model_dims,
             checkpoint_state,
         )
+    except Exception as e:
+        beaker_url = utils.get_beaker_experiment_url()
+        if beaker_url:
+            error_message = f"@here A RL job has died. Check it out: {beaker_url}. Error message: {str(e)}"
+        else:
+            error_message = f"@here A RL job has died. Error message: {str(e)}"
+        utils.send_slack_alert(error_message)
+        raise
     finally:
         cleanup_training_resources(
             stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
