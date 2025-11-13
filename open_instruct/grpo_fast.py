@@ -2907,8 +2907,6 @@ def run_training(
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
-    raise ValueError("I'm a fake error.")
-
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
     weight_sync_thread_future = executor.submit(
