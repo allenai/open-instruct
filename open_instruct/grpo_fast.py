@@ -418,6 +418,8 @@ class Args:
     """multiply the gpus used for each oe-eval task"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+    eval_workspace: str = "ai2/tulu-3-results"
+    """the workspace to launch evaluation jobs on"""
 
     # Evaluation behavior
     eval_on_step_0: bool = False
@@ -1331,6 +1333,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.stop_strings,
                 args.gs_bucket_path,
                 args.eval_priority,
+                args.eval_workspace,
                 args.oe_eval_beaker_image,
                 args.oe_eval_gpu_multiplier,
             )
