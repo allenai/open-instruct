@@ -19,6 +19,17 @@ class TestDPOCacheCompatibility(unittest.TestCase):
         shutil.rmtree(self.tmpdir)
 
     def _create_mock_dataloader(self, all_indices, world_size, rank, seed):
+        """Creates a mock dataloader that simulates distributed data loading.
+
+        Args:
+            all_indices: Complete list of dataset indices.
+            world_size: Total number of processes.
+            rank: Rank of the current process.
+            seed: Random seed for shuffling.
+
+        Returns:
+            Tuple of (mock_dataloader, shard_indices) where shard_indices are the indices for this rank.
+        """
         rng = random.Random(seed)
         shuffled_indices = list(all_indices)
         rng.shuffle(shuffled_indices)
@@ -31,6 +42,7 @@ class TestDPOCacheCompatibility(unittest.TestCase):
         return mock_dataloader, shard_indices
 
     def test_save_and_load_different_world_sizes(self, mock_logger):
+        """Tests that cache saved with world_size=4 can be loaded with world_size=2."""
         merged_cache_path = os.path.join(self.tmpdir, "model_hash.npz")
 
         all_indices = list(range(100))
@@ -86,6 +98,7 @@ class TestDPOCacheCompatibility(unittest.TestCase):
             self.assertAlmostEqual(rejected_logp.item(), all_rejected[idx].item(), places=5)
 
     def test_cache_load_with_different_seeds_matches(self, mock_logger):
+        """Tests that loading with a different random seed still retrieves correct values."""
         merged_cache_path = os.path.join(self.tmpdir, "model_hash.npz")
 
         all_indices = list(range(30))
@@ -132,6 +145,7 @@ class TestDPOCacheCompatibility(unittest.TestCase):
             self.assertAlmostEqual(rejected_logp.item(), all_rejected[idx].item(), places=5)
 
     def test_save_with_world_size_2_load_with_world_size_4(self, mock_logger):
+        """Tests that cache saved with world_size=2 can be loaded with world_size=4."""
         merged_cache_path = os.path.join(self.tmpdir, "model_hash.npz")
 
         all_indices = list(range(20))

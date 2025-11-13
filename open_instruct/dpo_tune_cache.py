@@ -427,6 +427,16 @@ def get_cache_ref_logprobs(
 
 
 def get_temp_cache_filename(merged_cache_path: str, process_rank: int, world_size: int) -> str:
+    """Generates temporary cache filename for a specific process.
+
+    Args:
+        merged_cache_path: Path to the final merged cache file.
+        process_rank: Rank of the current process.
+        world_size: Total number of processes.
+
+    Returns:
+        Filename for the temporary per-process cache file.
+    """
     base_name = os.path.splitext(os.path.basename(merged_cache_path))[0]
     return f"{base_name}_temp_process_{process_rank}_of_{world_size}.npz"
 
@@ -440,6 +450,20 @@ def save_per_process_ref_logprobs(
     rejected_logps_tensors: list,
     merged_cache_path: str,
 ) -> str:
+    """Saves reference logprobs from a single process to a temporary file.
+
+    Args:
+        cache_dir: Directory to save the temporary cache file.
+        process_rank: Rank of the current process.
+        world_size: Total number of processes.
+        indices: List of dataset indices processed by this process.
+        chosen_logps_tensors: List of tensors containing chosen logprobs.
+        rejected_logps_tensors: List of tensors containing rejected logprobs.
+        merged_cache_path: Path to the final merged cache file.
+
+    Returns:
+        Path to the saved temporary cache file.
+    """
     os.makedirs(cache_dir, exist_ok=True)
     temp_filename = get_temp_cache_filename(merged_cache_path, process_rank, world_size)
     temp_path = os.path.join(cache_dir, temp_filename)
@@ -454,6 +478,13 @@ def save_per_process_ref_logprobs(
 
 
 def merge_ref_logprobs_from_processes(cache_dir: str, world_size: int, merged_cache_path: str) -> None:
+    """Merges reference logprobs from all processes into a single cache file.
+
+    Args:
+        cache_dir: Directory containing the temporary per-process cache files.
+        world_size: Total number of processes.
+        merged_cache_path: Path to save the final merged cache file.
+    """
     all_indices = []
     all_chosen_logps = []
     all_rejected_logps = []
@@ -500,6 +531,17 @@ def merge_ref_logprobs_from_processes(cache_dir: str, world_size: int, merged_ca
 def get_ref_logprobs_cache_path(
     cache_dir: str, model_name_or_path: str, dataset_config_hash: str, max_train_samples: int | None = None
 ) -> str:
+    """Constructs the cache file path for reference logprobs.
+
+    Args:
+        cache_dir: Directory to store the cache file.
+        model_name_or_path: Name or path of the model.
+        dataset_config_hash: Hash of the dataset configuration.
+        max_train_samples: Maximum number of training samples, if limited.
+
+    Returns:
+        Full path to the cache file.
+    """
     model_name_sanitized = re.sub(r"[^\w\-_]", "_", model_name_or_path)
     samples_str = f"_samples{max_train_samples}" if max_train_samples is not None else ""
     cache_filename = f"{model_name_sanitized}_{dataset_config_hash}{samples_str}.npz"
@@ -509,6 +551,16 @@ def get_ref_logprobs_cache_path(
 def load_ref_logprobs_from_disk(
     cache_path: str, train_dataloader: torch.utils.data.DataLoader, accelerator: Accelerator
 ) -> tuple[list | None, list | None]:
+    """Loads cached reference logprobs from disk and reorders them for the dataloader.
+
+    Args:
+        cache_path: Path to the cached reference logprobs file.
+        train_dataloader: DataLoader used for training.
+        accelerator: Accelerator instance for distributed training.
+
+    Returns:
+        Tuple of (chosen_logps, rejected_logps) lists, or (None, None) if cache doesn't exist.
+    """
     if not os.path.exists(cache_path):
         return None, None
 
@@ -551,6 +603,20 @@ def load_ref_logprobs_from_disk(
 def maybe_load_reference_logprobs_from_disk(
     args: FlatArguments, tc: TokenizerConfig, accelerator: Accelerator, train_dataloader: torch.utils.data.DataLoader
 ) -> tuple[list | None, list | None, str | None]:
+    """Attempts to load cached reference logprobs from disk if caching is enabled.
+
+    Args:
+        args: Training arguments.
+        tc: Tokenizer configuration.
+        accelerator: Accelerator instance for distributed training.
+        train_dataloader: DataLoader used for training.
+
+    Returns:
+        Tuple of (chosen_logps, rejected_logps, cache_location), or (None, None, None) if caching disabled.
+
+    Raises:
+        ValueError: If num_train_epochs is not 1 when caching is enabled.
+    """
     if args.num_train_epochs != 1:
         raise ValueError("Only one epoch is supported for reference logprobs caching.")
     if args.ref_logprobs_cache_dir is None:
