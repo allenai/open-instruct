@@ -1753,7 +1753,7 @@ def accumulate_inference_batches(
         masks=combined_masks,
         request_info=combined_request_info,
         dataset_index=None,
-        epoch_number=results[0].epoch_number,
+        epoch_number=results[0].epoch_number if results else None,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
     )
