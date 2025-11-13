@@ -1268,7 +1268,12 @@ def send_slack_alert(message: str) -> None:
         return
     payload = {"text": message}
     response = requests.post(slack_webhook_url, json=payload)
-    response.raise_for_status()
+    if not response.ok:
+        logger.warning(
+            "Failed to send Slack alert with status %s: %s",
+            response.status_code,
+            response.text,
+        )
 
 
 def get_beaker_experiment_url() -> str | None:
