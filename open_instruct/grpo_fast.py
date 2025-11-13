@@ -868,7 +868,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model.train()
 
         if args.load_ref_policy:
-            ds_config = get_eval_ds_config(
+            ds_config, self.ref_policy_hf_ds_config = get_eval_ds_config(
                 offload=False,
                 # inference model only has stage 3 (sharding) or stage 0 (no sharding)
                 # stage 2 is optimizer sharding which doesn't apply to inference
@@ -890,6 +890,7 @@ class PolicyTrainerRayProcess(RayProcess):
             )
         else:
             self.ref_policy = None
+            self.ref_policy_hf_ds_config = None
             logger.info(f"{self.rank=}: Skipping reference policy loading (load_ref_policy=False)")
         self.local_metrics = utils.MetricsTracker(device=self.device)
         return optimization_steps_done
@@ -1155,16 +1156,16 @@ class PolicyTrainerRayProcess(RayProcess):
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            pg_clipfrac_stats = torch.zeros(len(collated_query_responses))
-            pg_loss_stats = torch.zeros(len(collated_query_responses))
-            loss_stats = torch.zeros(len(collated_query_responses))
-            ratio_stats = torch.zeros(len(collated_query_responses))
-            entropy_stats = torch.zeros(len(collated_query_responses))
             kl1_stats = torch.zeros(len(collated_query_responses))
             kl2_stats = torch.zeros(len(collated_query_responses))
             kl3_stats = torch.zeros(len(collated_query_responses))
             kl4_stats = torch.zeros(len(collated_query_responses))
             kl_loss_stats = torch.zeros(len(collated_query_responses))
+            pg_clipfrac_stats = torch.zeros(len(collated_query_responses))
+            pg_loss_stats = torch.zeros(len(collated_query_responses))
+            loss_stats = torch.zeros(len(collated_query_responses))
+            ratio_stats = torch.zeros(len(collated_query_responses))
+            entropy_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]

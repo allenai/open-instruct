@@ -1394,7 +1394,7 @@ def get_train_ds_config(
 
 def get_eval_ds_config(
     offload: bool, stage: int = 0, bf16: bool = True, per_device_train_batch_size: int = 1
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], HfDeepSpeedConfig | None]:
     """Creates a DeepSpeed configuration for evaluation.
 
     Args:
@@ -1404,7 +1404,7 @@ def get_eval_ds_config(
         per_device_train_batch_size: Batch size per GPU.
 
     Returns:
-        Dictionary containing DeepSpeed configuration.
+        Tuple containing a Dictionary containing DeepSpeed configuration, and the actual HfDeepSpeedConfig object if stage 3 is used, else None. We need to return the HfDeepSpeedConfig object so it doesn't go out of scope as HF accelerate uses it internally via a global weakref.
 
     Raises:
         ValueError: If stage is not 0 or 3.
@@ -1429,8 +1429,11 @@ def get_eval_ds_config(
     ds_config["gradient_accumulation_steps"] = 1
     if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
         # This is needed as it apparently has mysterious side effects.
-        logger.info(f"DeepSpeed config: {HfDeepSpeedConfig(ds_config)}")
-    return ds_config
+        hf_config = HfDeepSpeedConfig(ds_config)
+        logger.info(f"DeepSpeed config: {hf_config}")
+    else:
+        hf_config = None
+    return ds_config, hf_config
 
 
 def get_optimizer_grouped_parameters(

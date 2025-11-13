@@ -559,7 +559,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.value_model.train()
 
-        ds_config = get_eval_ds_config(
+        ds_config, self.ref_policy_hf_ds_config = get_eval_ds_config(
             offload=False,
             stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
             bf16=True,

@@ -191,8 +191,7 @@ def load_ref_policy(
         else:
             # If a vanilla HF model.
             ref_policy.load_state_dict(state_dict)
-        logger_utils.setup_logger(__name__).info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
-
+        logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
     return ref_policy
 
 
