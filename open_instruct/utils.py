@@ -2430,3 +2430,26 @@ def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, An
             # Fallback: keep the latest value if aggregation strategy is unclear.
             combined[key] = records[-1]
     return combined
+
+
+def send_slack_alert(message: str) -> None:
+    """Sends the provided message to a Slack webhook (if the env var SLACK_WEBHOOK is set)."""
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
+    if not slack_webhook_url:
+        logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
+        return
+    payload = {"text": message}
+    response = requests.post(slack_webhook_url, json=payload)
+    if not response.ok:
+        logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
+
+
+def get_beaker_experiment_url() -> str | None:
+    """If the env var BEAKER_WORKLOAD_ID is set, gets the current experiment URL."""
+    try:
+        beaker_client = beaker.Beaker.from_env()
+        workload = beaker_client.workload.get(os.environ["BEAKER_WORKLOAD_ID"])
+        url = beaker_client.experiment.url(workload.experiment)
+        return url
+    except Exception:
+        return None
