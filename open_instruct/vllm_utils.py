@@ -115,9 +115,6 @@ async def process_request_async(
     sampling_params: vllm.SamplingParams,
 ):
     """Process a single async request with tool support, awaiting tools inline."""
-    logger.info(
-        f"[LLMRayActor] process_request_async: starting sub_request_id={sub_request_id}, base_request_id={base_request_id}"
-    )
     accumulated_tokens = []
     accumulated_logprobs = []
     masks = []
@@ -136,9 +133,6 @@ async def process_request_async(
 
     while True:
         iteration_request_id = f"{sub_request_id}_iter{iteration}"
-        logger.info(
-            f"[LLMRayActor] process_request_async: iteration {iteration} for sub_request_id={sub_request_id}, calling llm_engine.generate"
-        )
         outputs = [
             o
             async for o in actor.llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
@@ -148,9 +142,6 @@ async def process_request_async(
         request_output = outputs[0]
         iteration += 1
         output = request_output.outputs[0]
-        logger.info(
-            f"[LLMRayActor] process_request_async: iteration {iteration - 1} completed for sub_request_id={sub_request_id}, generated {len(output.token_ids)} tokens"
-        )
 
         if final_prompt_token_ids is None:
             final_prompt_token_ids = request_output.prompt_token_ids
@@ -230,9 +221,6 @@ async def process_request_async(
 
     actor.active_tasks.pop(sub_request_id, None)
 
-    logger.info(
-        f"[LLMRayActor] process_request_async: completed sub_request_id={sub_request_id}, putting result to completion_queue"
-    )
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
@@ -248,7 +236,6 @@ async def process_request_async(
             "tools": actor.tools,
         }
     )
-    logger.info(f"[LLMRayActor] process_request_async: finished sub_request_id={sub_request_id}")
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -477,31 +464,17 @@ def init_process_group(
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
-    logger.info("[LLMRayActor] _prefetch_worker thread started")
     while True:
-        should_stop = actor._should_stop()
-        active_tasks_count = len(actor.active_tasks)
-        if should_stop or active_tasks_count >= actor.inference_batch_size:
-            if should_stop:
-                logger.info("[LLMRayActor] _prefetch_worker: should_stop=True, sleeping")
-            else:
-                logger.info(
-                    f"[LLMRayActor] _prefetch_worker: active_tasks={active_tasks_count} >= batch_size={actor.inference_batch_size}, sleeping"
-                )
+        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        logger.info("[LLMRayActor] _prefetch_worker: waiting for request from queue")
         request = actor.prompt_queue.get()
-        logger.info("[LLMRayActor] _prefetch_worker: received request, request_id will be generated in add_request")
         add_request(actor, request)
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
-    logger.info(
-        f"[LLMRayActor] add_request: request_id={request_id}, prompt_len={len(request.prompt)}, n={request.generation_config.n}"
-    )
 
     sampling_params = request.generation_config.clone()
     sampling_params.n = 1  # Use n=1 for tool processing
@@ -527,10 +500,6 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params), actor.loop
         )
-
-    logger.info(
-        f"[LLMRayActor] add_request: submitted {request.generation_config.n} sub-requests for request_id={request_id}"
-    )
 
 
 class LLMRayActor:
@@ -654,9 +623,6 @@ class LLMRayActor:
     def _accumulate_sub_request(self, sub_request: dict) -> None:
         base_request_id = sub_request["base_request_id"]
         expected_n = sub_request["expected_n"]
-        logger.info(
-            f"[LLMRayActor] _accumulate_sub_request: received sub-request for base_request_id={base_request_id}"
-        )
 
         if base_request_id not in self.request_outputs:
             self.request_outputs[base_request_id] = {
@@ -668,14 +634,10 @@ class LLMRayActor:
         self.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
 
         is_complete = len(self.request_outputs[base_request_id]["outputs"]) == expected_n
-        logger.info(
-            f"[LLMRayActor] _accumulate_sub_request: base_request_id={base_request_id}, accumulated {len(self.request_outputs[base_request_id]['outputs'])}/{expected_n}, is_complete={is_complete}"
-        )
         if is_complete:
             self._finalize_completed_request(base_request_id)
 
     def _finalize_completed_request(self, base_request_id: str) -> None:
-        logger.info(f"[LLMRayActor] _finalize_completed_request: finalizing base_request_id={base_request_id}")
         outputs = self.request_outputs[base_request_id]["outputs"]
         ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
 
@@ -693,16 +655,10 @@ class LLMRayActor:
 
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
-        logger.info(
-            f"[LLMRayActor] _finalize_completed_request: put result to {'eval_results_queue' if is_eval else 'results_queue'} for base_request_id={base_request_id}"
-        )
 
     def process_from_queue(self) -> None:
-        logger.info("[LLMRayActor] process_from_queue: thread started, waiting for completions")
         while True:
-            logger.info("[LLMRayActor] process_from_queue: waiting for sub-request from completion_queue")
             sub_request = self.completion_queue.get()
-            logger.info("[LLMRayActor] process_from_queue: received sub-request from completion_queue")
             self._accumulate_sub_request(sub_request)
 
     def init_process_group(
