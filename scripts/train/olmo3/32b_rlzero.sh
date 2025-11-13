@@ -19,6 +19,7 @@ EXP_NAME="olmo3-32b_rlzero_${SHORT_MODEL_NAME}"
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+shift  # Remove the image name from the argument list
 
 cluster=ai2/augusta
 
