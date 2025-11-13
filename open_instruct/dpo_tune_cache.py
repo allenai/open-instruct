@@ -44,7 +44,7 @@ import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
-from accelerate.utils import InitProcessGroupKwargs, set_seed
+from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
@@ -337,6 +337,23 @@ class FlatArguments:
         metadata={"help": "Whether to use packing/padding-free collation via DataCollatorWithFlatteningDPO"},
     )
 
+    zero_stage: int | None = field(
+        default=None,
+        metadata={
+            "help": "DeepSpeed ZeRO optimization stage (0, 1, 2, or 3). If None, DeepSpeed config must be provided via accelerate launch."
+        },
+    )
+    offload_optimizer: bool = field(
+        default=False,
+        metadata={"help": "Offload optimizer states to CPU to save GPU memory. Only used if zero_stage is set."},
+    )
+    offload_param: bool = field(
+        default=False, metadata={"help": "Offload parameters to CPU to save GPU memory. Only used with zero_stage 3."}
+    )
+    zero_hpz_partition_size: int = field(
+        default=8, metadata={"help": "Hierarchical partition size for ZeRO stage 3. Only used with zero_stage 3."}
+    )
+
     # Ai2 specific settings
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
@@ -375,6 +392,53 @@ class FlatArguments:
                 # Convert str values to types if applicable
                 loaded_dict = _convert_str_dict(loaded_dict)
                 setattr(self, dict_feld, loaded_dict)
+
+        if self.zero_stage is not None:
+            if self.zero_stage not in [0, 1, 2, 3]:
+                raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
+            if self.offload_param and self.zero_stage != 3:
+                raise ValueError("offload_param can only be used with zero_stage 3")
+
+
+def build_deepspeed_config(
+    zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, zero_hpz_partition_size: int = 8
+) -> dict:
+    config = {
+        "bf16": {"enabled": "auto"},
+        "zero_optimization": {
+            "stage": zero_stage,
+            "overlap_comm": True,
+            "contiguous_gradients": True,
+            "reduce_bucket_size": "auto",
+        },
+        "gradient_accumulation_steps": "auto",
+        "gradient_clipping": "auto",
+        "steps_per_print": 1e5,
+        "train_batch_size": "auto",
+        "train_micro_batch_size_per_gpu": "auto",
+        "wall_clock_breakdown": False,
+    }
+
+    if zero_stage == 3:
+        config["zero_optimization"].update(
+            {
+                "sub_group_size": 1e9,
+                "stage3_prefetch_bucket_size": "auto",
+                "stage3_param_persistence_threshold": "auto",
+                "stage3_max_live_parameters": 1e9,
+                "stage3_max_reuse_distance": 1e9,
+                "stage3_gather_16bit_weights_on_model_save": True,
+                "zero_hpz_partition_size": zero_hpz_partition_size,
+            }
+        )
+
+    if offload_optimizer:
+        config["zero_optimization"]["offload_optimizer"] = {"device": "cpu", "pin_memory": True}
+
+    if offload_param:
+        config["zero_optimization"]["offload_param"] = {"device": "cpu", "pin_memory": True}
+
+    return config
 
 
 def get_cache_ref_logprobs(
@@ -431,6 +495,16 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # if you get timeouts (e.g. due to long tokenization) increase this.
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
     dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
+    deepspeed_plugin = None
+    if args.zero_stage is not None:
+        deepspeed_config = build_deepspeed_config(
+            zero_stage=args.zero_stage,
+            offload_optimizer=args.offload_optimizer,
+            offload_param=args.offload_param,
+            zero_hpz_partition_size=args.zero_hpz_partition_size,
+        )
+        deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=deepspeed_config)
+
     accelerator = Accelerator(
         dataloader_config=dataloader_config,
         **accelerator_log_kwargs,
@@ -438,6 +512,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         gradient_accumulation_plugin=GradientAccumulationPlugin(
             num_steps=args.gradient_accumulation_steps, sync_each_batch=args.sync_each_batch
         ),
+        deepspeed_plugin=deepspeed_plugin,
     )
 
     # ------------------------------------------------------------
