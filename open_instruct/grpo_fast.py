@@ -1804,7 +1804,6 @@ def accumulate_inference_batches(
             logging.debug(
                 f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
             )
-
             continue
         else:
             num_prompts_sampled += 1
