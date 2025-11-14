@@ -110,9 +110,9 @@ class ActorManager:
                 "queues": queues_data,
                 "token_stats": self.get_token_stats(),
                 "timing_stats": self.get_timing_stats(),
-                "kv_cache_max_concurrency": self._kv_cache_max_concurrency,
-                # This is less confusing to users.
-                "inference_batch_size": self._args.inference_batch_size * self._args.num_samples_per_prompt_rollout,
+                "concurrency_per_engine": self._kv_cache_max_concurrency,
+                "total_concurrency": self._kv_cache_max_concurrency * self._args.vllm_num_engines,
+                "batch_size": self._args.num_unique_prompts_rollout * self._args.num_samples_per_prompt_rollout,
             }
 
         def run_server():

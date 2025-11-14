@@ -246,11 +246,6 @@ class TestGrpoFastBase(unittest.TestCase):
         mock_generation_config = MagicMock()
         mock_generation_config.n = 4
 
-        # Create mock args with inference_batch_size
-        mock_args = MagicMock()
-        # Calculate inference_batch_size based on number of queries and engines
-        mock_args.inference_batch_size = max(1, len(queries) // num_engines)
-
         grpo_fast.split_and_insert_batch(
             batch, 0, training_step, pending_queries_map, param_prompt_Q, mock_generation_config, False
         )
@@ -743,8 +738,6 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
     def test_more_engines_than_queries(self):
         """Test that split_and_insert_batch handles gracefully when engines > queries."""
-        # More engines than queries - should handle gracefully with single-prompt batches
-        num_engines = 8
         num_queries = 4
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
@@ -766,10 +759,6 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
-
-        # Create mock args with inference_batch_size
-        mock_args = MagicMock()
-        mock_args.inference_batch_size = max(1, num_queries // num_engines)
 
         grpo_fast.split_and_insert_batch(
             batch,
