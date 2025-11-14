@@ -8,7 +8,7 @@ DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_templat
 
 # math evals
 # EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
-EVALS="minerva_math_500::hamish_zs_reasoning_dapo,aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo,omega_500:0-shot-chat_dapo,gsm8k::zs_cot_latex_dapo"
+EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo,minerva_math_500::hamish_zs_reasoning_dapo"
 
 # AIME 2024, 2025 local evals
 LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
@@ -17,6 +17,7 @@ LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
 
 EXP_NAME="olmo3-32b_rlzero_${SHORT_MODEL_NAME}"
 
+#BEAKER_IMAGE="${1:nathanl/open_instruct_auto}"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift  # Remove the image name from the argument list
@@ -31,23 +32,24 @@ python mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 8 \
+    --num_nodes 10 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
-    --no_auto_dataset_cache \
     --budget ai2/oe-adapt \
-    -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+    -- \
+source configs/beaker_configs/ray_node_setup.sh \&\& \
+python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
-    --async_steps 4 \
+    --async_steps 8 \
     --inflight_updates \
-    --no_resampling_pass_rate 0.9 \
+    --no_resampling_pass_rate 0.875 \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --active_sampling \
     --num_samples_per_prompt_rollout 8 \
-    --num_unique_prompts_rollout 64 \
+    --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -66,15 +68,15 @@ python mason.py \
     --total_episodes 12800 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 8 8 8 \
-    --vllm_num_engines 8 \
+    --vllm_num_engines 12 \
     --gather_whole_model False \
     --vllm_tensor_parallel_size 4 \
-    --inference_batch_size 160 \
+    --inference_batch_size 125 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
     --local_eval_every 25 \
-    --save_freq 100 \
+    --save_freq 25 \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
@@ -92,3 +94,5 @@ python mason.py \
     --deepspeed_zpg 1 \
     --oe_eval_tasks $EVALS \
     --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 
+
+# deepspeed_zpg could also be num_GPUs of the trainer, acheives same effect (allow model to be sharded across all trainer GPUs) 
