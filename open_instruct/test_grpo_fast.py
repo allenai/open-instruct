@@ -793,7 +793,6 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
     def test_more_engines_than_queries(self):
         """Test that split_and_insert_batch handles gracefully when engines > queries."""
-        # More engines than queries - should handle gracefully with single-prompt batches
         num_engines = 8
         num_queries = 4
 
