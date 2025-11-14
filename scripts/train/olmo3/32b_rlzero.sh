@@ -8,7 +8,7 @@ DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_templat
 
 # math evals
 # EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
-EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
+EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo,minerva_math_500::hamish_zs_reasoning_dapo"
 
 # AIME 2024, 2025 local evals
 LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
