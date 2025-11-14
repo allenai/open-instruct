@@ -1955,7 +1955,22 @@ def data_preparation_thread(
                 return
 
             if result is None:
-                logger.info("[Data Preparation Thread] Empty batch (all prompts filtered), skipping to next iteration")
+                logger.info(
+                    "[Data Preparation Thread] Empty batch (all prompts filtered), putting marker to maintain sync"
+                )
+                packed_sequences_Q.put(
+                    {
+                        "packed_sequences": None,
+                        "collated_data": None,
+                        "metrics": {},
+                        "responses_count": 0,
+                        "num_new_tokens": 0,
+                        "B": 0,
+                        "prompt_lengths": [],
+                        "response_lengths": [],
+                        "num_filtered_prompts": args.num_unique_prompts_rollout,
+                    }
+                )
                 continue
 
         getting_response_time = timer.duration
