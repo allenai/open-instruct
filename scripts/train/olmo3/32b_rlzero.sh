@@ -22,13 +22,13 @@ BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift  # Remove the image name from the argument list
 
-cluster=ai2/augusta
+cluster=ai2/jupiter
 
 python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/olmo-instruct \
-    --priority urgent \
+    --priority high \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
@@ -67,8 +67,8 @@ python open_instruct/grpo_fast.py \
     --temperature 1.0 \
     --total_episodes 12800 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 8 8 8 8 \
-    --vllm_num_engines 12 \
+    --num_learners_per_node 8 8 8 \
+    --vllm_num_engines 14 \
     --gather_whole_model False \
     --vllm_tensor_parallel_size 4 \
     --inference_batch_size 125 \
@@ -81,8 +81,7 @@ python open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --with_tracking \
     --output_dir /output/olmo3-32b-rlzero/checkpoints \
-    --checkpoint_state_dir /output/olmo3-32b-rlzero/checkpoints \
-    --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-32b_rlzero/ \
+    --checkpoint_state_dir /weka/oe-adapt-default/saurabhs/repos/open-instruct-war/RL0_checkpoints/32B_math \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions True \
