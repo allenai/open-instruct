@@ -1236,25 +1236,11 @@ class PolicyTrainerRayProcess(RayProcess):
                             ).float()
 
             with torch.no_grad():
-<<<<<<< HEAD
-                self.local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
-                self.local_metrics.add("loss/total_avg", loss_stats.mean())
-                self.local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
-                self.local_metrics.add("val/ratio", ratio_stats.mean())
-                self.local_metrics.add("val/ratio_var", ratio_stats.var())
-=======
                 self.local_metrics["loss/policy_avg"] = pg_loss_stats.mean()
                 self.local_metrics["loss/total_avg"] = loss_stats.mean()
                 self.local_metrics["policy/clipfrac_avg"] = pg_clipfrac_stats.mean()
                 self.local_metrics["val/ratio"] = ratio_stats.mean()
                 self.local_metrics["val/ratio_var"] = ratio_stats.var()
-
-                self.local_metrics["objective/kl_avg"] = kl1_stats.mean()
-                self.local_metrics["objective/kl2_avg"] = kl2_stats.mean()
-                self.local_metrics["objective/kl3_avg"] = kl3_stats.mean()
-                self.local_metrics["objective/kl4_avg"] = kl4_stats.mean()
-                self.local_metrics["loss/kl_avg"] = kl_loss_stats.mean()
->>>>>>> 733bf925d31ed2bac05dfc73b74ba5d71287b1d8
                 if args.record_entropy:
                     self.local_metrics["policy/entropy_avg"] = entropy_stats.mean()
                 self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
