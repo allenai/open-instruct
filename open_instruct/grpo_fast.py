@@ -1661,6 +1661,7 @@ def accumulate_inference_batches(
     timeout: float | None = None,
     active_sampling: bool = False,
     filter_zero_std_samples: bool = False,
+    replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: ShufflingIterator | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
@@ -1677,6 +1678,7 @@ def accumulate_inference_batches(
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
         active_sampling: Whether to continue sampling until we have sampled num_prompts prompts with non-zero std
         filter_zero_std_samples: Whether to filter samples with zero reward std
+        replenish_prompts: Add a prompt back onto the prompt_Q after receiving a finished result
         no_resampling_pass_rate: Optional rate at which to note samples solved at greater than this rate
             and exclude them from further sampling
         iter_dataloader: Optional, used for no_resampling_pass_rate
@@ -1692,9 +1694,9 @@ def accumulate_inference_batches(
     if no_resampling_pass_rate is not None:
         assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
 
-    if active_sampling:
+    if replenish_prompts:
         assert param_prompt_Q is not None and iter_dataloader is not None, (
-            "active_sampling requires param_prompt_Q and iter_dataloader"
+            "replenish_prompts requires param_prompt_Q and iter_dataloader"
         )
 
     results = []
@@ -1734,7 +1736,7 @@ def accumulate_inference_batches(
         query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
 
         # Replenish generation queue with new prompt
-        if active_sampling:
+        if replenish_prompts:
             dataset_index = next(iter_dataloader)
             add_prompt_to_generator(
                 dataset[dataset_index],
@@ -1958,6 +1960,7 @@ def data_preparation_thread(
                 actor_manager=actor_manager,
                 active_sampling=args.active_sampling,
                 filter_zero_std_samples=args.filter_zero_std_samples,
+                replenish_prompts=True,
                 no_resampling_pass_rate=args.no_resampling_pass_rate,
                 iter_dataloader=iter_dataloader,
                 param_prompt_Q=param_prompt_Q,
@@ -2662,6 +2665,7 @@ def maybe_evaluate(
             timeout=timeout,
             active_sampling=False,
             filter_zero_std_samples=False,
+            replenish_prompts=False,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
