@@ -2990,8 +2990,12 @@ def run_training(
             enable=False,
         )
 
-    # Send initial data to ensure we have a N-step offset.
-    for _ in range(args.async_steps):
+    total_training_steps_remaining = max(0, args.num_training_steps - resume_training_step + 1)
+    prefill_steps = min(args.async_steps, total_training_steps_remaining)
+    train_batches_inserted = 0
+
+    # Send initial data to ensure we have up to a N-step offset (or whatever remains).
+    for _ in range(prefill_steps):
         dataset_indices = next(iter_dataloader)
         batch = next_batch(dataset_indices, train_dataset)
         split_and_insert_batch(
@@ -3003,6 +3007,7 @@ def run_training(
             generation_configs["train"],
             is_eval=False,
         )
+        train_batches_inserted += 1
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
         logger.info(f"Restored num_total_tokens: {num_total_tokens}")
@@ -3041,10 +3046,15 @@ def run_training(
             num_filtered_prompts,
         ) = load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
 
-        if training_step < args.num_training_steps:
-            num_prompts_to_refill += args.num_unique_prompts_rollout + num_filtered_prompts
+        if training_step < args.num_training_steps and train_batches_inserted < total_training_steps_remaining:
+            num_prompts_to_refill += args.num_unique_prompts_rollout
+            if args.active_sampling:
+                num_prompts_to_refill += num_filtered_prompts
 
-            while num_prompts_to_refill >= args.num_unique_prompts_rollout:
+            while (
+                num_prompts_to_refill >= args.num_unique_prompts_rollout
+                and train_batches_inserted < total_training_steps_remaining
+            ):
                 batch = next_batch(next(iter_dataloader), train_dataset)
                 split_and_insert_batch(
                     batch,
@@ -3055,7 +3065,10 @@ def run_training(
                     generation_configs["train"],
                     is_eval=False,
                 )
+                train_batches_inserted += 1
                 num_prompts_to_refill -= args.num_unique_prompts_rollout
+        else:
+            num_prompts_to_refill = 0
 
         if (
             training_step % args.local_eval_every == 0
