@@ -29,7 +29,7 @@ python mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 12 \
+    --num_nodes 8 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
@@ -45,7 +45,7 @@ python mason.py \
     --advantage_normalization_type centered \
     --active_sampling \
     --num_samples_per_prompt_rollout 8 \
-    --num_unique_prompts_rollout 32 \
+    --num_unique_prompts_rollout 64 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -64,7 +64,7 @@ python mason.py \
     --total_episodes 12800 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 8 8 8 \
-    --vllm_num_engines 16 \
+    --vllm_num_engines 8 \
     --gather_whole_model False \
     --vllm_tensor_parallel_size 4 \
     --inference_batch_size 160 \
@@ -92,4 +92,4 @@ python mason.py \
     --vllm_enforce_eager \
     --deepspeed_zpg 1 \
     --oe_eval_tasks $EVALS \
-    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo3_auto $@ 
+    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 

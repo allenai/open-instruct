@@ -47,7 +47,7 @@ python mason.py \
     --advantage_normalization_type centered \
     --active_sampling \
     --num_samples_per_prompt_rollout 8 \
-    --num_unique_prompts_rollout 32 \
+    --num_unique_prompts_rollout 64 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -91,4 +91,4 @@ python mason.py \
     --vllm_enforce_eager \
     --deepspeed_zpg 1 \
     --oe_eval_tasks $EVALS \
-    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo3_auto $@ 
+    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 
