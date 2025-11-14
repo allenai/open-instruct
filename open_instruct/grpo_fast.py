@@ -66,6 +66,7 @@ import torch.utils
 import torch.utils.data
 import vllm
 import wandb
+from datasets import Dataset
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
@@ -539,20 +540,6 @@ class Args:
             )
 
 
-def next_batch(dataset_indices: list[int], dataset: datasets.Dataset) -> Batch:
-    """Extract next batch of data based on indices."""
-    data_next = dataset[dataset_indices]
-    return Batch(
-        queries=data_next[INPUT_IDS_PROMPT_KEY],
-        ground_truths=data_next[GROUND_TRUTHS_KEY],
-        datasets=data_next[VERIFIER_SOURCE_KEY],
-        raw_queries=data_next[RAW_PROMPT_KEY],
-        indices=dataset_indices,
-        decoded_responses=None,
-        scores=None,
-    )
-
-
 def masked_mean(
     values: torch.Tensor, mask: torch.Tensor, axis: int | None = None, denominator: float | None = None
 ) -> torch.Tensor:
@@ -673,7 +660,8 @@ class ShufflingIterator:
     def __iter__(self) -> Iterator[list[int]]:
         return self
 
-    def __next__(self) -> list[int]:
+    def __next__(self) -> list[int] | int:
+        """Return a list of next indices or a single index if batch size is 1"""
         if self.index >= self.effective_size:
             self.index = 0
             self._update_effective_size()
@@ -682,6 +670,8 @@ class ShufflingIterator:
 
         end_index = self.index + self.batch_size
         batch = self.data[self.index : end_index].tolist()
+        if self.batch_size == 1:
+            batch = batch[0]
         self.index = end_index
 
         return batch
@@ -1672,8 +1662,12 @@ def accumulate_inference_batches(
     timeout: float | None = None,
     active_sampling: bool = False,
     filter_zero_std_samples: bool = False,
+    replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: ShufflingIterator | None = None,
+    prompt_dataset: Dataset = None,
+    param_prompt_Q: ray_queue.Queue | None = None,
+    training_step: int = None,
 ) -> tuple[GenerationResult, Batch, dict, BatchStatistics]:
     """Accumulate multiple inference results into a single training batch.
 
@@ -1686,9 +1680,11 @@ def accumulate_inference_batches(
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
         active_sampling: Whether to continue sampling until we have sampled num_prompts prompts with non-zero std
         filter_zero_std_samples: Whether to filter samples with zero reward std
+        replenish_prompts: Add a prompt back onto the prompt_Q after receiving a finished result
         no_resampling_pass_rate: Optional rate at which to note samples solved at greater than this rate
             and exclude them from further sampling
         iter_dataloader: Optional, used for no_resampling_pass_rate
+        param_prompt_Q: Queue containing prompts to send to generator, used to replenish used prompts
 
     Raises:
         queue.Empty: If timeout is specified and no data is available within timeout.
@@ -1697,6 +1693,14 @@ def accumulate_inference_batches(
         Tuple of (combined_result, Batch with queries, ground_truths, datasets, prompt_lengths, response_lengths)
         or (ShutdownSentinel, None, None, None) if shutdown signal received
     """
+    if no_resampling_pass_rate is not None:
+        assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
+
+    if replenish_prompts:
+        assert param_prompt_Q is not None and iter_dataloader is not None and prompt_dataset is not None, (
+            "replenish_prompts requires param_prompt_Q and iter_dataloader and prompt_dataset"
+        )
+
     results = []
     all_queries = []
     all_ground_truths = []
@@ -1731,7 +1735,21 @@ def accumulate_inference_batches(
             f"Dataset index: {result.dataset_index}, Epoch: {result.epoch_number}"
         )
 
-        query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
+        query, ground_truth, dataset_name, raw_query = pending_queries_map.pop(result.dataset_index)
+
+        # Replenish generation queue with new prompt
+        if replenish_prompts:
+            dataset_index = next(iter_dataloader)
+            add_prompt_to_generator(
+                prompt_dataset[dataset_index],
+                dataset_index,
+                iter_dataloader.epoch_number,
+                training_step,
+                pending_queries_map,
+                param_prompt_Q,
+                generation_config,
+                is_eval=False,
+            )
 
         # TODO(finbarrtimbers): Move this to LLMRayActor.
         for i in range(len(result.finish_reasons)):
@@ -1745,7 +1763,7 @@ def accumulate_inference_batches(
         # TODO(finbarrtimbers): Make PendingQueriesMap.pop return a Batch, and add a Batch.repeat method.
         k_queries = repeat_each([query], generation_config.n)
         k_ground_truths = repeat_each([ground_truth], generation_config.n)
-        k_datasets = repeat_each([dataset], generation_config.n)
+        k_datasets = repeat_each([dataset_name], generation_config.n)
         k_raw_queries = repeat_each([raw_query], generation_config.n)
 
         scores, reward_metrics = asyncio.run(
@@ -1916,6 +1934,7 @@ def accumulate_inference_batches(
 def data_preparation_thread(
     reward_fn: Callable,
     inference_results_Q: ray_queue.Queue,  # Ray queue
+    param_prompt_Q: ray_queue.Queue,
     packed_sequences_Q: Queue,
     pending_queries_map: dict,
     args: Args,
@@ -1924,6 +1943,7 @@ def data_preparation_thread(
     generation_config,
     resume_training_step: int,
     iter_dataloader: ShufflingIterator,
+    train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
 ):
@@ -1942,8 +1962,12 @@ def data_preparation_thread(
                 actor_manager=actor_manager,
                 active_sampling=args.active_sampling,
                 filter_zero_std_samples=args.filter_zero_std_samples,
+                replenish_prompts=True,
                 no_resampling_pass_rate=args.no_resampling_pass_rate,
                 iter_dataloader=iter_dataloader,
+                prompt_dataset=train_dataset,
+                param_prompt_Q=param_prompt_Q,
+                training_step=training_step,
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -2366,8 +2390,9 @@ def create_generation_configs(args: Args):
     return {"train": generation_config, "eval": eval_generation_config}
 
 
-def split_and_insert_batch(
-    batch: Batch,
+def add_prompt_to_generator(
+    example: dict[str, Any],
+    example_index: int,
     epoch_number: int,
     training_step: int,
     pending_queries_map: PendingQueriesMap,
@@ -2376,20 +2401,22 @@ def split_and_insert_batch(
     is_eval: bool,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    for idx, query, ground_truth, dataset, raw_query in zip(
-        batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries
-    ):
-        pending_queries_map.insert(idx, query, ground_truth, dataset, raw_query)
-        param_prompt_Q.put(
-            PromptRequest(
-                prompt=query,
-                generation_config=generation_config,
-                epoch_number=epoch_number,
-                training_step=training_step,
-                dataset_index=idx,
-                is_eval=is_eval,
-            )
+    query = example[INPUT_IDS_PROMPT_KEY]
+    ground_truth = example[GROUND_TRUTHS_KEY]
+    dataset_name = example[VERIFIER_SOURCE_KEY]
+    raw_query = example[RAW_PROMPT_KEY]
+    pending_queries_map.insert(example_index, query, ground_truth, dataset_name, raw_query)
+
+    param_prompt_Q.put(
+        PromptRequest(
+            prompt=query,
+            generation_config=generation_config,
+            epoch_number=epoch_number,
+            training_step=training_step,
+            dataset_index=example_index,
+            is_eval=is_eval,
         )
+    )
 
 
 def load_data_from_packing_thread(
@@ -2641,8 +2668,7 @@ def maybe_evaluate(
             timeout=timeout,
             active_sampling=False,
             filter_zero_std_samples=False,
-            no_resampling_pass_rate=None,
-            iter_dataloader=None,
+            replenish_prompts=False,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -2896,7 +2922,7 @@ def run_training(
     args,
     tokenizer,
     train_dataset,
-    eval_batch,
+    eval_dataset,
     policy_group,
     vllm_engines,
     generation_configs,
@@ -2946,6 +2972,7 @@ def run_training(
         data_preparation_thread,
         reward_fn,
         inference_results_Q,
+        param_prompt_Q,
         packed_sequences_Q,
         pending_queries_map,
         args,
@@ -2954,6 +2981,7 @@ def run_training(
         generation_configs["train"],
         resume_training_step,
         iter_dataloader,
+        train_dataset,
         actor_manager,
         model_dims,
     )
@@ -2967,11 +2995,11 @@ def run_training(
         )
 
     # Send initial data to ensure we have a N-step offset.
-    for _ in range(args.async_steps):
-        dataset_indices = next(iter_dataloader)
-        batch = next_batch(dataset_indices, train_dataset)
-        split_and_insert_batch(
-            batch,
+    for _ in range(args.async_steps * args.num_unique_prompts_rollout):
+        dataset_index = next(iter_dataloader)
+        add_prompt_to_generator(
+            train_dataset[dataset_index],
+            dataset_index,
             iter_dataloader.epoch_number,
             resume_training_step,
             pending_queries_map,
@@ -2985,7 +3013,6 @@ def run_training(
     else:
         num_total_tokens = 0
 
-    num_prompts_to_refill = 0
     training_start_time = time.perf_counter()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
@@ -3017,35 +3044,22 @@ def run_training(
             num_filtered_prompts,
         ) = load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
 
-        num_prompts_to_refill += args.num_unique_prompts_rollout + num_filtered_prompts
-
-        while num_prompts_to_refill >= args.num_unique_prompts_rollout:
-            batch = next_batch(next(iter_dataloader), train_dataset)
-            split_and_insert_batch(
-                batch,
-                iter_dataloader.epoch_number,
-                training_step,
-                pending_queries_map,
-                param_prompt_Q,
-                generation_configs["train"],
-                is_eval=False,
-            )
-            num_prompts_to_refill -= args.num_unique_prompts_rollout
-
         if (
             training_step % args.local_eval_every == 0
-            and eval_batch is not None
+            and eval_dataset is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
-            split_and_insert_batch(
-                eval_batch,
-                iter_dataloader.epoch_number,
-                training_step,
-                eval_pending_queries_map,
-                param_prompt_Q,
-                generation_configs["eval"],
-                is_eval=True,
-            )
+            for eval_index, eval_example in enumerate(eval_dataset):
+                add_prompt_to_generator(
+                    eval_example,
+                    eval_index,
+                    iter_dataloader.epoch_number,
+                    training_step,
+                    eval_pending_queries_map,
+                    param_prompt_Q,
+                    generation_configs["eval"],
+                    is_eval=True,
+                )
         if collated_data is None:
             continue
 
@@ -3122,7 +3136,7 @@ def run_training(
             eval_pending_queries_map,
             generation_configs["eval"],
             generate_metrics_Q,
-            len(eval_batch.queries) if eval_batch else 0,
+            len(eval_dataset) if eval_dataset else 0,
             model_dims,
             actor_manager,
         )
@@ -3199,7 +3213,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             logger.info(f"Restored episode count: {episode}")
 
     train_dataset_idxs = np.arange(len(train_dataset))
-    iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
+    iter_dataloader = ShufflingIterator(train_dataset_idxs, 1, seed=args.seed)
 
     if checkpoint_state and "shuffling_iterator_state" in checkpoint_state:
         iter_dataloader.set_state(checkpoint_state["shuffling_iterator_state"])
@@ -3212,11 +3226,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     generate_metrics_Q = Queue(maxsize=args.async_steps)
     weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
 
-    if eval_dataset is None:
-        eval_batch = None
-    else:
-        eval_dataset_indices = list(range(len(eval_dataset)))
-        eval_batch = next_batch(eval_dataset_indices, eval_dataset)
     reward_fn = make_reward_fn(args)
 
     stop_event = threading.Event()
@@ -3227,7 +3236,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             args,
             tokenizer,
             train_dataset,
-            eval_batch,
+            eval_dataset,
             policy_group,
             vllm_engines,
             generation_configs,
