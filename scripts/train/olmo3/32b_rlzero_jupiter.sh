@@ -1,31 +1,35 @@
 #!/bin/bash
 
 # OLMo 3 model
-MODEL_NAME_OR_PATH="gs://ai2-llm/checkpoints/stego32-longcontext-run-3/step11921+11000+10000-nooptim-hf"
+#MODEL_NAME_OR_PATH="gs://ai2-llm/checkpoints/stego32-longcontext-run-3/step11921+11000+10000-nooptim-hf"
+MODEL_NAME_OR_PATH="/weka/oe-adapt-default/saurabhs/repos/open-instruct-war/RL0_checkpoints/32B_math/step0/step11921+11000+10000-nooptim-hf"
 SHORT_MODEL_NAME="olmo3_32b_lc"
 
-num_prompts_fn=6656
-num_prompts_stdio=3328
-DATASETS="saurabh5/rlvr_acecoder_filtered_filtered_olmo_completions_filtered ${num_prompts_fn} hamishivi/synthetic2-rlvr-code-compressed_filtered ${num_prompts_stdio} hamishivi/klear-code-rlvr_filtered ${num_prompts_stdio}"
+DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_template_filtered 1.0 saurabh5/MATH_3000_Filtered_olmo_completions_new_template_filtered 1.0"
 
-#code evals
-EVALS="codex_humanevalplus:0-shot-chat::tulu-thinker_RL0,mbppplus:0-shot-chat::tulu-thinker_RL0,livecodebench_codegeneration::tulu-thinker_RL0_no_think_tags_lite"
-LOCAL_EVALS="saurabh5/rlvr_acecoder_filtered_filtered_olmo_completions_filtered 4 hamishivi/klear-code-rlvr_filtered 4"
-LOCAL_EVAL_SPLITS="train train train train"
+# math evals
+# EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
+EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo,minerva_math_500::hamish_zs_reasoning_dapo"
 
-EXP_NAME="olmo3-32b_rlzero_code_${SHORT_MODEL_NAME}"
+# AIME 2024, 2025 local evals
+LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
+LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
 
+
+EXP_NAME="olmo3-32b_rlzero_${SHORT_MODEL_NAME}"
+
+#BEAKER_IMAGE="${1:nathanl/open_instruct_auto}"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift  # Remove the image name from the argument list
 
-cluster=ai2/augusta
+cluster=ai2/jupiter
 
 python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/olmo-instruct \
-    --priority urgent \
+    --priority high \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
@@ -34,7 +38,9 @@ python mason.py \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
     --budget ai2/oe-adapt \
-    -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+    -- \
+source configs/beaker_configs/ray_node_setup.sh \&\& \
+python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
     --async_steps 8 \
@@ -57,13 +63,13 @@ python mason.py \
     --response_length 16384 \
     --pack_length 18432 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name olmo_thinker_code_RL0 \
+    --chat_template_name olmo_thinker_dapo \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 1280000 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 8 8 8 8 \
-    --vllm_num_engines 12 \
+    --num_learners_per_node 8 8 8 \
+    --vllm_num_engines 14 \
     --gather_whole_model False \
     --vllm_tensor_parallel_size 4 \
     --inference_batch_size 125 \
@@ -76,12 +82,6 @@ python mason.py \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
-    --output_dir /output/olmo3-32b-rlzero-code/checkpoints \
-    --checkpoint_state_dir /output/olmo3-32b-rlzero-code/checkpoints \
-    --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-32b_rlzero-code/ \
-    --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
-    --code_max_execution_time 6.0 \
-    --code_pass_rate_reward_threshold 0.99 \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions True \
@@ -92,4 +92,6 @@ python mason.py \
     --vllm_enforce_eager \
     --deepspeed_zpg 1 \
     --oe_eval_tasks $EVALS \
-    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@
+    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 
+
+# deepspeed_zpg could also be num_GPUs of the trainer, acheives same effect (allow model to be sharded across all trainer GPUs) 

@@ -2,7 +2,7 @@
 
 # OLMo 3 model
 #MODEL_NAME_OR_PATH="gs://ai2-llm/checkpoints/stego32-longcontext-run-3/step11921+11000+10000-nooptim-hf"
-MODEL_NAME_OR_PATH="/weka/oe-adapt-default/saurabhs/repos/open-instruct-war/RL0_checkpoints/32B_math/step0/step11921+11000+10000-nooptim-hf"
+MODEL_NAME_OR_PATH="gs://ai2-llm/checkpoints/stego32-longcontext-run-3/step11921+11000+10000-nooptim-hf"
 SHORT_MODEL_NAME="olmo3_32b_lc"
 
 DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_template_filtered 1.0 saurabh5/MATH_3000_Filtered_olmo_completions_new_template_filtered 1.0"
@@ -23,13 +23,13 @@ BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift  # Remove the image name from the argument list
 
-cluster=ai2/jupiter
+cluster=ai2/augusta
 
 python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/olmo-instruct \
-    --priority high \
+    --priority urgent \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
@@ -82,6 +82,9 @@ python open_instruct/grpo_fast.py \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
+    --output_dir /output/olmo3-32b-rlzero/checkpoints \
+    --checkpoint_state_dir /output/olmo3-32b-rlzero/checkpoints \
+    --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-32b_rlzero/ \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions True \
