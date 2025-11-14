@@ -40,7 +40,7 @@ python mason.py \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \
-    --no_resampling_pass_rate 0.9 \
+    --no_resampling_pass_rate 0.875 \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --active_sampling \
