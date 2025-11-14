@@ -91,5 +91,4 @@ python mason.py \
     --vllm_enforce_eager \
     --deepspeed_zpg 1 \
     --oe_eval_tasks $EVALS \
-    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 
-    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 
+    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@
