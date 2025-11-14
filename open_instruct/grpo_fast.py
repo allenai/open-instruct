@@ -3252,13 +3252,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             checkpoint_state,
         )
     except Exception as e:
-        beaker_url = utils.get_beaker_experiment_url()
-        if beaker_url:
-            error_message = f"<!here> A RL job has died. Check it out: {beaker_url}. Error message: {str(e)}"
-        else:
-            error_message = f"<!here> A RL job has died. Error message: {str(e)}"
         if args.send_slack_alerts:
-            utils.send_slack_alert(error_message)
+            utils.send_slack_alert(e)
         raise
     finally:
         cleanup_training_resources(

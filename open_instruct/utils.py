@@ -2435,12 +2435,15 @@ def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, An
     return combined
 
 
-def send_slack_alert(message: str) -> None:
-    """Sends the provided message to a Slack webhook (if the env var SLACK_WEBHOOK is set)."""
+def send_slack_alert(error: Exception) -> None:
+    """Sends an alert about a training failure to a Slack webhook (if the env var SLACK_WEBHOOK is set)."""
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
     if not slack_webhook_url:
         logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
         return
+    beaker_url = get_beaker_experiment_url()
+    beaker_message = f"Check it out: {beaker_url}. " if beaker_url else ""
+    message = f"<!here> A RL job has died. {beaker_message}Error message: {str(error)}."
     payload = {"text": message}
     response = requests.post(slack_webhook_url, json=payload)
     if not response.ok:
