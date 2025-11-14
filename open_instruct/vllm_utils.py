@@ -521,13 +521,13 @@ class LLMRayActor:
         assert_threaded_actor(self)
         self._init_config(tools, max_tool_calls, inflight_updates)
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
-        self._init_executor()
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self.inference_batch_size = self.get_kv_cache_info()
+        self._init_executor()
 
     def _init_config(
         self, tools: dict[str, Tool] | None, max_tool_calls: dict[str, int] | None, inflight_updates: bool
