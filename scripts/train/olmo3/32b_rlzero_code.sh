@@ -29,16 +29,15 @@ python mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 12 \
+    --num_nodes 10 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
-    --no_auto_dataset_cache \
     --budget ai2/oe-adapt \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
-    --async_steps 4 \
+    --async_steps 8 \
     --inflight_updates \
     --no_resampling_pass_rate 0.875 \
     --truncated_importance_sampling_ratio_cap 2.0 \
@@ -64,10 +63,10 @@ python mason.py \
     --total_episodes 12800 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 8 8 8 \
-    --vllm_num_engines 16 \
+    --vllm_num_engines 12 \
     --gather_whole_model False \
     --vllm_tensor_parallel_size 4 \
-    --inference_batch_size 160 \
+    --inference_batch_size 125 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
@@ -92,4 +91,4 @@ python mason.py \
     --vllm_enforce_eager \
     --deepspeed_zpg 1 \
     --oe_eval_tasks $EVALS \
-    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo3_auto $@ 
+    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 

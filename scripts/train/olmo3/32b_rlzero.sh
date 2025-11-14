@@ -17,7 +17,9 @@ LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
 
 EXP_NAME="olmo3-32b_rlzero_${SHORT_MODEL_NAME}"
 
-BEAKER_IMAGE="${1:nathanl/open_instruct_auto}"
+#BEAKER_IMAGE="${1:nathanl/open_instruct_auto}"
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift  # Remove the image name from the argument list
 
 cluster=ai2/augusta
@@ -69,7 +71,7 @@ python open_instruct/grpo_fast.py \
     --vllm_num_engines 12 \
     --gather_whole_model False \
     --vllm_tensor_parallel_size 4 \
-    --inference_batch_size 160 \
+    --inference_batch_size 125 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
