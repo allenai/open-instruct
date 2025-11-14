@@ -162,23 +162,33 @@
             }
 
             // Update KV cache statistics
-            if (data.kv_cache_max_concurrency !== null && data.kv_cache_max_concurrency !== undefined) {
+            if (data.concurrency_per_engine !== null && data.concurrency_per_engine !== undefined) {
                 let kvCacheHtml = `
                     <div class="token-card" style="border-left-color: #FF9800;">
                         <div class="token-grid">
                             <div class="token-stat">
-                                <div class="token-label">Max Theoretical Generation Concurrency</div>
-                                <div class="token-value" style="color: #FF9800;">${data.kv_cache_max_concurrency}</div>
-                                <div class="token-rate">Maximum concurrent generations supported by KV cache configuration</div>
+                                <div class="token-label">Concurrency Per Engine</div>
+                                <div class="token-value" style="color: #FF9800;">${data.concurrency_per_engine}</div>
+                                <div class="token-rate">Maximum concurrent generations per vLLM engine</div>
                             </div>
                 `;
 
-                if (data.inference_batch_size !== null && data.inference_batch_size !== undefined) {
+                if (data.total_concurrency !== null && data.total_concurrency !== undefined) {
                     kvCacheHtml += `
                             <div class="token-stat">
-                                <div class="token-label">Inference Batch Size</div>
-                                <div class="token-value" style="color: #FF9800;">${data.inference_batch_size}</div>
-                                <div class="token-rate">Number of prompts processed per vLLM engine batch</div>
+                                <div class="token-label">Total Concurrency (All Engines)</div>
+                                <div class="token-value" style="color: #FF9800;">${data.total_concurrency}</div>
+                                <div class="token-rate">Total concurrent generations across all engines</div>
+                            </div>
+                    `;
+                }
+
+                if (data.batch_size !== null && data.batch_size !== undefined) {
+                    kvCacheHtml += `
+                            <div class="token-stat">
+                                <div class="token-label">Batch Size</div>
+                                <div class="token-value" style="color: #FF9800;">${data.batch_size}</div>
+                                <div class="token-rate">Total prompts to generate per training step</div>
                             </div>
                     `;
                 }

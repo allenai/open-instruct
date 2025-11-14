@@ -242,11 +242,6 @@ class TestGrpoFastBase(unittest.TestCase):
         mock_generation_config = MagicMock()
         mock_generation_config.n = 4
 
-        # Create mock args with inference_batch_size
-        mock_args = MagicMock()
-        # Calculate inference_batch_size based on number of queries and engines
-        mock_args.inference_batch_size = max(1, len(queries) // num_engines)
-
         for index in range(len(queries)):
             example = {
                 INPUT_IDS_PROMPT_KEY: queries[index],
@@ -766,10 +761,6 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
-
-        # Create mock args with inference_batch_size
-        mock_args = MagicMock()
-        mock_args.inference_batch_size = max(1, num_queries // num_engines)
 
         for index in range(len(queries)):
             example = {
