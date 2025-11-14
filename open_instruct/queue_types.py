@@ -8,8 +8,9 @@ class TokenStatistics:
 
     num_prompt_tokens: int
     num_response_tokens: int
-    generation_time: float
     earliest_start_time: float | None = None
+    total_generation_time: float
+    all_generation_times: list[float]
 
 
 @dataclass

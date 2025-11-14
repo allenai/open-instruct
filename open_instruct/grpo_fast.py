@@ -1655,6 +1655,8 @@ class BatchStatistics:
     percent_solved_mean: float
     no_resampled_prompts: int
     total_prompts: int
+    time_total: float
+    time_after_first: float
 
 
 def accumulate_inference_batches(
@@ -1716,8 +1718,10 @@ def accumulate_inference_batches(
         disable=not args.verbose,
     )
     num_prompts_sampled = 0
+    start_acc_time = time.perf_counter()
     while num_prompts_sampled < num_prompts:
         result = inference_results_Q.get(timeout=timeout)
+        after_first_result_time = time.perf_counter()
 
         if isinstance(result, ShutdownSentinel):
             return result, None, None, None
@@ -1799,6 +1803,8 @@ def accumulate_inference_batches(
         all_reward_metrics.append(reward_metrics)
         all_percent_solved.append(percent_solved)
 
+    end_acc_time = time.perf_counter()
+
     # Combine all results into a single GenerationResult
     combined_responses = []
     combined_finish_reasons = []
@@ -1810,6 +1816,7 @@ def accumulate_inference_batches(
     combined_tool_runtimes = []
     combined_tool_calleds = []
     combined_logprobs = []
+    combined_generation_times = []
 
     earliest_start_time = float("inf")
     prompt_lengths = []
@@ -1817,7 +1824,6 @@ def accumulate_inference_batches(
 
     total_prompt_tokens = 0
     total_response_tokens = 0
-    max_generation_time = 0
 
     for i, result in enumerate(results):
         combined_responses.extend(result.responses)
@@ -1829,6 +1835,7 @@ def accumulate_inference_batches(
         combined_tool_outputs.extend(result.request_info.tool_outputs)
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
+        combined_generation_times.append(result.token_statistics.generation_time)
 
         combined_logprobs.extend(result.logprobs)
 
@@ -1841,17 +1848,17 @@ def accumulate_inference_batches(
 
         total_prompt_tokens += result.token_statistics.num_prompt_tokens
         total_response_tokens += result.token_statistics.num_response_tokens
-        max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
 
     # Use the maximum generation time across engines since they work in parallel
     # This avoids including queue overhead and accumulation time in MFU/MBU calculations
-    total_generation_time = max_generation_time
+    total_generation_time = max(combined_generation_times)
 
     accumulated_stats = TokenStatistics(
         num_prompt_tokens=total_prompt_tokens,
         num_response_tokens=total_response_tokens,
-        generation_time=total_generation_time,
         earliest_start_time=earliest_start_time,
+        total_generation_time=total_generation_time,
+        all_generation_times=combined_generation_times,
     )
 
     # Create combined RequestInfo
@@ -1903,6 +1910,8 @@ def accumulate_inference_batches(
         percent_solved_mean=percent_solved_mean,
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
+        time_total=end_acc_time - start_acc_time,
+        time_after_first=end_acc_time - after_first_result_time,
     )
     logging.info(
         f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"
