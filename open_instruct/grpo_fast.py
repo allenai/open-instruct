@@ -3041,20 +3041,21 @@ def run_training(
             num_filtered_prompts,
         ) = load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
 
-        num_prompts_to_refill += args.num_unique_prompts_rollout + num_filtered_prompts
+        if training_step < args.num_training_steps:
+            num_prompts_to_refill += args.num_unique_prompts_rollout + num_filtered_prompts
 
-        while num_prompts_to_refill >= args.num_unique_prompts_rollout:
-            batch = next_batch(next(iter_dataloader), train_dataset)
-            split_and_insert_batch(
-                batch,
-                iter_dataloader.epoch_number,
-                training_step,
-                pending_queries_map,
-                param_prompt_Q,
-                generation_configs["train"],
-                is_eval=False,
-            )
-            num_prompts_to_refill -= args.num_unique_prompts_rollout
+            while num_prompts_to_refill >= args.num_unique_prompts_rollout:
+                batch = next_batch(next(iter_dataloader), train_dataset)
+                split_and_insert_batch(
+                    batch,
+                    iter_dataloader.epoch_number,
+                    training_step,
+                    pending_queries_map,
+                    param_prompt_Q,
+                    generation_configs["train"],
+                    is_eval=False,
+                )
+                num_prompts_to_refill -= args.num_unique_prompts_rollout
 
         if (
             training_step % args.local_eval_every == 0
