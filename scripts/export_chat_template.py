@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 """Save a chat template defined in open_instruct.dataset_transformation to a Jinja file."""
 
-from __future__ import annotations
-
 import argparse
 import sys
 from pathlib import Path

@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 """Render canned chat examples with a chosen template to inspect formatting."""
 
-from __future__ import annotations
-
 import argparse
 from pathlib import Path
 from typing import Iterable, List
