@@ -95,6 +95,7 @@ from open_instruct.model_utils import (
     disable_dropout_in_model,
     entropy_from_logits,
     get_olmo3_generation_config,
+    load_ref_policy,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -558,31 +559,21 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.value_model.train()
 
-        # reference model
-        ds_config = get_eval_ds_config(
+        ds_config, self.ref_policy_hf_ds_config = get_eval_ds_config(
             offload=False,
-            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-            # stage 2 is optimizer sharding which doesn't apply to inference
             stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
             bf16=True,
+            per_device_train_batch_size=args.per_device_train_batch_size,
         )
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["gradient_accumulation_steps"] = 1
-        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
-        else:
-            dschf = None
-        print(f"{dschf=}")
-        self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
+
+        self.ref_policy: PreTrainedModel = load_ref_policy(
+            model_config=model_config,
+            ds_config=ds_config,
+            deepspeed_stage=args.deepspeed_stage,
+            local_rank=self.local_rank,
+            device=self.device,
+            rank=self.rank,
         )
-        disable_dropout_in_model(self.ref_policy)
-        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
-        self.ref_policy.eval()
         self.local_metrics = utils.MetricsTracker(device=self.device)
 
         self.offload_to_cpu(self.model)
