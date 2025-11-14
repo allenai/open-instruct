@@ -66,7 +66,7 @@ python open_instruct/grpo_fast.py \
     --chat_template_name olmo_thinker_dapo \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 12800 \
+    --total_episodes 1280000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 8 8 \
     --vllm_num_engines 14 \
@@ -77,7 +77,8 @@ python open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --seed 1 \
     --local_eval_every 25 \
-    --save_freq 25 \
+    --save_freq 50 \
+    --beaker_eval_freq 100 \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
