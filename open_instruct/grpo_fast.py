@@ -419,6 +419,8 @@ class Args:
     """multiply the gpus used for each oe-eval task"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+    send_slack_alerts: bool = False
+    """Whether to send Slack alerts on training failures"""
 
     # Evaluation behavior
     eval_on_step_0: bool = False
@@ -3255,7 +3257,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             error_message = f"<!here> A RL job has died. Check it out: {beaker_url}. Error message: {str(e)}"
         else:
             error_message = f"<!here> A RL job has died. Error message: {str(e)}"
-        utils.send_slack_alert(error_message)
+        if args.send_slack_alerts:
+            utils.send_slack_alert(error_message)
         raise
     finally:
         cleanup_training_resources(
