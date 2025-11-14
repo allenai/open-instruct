@@ -737,6 +737,56 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         # 12 entries should be removed from the map (4 still pending)
         self.assertEqual(len(pending_queries_map), 4)
 
+    def test_accumulate_handles_all_filtered_prompts(self):
+        """Test that accumulate_inference_batches handles the case where all prompts are filtered out."""
+        num_prompts = 4
+        num_samples_per_prompt = 4
+
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+
+        async def zero_std_reward_fn(
+            responses: list[torch.Tensor],
+            decoded_responses: list[str],
+            ground_truths: list[Any],
+            datasets: list[str],
+            finish_reasons: list[str],
+            infos: list[list[int]],
+            queries: list[str] | None = None,
+        ) -> (list[float], dict[str, Any]):
+            return [1.0] * len(responses), {"time/reward": 0.0}
+
+        inference_results_Q = ray_queue.Queue(maxsize=num_prompts * 2)
+        self._ray_queues.append(inference_results_Q)
+        pending_queries_map = grpo_fast.PendingQueriesMap()
+
+        for i in range(num_prompts):
+            pending_queries_map.insert(i, f"q_{i}", f"t_{i}", f"d_{i}", f"q_{i}")
+            mock_result = self.create_mock_result(i, 1, num_samples_per_prompt=num_samples_per_prompt)
+            inference_results_Q.put(mock_result)
+
+        mock_args = self.create_mock_args(1)
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_mock_model_dims()
+
+        result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
+            inference_results_Q,
+            pending_queries_map,
+            mock_args,
+            generation_config=mock_generation_config,
+            num_prompts=num_prompts,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            reward_fn=zero_std_reward_fn,
+            filter_zero_std_samples=True,
+            active_sampling=False,
+        )
+
+        self.assertIsNone(result)
+        self.assertIsNone(batch)
+        self.assertIsNone(reward_metrics)
+        self.assertIsNone(batch_stats)
+
 
 class TestStreamingAccumulation(TestGrpoFastBase):
     """Test the new streaming accumulation functionality."""
