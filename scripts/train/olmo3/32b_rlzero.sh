@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # OLMo 3 model
-MODEL_NAME_OR_PATH="gs://ai2-llm/checkpoints/stego32-longcontext-run-3/step11921+11000+10000-nooptim-hf"
+#MODEL_NAME_OR_PATH="gs://ai2-llm/checkpoints/stego32-longcontext-run-3/step11921+11000+10000-nooptim-hf"
+MODEL_NAME_OR_PATH="/weka/oe-adapt-default/saurabhs/repos/open-instruct-war/RL0_checkpoints/32B_math/step0/step11921+11000+10000-nooptim-hf"
 SHORT_MODEL_NAME="olmo3_32b_lc"
 
 DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_template_filtered 1.0 saurabh5/MATH_3000_Filtered_olmo_completions_new_template_filtered 1.0"
