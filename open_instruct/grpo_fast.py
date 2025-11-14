@@ -3061,6 +3061,7 @@ def run_training(
             training_step % args.local_eval_every == 0
             and eval_batch is not None
             and (args.eval_on_step_0 or training_step > 1)
+            and training_step < args.num_training_steps
         ):
             split_and_insert_batch(
                 eval_batch,
