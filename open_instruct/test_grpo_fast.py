@@ -748,8 +748,6 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
     def test_more_engines_than_queries(self):
         """Test that add_prompt_to_generator handles gracefully when engines > queries."""
-        # More engines than queries - should handle gracefully with single-prompt batches
-        num_engines = 8
         num_queries = 4
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
