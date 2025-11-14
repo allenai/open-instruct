@@ -18,8 +18,6 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: "0.8.8"
-      - name: Install dependencies
-        run: uv sync --frozen --only-group dev
       - name: Code quality
         run: |
           uv run ruff format --check --diff open_instruct mason.py
