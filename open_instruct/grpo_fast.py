@@ -854,43 +854,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
         self.model.train()
 
-        # reference model
-        ds_config = get_eval_ds_config(
-            offload=args.deepspeed_offload_param,
-            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-            # stage 2 is optimizer sharding which doesn't apply to inference
-            stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
-            bf16=True,
-        )
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["gradient_accumulation_steps"] = 1
-        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
-        else:
-            dschf = None
-        logger.info(f"DeepSpeed config: {dschf=}")
-
-        self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
-            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
-        )
-        disable_dropout_in_model(self.ref_policy)
-        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
-        self.ref_policy.eval()
-
-        # Load reference policy checkpoint if available
-        if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
-            state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device)
-            if hasattr(self.ref_policy, "module"):
-                # If wrapped by DeepSpeed
-                self.ref_policy.module.load_state_dict(state_dict)
-            else:
-                self.ref_policy.load_state_dict(state_dict)
-            logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
         self.local_metrics = utils.MetricsTracker(device=self.device)
         return optimization_steps_done
 
