@@ -81,8 +81,6 @@ python open_instruct/grpo_fast.py \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
-    --output_dir /output/olmo3-32b-rlzero/checkpoints \
-    --checkpoint_state_dir /weka/oe-adapt-default/saurabhs/repos/open-instruct-war/RL0_checkpoints/32B_math \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --mask_truncated_completions True \
