@@ -66,6 +66,7 @@ import torch.utils
 import torch.utils.data
 import vllm
 import wandb
+from datasets import Dataset
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
@@ -1664,6 +1665,7 @@ def accumulate_inference_batches(
     replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: ShufflingIterator | None = None,
+    prompt_dataset: Dataset = None,
     param_prompt_Q: ray_queue.Queue | None = None,
     training_step: int = None,
 ) -> tuple[GenerationResult, Batch, dict, BatchStatistics]:
@@ -1695,8 +1697,8 @@ def accumulate_inference_batches(
         assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
 
     if replenish_prompts:
-        assert param_prompt_Q is not None and iter_dataloader is not None, (
-            "replenish_prompts requires param_prompt_Q and iter_dataloader"
+        assert param_prompt_Q is not None and iter_dataloader is not None and prompt_dataset is not None, (
+            "replenish_prompts requires param_prompt_Q and iter_dataloader and prompt_dataset"
         )
 
     results = []
@@ -1733,13 +1735,13 @@ def accumulate_inference_batches(
             f"Dataset index: {result.dataset_index}, Epoch: {result.epoch_number}"
         )
 
-        query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
+        query, ground_truth, dataset_name, raw_query = pending_queries_map.pop(result.dataset_index)
 
         # Replenish generation queue with new prompt
         if replenish_prompts:
             dataset_index = next(iter_dataloader)
             add_prompt_to_generator(
-                dataset[dataset_index],
+                prompt_dataset[dataset_index],
                 dataset_index,
                 iter_dataloader.epoch_number,
                 training_step,
@@ -1761,7 +1763,7 @@ def accumulate_inference_batches(
         # TODO(finbarrtimbers): Make PendingQueriesMap.pop return a Batch, and add a Batch.repeat method.
         k_queries = repeat_each([query], generation_config.n)
         k_ground_truths = repeat_each([ground_truth], generation_config.n)
-        k_datasets = repeat_each([dataset], generation_config.n)
+        k_datasets = repeat_each([dataset_name], generation_config.n)
         k_raw_queries = repeat_each([raw_query], generation_config.n)
 
         scores, reward_metrics = asyncio.run(
@@ -1942,6 +1944,7 @@ def data_preparation_thread(
     generation_config,
     resume_training_step: int,
     iter_dataloader: ShufflingIterator,
+    train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
 ):
@@ -1963,6 +1966,7 @@ def data_preparation_thread(
                 replenish_prompts=True,
                 no_resampling_pass_rate=args.no_resampling_pass_rate,
                 iter_dataloader=iter_dataloader,
+                prompt_dataset=train_dataset,
                 param_prompt_Q=param_prompt_Q,
                 training_step=training_step,
             )
@@ -2978,6 +2982,7 @@ def run_training(
         generation_configs["train"],
         resume_training_step,
         iter_dataloader,
+        train_dataset,
         actor_manager,
         model_dims,
     )
