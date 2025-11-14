@@ -417,6 +417,8 @@ class Args:
     """multiply the gpus used for each oe-eval task"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+    send_slack_alerts: bool = False
+    """Whether to send Slack alerts on training failures"""
 
     # Evaluation behavior
     eval_on_step_0: bool = False
@@ -3250,6 +3252,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             model_dims,
             checkpoint_state,
         )
+    except Exception as e:
+        if args.send_slack_alerts:
+            utils.send_slack_alert(e)
+        raise
     finally:
         cleanup_training_resources(
             stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
