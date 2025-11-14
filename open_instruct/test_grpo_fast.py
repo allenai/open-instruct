@@ -350,7 +350,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
+        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
@@ -435,7 +435,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
+        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
@@ -480,12 +480,12 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
+        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
         # For multiple samples, we need to add additional references to the pending_queries_map
-        # The first reference is already added by setup_and_split_batch
+        # The first reference is already added by setup_and_add_prompts_to_generator
         for _ in range(num_samples_per_prompt - 1):
             for idx, query, ground_truth, dataset, raw_query in zip(
                 dataset_indices, queries_next, ground_truths_next, datasets_next, raw_queries_next
@@ -600,7 +600,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         tokenizer, reward_fn = self.create_mock_tokenizer_and_reward_fn()
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
+        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
             queries, ground_truths, datasets, raw_queries, indices, num_engines
         )
 
