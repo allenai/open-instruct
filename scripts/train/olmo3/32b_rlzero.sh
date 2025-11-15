@@ -90,6 +90,7 @@ python open_instruct/grpo_fast.py \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
+    --eval_on_step_0 True \
     --deepspeed_zpg 1 \
     --oe_eval_tasks $EVALS \
     --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 
