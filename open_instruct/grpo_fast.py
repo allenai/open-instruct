@@ -2650,7 +2650,7 @@ def maybe_evaluate(
 ):
     """Optionally evaluate the model."""
     try:
-        # timeout 0.01 if this is the last training step or we're not evaluating
+        # timeout 0.01 if this is not the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
         timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
 
