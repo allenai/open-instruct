@@ -2320,6 +2320,7 @@ def weight_sync_thread(
     policy_group: ModelGroup,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
+    params_lock: threading.Lock,
     resume_training_step: int = 1,
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
@@ -2338,24 +2339,27 @@ def weight_sync_thread(
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
 
-            # Set actors to stop
-            ray.get(actor_manager.set_should_stop.remote(True))
-            logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
+            with params_lock:
+                # Set actors to stop
+                ray.get(actor_manager.set_should_stop.remote(True))
+                logger.debug("[Weight Sync Thread] Set should_stop to True for weight sync")
 
-            # Broadcast weights to vLLM engines
-            # First get the futures
-            weight_broadcast_futures: list[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+                # Broadcast weights to vLLM engines
+                # First get the futures
+                weight_broadcast_futures: list[ray.ObjectRef] = [
+                    m.broadcast_to_vllm.remote() for m in policy_group.models
+                ]
 
-            # Wait for all weight updates to complete and collect individual timings
-            _, actor_sync_times = ray_get_with_progress(
-                weight_broadcast_futures,
-                desc="[Weight Sync Thread] Waiting for weight updates to complete",
-                enable=args.verbose,
-            )
+                # Wait for all weight updates to complete and collect individual timings
+                _, actor_sync_times = ray_get_with_progress(
+                    weight_broadcast_futures,
+                    desc="[Weight Sync Thread] Waiting for weight updates to complete",
+                    enable=args.verbose,
+                )
 
-            # Allow actors to resume
-            ray.get(actor_manager.set_should_stop.remote(False))
-            logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+                # Allow actors to resume
+                ray.get(actor_manager.set_should_stop.remote(False))
+                logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -2812,6 +2816,7 @@ def run_training(
 
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
+    params_lock = threading.Lock()
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
@@ -2820,6 +2825,7 @@ def run_training(
         policy_group,
         actor_manager,
         weight_sync_metrics_Q,
+        params_lock,
         resume_training_step,
     )
 
@@ -2994,17 +3000,20 @@ def run_training(
                 max_retries = 3
                 for attempt in range(max_retries):
                     try:
-                        ray_get_with_progress(
-                            [
-                                policy_group.models[i].save_checkpoint_state.remote(
-                                    args.checkpoint_state_dir, client_state
-                                )
-                                for i in range(args.world_size)
-                            ],
-                            desc=f"Saving checkpoint state at step {training_step}",
-                            timeout=600,
-                        )
-                        logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+                        with params_lock:
+                            ray_get_with_progress(
+                                [
+                                    policy_group.models[i].save_checkpoint_state.remote(
+                                        args.checkpoint_state_dir, client_state
+                                    )
+                                    for i in range(args.world_size)
+                                ],
+                                desc=f"Saving checkpoint state at step {training_step}",
+                                timeout=600,
+                            )
+                            logger.info(
+                                f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}"
+                            )
                         break
                     except Exception as e:
                         if attempt < max_retries - 1:
