@@ -790,6 +790,41 @@ def clean_last_n_checkpoints_deepspeed(output_dir: str, keep_last_n_checkpoints:
     print("Remaining files:" + str(os.listdir(output_dir)))
 
 
+def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> None:
+    """
+    Clean up regular checkpoints that follow the pattern step_{number}.
+    Keeps only the N most recent checkpoints.
+    """
+    if not os.path.exists(output_dir):
+        return
+    
+    # Identify checkpoint directories that follow the pattern step_{number}
+    all_files = os.listdir(output_dir)
+    checkpoint_dirs = []
+    for file in all_files:
+        file_path = os.path.join(output_dir, file)
+        if file.startswith("step_") and os.path.isdir(file_path):
+            # Extract the step number after "step_"
+            step_str = file[len("step_"):]
+            if step_str.isdigit():
+                checkpoint_dirs.append(file)
+
+    # Sort checkpoints by step number
+    checkpoints = sorted(checkpoint_dirs, key=lambda x: int(x[len("step_"):]), reverse=True)
+
+    # Keep the N most recent checkpoints and remove the rest
+    if keep_last_n_checkpoints >= 0 and len(checkpoints) > keep_last_n_checkpoints:
+        for checkpoint in checkpoints[keep_last_n_checkpoints:]:
+            print(f"Removing checkpoint {checkpoint}")
+            checkpoint_path = os.path.join(output_dir, checkpoint)
+            if os.path.isdir(checkpoint_path):
+                shutil.rmtree(checkpoint_path)
+            elif os.path.isfile(checkpoint_path):
+                os.remove(checkpoint_path)
+
+    print("Remaining checkpoints:" + str([c for c in os.listdir(output_dir) if c.startswith("step_")]))
+
+
 def calibrate_checkpoint_state_dir(checkpoint_state_dir: str) -> None:
     """
     Find the latest valid checkpoint directory and update the 'latest' file.

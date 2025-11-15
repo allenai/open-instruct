@@ -112,6 +112,7 @@ from open_instruct.utils import (
     RayProcess,
     _z3_params_to_fetch,
     calibrate_checkpoint_state_dir,
+    clean_last_n_checkpoints,
     clean_last_n_checkpoints_deepspeed,
     combine_reward_metrics,
     download_latest_checkpoint_from_gs,
@@ -2429,6 +2430,12 @@ def one_training_step(
                         timeout=600,
                     )
                     logger.info(f"Saved model at step {training_step} to {step_dir}")
+                    # Clean up old checkpoints (only on rank 0, similar to checkpoint states)
+                    if args.keep_last_n_checkpoints >= 0:
+                        try:
+                            clean_last_n_checkpoints(checkpoint_dir, args.keep_last_n_checkpoints)
+                        except Exception as cleanup_error:
+                            logger.warning(f"Failed to clean up old checkpoints: {cleanup_error}")
                     break
                 except Exception as e:
                     if attempt < max_retries - 1:
