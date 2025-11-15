@@ -1171,6 +1171,7 @@ def launch_ai2_evals_on_weka(
     eval_workspace: str | None = "ai2/tulu-3-results",
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
+    run_eval_jobs: bool = True,
 ) -> None:
     beaker_users = get_beaker_whoami()
 
@@ -1197,6 +1198,10 @@ def launch_ai2_evals_on_weka(
         path = gs_saved_path
     else:
         cluster_str = ""
+
+    if not run_eval_jobs:
+        return
+
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \

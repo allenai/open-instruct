@@ -1304,7 +1304,9 @@ class PolicyTrainerRayProcess(RayProcess):
             self.tokenizer.save_pretrained(output_dir)
 
     # we need this because we don't know which node is rank 0 is on
-    def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
+    def launch_ai2_evals_on_weka_wrapper(
+        self, step_dir, leaderboard_name, wandb_url, training_step, run_eval_jobs: bool = True
+    ):
         args = self.args
         if self.rank == 0:
             ray.remote(launch_ai2_evals_on_weka).options(num_cpus=1).remote(
@@ -1320,6 +1322,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.eval_workspace,
                 args.oe_eval_beaker_image,
                 args.oe_eval_gpu_multiplier,
+                run_eval_jobs,
             )
 
 
@@ -2410,24 +2413,38 @@ def one_training_step(
             checkpoint_dir = f"{args.output_dir}_checkpoints"
             step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
             logger.info(f"Saving model at step {training_step} to {step_dir}")
-            ray_get_with_progress(
-                [
-                    policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
-                    for i in range(args.world_size)
-                ],
-                desc=f"Saving model at step {training_step}",
-            )
-            if (
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    ray_get_with_progress(
+                        [
+                            policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
+                            for i in range(args.world_size)
+                        ],
+                        desc=f"Saving model at step {training_step}",
+                        timeout=600,
+                    )
+                    logger.info(f"Saved model at step {training_step} to {step_dir}")
+                    break
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            f"Failed to save model at step {training_step} (attempt {attempt + 1}/{max_retries}): {e}. Retrying..."
+                        )
+                    else:
+                        logger.error(f"Failed to save model at step {training_step} after {max_retries} attempts: {e}")
+                        raise
+            leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+            run_eval_jobs = (
                 args.beaker_eval_freq > 0
                 and training_step % args.beaker_eval_freq == 0
                 and args.try_launch_beaker_eval_jobs_on_weka
                 and is_beaker_job()
-            ):
-                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                for i in range(args.world_size):
-                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                        step_dir, leaderboard_name, wandb_url, training_step
-                    )
+            )
+            for i in range(args.world_size):
+                policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                    step_dir, leaderboard_name, wandb_url, training_step, run_eval_jobs
+                )
         save_time += timer.duration
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
@@ -2586,7 +2603,7 @@ def save_final_model(
             leaderboard_name = args.hf_repo_revision
             for i in range(args.world_size):
                 policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                    args.output_dir, leaderboard_name, wandb_url, training_step
+                    args.output_dir, leaderboard_name, wandb_url, training_step, True
                 )
 
 
@@ -2973,14 +2990,32 @@ def run_training(
                 if iter_dataloader is not None:
                     client_state["shuffling_iterator_state"] = iter_dataloader.get_state()
 
-                ray_get_with_progress(
-                    [
-                        policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
-                        for i in range(args.world_size)
-                    ],
-                    desc=f"Saving checkpoint state at step {training_step}",
-                )
-                logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+                # Retry checkpoint save up to 3 times
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        ray_get_with_progress(
+                            [
+                                policy_group.models[i].save_checkpoint_state.remote(
+                                    args.checkpoint_state_dir, client_state
+                                )
+                                for i in range(args.world_size)
+                            ],
+                            desc=f"Saving checkpoint state at step {training_step}",
+                            timeout=600,
+                        )
+                        logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+                        break
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            logger.warning(
+                                f"Failed to save checkpoint state at step {training_step} (attempt {attempt + 1}/{max_retries}): {e}. Retrying..."
+                            )
+                        else:
+                            logger.error(
+                                f"Failed to save checkpoint state at step {training_step} after {max_retries} attempts: {e}"
+                            )
+                            raise
 
         maybe_evaluate(
             args,
