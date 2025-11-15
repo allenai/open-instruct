@@ -31,11 +31,11 @@ export model_path=/weka/oe-adapt-default/allennlp/deletable_checkpoint/scottg/ol
 # export gs_model_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
 # 
 # 5e-7 s1 ckpt
-export lr=5e-7
-export model_path=/weka/oe-adapt-default/hamishi/olmo_3_emergency_ckpts/test_dpo_olmo3_32b_s1_lr5e-7_9654__1__1763092410_checkpoints_step_200
-export seed=1
-export exp_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
-export gs_model_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
+# export lr=5e-7
+# export model_path=/weka/oe-adapt-default/hamishi/olmo_3_emergency_ckpts/test_dpo_olmo3_32b_s1_lr5e-7_9654__1__1763092410_checkpoints_step_200
+# export seed=1
+# export exp_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
+# export gs_model_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
 
 python mason.py \
     --budget ai2/oe-adapt \
