@@ -8,7 +8,7 @@ DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_templat
 
 # math evals
 # EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
-EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
+EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo,minerva_math_500::hamish_zs_reasoning_dapo"
 
 # AIME 2024, 2025 local evals
 LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
@@ -20,7 +20,7 @@ BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift  # Remove the image name from the argument list
 
-cluster=ai2/jupiter
+cluster=ai2/augusta
 
 python mason.py \
     --task_name ${EXP_NAME} \
@@ -43,7 +43,7 @@ python open_instruct/grpo_fast.py \
     --beta 0.0 \
     --async_steps 8 \
     --inflight_updates \
-    --no_resampling_pass_rate 0.9 \
+    --no_resampling_pass_rate 0.875 \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --active_sampling \
@@ -80,12 +80,14 @@ python open_instruct/grpo_fast.py \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
+    --output_dir /output/olmo3-7b-rlzero/checkpoints \
     --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-7b_rlzero/ \
     --mask_truncated_completions True \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
-    --oe_eval_tasks $EVALS
+    --oe_eval_tasks $EVALS \
+    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 
 
 # TODO
 #     --oe_eval_gpu_multiplier 4 \

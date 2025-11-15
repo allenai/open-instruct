@@ -77,7 +77,6 @@ python mason.py \
     --gradient_checkpointing \
     --with_tracking \
     --output_dir /output/olmo3-32b-rlzero-code/checkpoints \
-    --checkpoint_state_dir /output/olmo3-32b-rlzero-code/checkpoints \
     --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
     --code_max_execution_time 6.0 \
     --code_pass_rate_reward_threshold 0.99 \
@@ -89,7 +88,6 @@ python mason.py \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
-    --vllm_enforce_eager \
     --deepspeed_zpg 1 \
     --oe_eval_tasks $EVALS \
     --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 

@@ -82,7 +82,6 @@ python open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --with_tracking \
     --output_dir /output/olmo3-32b-rlzero/checkpoints \
-    --checkpoint_state_dir /output/olmo3-32b-rlzero/checkpoints \
     --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-32b_rlzero \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
@@ -91,7 +90,6 @@ python open_instruct/grpo_fast.py \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
-    --vllm_enforce_eager \
     --deepspeed_zpg 1 \
     --oe_eval_tasks $EVALS \
     --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 

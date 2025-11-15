@@ -4,23 +4,23 @@
 MODEL_NAME_OR_PATH="/weka/oe-adapt-default/michaeln/checkpoints/olmo3-7b-base"
 GS_MODEL_NAME="olmo3_7b_base"
 
-DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_template_filtered 1.0 saurabh5/MATH_3000_Filtered_olmo_completions_new_template_filtered 1.0"
+num_prompts_fn=6656
+num_prompts_stdio=3328
+DATASETS="saurabh5/rlvr_acecoder_filtered_filtered_olmo_completions_filtered ${num_prompts_fn} hamishivi/synthetic2-rlvr-code-compressed_filtered ${num_prompts_stdio} hamishivi/klear-code-rlvr_filtered ${num_prompts_stdio}"
 
-# math evals
-# EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
-EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
-
-# AIME 2024, 2025 local evals
-LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
-LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
+# code evals
+EVALS="codex_humanevalplus:0-shot-chat::tulu-thinker_RL0,mbppplus:0-shot-chat::tulu-thinker_RL0,livecodebench_codegeneration::tulu-thinker_RL0_no_think_tags_lite"
+LOCAL_EVALS="saurabh5/rlvr_acecoder_filtered_filtered_olmo_completions_filtered 4 hamishivi/klear-code-rlvr_filtered 4"
+LOCAL_EVAL_SPLITS="train train train train"
 
 
 EXP_NAME="olmo3-7b_rlzero_code_${GS_MODEL_NAME}"
+
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift  # Remove the image name from the argument list
 
-cluster=ai2/jupiter
+cluster=ai2/augusta
 
 python mason.py \
     --task_name ${EXP_NAME} \
@@ -43,7 +43,7 @@ python open_instruct/grpo_fast.py \
     --beta 0.0 \
     --async_steps 8 \
     --inflight_updates \
-    --no_resampling_pass_rate 0.9 \
+    --no_resampling_pass_rate 0.875 \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --active_sampling \
@@ -61,7 +61,7 @@ python open_instruct/grpo_fast.py \
     --response_length 16384 \
     --pack_length 18432 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name olmo_thinker_dapo \
+    --chat_template_name olmo_thinker_code_RL0 \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 512256 \
@@ -83,12 +83,14 @@ python open_instruct/grpo_fast.py \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
+    --output_dir /output/olmo3-7b-rlzero-code/checkpoints \
     --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-7b_rlzero-code/ \
     --mask_truncated_completions True \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
-    --oe_eval_tasks $EVALS
+    --oe_eval_tasks $EVALS \
+    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 
 
 # TODO
 #     --oe_eval_gpu_multiplier 4 \
