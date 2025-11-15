@@ -16,3 +16,10 @@ style-check:   ## *fail* if anything needs rewriting
 
 quality-check: ## *fail* if any rewrite was needed
 	uv run ruff check --exit-non-zero-on-fix $(check_dirs)
+
+docker:
+	DOCKER_BUILDKIT=1 docker build -f Dockerfile --build-arg UV_CACHE_DIR=$(UV_CACHE_DIR) -t open_instruct_olmo3_rlzero .
+	# if you are internally at AI2, you can create an image like this:
+	$(eval beaker_user := $(shell beaker account whoami --format json | jq -r '.[0].name'))
+	beaker image delete $(beaker_user)/open_instruct_olmo3_rlzero <image-name> 2>/dev/null || true
+	beaker image create open_instruct_olmo3_rlzero -n open_instruct_olmo3_rlzero -w ai2/$(beaker_user)
