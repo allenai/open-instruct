@@ -301,6 +301,8 @@ class Args:
     # -- llm verifiers
     llm_judge_model: str = "azure/gpt-4o-mini-standard"
     """the model to use for the llm judge"""
+    llm_judge_vllm_servers: list[str] = field(default_factory=list)
+    """Optional list of VLLM server URLs for judge (e.g., ['http://localhost:8001', 'http://localhost:8002'])"""
     llm_judge_max_tokens: int = 2048
     """the max tokens to use for the llm judge"""
     llm_judge_max_context_length: int = 8192

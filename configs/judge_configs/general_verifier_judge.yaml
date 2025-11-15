@@ -1,8 +1,8 @@
 version: v2
 budget: ai2/oe-adapt
-description: "VLLM Server for general verifier"
+description: "Dual VLLM Servers for general verifier"
 tasks:
-  - name: "vllm-job"
+  - name: "vllm-dual-servers"
     image:
       beaker: ai2/pytorch2.0.0-cuda11.8-python3.10
     hostNetworking: true
@@ -10,13 +10,25 @@ tasks:
     arguments:
       [
         "pip install vllm && \
-          VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve Qwen/Qwen3-32B \
-            --tensor-parallel-size 2 \
+          echo 'Starting two VLLM servers on different GPUs...' && \
+          # Server 1 on GPUs 0-3, port 8001 \
+          CUDA_VISIBLE_DEVICES=0,1,2,3 VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve Qwen/Qwen3-32B \
+            --tensor-parallel-size 4 \
             --max-model-len 32768 \
             --trust-remote-code \
             --port 8001 \
             --enforce-eager \
-            --chat-template '/weka/oe-adapt-default/hamishi/qwen_no_think_config.jinja'"
+            --chat-template '/weka/oe-adapt-default/hamishi/qwen_no_think_config.jinja' & \
+          # Server 2 on GPUs 4-7, port 8002 \
+          CUDA_VISIBLE_DEVICES=4,5,6,7 VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve Qwen/Qwen3-32B \
+            --tensor-parallel-size 4 \
+            --max-model-len 32768 \
+            --trust-remote-code \
+            --port 8002 \
+            --enforce-eager \
+            --chat-template '/weka/oe-adapt-default/hamishi/qwen_no_think_config.jinja' & \
+          # Keep the container running \
+          wait"
       ]
     datasets:
       - mountPath: /weka/oe-adapt-default
@@ -26,7 +38,7 @@ tasks:
       cluster:
         - ai2/saturn
     resources:
-      gpuCount: 2
+      gpuCount: 8
     context:
-      priority: high
-      preemptible: False
+      priority: urgent
+      preemptible: true

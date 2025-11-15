@@ -16,7 +16,7 @@ import string
 import weakref
 from abc import ABC, abstractmethod
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import requests
@@ -75,11 +75,12 @@ class VerifierConfig:
 class LMJudgeVerifierConfig(VerifierConfig):
     # judge args
     llm_judge_model: str
-    llm_judge_max_tokens: int
-    llm_judge_max_context_length: int
-    llm_judge_temperature: float
-    llm_judge_timeout: int
-    seed: int
+    llm_judge_vllm_servers: list[str] = field(default_factory=list)
+    llm_judge_max_tokens: int = 2048
+    llm_judge_max_context_length: int = 8192
+    llm_judge_temperature: float = 1.0
+    llm_judge_timeout: int = 60
+    seed: int = 42
 
 
 @dataclass
@@ -625,6 +626,20 @@ class LMJudgeVerifier(VerifierFunction):
         self.extractor = EXTRACTOR_MAP[judge_type]
         os.environ["AZURE_API_VERSION"] = "2024-12-01-preview"
 
+        # Track current server index for round-robin load balancing
+        self.current_server_idx = 0
+
+        # If VLLM servers are configured, set up the environment for liteLLM
+        if verifier_config.llm_judge_vllm_servers:
+            self._setup_vllm_servers(verifier_config.llm_judge_vllm_servers)
+
+    def _setup_vllm_servers(self, server_urls: list[str]):
+        """Configure liteLLM to use VLLM servers."""
+        # Set up liteLLM to use VLLM servers
+        # We'll use a custom model name that cycles through servers
+        self.vllm_server_urls = server_urls
+        logger.info(f"Configured LMJudgeVerifier to use {len(server_urls)} VLLM servers: {server_urls}")
+
     def parse_completion(self, completion):
         """
         Extract reasoning and score from an OpenAI API completion response.
@@ -726,14 +741,38 @@ class LMJudgeVerifier(VerifierFunction):
                         logger.error("Cannot fit request within context window even after truncation.")
                         return VerificationResult(score=0.0, cost=0.0, reasoning="Error: Context window exceeded")
                 # end of Faeze's context window check
-                response = await acompletion(
-                    model=self.verifier_config.llm_judge_model,
-                    messages=messages,
-                    temperature=self.verifier_config.llm_judge_temperature,
-                    max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
-                    seed=self.verifier_config.seed,
-                    timeout=self.verifier_config.llm_judge_timeout,
-                )
+
+                # Determine which model/server to use
+                if hasattr(self, 'vllm_server_urls') and self.vllm_server_urls:
+                    # Use VLLM servers with round-robin load balancing
+                    server_url = self.vllm_server_urls[self.current_server_idx]
+                    self.current_server_idx = (self.current_server_idx + 1) % len(self.vllm_server_urls)
+
+                    # Configure for VLLM via OpenAI-compatible API
+                    # liteLLM supports custom API bases for OpenAI-compatible endpoints
+                    model_name = "openai/served-model"  # VLLM default model name
+                    api_base = f"{server_url}/v1" if not server_url.endswith("/v1") else server_url
+
+                    response = await acompletion(
+                        model=model_name,
+                        messages=messages,
+                        api_base=api_base,
+                        api_key="dummy",  # VLLM doesn't require a real API key
+                        temperature=self.verifier_config.llm_judge_temperature,
+                        max_tokens=self.verifier_config.llm_judge_max_tokens,
+                        seed=self.verifier_config.seed,
+                        timeout=self.verifier_config.llm_judge_timeout,
+                    )
+                else:
+                    # Use the default configured model (e.g., Azure OpenAI)
+                    response = await acompletion(
+                        model=self.verifier_config.llm_judge_model,
+                        messages=messages,
+                        temperature=self.verifier_config.llm_judge_temperature,
+                        max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
+                        seed=self.verifier_config.seed,
+                        timeout=self.verifier_config.llm_judge_timeout,
+                    )
                 reasoning, score = self.parse_completion(response)
                 cost = self.get_cost(response, self.verifier_config.llm_judge_model)
                 # normalize score to be between 0 and 1
