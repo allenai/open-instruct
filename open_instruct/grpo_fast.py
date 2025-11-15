@@ -829,6 +829,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
                 )
             else:
+                # print what is in the checkpoint state dir
+                print(f"Checkpoint state dir: {args.checkpoint_state_dir}")
+                print(os.listdir(args.checkpoint_state_dir))
                 path, states = self.model.load_checkpoint(
                     args.checkpoint_state_dir,
                     load_module_strict=True,
