@@ -1,11 +1,41 @@
 #!/bin/bash
 
+export lr=1e-6
+export seed=1
+export exp_name=test_dpo_olmo3_32b_s${seed}_lr${lr}_${RANDOM}
+export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 saurabh5/code_rlvr_mixture_dpo 1.0 allenai/IF_multi_constraints_upto5_filtered_dpo_0625_filter-keyword-filtered-topic-char-topic-filtered 30186 allenai/rlvr_general_mix-keyword-filtered-topic-chars-char-filt-topic-filtered 21387"
+export beaker_image=hamishivi/open_instruct_rl32_no_ref14
+export gs_model_name=test_dpo_olmo3_32b_s${seed}_lr${lr}_${RANDOM}
+# if we need the sft model, use this:
+# export model_path=/weka/oe-adapt-default/hamishi/model_checkpoints/final_olmo_32b_sft
+export model_path=/weka/oe-adapt-default/allennlp/deletable_checkpoint/scottg/olmo3-32b-DPO-8k-0.6b-200k-lucafilt-s42-7e-8__42__1762948744
 
-export exp_name=test_olmo3_32b_rl_run_${RANDOM}
-export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 saurabh5/code_rlvr_mixture_dpo 1.0 hamishivi/IF_multi_constraints_upto5_filtered_dpo_0625_filter-keyword-filtered 30186 allenai/rlvr_general_mix-keyword-filtered 21387"
-export beaker_image=hamishivi/open_instruct_rl32_test10
-export model_path=/weka/oe-adapt-default/hamishi/model_checkpoints/olmo3-merge-32b-1e-4-5e-5/olmo3-merge-32b-1e-4-5e-5/
-
+# annoying restart nonsense.
+# 
+# 2e-6 s1 ckpt
+# export lr=2e-6
+# export model_path=/weka/oe-adapt-default/hamishi/olmo_3_emergency_ckpts/test_dpo_olmo3_32b_s1_lr2e-6_1305__1__1763092241_checkpoints_step_100
+# export exp_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
+# export gs_model_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
+# 
+# 1e-6 s42 ckpt
+# export model_path=/weka/oe-adapt-default/hamishi/olmo_3_emergency_ckpts/test_dpo_olmo3_32b_s42_lr1e-6_31282__42__1763093382_checkpoints_step_100
+# export seed=42
+# export exp_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
+# export gs_model_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
+# 
+# 1e-6 s1 ckpt
+# export model_path=/weka/oe-adapt-default/hamishi/olmo_3_emergency_ckpts/test_dpo_olmo3_32b_s1_lr1e-6_25849__1__1763083366_checkpoints_step_200
+# export seed=1
+# export exp_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
+# export gs_model_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
+# 
+# 5e-7 s1 ckpt
+# export lr=5e-7
+# export model_path=/weka/oe-adapt-default/hamishi/olmo_3_emergency_ckpts/test_dpo_olmo3_32b_s1_lr5e-7_9654__1__1763092410_checkpoints_step_200
+# export seed=1
+# export exp_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
+# export gs_model_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
 
 python mason.py \
     --budget ai2/oe-adapt \
@@ -14,9 +44,9 @@ python mason.py \
     --pure_docker_mode \
     --workspace ai2/olmo-instruct \
     --priority urgent \
-    --gs_model_name "sft_olmo3_32b_rl_run_testing" \
+    --gs_model_name "${gs_model_name}" \
     --preemptible \
-    --num_nodes 16 \
+    --num_nodes 28 \
     --gpus 8 \
     --max_retries 0 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -28,10 +58,10 @@ python mason.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \
-        --num_unique_prompts_rollout 64 \
+        --num_unique_prompts_rollout 128 \
         --num_mini_batches 1 \
         --num_epochs 1 \
-        --learning_rate 1e-6 \
+        --learning_rate ${lr} \
         --per_device_train_batch_size 1 \
         --output_dir /output \
         --kl_estimator kl3 \
@@ -51,15 +81,16 @@ python mason.py \
         --sft_messages_key messages \
         --total_episodes 10000000 \
         --deepspeed_stage 3 \
-        --num_learners_per_node 8 8 8 8 8 8 \
-        --vllm_num_engines 10 \
+        --num_learners_per_node 8 8 8 8 8 8 8 8 \
+        --vllm_num_engines 20 \
+        --inference_batch_size 200 \
         --gather_whole_model False \
         --vllm_tensor_parallel_size 8 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
-        --seed 1 \
+        --seed ${seed} \
         --local_eval_every 50 \
-        --save_freq 25 \
+        --save_freq 50 \
         --beaker_eval_freq 50 \
         --eval_priority urgent \
         --try_launch_beaker_eval_jobs_on_weka True \
@@ -76,14 +107,14 @@ python mason.py \
         --code_pass_rate_reward_threshold 0.99 \
         --code_max_execution_time 6 \
         --oe_eval_max_length 32768 \
-        --checkpoint_state_freq 100 \
+        --checkpoint_state_freq 1 \
         --backend_timeout 1200 \
         --inflight_updates true \
         --async_steps 8 \
         --active_sampling \
         --advantage_normalization_type centered \
         --truncated_importance_sampling_ratio_cap 2.0 \
-        --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto \
-        --oe_eval_tasks mmlu:cot::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,gpqa:0shot_cot::qwen3-instruct,zebralogic::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek \
+        --oe_eval_tasks mmlu:cot::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,gpqa:0shot_cot::qwen3-instruct,zebralogic::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek \
+        --oe_eval_gpu_multiplier 2 \
         --vllm_enforce_eager \
         --deepspeed_zpg 1
