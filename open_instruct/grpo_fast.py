@@ -507,7 +507,7 @@ class Args:
             else:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{checkpoint_dir_name}"
             if not checkpoint_dir_name.startswith("/filestore"):
-                self.gs_checkpoint_state_dir = f"/filestore{self.gs_checkpoint_state_dir}"
+                self.checkpoint_state_dir = f"/filestore{self.checkpoint_state_dir}"
 
         if self.checkpoint_state_dir is not None:
             if self.gs_checkpoint_state_dir is not None:
