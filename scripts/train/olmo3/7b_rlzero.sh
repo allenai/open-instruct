@@ -15,7 +15,7 @@ LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
 LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
 
 
-EXP_NAME="grpo_17kfilter_${GS_MODEL_NAME}"
+EXP_NAME="olmo3-7b_rlzero_${GS_MODEL_NAME}"
 
 cluster=ai2/jupiter
 
@@ -27,7 +27,7 @@ python mason.py \
     --pure_docker_mode \
     --image nathanl/open_instruct_auto \
     --preemptible \
-    --num_nodes 9 \
+    --num_nodes 5 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $GS_MODEL_NAME \
@@ -35,18 +35,17 @@ python mason.py \
     --budget ai2/oe-adapt \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \&\& \
-source configs/beaker_configs/code_api_setup.sh \&\& \
 python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
-    --async_steps 4 \
+    --async_steps 8 \
     --inflight_updates \
-    --no_resampling_pass_rate 0.9 \ # Soon to be merged!
+    --no_resampling_pass_rate 0.9 \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --active_sampling \
-    --num_samples_per_prompt_rollout 16 \
-    --num_unique_prompts_rollout 16 \
+    --num_samples_per_prompt_rollout 8 \
+    --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -56,27 +55,29 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
-    --response_length 12000 \
-    --pack_length 32768 \
+    --response_length 16384 \
+    --pack_length 18432 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name olmo_thinker_dapo \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 512000 \
+    --total_episodes 512256 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
-    --vllm_num_engines 64 \
+    --vllm_num_engines 32 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 100 \
-    --save_freq 100 \
+    --local_eval_every 25 \
+    --save_freq 50 \
+    --beaker_eval_freq 50 \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
+    --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-7b_rlzero/ \
     --mask_truncated_completions True \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \

@@ -1,28 +1,23 @@
 #!/bin/bash
 
 # OLMo 3 model
-MODEL_NAME_OR_PATH="gs://ai2-llm/checkpoints/stego32-longcontext-run-3/step11921+11000+10000-nooptim-hf"
-SHORT_MODEL_NAME="olmo3_32b_lc"
+MODEL_NAME_OR_PATH="/weka/oe-adapt-default/michaeln/checkpoints/olmo3-7b-base"
+GS_MODEL_NAME="olmo3_7b_base"
 
 DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_template_filtered 1.0 saurabh5/MATH_3000_Filtered_olmo_completions_new_template_filtered 1.0"
 
 # math evals
 # EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
-EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo,minerva_math_500::hamish_zs_reasoning_dapo"
+EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
 
 # AIME 2024, 2025 local evals
 LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
 LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
 
 
-EXP_NAME="olmo3-32b_rlzero_${SHORT_MODEL_NAME}"
+EXP_NAME="olmo3-7b_rlzero_code_${GS_MODEL_NAME}"
 
-#BEAKER_IMAGE="${1:nathanl/open_instruct_auto}"
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
-shift  # Remove the image name from the argument list
-
-cluster=ai2/augusta
+cluster=ai2/jupiter
 
 python mason.py \
     --task_name ${EXP_NAME} \
@@ -30,11 +25,12 @@ python mason.py \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --pure_docker_mode \
-    --image ${BEAKER_IMAGE} \
+    --image nathanl/open_instruct_auto \
     --preemptible \
-    --num_nodes 10 \
+    --num_nodes 5 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
+    --gs_model_name $GS_MODEL_NAME \
     --gpus 8 \
     --budget ai2/oe-adapt \
     -- \
@@ -44,7 +40,7 @@ python open_instruct/grpo_fast.py \
     --beta 0.0 \
     --async_steps 8 \
     --inflight_updates \
-    --no_resampling_pass_rate 0.875 \
+    --no_resampling_pass_rate 0.9 \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --active_sampling \
@@ -67,13 +63,14 @@ python open_instruct/grpo_fast.py \
     --temperature 1.0 \
     --total_episodes 512256 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 8 8 8 8 \
-    --vllm_num_engines 12 \
-    --gather_whole_model False \
-    --vllm_tensor_parallel_size 4 \
-    --inference_batch_size 125 \
+    --num_learners_per_node 8 \
+    --vllm_num_engines 32 \
+    --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
+    --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
+    --code_max_execution_time 6.0 \
+    --code_pass_rate_reward_threshold 0.99 \
     --seed 1 \
     --local_eval_every 25 \
     --save_freq 50 \
@@ -81,19 +78,15 @@ python open_instruct/grpo_fast.py \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
-    --output_dir /output/olmo3-32b-rlzero/checkpoints \
-    --checkpoint_state_dir /output/olmo3-32b-rlzero/checkpoints \
-    --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-32b_rlzero \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
+    --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-7b_rlzero-code/ \
     --mask_truncated_completions True \
-    --oe_eval_gpu_multiplier 4 \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
-    --vllm_enforce_eager \
-    --deepspeed_zpg 1 \
-    --oe_eval_tasks $EVALS \
-    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 
+    --oe_eval_tasks $EVALS
 
-# deepspeed_zpg could also be num_GPUs of the trainer, acheives same effect (allow model to be sharded across all trainer GPUs) 
+# TODO
+#     --oe_eval_gpu_multiplier 4 \
+#     --oe_eval_beaker_image michaeln/oe_eval_rlzero
