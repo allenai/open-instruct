@@ -3021,7 +3021,7 @@ def run_training(
                                     for i in range(args.world_size)
                                 ],
                                 desc=f"Saving checkpoint state at step {training_step}",
-                                timeout=600,
+                                timeout=1800,
                             )
                             logger.info(
                                 f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}"
