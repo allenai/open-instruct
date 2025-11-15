@@ -16,6 +16,9 @@ LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
 
 
 EXP_NAME="olmo3-7b_rlzero_code_${GS_MODEL_NAME}"
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+shift  # Remove the image name from the argument list
 
 cluster=ai2/jupiter
 
@@ -25,7 +28,7 @@ python mason.py \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --pure_docker_mode \
-    --image nathanl/open_instruct_auto \
+    --image ${BEAKER_IMAGE} \
     --preemptible \
     --num_nodes 5 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
