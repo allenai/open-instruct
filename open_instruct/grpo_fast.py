@@ -2431,7 +2431,7 @@ def one_training_step(
                     )
                     logger.info(f"Saved model at step {training_step} to {step_dir}")
                     # Clean up old checkpoints (only on rank 0, similar to checkpoint states)
-                    if args.keep_last_n_checkpoints >= 0:
+                    if args.keep_last_n_checkpoints >= 0 and self.rank == 0:
                         try:
                             clean_last_n_checkpoints(checkpoint_dir, args.keep_last_n_checkpoints)
                         except Exception as cleanup_error:
