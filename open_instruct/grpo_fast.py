@@ -508,6 +508,8 @@ class Args:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{checkpoint_dir_name}"
 
         if self.checkpoint_state_dir is not None:
+            if self.gs_checkpoint_state_dir is not None:
+                download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
         if self.tools is not None and len(self.tools) > 0:
             for tool in self.tools:
@@ -765,13 +767,6 @@ class PolicyTrainerRayProcess(RayProcess):
         random.seed(worker_seed)
 
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
-
-        # Download checkpoint and calibrate on every rank
-        if args.checkpoint_state_dir is not None:
-            if args.gs_checkpoint_state_dir is not None:
-                download_latest_checkpoint_from_gs(args.gs_checkpoint_state_dir, args.checkpoint_state_dir)
-                # If we downloaded, calibrate also on every rank
-                calibrate_checkpoint_state_dir(args.checkpoint_state_dir)
 
         ds_config = get_train_ds_config(
             offload=args.deepspeed_offload_param,
