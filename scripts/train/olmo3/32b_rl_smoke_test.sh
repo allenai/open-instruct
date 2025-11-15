@@ -2,10 +2,11 @@
 
 export lr=1e-6
 export seed=1
-export exp_name=test_dpo_olmo3_32b_s${seed}_lr${lr}_${RANDOM}
+export exp_name=BIGTEST_test_dpo_olmo3_32b_s${seed}_lr${lr}_${RANDOM}
 export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 saurabh5/code_rlvr_mixture_dpo 1.0 allenai/IF_multi_constraints_upto5_filtered_dpo_0625_filter-keyword-filtered-topic-char-topic-filtered 30186 allenai/rlvr_general_mix-keyword-filtered-topic-chars-char-filt-topic-filtered 21387"
-export beaker_image=hamishivi/open_instruct_rl32_no_ref14
+export beaker_image=hamishivi/open_instruct_rl32_no_ref18
 export gs_model_name=test_dpo_olmo3_32b_s${seed}_lr${lr}_${RANDOM}
+export cluster=ai2/augusta
 # if we need the sft model, use this:
 # export model_path=/weka/oe-adapt-default/hamishi/model_checkpoints/final_olmo_32b_sft
 export model_path=/weka/oe-adapt-default/allennlp/deletable_checkpoint/scottg/olmo3-32b-DPO-8k-0.6b-200k-lucafilt-s42-7e-8__42__1762948744
@@ -21,8 +22,9 @@ export model_path=/weka/oe-adapt-default/allennlp/deletable_checkpoint/scottg/ol
 # 1e-6 s42 ckpt
 # export model_path=/weka/oe-adapt-default/hamishi/olmo_3_emergency_ckpts/test_dpo_olmo3_32b_s42_lr1e-6_31282__42__1763093382_checkpoints_step_100
 # export seed=42
-# export exp_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
+# export exp_name=dpo_olmo3_32b_res100_jup_s${seed}_lr${lr}_${RANDOM}
 # export gs_model_name=test_dpo_olmo3_32b_res100_s${seed}_lr${lr}_${RANDOM}
+# export cluster=ai2/jupiter
 # 
 # 1e-6 s1 ckpt
 # export model_path=/weka/oe-adapt-default/hamishi/olmo_3_emergency_ckpts/test_dpo_olmo3_32b_s1_lr1e-6_25849__1__1763083366_checkpoints_step_200
@@ -39,7 +41,7 @@ export model_path=/weka/oe-adapt-default/allennlp/deletable_checkpoint/scottg/ol
 
 python mason.py \
     --budget ai2/oe-adapt \
-    --cluster ai2/augusta \
+    --cluster ${cluster} \
     --image ${beaker_image} \
     --pure_docker_mode \
     --workspace ai2/olmo-instruct \
@@ -107,7 +109,7 @@ python mason.py \
         --code_pass_rate_reward_threshold 0.99 \
         --code_max_execution_time 6 \
         --oe_eval_max_length 32768 \
-        --checkpoint_state_freq 1 \
+        --checkpoint_state_freq 5 \
         --backend_timeout 1200 \
         --inflight_updates true \
         --async_steps 8 \
