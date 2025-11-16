@@ -633,9 +633,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
 
     deepspeed_plugin = None
-    if args.zero_stage is not None:
+    should_init_deepspeed = args.zero_stage is not None
+    if should_init_deepspeed and args.cache_dataset_only:
+        should_init_deepspeed = False
+    if should_init_deepspeed:
         deepspeed_config = build_deepspeed_config(
-            zero_stage=args.zero_stage, offload_optimizer=args.offload_optimizer, offload_param=args.offload_param, zero_hpz_partition_size=args.zero_hpz_partition_size
+            zero_stage=args.zero_stage,
+            offload_optimizer=args.offload_optimizer,
+            offload_param=args.offload_param,
+            zero_hpz_partition_size=args.zero_hpz_partition_size,
         )
         deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=deepspeed_config)
 
