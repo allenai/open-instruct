@@ -393,8 +393,10 @@ class Args:
     """Whether to save learning data traces"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    keep_last_n_checkpoints: int = 3
-    """How many checkpoints to keep in the output directory. -1 for all."""
+    keep_last_n_checkpoint_states: int = 3
+    """How many checkpoint states (optimizer, lr scheduler, etc.) to keep in the output directory. -1 for all."""
+    keep_last_n_checkpoints: int = -1
+    """How many regular model checkpoints to keep in the output directory. -1 for all."""
     checkpoint_state_freq: int = -1
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
@@ -1242,8 +1244,8 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
         if self.rank == 0:
-            if args.keep_last_n_checkpoints >= 0:
-                clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoints)
+            if args.keep_last_n_checkpoint_states >= 0:
+                clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoint_states)
 
             # Sync to GCS if configured (check the actual target, not just gs_bucket_path)
             if args.gs_checkpoint_state_dir is not None:
