@@ -1,7 +1,7 @@
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
-for LR in 8e-7
+for LR in 8e-7 1e-6
 do
-    EXP_NAME=olmo3-7b-DPO-1115-old-plus_img-${LR}
+    EXP_NAME=olmo3-7b-DPO-1115-old-plus_keyfilt-${LR}
     uv run python mason.py \
        --cluster ai2/augusta \
        --gs_model_name olmo3-7b-instruct-SFT-1115 \
@@ -28,12 +28,12 @@ do
         --model_name_or_path $MODEL_NAME \
         --tokenizer_name $MODEL_NAME \
         --use_slow_tokenizer False \
-        --dataset_mixer_list scottgeng00/olmo-3-preference-mix-deltas-complement2-yolo_victoria_hates_code-DECON 125000 \
-            allenai/dpo-yolo1-200k-gpt4.1-judge-2weak2strong-maxdelta_rejected-DECON 125000 \
-            VGraf/general_responses_dev_8maxturns_truncated2048 2247 \
-            VGraf/paraphrase_train_dev_8maxturns_truncated2048 1687 \
-            VGraf/repeat_response_flip_tulu_5maxturns_big_truncated2048 562 \
-            VGraf/self-talk_gpt3.5_gpt4o_prefpairs_truncated2048 4502 \
+        --dataset_mixer_list allenai/olmo-3-preference-mix-deltas-complement2-grafmix-DECON-qwen32b-keyword-filtered-chinese-filtered 125000 \
+            allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_rejected-DECON-rm-gemma3-kwd-ftd-chinese-filtered 125000 \
+            allenai/general_responses_dev_8maxturns_truncated2048-keyword-filtered 2247 \
+            allenai/paraphrase_train_dev_8maxturns_truncated2048-keyword-filtered 1687 \
+            allenai/repeat_response_flip_tulu_5maxturns_big_truncated2048-keyword-filtered 562 \
+            allenai/self-talk_gpt3.5_gpt4o_prefpairs_truncated2048-keyword-filtered 4502 \
         --max_seq_length 16384 \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps 4 \
