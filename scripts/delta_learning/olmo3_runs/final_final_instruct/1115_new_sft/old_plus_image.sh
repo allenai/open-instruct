@@ -1,7 +1,7 @@
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
 for LR in 8e-7
 do
-    EXP_NAME=olmo3-7b-DPO-1115-old-plus_img-${LR}
+    EXP_NAME=olmo3-7b-DPO-1115-old-plus_img-${LR}-hpz8
     uv run python mason.py \
        --cluster ai2/augusta \
        --gs_model_name olmo3-7b-instruct-SFT-1115 \
@@ -38,6 +38,9 @@ do
         --max_seq_length 16384 \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps 4 \
+        --zero_stage 3 \
+        --zero_hpz_partition_size 8 \
+        --dataset_skip_cache \
         --learning_rate $LR \
         --lr_scheduler_type linear \
         --warmup_ratio 0.1 \

@@ -35,6 +35,8 @@ do
             allenai/self-talk-truncated-gpt-deduped 2500 \
         --max_seq_length 16384 \
         --per_device_train_batch_size 1 \
+        --zero_stage 3 \
+        --zero_hpz_partition_size 8 \
         --gradient_accumulation_steps 2 \
         --learning_rate $LR \
         --lr_scheduler_type linear \
