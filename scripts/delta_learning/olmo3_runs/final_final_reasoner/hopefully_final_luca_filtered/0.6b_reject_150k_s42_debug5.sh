@@ -1,6 +1,5 @@
-MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-1e-4-5e-5/ 
-NUM_NODES=16
-for LR in 8e-8 9e-8
+MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-1e-4-5e-5/ NUM_NODES=16
+for LR in 7e-8
 do
     EXP_NAME="olmo3-32b-DPO-8k-0.6b-150k-lucafilt-s42-${LR}"
     uv run python mason.py \

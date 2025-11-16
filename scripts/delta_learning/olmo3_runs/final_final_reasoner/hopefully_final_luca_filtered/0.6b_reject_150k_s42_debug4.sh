@@ -1,6 +1,6 @@
-MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-1e-4-5e-5/ 
+MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-1e-4-5e-5/
 NUM_NODES=16
-for LR in 8e-8 9e-8
+for LR in 7e-8
 do
     EXP_NAME="olmo3-32b-DPO-8k-0.6b-150k-lucafilt-s42-${LR}"
     uv run python mason.py \
@@ -31,7 +31,7 @@ do
         --model_name_or_path $MODEL_NAME \
         --tokenizer_name $MODEL_NAME \
         --use_slow_tokenizer False \
-        --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-ftd-topic-ftd-dedup5_take2 1.0 \
+        --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-filtered 1.0 \
         --max_train_samples 150000 \
         --dataset_skip_cache \
         --zero_stage 3 \
