@@ -371,6 +371,12 @@ class FlatArguments:
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
+    oe_eval_gpu_multiplier: int | None = None
+    """the multiplier for the number of GPUs to use for evaluation"""
+    eval_workspace: str | None = "ai2/olmo-instruct"
+    """the workspace to use for evaluation"""
+    eval_priority: str | None = "urgent"
+    """the priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
         if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
@@ -1289,6 +1295,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
+            eval_workspace=args.eval_workspace,
+            eval_priority=args.eval_priority,
+            oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
         )
     if args.push_to_hub:
         push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
