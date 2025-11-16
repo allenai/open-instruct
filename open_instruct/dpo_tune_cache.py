@@ -157,6 +157,9 @@ class FlatArguments:
             "help": "DeepSpeed ZeRO optimization stage (0, 1, 2, or 3). If None, DeepSpeed config must be provided via accelerate launch."
         },
     )
+    zero_hpz_partition_size: int = field(
+        default=8, metadata={"help": "The partition size for ZeRO++ optimization. Only used if zero_stage is set."},
+    )
     offload_optimizer: bool = field(
         default=False,
         metadata={"help": "Offload optimizer states to CPU to save GPU memory. Only used if zero_stage is set."},
@@ -550,7 +553,7 @@ def maybe_load_reference_logprobs_from_disk(
     return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location
 
 
-def build_deepspeed_config(zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False) -> dict:
+def build_deepspeed_config(zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, zero_hpz_partition_size: int = 8) -> dict:
     """Build a DeepSpeed configuration dict from the provided settings."""
     config = {
         "bf16": {"enabled": "auto"},
@@ -577,7 +580,7 @@ def build_deepspeed_config(zero_stage: int, offload_optimizer: bool = False, off
                 "stage3_max_live_parameters": 1e9,
                 "stage3_max_reuse_distance": 1e9,
                 "stage3_gather_16bit_weights_on_model_save": True,
-                "zero_hpz_partition_size": 8,
+                "zero_hpz_partition_size": zero_hpz_partition_size,
             }
         )
 
@@ -632,7 +635,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     deepspeed_plugin = None
     if args.zero_stage is not None:
         deepspeed_config = build_deepspeed_config(
-            zero_stage=args.zero_stage, offload_optimizer=args.offload_optimizer, offload_param=args.offload_param
+            zero_stage=args.zero_stage, offload_optimizer=args.offload_optimizer, offload_param=args.offload_param, zero_hpz_partition_size=args.zero_hpz_partition_size
         )
         deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=deepspeed_config)
 
