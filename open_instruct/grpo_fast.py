@@ -39,7 +39,6 @@ with contextlib.suppress(Exception):
 from open_instruct import streaming_data_loader, utils
 from open_instruct.streaming_data_loader import (
     PendingQueriesMap,
-    ShufflingIterator,
     accumulate_inference_batches,
     add_prompt_to_generator,
     collate_fn,
@@ -56,7 +55,7 @@ import threading
 import time
 from argparse import Namespace
 from collections import defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from queue import Empty, Full, Queue
@@ -244,8 +243,6 @@ class Args:
     """Enable immediate stopping of request processing when should_stop is set, allowing for quick pausing and resumption"""
     kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
     """the KL estimator to use"""
-    pack_length: int = 512
-    """the length of the pack (you should prob set to the max length of the model)"""
     masked_mean_axis: int | None = None
     """the axis to compute the mean of the masked values"""
     masked_mean_denominator: float | None = None
@@ -257,19 +254,6 @@ class Args:
     """
     ref_policy_update_freq: int | None = None
     """How many training steps to take before updating the reference policy."""
-    advantage_normalization_type: Literal["standard", "centered"] = "standard"
-    """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
-    divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
-    DR.GRPO https://arxiv.org/pdf/2503.20783)."""
-    mask_truncated_completions: bool = False
-    """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
-
-    active_sampling: bool = False
-    """Whether to continue sampling responses until you get a full batch."""
-    filter_zero_std_samples: bool = True
-    """Whether to filter out prompts with zero reward std (all samples have the same score)."""
-    no_resampling_pass_rate: float | None = None
-    """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
 
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
@@ -642,6 +626,7 @@ class PolicyTrainerRayProcess(RayProcess):
         local_rank: int,
         master_addr: str | None,
         master_port: int | None,
+        args: Args,
         data_loader_config: streaming_data_loader.StreamingDataLoaderConfig,
         dataset: Dataset,
         reward_fn: Callable,
@@ -656,7 +641,7 @@ class PolicyTrainerRayProcess(RayProcess):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
-        self.num_mini_batches = data_loader_config.args.num_mini_batches
+        self.num_mini_batches = args.num_mini_batches
         self.dataloader = data_loader_config.build(
             dataset=dataset,
             reward_fn=reward_fn,
@@ -667,6 +652,12 @@ class PolicyTrainerRayProcess(RayProcess):
             generation_config=generation_config,
             dp_rank=self.local_rank,
             fs_local_rank=self.local_rank,
+            num_training_steps=args.num_training_steps,
+            seed=args.seed,
+            async_steps=args.async_steps,
+            num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout,
+            per_device_train_batch_size=args.per_device_train_batch_size,
+            verbose=args.verbose,
             actor_manager=actor_manager,
             model_dims=model_dims,
         )
@@ -1426,6 +1417,7 @@ class ModelGroup:
         ray_process_cls: RayProcess,
         num_gpus_per_node: list[int],
         single_gpu_mode: bool,
+        args: Args,
         data_loader_config: streaming_data_loader.StreamingDataLoaderConfig,
         dataset: Dataset,
         reward_fn: Callable,
@@ -1456,6 +1448,7 @@ class ModelGroup:
             0,
             None,
             None,
+            args,
             data_loader_config,
             dataset,
             reward_fn,
@@ -1505,6 +1498,7 @@ class ModelGroup:
                 0,
                 master_addr,
                 master_port,
+                args,
                 data_loader_config,
                 dataset,
                 reward_fn,
@@ -1782,6 +1776,7 @@ def create_model_and_optimizer(
         PolicyTrainerRayProcess,
         args.num_learners_per_node,
         args.single_gpu_mode,
+        args=args,
         data_loader_config=data_loader_config,
         dataset=train_dataset,
         reward_fn=reward_fn,
@@ -1916,7 +1911,6 @@ def one_training_step(
     prompt_lengths: list[int],
     response_lengths: list[int],
     actor_manager: ActorManager | None = None,
-    iter_dataloader: Iterator | None = None,
 ) -> None:
     """Train the model for one step."""
     update_ref_policy_future = []
@@ -2299,7 +2293,6 @@ def run_training(
     policy_group,
     vllm_engines,
     generation_configs,
-    iter_dataloader,
     reward_fn,
     resume_training_step,
     episode,
@@ -2350,19 +2343,6 @@ def run_training(
             enable=False,
         )
 
-    # Send initial data to ensure we have a N-step offset.
-    for _ in range(args.async_steps * args.num_unique_prompts_rollout):
-        dataset_index = next(iter_dataloader)
-        add_prompt_to_generator(
-            train_dataset[dataset_index],
-            dataset_index,
-            iter_dataloader.epoch_number,
-            resume_training_step,
-            pending_queries_map,
-            param_prompt_Q,
-            generation_configs["train"],
-            is_eval=False,
-        )
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
         logger.info(f"Restored num_total_tokens: {num_total_tokens}")
@@ -2399,7 +2379,7 @@ def run_training(
                 add_prompt_to_generator(
                     eval_example,
                     eval_index,
-                    iter_dataloader.epoch_number,
+                    0,
                     training_step,
                     eval_pending_queries_map,
                     param_prompt_Q,
@@ -2440,7 +2420,6 @@ def run_training(
             prompt_lengths,
             response_lengths,
             actor_manager,
-            iter_dataloader,
         )
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
@@ -2454,16 +2433,11 @@ def run_training(
             and args.checkpoint_state_dir is not None
         ):
             with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                # Save comprehensive client state including ShufflingIterator state
                 client_state = {
                     "training_step": training_step,
                     "episode": episode,
                     "num_total_tokens": num_total_tokens,
                 }
-
-                # Save ShufflingIterator state
-                if iter_dataloader is not None:
-                    client_state["shuffling_iterator_state"] = iter_dataloader.get_state()
 
                 ray_get_with_progress(
                     [
@@ -2570,13 +2544,6 @@ def main(
             episode = checkpoint_state["episode"]
             logger.info(f"Restored episode count: {episode}")
 
-    train_dataset_idxs = np.arange(len(train_dataset))
-    iter_dataloader = ShufflingIterator(train_dataset_idxs, 1, seed=args.seed)
-
-    if checkpoint_state and "shuffling_iterator_state" in checkpoint_state:
-        iter_dataloader.set_state(checkpoint_state["shuffling_iterator_state"])
-        logger.info("Restored ShufflingIterator state from checkpoint")
-
     # Create additional queues (main queues already created above)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     eval_pending_queries_map = PendingQueriesMap()
@@ -2595,7 +2562,6 @@ def main(
             policy_group,
             vllm_engines,
             generation_configs,
-            iter_dataloader,
             reward_fn,
             resume_training_step,
             episode,
