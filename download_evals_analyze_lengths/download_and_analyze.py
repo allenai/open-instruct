@@ -13,6 +13,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
+import numpy as np
+
 try:
     import duckdb
 except ImportError as exc:  # pragma: no cover - dependency check is runtime only
@@ -34,26 +36,37 @@ from length_analysis import (
 )
 
 
-DEFAULT_ALIASES: Tuple[str, ...] = (
-    "mmlu:cot::hamish_zs_reasoning_deepseek",
-    "popqa::hamish_zs_reasoning_deepseek",
-    "simpleqa::tulu-thinker_deepseek",
-    "bbh:cot::hamish_zs_reasoning_deepseek_v2",
-    "gpqa:0shot_cot::hamish_zs_reasoning_deepseek",
-    "zebralogic::hamish_zs_reasoning_deepseek",
-    "agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek",
-    "minerva_math::hamish_zs_reasoning_deepseek",
-    "gsm8k::zs_cot_latex_deepseek",
-    "omega_500:0-shot-chat_deepseek",
-    "aime:zs_cot_r1::pass_at_32_2025_deepseek",
-    "aime:zs_cot_r1::pass_at_32_2024_deepseek",
-    "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek",
-    "mbppplus:0-shot-chat::tulu-thinker_deepseek",
-    "livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags",
-    "alpaca_eval_v3::hamish_zs_reasoning_deepseek",
-    "ifeval::hamish_zs_reasoning_deepseek",
-    "bfcl_all::std",
-)
+DEFAULT_ALIASES: Dict[str, list[str]] = {
+    "Knowledge": [
+        "mmlu:cot::hamish_zs_reasoning_deepseek",
+        "popqa::hamish_zs_reasoning_deepseek",
+        "gpqa:0shot_cot::hamish_zs_reasoning_deepseek",
+    ],
+    "Reasoning": [
+        "bbh:cot::hamish_zs_reasoning_deepseek_v2",
+        "zebralogic::hamish_zs_reasoning_deepseek",
+        "agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek",
+    ],
+    "Math": [
+        #"minerva_math::hamish_zs_reasoning_deepseek",
+        "minerva_math_500::hamish_zs_reasoning_deepseek",
+        #"omega_compositional:0-shot-chat_deepseek",
+        "omega_500:0-shot-chat_deepseek",
+        "aime:zs_cot_r1::pass_at_32_2025_deepseek",
+        "aime:zs_cot_r1::pass_at_32_2024_deepseek",
+    ],
+    "Coding": [
+        "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek",
+        "mbppplus:0-shot-chat::tulu-thinker_deepseek",
+        #"livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags",
+        "livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite",
+    ],
+    "IF & Chat": [
+        "alpaca_eval_v3::hamish_zs_reasoning_deepseek",
+        "ifeval::hamish_zs_reasoning_deepseek",
+    ],
+    # "Tool Use": ["bfcl_all::std"]
+}
 
 SCORE_FIELDS: Tuple[str, ...] = (
     "primary_score",
@@ -460,8 +473,9 @@ def ensure_bigquery_extension(conn: duckdb.DuckDBPyConnection) -> None:
             f"ATTACH '{BIGQUERY_ATTACH}' AS bq "
             "(TYPE bigquery, READ_ONLY);"
         )
-    except duckdb.CatalogException as exc:
-        message = exc.args[0] if exc.args else ""
+    except Exception as exc:
+        # Handle both CatalogException and BinderException when database already exists
+        message = str(exc)
         if "already exists" not in message.lower():
             raise
 
@@ -530,11 +544,14 @@ def table_exists(conn: duckdb.DuckDBPyConnection, table_name: str) -> bool:
 
 
 def fetch_latest_eval_rows(
-    model_name: str,
+    model_names: Sequence[str],
     aliases: Sequence[str],
     duckdb_path: Optional[Path],
 ) -> Tuple[Dict[str, RowDict], List[str]]:
-    """Return the most recent datalake rows per alias along with lookup sources."""
+    """Return the most recent datalake rows per alias along with lookup sources.
+    
+    Tries each model_name in sequence for each alias, taking the first hit found.
+    """
 
     # Open DuckDB in read-only mode to allow concurrent access from multiple processes
     if duckdb_path:
@@ -545,18 +562,30 @@ def fetch_latest_eval_rows(
     sources: List[str] = []
     results: Dict[str, RowDict] = {}
     try:
+        # Try local cache first for all model names
         if duckdb_path:
-            local_rows = query_local_metrics(conn, model_name, aliases)
-            if local_rows:
-                sources.append(f"duckdb:{duckdb_path}")
-                results.update({row["alias"]: row for row in local_rows})
+            for model_name in model_names:
+                missing = [alias for alias in aliases if alias not in results]
+                if not missing:
+                    break
+                local_rows = query_local_metrics(conn, model_name, missing)
+                if local_rows:
+                    if f"duckdb:{duckdb_path}" not in sources:
+                        sources.append(f"duckdb:{duckdb_path}")
+                    results.update({row["alias"]: row for row in local_rows})
 
+        # Try BigQuery for remaining missing aliases
         missing = [alias for alias in aliases if alias not in results]
         if missing:
-            bigquery_rows = query_bigquery_metrics(conn, model_name, missing)
-            if bigquery_rows:
-                sources.append("bigquery")
-                results.update({row["alias"]: row for row in bigquery_rows})
+            for model_name in model_names:
+                still_missing = [alias for alias in missing if alias not in results]
+                if not still_missing:
+                    break
+                bigquery_rows = query_bigquery_metrics(conn, model_name, still_missing)
+                if bigquery_rows:
+                    if "bigquery" not in sources:
+                        sources.append("bigquery")
+                    results.update({row["alias"]: row for row in bigquery_rows})
 
         return results, sources
     finally:
@@ -726,7 +755,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "model_name",
-        help="Exact model name as recorded in the datalake (model_config.model).",
+        nargs="+",
+        help="Exact model name(s) as recorded in the datalake (model_config.model). Multiple names can be provided for the same model.",
     )
     parser.add_argument(
         "--aliases",
@@ -759,8 +789,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--tokenizer",
-        default="allenai/dolma2-tokenizer",
-        help="Tokenizer identifier to use for response length computation (default: allenai/dolma2-tokenizer).",
+        default="allenai/dolma-2-tokenizer-olmo-3-instruct-final",
+        help="Tokenizer identifier to use for response length computation (default: allenai/dolma-2-tokenizer-olmo-3-instruct-final).",
     )
     parser.add_argument(
         "--no-refresh",
@@ -775,22 +805,99 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def plot_category_distributions(
+    category_name: str,
+    token_counts: List[int],
+    output_root: Path,
+    model_name: str,
+) -> None:
+    """Generate two distribution plots for a category: linear and log scale."""
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("Warning: matplotlib not installed. Skipping plots.")
+        return
+    
+    if not token_counts:
+        print(f"  No token counts available for {category_name}, skipping plots.")
+        return
+    
+    # Create plots directory
+    plots_dir = output_root / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Calculate statistics for annotations
+    counts_array = np.array(token_counts)
+    mean_val = np.mean(counts_array)
+    median_val = np.median(counts_array)
+    
+    # Create linear scale plot
+    plt.figure(figsize=(10, 6))
+    plt.hist(token_counts, bins=50, edgecolor='black', alpha=0.7)
+    plt.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.1f}')
+    plt.axvline(median_val, color='green', linestyle='--', linewidth=2, label=f'Median: {median_val:.1f}')
+    plt.xlabel('Token Count')
+    plt.ylabel('Frequency')
+    plt.title(f'{category_name} - Response Length Distribution (Linear Scale)\n{model_name}')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    linear_path = plots_dir / f"{sanitize_name(category_name)}_linear.png"
+    plt.savefig(linear_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  Saved linear plot to {linear_path}")
+    
+    # Create log scale plot
+    plt.figure(figsize=(10, 6))
+    plt.hist(token_counts, bins=50, edgecolor='black', alpha=0.7)
+    plt.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.1f}')
+    plt.axvline(median_val, color='green', linestyle='--', linewidth=2, label=f'Median: {median_val:.1f}')
+    plt.xscale('log')
+    plt.xlabel('Token Count (log scale)')
+    plt.ylabel('Frequency')
+    plt.title(f'{category_name} - Response Length Distribution (Log Scale)\n{model_name}')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    log_path = plots_dir / f"{sanitize_name(category_name)}_log.png"
+    plt.savefig(log_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  Saved log plot to {log_path}")
+
+
 def main() -> None:
     args = parse_args()
 
-    # Use model_alias if provided, otherwise use model_name
-    display_name = args.model_alias if args.model_alias else args.model_name
+    # model_name is now a list
+    model_names = args.model_name if isinstance(args.model_name, list) else [args.model_name]
+    
+    # Use model_alias if provided, otherwise use the first model_name
+    display_name = args.model_alias if args.model_alias else model_names[0]
+    
+    print(f"Querying for model name(s): {', '.join(model_names)}")
+    print(f"Display name: {display_name}")
 
-    aliases: List[str] = []
-    seen: set[str] = set()
-    for alias in (args.aliases or DEFAULT_ALIASES):
-        alias = alias.strip()
-        if not alias or alias in seen:
-            continue
-        seen.add(alias)
-        aliases.append(alias)
+    # Build aliases list based on whether user provided custom aliases
+    if args.aliases:
+        # User provided custom aliases - use them as a single category
+        aliases: List[str] = []
+        seen: set[str] = set()
+        for alias in args.aliases:
+            alias = alias.strip()
+            if not alias or alias in seen:
+                continue
+            seen.add(alias)
+            aliases.append(alias)
+        # Create a pseudo-category structure
+        categories_dict = {"Custom": aliases}
+    else:
+        # Use DEFAULT_ALIASES which is now a dict of categories
+        categories_dict = DEFAULT_ALIASES
 
-    if not aliases:
+    # Flatten to get all aliases
+    all_aliases: List[str] = []
+    for category_aliases in categories_dict.values():
+        all_aliases.extend(category_aliases)
+    
+    if not all_aliases:
         raise SystemExit("No evaluation aliases provided.")
 
     duckdb_path = resolve_duckdb_path(args.duckdb_path)
@@ -807,7 +914,7 @@ def main() -> None:
     else:
         print("No DuckDB cache path detected; queries will run directly against BigQuery.")
 
-    rows_by_alias, sources = fetch_latest_eval_rows(args.model_name, aliases, duckdb_path)
+    rows_by_alias, sources = fetch_latest_eval_rows(model_names, all_aliases, duckdb_path)
     if not rows_by_alias:
         raise SystemExit(
             "No matching eval runs were found in the datalake for the requested model/aliases."
@@ -825,59 +932,87 @@ def main() -> None:
     tokenizer = load_tokenizer(args.tokenizer)
 
     per_alias_summary: Dict[str, Dict[str, Any]] = {}
+    per_category_token_counts: Dict[str, List[int]] = {}
     aggregate_token_counts: List[int] = []
     missing_aliases: List[str] = []
     errors: Dict[str, str] = {}
 
-    for alias in aliases:
-        print(f"\n=== {alias} ===")
-        record = rows_by_alias.get(alias)
-        if not record:
-            print("  No matching eval row found in datalake.")
-            missing_aliases.append(alias)
-            continue
+    # Process each category
+    for category_name, category_aliases in categories_dict.items():
+        print(f"\n{'='*70}")
+        print(f"CATEGORY: {category_name}")
+        print(f"{'='*70}")
+        
+        category_token_counts: List[int] = []
+        
+        for alias in category_aliases:
+            print(f"\n=== {alias} ===")
+            record = rows_by_alias.get(alias)
+            if not record:
+                print("  No matching eval row found in datalake.")
+                missing_aliases.append(alias)
+                continue
 
-        run_date_str = convert_datetime(record.get("run_date"))
-        scores = extract_scores(record)
-        print(f"  Run date: {run_date_str or 'unknown'}")
-        print(f"  Experiment: {record.get('experiment_id')} (workspace {record.get('workspace')})")
-        print(f"  Scores: {format_scores_for_print(scores)}")
+            run_date_str = convert_datetime(record.get("run_date"))
+            scores = extract_scores(record)
+            print(f"  Run date: {run_date_str or 'unknown'}")
+            print(f"  Experiment: {record.get('experiment_id')} (workspace {record.get('workspace')})")
+            print(f"  Scores: {format_scores_for_print(scores)}")
 
-        try:
-            analysis = analyze_alias(
-                alias=alias,
-                record=record,
-                output_root=output_root,
-                pattern=args.pattern,
-                tokenizer=tokenizer,
-                overwrite=args.overwrite,
-            )
-        except Exception as exc:  # pylint: disable=broad-except
-            message = str(exc)
-            errors[alias] = message
-            print(f"  ERROR: {message}")
-            continue
+            try:
+                analysis = analyze_alias(
+                    alias=alias,
+                    record=record,
+                    output_root=output_root,
+                    pattern=args.pattern,
+                    tokenizer=tokenizer,
+                    overwrite=args.overwrite,
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                message = str(exc)
+                errors[alias] = message
+                print(f"  ERROR: {message}")
+                continue
 
-        stats = normalize_stats(analysis["stats"])
-        token_counts = analysis["token_counts"]
+            stats = normalize_stats(analysis["stats"])
+            token_counts = analysis["token_counts"]
+            if token_counts:
+                aggregate_token_counts.extend(token_counts)
+                category_token_counts.extend(token_counts)
+
+            per_alias_summary[alias] = {
+                "status": "analyzed",
+                "category": category_name,
+                "run_date": run_date_str,
+                "workspace": record.get("workspace"),
+                "experiment_id": record.get("experiment_id"),
+                "experiment_name": analysis["experiment_name"],
+                "dataset_id": analysis["dataset_id"],
+                "dataset_path": str(analysis["dataset_dir"]),
+                "prediction_files": [str(path) for path in analysis["matched_files"]],
+                "scores": scores,
+                "num_instances": to_python_int(record.get("num_instances")),
+                "model_hash": record.get("model_hash"),
+                "eval_sha": record.get("eval_sha"),
+                "stats": stats,
+            }
+        
+        # Store category token counts and print category statistics
+        per_category_token_counts[category_name] = category_token_counts
+        if category_token_counts:
+            category_stats = normalize_stats(calculate_statistics(category_token_counts))
+            print_statistics(f"Category: {category_name}", category_stats)
+        else:
+            print(f"\nNo model responses found for category: {category_name}")
+
+    # Generate plots for each category
+    print(f"\n{'='*70}")
+    print("GENERATING PLOTS")
+    print(f"{'='*70}")
+    for category_name, token_counts in per_category_token_counts.items():
         if token_counts:
-            aggregate_token_counts.extend(token_counts)
-
-        per_alias_summary[alias] = {
-            "status": "analyzed",
-            "run_date": run_date_str,
-            "workspace": record.get("workspace"),
-            "experiment_id": record.get("experiment_id"),
-            "experiment_name": analysis["experiment_name"],
-            "dataset_id": analysis["dataset_id"],
-            "dataset_path": str(analysis["dataset_dir"]),
-            "prediction_files": [str(path) for path in analysis["matched_files"]],
-            "scores": scores,
-            "num_instances": to_python_int(record.get("num_instances")),
-            "model_hash": record.get("model_hash"),
-            "eval_sha": record.get("eval_sha"),
-            "stats": stats,
-        }
+            print(f"\nGenerating plots for {category_name}...")
+            plot_category_distributions(category_name, token_counts, output_root, display_name)
 
     overall_stats = (
         normalize_stats(calculate_statistics(aggregate_token_counts))
@@ -890,11 +1025,18 @@ def main() -> None:
     else:
         print("\nNo model responses found across all analyzed datasets.")
 
+    # Calculate per-category statistics for summary
+    category_stats_summary: Dict[str, Dict[str, float]] = {}
+    for category_name, token_counts in per_category_token_counts.items():
+        if token_counts:
+            category_stats_summary[category_name] = normalize_stats(calculate_statistics(token_counts))
+
     summary = {
         "model_name": display_name,
-        "model_query_name": args.model_name,
+        "model_query_names": model_names,
         "lookup_sources": sources,
         "aliases": per_alias_summary,
+        "categories": category_stats_summary,
         "missing_aliases": missing_aliases,
         "errors": errors,
         "overall": overall_stats,
