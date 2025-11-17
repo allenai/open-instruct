@@ -39,7 +39,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
-from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct import logger_utils
 from open_instruct.ground_truth_utils import VerifierFunction
@@ -157,14 +156,14 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
 
 
 def load_ref_policy(
-    model_config: "ModelConfig",
+    model_config: ModelConfig,
     ds_config: dict,
     deepspeed_stage: int,
     local_rank: int,
     device: torch.device,
     rank: int,
     checkpoint_path: str | None = None,
-) -> PreTrainedModel:
+) -> transformers.PreTrainedModel:
     """Loads a reference policy model for evaluation.
 
     Args:
@@ -179,7 +178,7 @@ def load_ref_policy(
     Returns:
         Initialized reference policy model in evaluation mode.
     """
-    ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+    ref_policy: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
         torch_dtype=torch.bfloat16,
@@ -507,7 +506,7 @@ def get_olmo3_generation_config(tokenizer):
 def save_with_accelerate(
     accelerator: Accelerator,
     model: torch.nn.Module,
-    tokenizer: PreTrainedTokenizer,
+    tokenizer: transformers.PreTrainedTokenizer,
     output_dir: str,
     use_lora: bool = False,
     model_attribute_to_save: str | None = None,
@@ -526,7 +525,7 @@ def save_with_accelerate(
             temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
         )
 
-    unwrapped_model: PreTrainedModel = accelerator.unwrap_model(model)
+    unwrapped_model: transformers.PreTrainedModel = accelerator.unwrap_model(model)
     if model_attribute_to_save is not None:
         unwrapped_model = getattr(unwrapped_model, model_attribute_to_save)
     # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
