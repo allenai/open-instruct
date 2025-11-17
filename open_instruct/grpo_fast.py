@@ -1013,18 +1013,52 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
-    def train(
+    def setup_dataloader(
         self,
-        collated_query_responses,
-        collated_tool_masks,
-        collated_attention_masks,
-        collated_position_ids,
-        collated_advantages,
-        collated_response_masks,
-        collated_vllm_logprobs,
-        pad_token_id: int,
-        num_mini_batches: int,
+        dataset: Dataset,
+        reward_fn: Callable,
+        inference_results_Q: ray_queue.Queue,
+        param_prompt_Q: ray_queue.Queue,
+        pending_queries_map: dict,
+        generation_config,
+        resume_training_step: int,
+        num_training_steps: int,
+        worker_data_queues: list,
+        main_thread_metrics_queue: ray_queue.Queue,
+        actor_manager=None,
+        model_dims: utils.ModelDims = None,
     ):
+        from open_instruct.streaming_dataloader import StreamingDataLoader
+
+        self.dataloader = StreamingDataLoader(
+            dataset=dataset,
+            rank=self.local_rank,
+            world_size=self.args.world_size,
+            reward_fn=reward_fn,
+            inference_results_Q=inference_results_Q,
+            param_prompt_Q=param_prompt_Q,
+            pending_queries_map=pending_queries_map,
+            tokenizer=self.tokenizer,
+            args=self.args,
+            generation_config=generation_config,
+            resume_training_step=resume_training_step,
+            num_training_steps=num_training_steps,
+            actor_manager=actor_manager,
+            model_dims=model_dims,
+            worker_data_queues=worker_data_queues,
+            main_thread_metrics_queue=main_thread_metrics_queue,
+        )
+
+    def train(self, pad_token_id: int, num_mini_batches: int):
+        batch_data = next(self.dataloader)
+        collated_query_responses = batch_data["collated_query_responses"]
+        collated_tool_masks = batch_data["collated_tool_masks"]
+        collated_attention_masks = batch_data["collated_attention_masks"]
+        collated_position_ids = batch_data["collated_position_ids"]
+        collated_advantages = batch_data["collated_advantages"]
+        collated_response_masks = batch_data["collated_response_masks"]
+        collated_vllm_logprobs = batch_data["collated_vllm_logprobs"]
+
         args = self.args
         to_device_inplace(collated_query_responses, self.device)
         to_device_inplace(collated_tool_masks, self.device)
@@ -2522,7 +2556,6 @@ def weight_sync_thread(
 def one_training_step(
     args: Args,
     policy_group: ModelGroup,
-    collated_data: list[dict[str, list[torch.Tensor]]],
     tokenizer: PreTrainedTokenizer,
     data_thread_metrics: dict[str, Any],
     episode: int,
@@ -2546,7 +2579,7 @@ def one_training_step(
         metrics_list, _ = ray_get_with_progress(
             [
                 policy_group.models[i].train.remote(
-                    **collated_data[i], pad_token_id=tokenizer.pad_token_id, num_mini_batches=args.num_mini_batches
+                    pad_token_id=tokenizer.pad_token_id, num_mini_batches=args.num_mini_batches
                 )
                 for i in range(args.world_size)
             ],
@@ -2967,27 +3000,32 @@ def run_training(
         [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
     )
 
-    logger.info("======== ✅ data preparation thread starts =========")
-    packing_future = executor.submit(
-        data_preparation_thread,
-        reward_fn,
-        inference_results_Q,
-        param_prompt_Q,
-        packed_sequences_Q,
-        pending_queries_map,
-        args,
-        tokenizer,
-        args.num_training_steps,
-        generation_configs["train"],
-        resume_training_step,
-        iter_dataloader,
-        train_dataset,
-        actor_manager,
-        model_dims,
+    logger.info("======== ✅ Setting up dataloaders =========")
+    worker_data_queues = [ray_queue.Queue(maxsize=args.async_steps) for _ in range(args.world_size)]
+    main_thread_metrics_queue = ray_queue.Queue(maxsize=args.async_steps)
+    ray_get_with_progress(
+        [
+            policy_group.models[i].setup_dataloader.remote(
+                dataset=train_dataset,
+                reward_fn=reward_fn,
+                inference_results_Q=inference_results_Q,
+                param_prompt_Q=param_prompt_Q,
+                pending_queries_map=pending_queries_map,
+                generation_config=generation_configs["train"],
+                resume_training_step=resume_training_step,
+                num_training_steps=args.num_training_steps,
+                worker_data_queues=worker_data_queues,
+                main_thread_metrics_queue=main_thread_metrics_queue,
+                actor_manager=actor_manager,
+                model_dims=model_dims,
+            )
+            for i in range(args.world_size)
+        ],
+        desc="Setting up dataloaders for all workers",
     )
 
     def health_check_fn():
-        [f.result() for f in [packing_future, weight_sync_thread_future] if f.done()]
+        [f.result() for f in [weight_sync_thread_future] if f.done()]
         ray_get_with_progress(
             [engine.check_background_threads.remote() for engine in vllm_engines],
             desc="Checking vLLM engine health",
@@ -3034,15 +3072,11 @@ def run_training(
         health_check_fn()
         health_check_time = time.perf_counter() - health_check_start
 
-        (
-            collated_data,
-            data_thread_metrics,
-            num_total_tokens,
-            num_step_tokens,
-            prompt_lengths,
-            response_lengths,
-            num_filtered_prompts,
-        ) = load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
+        batch_metadata = main_thread_metrics_queue.get()
+        num_step_tokens = batch_metadata["num_new_tokens"]
+        num_total_tokens += num_step_tokens
+        prompt_lengths = batch_metadata["prompt_lengths"]
+        response_lengths = batch_metadata["response_lengths"]
 
         if (
             training_step % args.local_eval_every == 0
@@ -3060,11 +3094,10 @@ def run_training(
                     generation_configs["eval"],
                     is_eval=True,
                 )
-        if collated_data is None:
-            continue
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
 
+        data_thread_metrics = batch_metadata["metrics"]
         for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
             try:
                 data_thread_metrics |= metrics_Q.get_nowait()
@@ -3076,7 +3109,6 @@ def run_training(
         one_training_step(
             args,
             policy_group,
-            collated_data,
             tokenizer,
             data_thread_metrics,
             episode,
