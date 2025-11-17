@@ -730,6 +730,9 @@ class PolicyTrainerRayProcess(RayProcess):
         model_dims: utils.ModelDims,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
+        self.tokenizer = tokenizer
+        self.pad_token_id = tokenizer.pad_token_id
+        self.num_mini_batches = data_loader_config.args.num_mini_batches
         self.dataloader = data_loader_config.build(
             dataset=dataset,
             reward_fn=reward_fn,
@@ -1046,7 +1049,7 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
-    def train(self, pad_token_id: int, num_mini_batches: int):
+    def step(self):
         batch_data = next(self.dataloader)
         collated_query_responses = batch_data["collated_query_responses"]
         collated_tool_masks = batch_data["collated_tool_masks"]
@@ -1065,7 +1068,7 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_response_masks, self.device)
         to_device_inplace(collated_vllm_logprobs, self.device)
         # accumulation steps should always be at least 1
-        accumulation_steps = max(math.ceil(len(collated_query_responses) / num_mini_batches - 0.5), 1)
+        accumulation_steps = max(math.ceil(len(collated_query_responses) / self.num_mini_batches - 0.5), 1)
         leftover = len(collated_query_responses) % accumulation_steps
         if leftover > 0:
             collated_query_responses = collated_query_responses[0:-leftover]
@@ -1075,7 +1078,7 @@ class PolicyTrainerRayProcess(RayProcess):
             collated_advantages = collated_advantages[0:-leftover]
             collated_response_masks = collated_response_masks[0:-leftover]
             collated_vllm_logprobs = collated_vllm_logprobs[0:-leftover]
-            logger.warning(f"{leftover} samples are dropped due to batch size {num_mini_batches}")
+            logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
 
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
@@ -1094,7 +1097,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     query_response,
                     attention_mask,
                     position_id,
-                    pad_token_id,
+                    self.pad_token_id,
                     args.temperature,
                     return_entropy=False,
                 )
@@ -1124,7 +1127,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             query_response,
                             attention_mask,
                             position_id,
-                            pad_token_id,
+                            self.pad_token_id,
                             args.temperature,
                             return_entropy=False,
                         )
@@ -1176,7 +1179,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_query_responses,
                         mb_attention_mask,
                         mb_position_id,
-                        pad_token_id,
+                        self.pad_token_id,
                         args.temperature,
                         return_entropy=args.record_entropy,
                     )
@@ -2646,12 +2649,7 @@ def one_training_step(
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
         metrics_list, _ = ray_get_with_progress(
-            [
-                policy_group.models[i].train.remote(
-                    pad_token_id=tokenizer.pad_token_id, num_mini_batches=args.num_mini_batches
-                )
-                for i in range(args.world_size)
-            ],
+            [policy_group.models[i].step.remote() for i in range(args.world_size)],
             desc=f"Running training step {training_step}",
         )
         if (
