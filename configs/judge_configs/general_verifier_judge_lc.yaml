@@ -1,0 +1,40 @@
+version: v2
+budget: ai2/oe-adapt
+description: "VLLM Server for general verifier reasoner"
+tasks:
+  - name: "vllm-job"
+    image:
+      # Prefer a CUDA 12.x base; example:
+      beaker: ai2/cuda12.8-ubuntu22.04-torch2.7.1
+    hostNetworking: true
+    command: ["/bin/sh", "-c"]
+    arguments:
+      [
+        "pip install -U 'vllm>=0.8.5,<0.9' && \
+        CUDA_VISIBLE_DEVICES=0,1,2,3 \
+        vllm serve Qwen/Qwen3-32B \
+          --tensor-parallel-size 4 \
+          --dtype auto \
+          --gpu-memory-utilization 0.90 \
+          --max-model-len 32768 \
+          --max-num-batched-tokens 65536 \
+          --max-num-seqs 64 \
+          --enable-chunked-prefill \
+          --trust-remote-code \
+          --port 8002 \
+          --chat-template /weka/oe-adapt-default/hamishi/qwen_no_think_config.jinja"
+      ]
+    datasets:
+      - mountPath: /weka/oe-adapt-default
+        source:
+          weka: oe-adapt-default
+    constraints:
+      cluster:
+        - ai2/saturn-cirrascale
+    resources:
+      gpuCount: 4
+    context:
+
+      priority: urgent
+      preemptible: True
+# - ai2/saturn-cirrascale
