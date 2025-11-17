@@ -1023,8 +1023,8 @@ class PolicyTrainerRayProcess(RayProcess):
         generation_config,
         resume_training_step: int,
         num_training_steps: int,
-        worker_data_queues: list,
-        main_thread_metrics_queue: ray_queue.Queue,
+        work_dir: str,
+        global_batch_size: int,
         actor_manager=None,
         model_dims: utils.ModelDims = None,
     ):
@@ -1032,8 +1032,6 @@ class PolicyTrainerRayProcess(RayProcess):
 
         self.dataloader = StreamingDataLoader(
             dataset=dataset,
-            rank=self.local_rank,
-            world_size=self.args.world_size,
             reward_fn=reward_fn,
             inference_results_Q=inference_results_Q,
             param_prompt_Q=param_prompt_Q,
@@ -1041,12 +1039,15 @@ class PolicyTrainerRayProcess(RayProcess):
             tokenizer=self.tokenizer,
             args=self.args,
             generation_config=generation_config,
+            work_dir=work_dir,
+            global_batch_size=global_batch_size,
             resume_training_step=resume_training_step,
             num_training_steps=num_training_steps,
             actor_manager=actor_manager,
             model_dims=model_dims,
-            worker_data_queues=worker_data_queues,
-            main_thread_metrics_queue=main_thread_metrics_queue,
+            dp_world_size=self.args.world_size,
+            dp_rank=self.local_rank,
+            fs_local_rank=self.local_rank,
         )
 
     def train(self, pad_token_id: int, num_mini_batches: int):
@@ -3001,8 +3002,6 @@ def run_training(
     )
 
     logger.info("======== ✅ Setting up dataloaders =========")
-    worker_data_queues = [ray_queue.Queue(maxsize=args.async_steps) for _ in range(args.world_size)]
-    main_thread_metrics_queue = ray_queue.Queue(maxsize=args.async_steps)
     ray_get_with_progress(
         [
             policy_group.models[i].setup_dataloader.remote(
@@ -3014,8 +3013,8 @@ def run_training(
                 generation_config=generation_configs["train"],
                 resume_training_step=resume_training_step,
                 num_training_steps=args.num_training_steps,
-                worker_data_queues=worker_data_queues,
-                main_thread_metrics_queue=main_thread_metrics_queue,
+                work_dir=args.output_dir,
+                global_batch_size=args.num_unique_prompts_rollout,
                 actor_manager=actor_manager,
                 model_dims=model_dims,
             )
@@ -3072,12 +3071,6 @@ def run_training(
         health_check_fn()
         health_check_time = time.perf_counter() - health_check_start
 
-        batch_metadata = main_thread_metrics_queue.get()
-        num_step_tokens = batch_metadata["num_new_tokens"]
-        num_total_tokens += num_step_tokens
-        prompt_lengths = batch_metadata["prompt_lengths"]
-        response_lengths = batch_metadata["response_lengths"]
-
         if (
             training_step % args.local_eval_every == 0
             and eval_dataset is not None
@@ -3097,7 +3090,7 @@ def run_training(
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
 
-        data_thread_metrics = batch_metadata["metrics"]
+        data_thread_metrics = {}
         for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
             try:
                 data_thread_metrics |= metrics_Q.get_nowait()
@@ -3105,6 +3098,10 @@ def run_training(
                 logger.info("[Main Thread] didn't get train generation metrics")
 
         data_thread_metrics["time/health_check"] = health_check_time
+
+        num_step_tokens = 0
+        prompt_lengths = []
+        response_lengths = []
 
         one_training_step(
             args,
