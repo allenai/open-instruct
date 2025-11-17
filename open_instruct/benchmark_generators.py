@@ -264,7 +264,6 @@ def setup_vllm_engines(
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
         inference_batch_size=args.inference_batch_size,
-        use_fp8_kv_cache=args.use_fp8_kv_cache,
         inflight_updates=args.inflight_updates,
     )
 
