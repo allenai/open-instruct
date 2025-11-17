@@ -227,9 +227,6 @@ class Args:
     stop_strings: list[str] | None = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
-    use_fp8_kv_cache: bool = False
-    """Whether to use fp8 kv cache. This is useful for larger models or olmo."""
-
     # Algorithm
     async_steps: int = 1
     """Number of steps ahead to generate responses. Set to 0 to make the code synchronous. Values greater than 0 learn from a policy up to async_steps old like Cleanba (https://arxiv.org/abs/2310.00036)"""
@@ -2336,7 +2333,6 @@ def create_model_and_optimizer(
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
-        use_fp8_kv_cache=args.use_fp8_kv_cache,
         inflight_updates=args.inflight_updates,
     )
 
