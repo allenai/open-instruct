@@ -1,7 +1,7 @@
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
-for LR in 1e-6 8e-7 6e-7
+for LR in 8e-7
 do
-    EXP_NAME=olmo3-7b-DPO-1115-newbase-tpc-d5-lbc100-bal-${LR}
+    EXP_NAME=olmo3-7b-DPO-1115-newb-tpc-d5-lbc100-bal-${LR}-1
     uv run python mason.py \
        --cluster ai2/augusta \
        --gs_model_name olmo3-7b-instruct-SFT-1115 \
@@ -15,7 +15,7 @@ do
         --env NCCL_PROTO=Simple,LL128 \
         --env NCCL_TUNER_CONFIG_PATH=/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto \
         --env NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE=/var/lib/tcpxo/lib64/a3plus_guest_config_ll128.textproto \
-        --num_nodes 8 \
+        --num_nodes 4 \
         --budget ai2/oe-adapt \
         --gpus 8 -- source /var/lib/tcpxo/lib64/nccl-env-profile.sh \&\& accelerate launch \
         --mixed_precision bf16 \
@@ -40,9 +40,8 @@ do
             allenai/self-talk-truncated-gpt-deduped-topic-filt-lb100 2500 \
         --max_seq_length 16384 \
         --per_device_train_batch_size 1 \
-        --gradient_accumulation_steps 2 \
-        --zero_stage 3 \
-        --zero_hpz_partition_size 8 \
+        --gradient_accumulation_steps 4 \
+        --zero_hpz_partition_size 1 \
         --learning_rate $LR \
         --lr_scheduler_type linear \
         --warmup_ratio 0.1 \
