@@ -36,7 +36,7 @@ os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
 
-from open_instruct import utils
+from open_instruct import streaming_data_loader, utils
 
 # isort: on
 import asyncio
@@ -711,6 +711,39 @@ class ShufflingIterator:
 
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
+    def __init__(
+        self,
+        world_size: int,
+        rank: int,
+        local_rank: int,
+        master_addr: str | None,
+        master_port: int | None,
+        data_loader_config: streaming_data_loader.StreamingDataLoaderConfig,
+        dataset: Dataset,
+        reward_fn: Callable,
+        inference_results_Q: ray_queue.Queue,
+        param_prompt_Q: ray_queue.Queue,
+        pending_queries_map: dict,
+        tokenizer: PreTrainedTokenizer,
+        generation_config,
+        actor_manager,
+        model_dims: utils.ModelDims,
+    ):
+        super().__init__(world_size, rank, local_rank, master_addr, master_port)
+        self.dataloader = data_loader_config.build(
+            dataset=dataset,
+            reward_fn=reward_fn,
+            inference_results_Q=inference_results_Q,
+            param_prompt_Q=param_prompt_Q,
+            pending_queries_map=pending_queries_map,
+            tokenizer=tokenizer,
+            generation_config=generation_config,
+            dp_rank=self.local_rank,
+            fs_local_rank=self.local_rank,
+            actor_manager=actor_manager,
+            model_dims=model_dims,
+        )
+
     def from_pretrained(
         self,
         args: Args,
@@ -1012,32 +1045,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
-
-    def build_dataloader(
-        self,
-        data_loader_config,
-        dataset: Dataset,
-        reward_fn: Callable,
-        inference_results_Q: ray_queue.Queue,
-        param_prompt_Q: ray_queue.Queue,
-        pending_queries_map: dict,
-        generation_config,
-        actor_manager,
-        model_dims: utils.ModelDims,
-    ):
-        self.dataloader = data_loader_config.build(
-            dataset=dataset,
-            reward_fn=reward_fn,
-            inference_results_Q=inference_results_Q,
-            param_prompt_Q=param_prompt_Q,
-            pending_queries_map=pending_queries_map,
-            tokenizer=self.tokenizer,
-            generation_config=generation_config,
-            dp_rank=self.local_rank,
-            fs_local_rank=self.local_rank,
-            actor_manager=actor_manager,
-            model_dims=model_dims,
-        )
 
     def train(self, pad_token_id: int, num_mini_batches: int):
         batch_data = next(self.dataloader)
@@ -1487,7 +1494,21 @@ class PolicyTrainerRayProcess(RayProcess):
 
 class ModelGroup:
     def __init__(
-        self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_node: list[int], single_gpu_mode: bool
+        self,
+        pg: PlacementGroup,
+        ray_process_cls: RayProcess,
+        num_gpus_per_node: list[int],
+        single_gpu_mode: bool,
+        data_loader_config: streaming_data_loader.StreamingDataLoaderConfig,
+        dataset: Dataset,
+        reward_fn: Callable,
+        inference_results_Q: ray_queue.Queue,
+        param_prompt_Q: ray_queue.Queue,
+        pending_queries_map: dict,
+        tokenizer: PreTrainedTokenizer,
+        generation_config,
+        actor_manager,
+        model_dims: utils.ModelDims,
     ):
         self.pg = pg
         self.ray_process_cls = ray_process_cls
@@ -1502,7 +1523,23 @@ class ModelGroup:
             scheduling_strategy=PlacementGroupSchedulingStrategy(
                 placement_group=self.pg, placement_group_bundle_index=0
             ),
-        ).remote(world_size, 0, 0, None, None)
+        ).remote(
+            world_size,
+            0,
+            0,
+            None,
+            None,
+            data_loader_config,
+            dataset,
+            reward_fn,
+            inference_results_Q,
+            param_prompt_Q,
+            pending_queries_map,
+            tokenizer,
+            generation_config,
+            actor_manager,
+            model_dims,
+        )
 
         self.models.append(master_policy)
         results, _ = ray_get_with_progress(
@@ -1535,7 +1572,23 @@ class ModelGroup:
                 num_cpus=self.num_cpus_per_actor,
                 num_gpus=self.num_gpus_per_actor,
                 scheduling_strategy=scheduling_strategy,
-            ).remote(world_size, rank, 0, master_addr, master_port)
+            ).remote(
+                world_size,
+                rank,
+                0,
+                master_addr,
+                master_port,
+                data_loader_config,
+                dataset,
+                reward_fn,
+                inference_results_Q,
+                param_prompt_Q,
+                pending_queries_map,
+                tokenizer,
+                generation_config,
+                actor_manager,
+                model_dims,
+            )
             self.models.append(worker_policy)
 
 
@@ -2294,19 +2347,17 @@ def create_model_and_optimizer(
     inference_results_Q: ray_queue.Queue,
     param_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
-) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict, int, int]:
+    data_loader_config: streaming_data_loader.StreamingDataLoaderConfig,
+    train_dataset: Dataset,
+    reward_fn: Callable,
+    pending_queries_map: dict,
+    generation_config,
+) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict, int, int, ActorManager, utils.ModelDims]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
-    inits = []
-    policy_group = ModelGroup(pg, PolicyTrainerRayProcess, args.num_learners_per_node, args.single_gpu_mode)
-    wandb_url = wandb.run.get_url() if args.with_tracking else None
-    inits.extend(
-        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
-        for model in policy_group.models
-    )
 
     # Set up tools
     max_len = args.max_prompt_token_length + args.response_length
@@ -2367,10 +2418,9 @@ def create_model_and_optimizer(
         inflight_updates=args.inflight_updates,
     )
 
-    results, _ = ray_get_with_progress(inits, desc="Initializing models")
-    resume_training_step = results[0] + 1
-    episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-    logger.info("======== ✅ all models and vLLM engines initialized =========")
+    # Get model dimensions from vLLM engine
+    model_dims = ray.get(vllm_engines[0].get_model_dims.remote())
+    logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
     # Get and set KV cache max concurrency from the first engine (all engines have the same config)
     # fp8 kv cache for now forces v0 engine and breaks this.
@@ -2381,13 +2431,42 @@ def create_model_and_optimizer(
         # dummy value
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
 
+    # Now create policy actors with all dependencies
+    wandb_url = wandb.run.get_url() if args.with_tracking else None
+    policy_group = ModelGroup(
+        pg,
+        PolicyTrainerRayProcess,
+        args.num_learners_per_node,
+        args.single_gpu_mode,
+        data_loader_config=data_loader_config,
+        dataset=train_dataset,
+        reward_fn=reward_fn,
+        inference_results_Q=inference_results_Q,
+        param_prompt_Q=param_prompt_Q,
+        pending_queries_map=pending_queries_map,
+        tokenizer=tokenizer,
+        generation_config=generation_config,
+        actor_manager=actor_manager,
+        model_dims=model_dims,
+    )
+
+    inits = [
+        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
+        for model in policy_group.models
+    ]
+
+    results, _ = ray_get_with_progress(inits, desc="Initializing models")
+    resume_training_step = results[0] + 1
+    episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    logger.info("======== ✅ all models initialized =========")
+
     ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
         desc="Setting up model update group",
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
-    return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
+    return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager, model_dims
 
 
 def create_generation_configs(args: Args):
@@ -2990,35 +3069,7 @@ def run_training(
         [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
     )
 
-    logger.info("======== ✅ Setting up dataloaders =========")
-    from open_instruct.streaming_data_loader import StreamingDataLoaderConfig
-
-    data_loader_config = StreamingDataLoaderConfig(
-        work_dir=args.output_dir,
-        global_batch_size=args.num_unique_prompts_rollout,
-        dp_world_size=args.world_size,
-        resume_training_step=resume_training_step,
-        num_training_steps=args.num_training_steps,
-        args=args,
-    )
-
-    ray_get_with_progress(
-        [
-            policy_group.models[i].build_dataloader.remote(
-                data_loader_config=data_loader_config,
-                dataset=train_dataset,
-                reward_fn=reward_fn,
-                inference_results_Q=inference_results_Q,
-                param_prompt_Q=param_prompt_Q,
-                pending_queries_map=pending_queries_map,
-                generation_config=generation_configs["train"],
-                actor_manager=actor_manager,
-                model_dims=model_dims,
-            )
-            for i in range(args.world_size)
-        ],
-        desc="Setting up dataloaders for all workers",
-    )
+    logger.info("======== ✅ Dataloaders already initialized in actors =========")
 
     def health_check_fn():
         [f.result() for f in [weight_sync_thread_future] if f.done()]
@@ -3208,7 +3259,25 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
-    policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
+    # Create dataloader dependencies before model creation
+    pending_queries_map = PendingQueriesMap()
+    reward_fn = make_reward_fn(args)
+    generation_configs = create_generation_configs(args)
+
+    # Get resume_training_step to create data_loader_config
+    # We need to temporarily estimate this; it will be corrected after model init
+    resume_training_step_estimate = 0
+
+    data_loader_config = streaming_data_loader.StreamingDataLoaderConfig(
+        work_dir=args.output_dir,
+        global_batch_size=args.num_unique_prompts_rollout,
+        dp_world_size=args.world_size,
+        resume_training_step=resume_training_step_estimate,
+        num_training_steps=args.num_training_steps,
+        args=args,
+    )
+
+    (policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager, model_dims) = (
         create_model_and_optimizer(
             args,
             tc,
@@ -3219,13 +3288,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             inference_results_Q,
             param_prompt_Q,
             evaluation_inference_results_Q,
+            data_loader_config,
+            train_dataset,
+            reward_fn,
+            pending_queries_map,
+            generation_configs["train"],
         )
     )
-
-    # Get the model dimensions from one of the engines without loading weights
-    model_dims = ray.get(vllm_engines[0].get_model_dims.remote())
-
-    generation_configs = create_generation_configs(args)
 
     checkpoint_state = None
     if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
@@ -3247,12 +3316,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     # Create additional queues (main queues already created above)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
-    pending_queries_map = PendingQueriesMap()
     eval_pending_queries_map = PendingQueriesMap()
     generate_metrics_Q = Queue(maxsize=args.async_steps)
     weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
-
-    reward_fn = make_reward_fn(args)
 
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
