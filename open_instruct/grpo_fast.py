@@ -1837,45 +1837,6 @@ def create_generation_configs(args: Args):
     return {"train": generation_config, "eval": eval_generation_config}
 
 
-def load_data_from_packing_thread(
-    packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event, health_check_fn: Callable[[], None]
-) -> tuple[list[dict[str, list[torch.Tensor]]] | None, dict[str, Any], int, int, list[int] | None, list[int] | None]:
-    """Get the packed sequences with advantages from the packing thread."""
-    with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
-        while True:
-            if stop_event.is_set():
-                logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
-                return None, {}, num_total_tokens, 0, None, None, 0
-            try:
-                packed_data = packed_sequences_Q.get(timeout=30.0)
-                break
-            except Empty:
-                health_check_fn()
-                logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
-        data_thread_metrics = packed_data["metrics"]
-        B = packed_data["B"]
-        collated_data = packed_data["collated_data"]
-        num_step_tokens = packed_data["num_new_tokens"]
-        num_total_tokens += num_step_tokens
-        prompt_lengths = packed_data["prompt_lengths"]
-        response_lengths = packed_data["response_lengths"]
-        num_filtered_prompts = packed_data["num_filtered_prompts"]
-
-    data_thread_metrics["time/trainer_idling"] = timer.duration
-    if B == 0:
-        logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-        return None, data_thread_metrics, num_total_tokens, 0, None, None, 0
-    return (
-        collated_data,
-        data_thread_metrics,
-        num_total_tokens,
-        num_step_tokens,
-        prompt_lengths,
-        response_lengths,
-        num_filtered_prompts,
-    )
-
-
 def weight_sync_thread(
     args: Args,
     stop_event: threading.Event,
