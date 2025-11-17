@@ -718,7 +718,7 @@ class PolicyTrainerRayProcess(RayProcess):
         beaker_config: BeakerRuntimeConfig,
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
-    ):
+    ) -> int:
         # ------------------------------------------------------------
         # Monkey patch to load checkpoints with `weights_only=False`
         # otherwise it errors out with:
@@ -1013,41 +1013,30 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
-    def setup_dataloader(
+    def build_dataloader(
         self,
+        data_loader_config,
         dataset: Dataset,
         reward_fn: Callable,
         inference_results_Q: ray_queue.Queue,
         param_prompt_Q: ray_queue.Queue,
         pending_queries_map: dict,
         generation_config,
-        resume_training_step: int,
-        num_training_steps: int,
-        work_dir: str,
-        global_batch_size: int,
-        actor_manager=None,
-        model_dims: utils.ModelDims = None,
+        actor_manager,
+        model_dims: utils.ModelDims,
     ):
-        from open_instruct.streaming_dataloader import StreamingDataLoader
-
-        self.dataloader = StreamingDataLoader(
+        self.dataloader = data_loader_config.build(
             dataset=dataset,
             reward_fn=reward_fn,
             inference_results_Q=inference_results_Q,
             param_prompt_Q=param_prompt_Q,
             pending_queries_map=pending_queries_map,
             tokenizer=self.tokenizer,
-            args=self.args,
             generation_config=generation_config,
-            work_dir=work_dir,
-            global_batch_size=global_batch_size,
-            resume_training_step=resume_training_step,
-            num_training_steps=num_training_steps,
-            actor_manager=actor_manager,
-            model_dims=model_dims,
-            dp_world_size=self.args.world_size,
             dp_rank=self.local_rank,
             fs_local_rank=self.local_rank,
+            actor_manager=actor_manager,
+            model_dims=model_dims,
         )
 
     def train(self, pad_token_id: int, num_mini_batches: int):
@@ -3002,19 +2991,27 @@ def run_training(
     )
 
     logger.info("======== ✅ Setting up dataloaders =========")
+    from open_instruct.streaming_data_loader import StreamingDataLoaderConfig
+
+    data_loader_config = StreamingDataLoaderConfig(
+        work_dir=args.output_dir,
+        global_batch_size=args.num_unique_prompts_rollout,
+        dp_world_size=args.world_size,
+        resume_training_step=resume_training_step,
+        num_training_steps=args.num_training_steps,
+        args=args,
+    )
+
     ray_get_with_progress(
         [
-            policy_group.models[i].setup_dataloader.remote(
+            policy_group.models[i].build_dataloader.remote(
+                data_loader_config=data_loader_config,
                 dataset=train_dataset,
                 reward_fn=reward_fn,
                 inference_results_Q=inference_results_Q,
                 param_prompt_Q=param_prompt_Q,
                 pending_queries_map=pending_queries_map,
                 generation_config=generation_configs["train"],
-                resume_training_step=resume_training_step,
-                num_training_steps=args.num_training_steps,
-                work_dir=args.output_dir,
-                global_batch_size=args.num_unique_prompts_rollout,
                 actor_manager=actor_manager,
                 model_dims=model_dims,
             )
