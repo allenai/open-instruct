@@ -47,10 +47,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StreamingDataLoaderConfig:
-    work_dir: Path | str
-    global_batch_size: int
-    dp_world_size: int
-    max_possible_score: float
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     no_resampling_pass_rate: float | None = None
@@ -75,6 +71,10 @@ class StreamingDataLoaderConfig:
         num_samples_per_prompt_rollout: int,
         per_device_train_batch_size: int,
         verbose: bool,
+        work_dir: Path | str,
+        global_batch_size: int,
+        dp_world_size: int,
+        max_possible_score: float,
         actor_manager=None,
         model_dims: utils.ModelDims | None = None,
     ) -> "StreamingDataLoader":
@@ -87,17 +87,18 @@ class StreamingDataLoaderConfig:
             tokenizer=tokenizer,
             config=self,
             generation_config=generation_config,
-            work_dir=self.work_dir,
-            global_batch_size=self.global_batch_size,
+            work_dir=work_dir,
+            global_batch_size=global_batch_size,
             num_training_steps=num_training_steps,
             seed=seed,
             async_steps=async_steps,
             num_samples_per_prompt_rollout=num_samples_per_prompt_rollout,
             per_device_train_batch_size=per_device_train_batch_size,
             verbose=verbose,
+            max_possible_score=max_possible_score,
             actor_manager=actor_manager,
             model_dims=model_dims,
-            dp_world_size=self.dp_world_size,
+            dp_world_size=dp_world_size,
             dp_rank=dp_rank,
             fs_local_rank=fs_local_rank,
         )
@@ -279,6 +280,7 @@ class StreamingDataLoader(TextDataLoaderBase):
         num_samples_per_prompt_rollout: int,
         per_device_train_batch_size: int,
         verbose: bool,
+        max_possible_score: float,
         actor_manager=None,
         model_dims: utils.ModelDims = None,
         dp_world_size: int = 1,
@@ -300,6 +302,7 @@ class StreamingDataLoader(TextDataLoaderBase):
         self.pending_queries_map = pending_queries_map
         self.tokenizer = tokenizer
         self.config = config
+        self.config.max_possible_score = max_possible_score
         self.generation_config = generation_config
         self.num_training_steps = num_training_steps
         self.actor_manager = actor_manager

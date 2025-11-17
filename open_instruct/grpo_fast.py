@@ -658,6 +658,10 @@ class PolicyTrainerRayProcess(RayProcess):
             num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout,
             per_device_train_batch_size=args.per_device_train_batch_size,
             verbose=args.verbose,
+            work_dir=args.output_dir,
+            global_batch_size=args.num_unique_prompts_rollout,
+            dp_world_size=world_size,
+            max_possible_score=args.max_possible_score,
             actor_manager=actor_manager,
             model_dims=model_dims,
         )
