@@ -853,6 +853,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
         self.model.train()
 
+        # reference model
         if args.load_ref_policy:
             ds_config, self.ref_policy_hf_ds_config = get_eval_ds_config(
                 offload=False,

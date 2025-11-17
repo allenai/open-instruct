@@ -178,6 +178,8 @@ def load_ref_policy(
     Returns:
         Initialized reference policy model in evaluation mode.
     """
+    # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+    # stage 2 is optimizer sharding which doesn't apply to inference
     ref_policy: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
