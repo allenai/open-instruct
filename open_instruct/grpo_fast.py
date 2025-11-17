@@ -875,10 +875,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 if hasattr(self, "ref_policy_checkpoint_path")
                 else None,
             )
-        else:
-            self.ref_policy = None
-            self.ref_policy_hf_ds_config = None
-            logger.info(f"{self.rank=}: Skipping reference policy loading (load_ref_policy=False)")
         self.local_metrics = utils.MetricsTracker(device=self.device)
         return optimization_steps_done
 
@@ -1385,7 +1381,7 @@ class PolicyTrainerRayProcess(RayProcess):
         client_state["rank"] = self.rank
 
         # Save reference policy checkpoint (model only, no optimizer)
-        if self.args.load_ref_policy and hasattr(self, "ref_policy") and self.ref_policy is not None:
+        if self.args.load_ref_policy:
             ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
             os.makedirs(ref_policy_dir, exist_ok=True)
 
