@@ -1002,53 +1002,54 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
-    def _calculate_ref_logprobs(
+    def compute_logprobs(
         self,
+        model: PreTrainedModel,
         collated_query_responses: list[torch.Tensor],
         collated_tool_masks: list[torch.Tensor],
         collated_attention_masks: list[torch.Tensor],
         collated_position_ids: list[torch.Tensor],
         collated_response_masks: list[torch.Tensor],
         pad_token_id: int,
-    ) -> list[torch.Tensor]:
-        """Calculate reference policy log probabilities for query-response pairs.
+        use_grad: bool = False,
+        return_entropy: bool = False,
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor] | None]:
+        collated_logprobs = []
+        collated_entropies = [] if return_entropy else None
 
-        Args:
-            collated_query_responses: List of query-response token tensors
-            collated_tool_masks: List of tool usage mask tensors
-            collated_attention_masks: List of attention mask tensors
-            collated_position_ids: List of position ID tensors
-            collated_response_masks: List of response mask tensors indicating valid response tokens
-            pad_token_id: Token ID used for padding
-
-        Returns:
-            List of reference log probability tensors, one per query-response pair
-        """
-        collated_ref_logprobs = []
-        with torch.no_grad():
+        context = contextlib.nullcontext() if use_grad else torch.no_grad()
+        with context:
             for i in range(len(collated_query_responses)):
                 query_response = collated_query_responses[i]
                 tool_mask = collated_tool_masks[i]
                 attention_mask = collated_attention_masks[i]
                 position_id = collated_position_ids[i]
                 response_mask = collated_response_masks[i]
-                ref_logprob, _ = self.forward(
-                    self.ref_policy,
+
+                logprob, entropy = self.forward(
+                    model,
                     query_response,
                     attention_mask,
                     position_id,
                     pad_token_id,
                     self.args.temperature,
-                    return_entropy=False,
+                    return_entropy=return_entropy,
                 )
+
                 if self.args.mask_tool_use and self.args.tool_use:
                     response_mask = response_mask.bool() & tool_mask.bool()
                 else:
                     response_mask = response_mask.bool()
-                ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                collated_ref_logprobs.append(ref_logprob)
+
+                logprob = torch.masked_fill(logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                collated_logprobs.append(logprob)
+
+                if return_entropy:
+                    collated_entropies.append(entropy)
+
                 torch.cuda.empty_cache()
-        return collated_ref_logprobs
+
+        return collated_logprobs, collated_entropies
 
     def train(
         self,
@@ -1089,52 +1090,57 @@ class PolicyTrainerRayProcess(RayProcess):
         collated_ref_logprobs = []
         if args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
-                collated_ref_logprobs = self._calculate_ref_logprobs(
+                collated_ref_logprobs, _ = self.compute_logprobs(
+                    self.ref_policy,
                     collated_query_responses,
                     collated_tool_masks,
                     collated_attention_masks,
                     collated_position_ids,
                     collated_response_masks,
                     pad_token_id,
+                    use_grad=False,
+                    return_entropy=False,
                 )
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
         # from the generator (note that async mode means these are a bit diff!)
         old_logprobs = [None for _ in range(len(collated_query_responses))]
         if num_mini_batches > 1:
-            with Timer("Old logprobs Calculation", noop=self.rank != 0), torch.no_grad():
-                for i in range(len(collated_query_responses)):
-                    query_response = collated_query_responses[i]
-                    tool_mask = collated_tool_masks[i]
-                    attention_mask = collated_attention_masks[i]
-                    position_id = collated_position_ids[i]
-                    response_mask = collated_response_masks[i]
-                    if not args.use_vllm_logprobs:
-                        local_old_logprob, _ = self.forward(
-                            self.model,
-                            query_response,
-                            attention_mask,
-                            position_id,
-                            pad_token_id,
-                            args.temperature,
-                            return_entropy=False,
-                        )
-                    vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
-                    if args.mask_tool_use and args.tool_use:
-                        response_mask = response_mask.bool() & tool_mask.bool()
-                    else:
-                        response_mask = response_mask.bool()
-                    if not args.use_vllm_logprobs:
-                        local_old_logprob = torch.masked_fill(
-                            local_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB
-                        )
-                    vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                    vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
-                    if args.use_vllm_logprobs:
-                        old_logprobs[i] = vllm_old_logprob
-                    else:
-                        old_logprobs[i] = local_old_logprob
-                    torch.cuda.empty_cache()
+            with Timer("Old logprobs Calculation", noop=self.rank != 0):
+                local_old_logprobs = None
+                if not args.use_vllm_logprobs:
+                    local_old_logprobs, _ = self.compute_logprobs(
+                        self.model,
+                        collated_query_responses,
+                        collated_tool_masks,
+                        collated_attention_masks,
+                        collated_position_ids,
+                        collated_response_masks,
+                        pad_token_id,
+                        use_grad=False,
+                        return_entropy=False,
+                    )
+
+                with torch.no_grad():
+                    for i in range(len(collated_query_responses)):
+                        tool_mask = collated_tool_masks[i]
+                        response_mask = collated_response_masks[i]
+
+                        if args.mask_tool_use and args.tool_use:
+                            response_mask = response_mask.bool() & tool_mask.bool()
+                        else:
+                            response_mask = response_mask.bool()
+
+                        vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
+                        vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                        vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
+
+                        if args.use_vllm_logprobs:
+                            old_logprobs[i] = vllm_old_logprob
+                        else:
+                            old_logprobs[i] = local_old_logprobs[i]
+
+                        torch.cuda.empty_cache()
 
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
