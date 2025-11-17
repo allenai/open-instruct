@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import logging
 import threading
 from abc import abstractmethod
@@ -23,26 +24,45 @@ from typing import Any
 
 import numpy as np
 import torch
+import vllm
 from datasets import Dataset
 from ray.util import queue as ray_queue
+from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
 from open_instruct import utils
+from open_instruct.dataset_transformation import (
+    GROUND_TRUTHS_KEY,
+    INPUT_IDS_PROMPT_KEY,
+    RAW_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
+)
+from open_instruct.model_utils import Batch
+from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, ShutdownSentinel, TokenStatistics
 from open_instruct.rl_utils import PackedSequences, Timer, pack_sequences
+from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
-
-PathOrStr = Path | str
 
 
 @dataclass
 class StreamingDataLoaderConfig:
-    work_dir: PathOrStr
+    work_dir: Path | str
     global_batch_size: int
     dp_world_size: int
-    resume_training_step: int
     num_training_steps: int
-    args: Any
+    seed: int
+    async_steps: int
+    num_samples_per_prompt_rollout: int
+    active_sampling: bool
+    filter_zero_std_samples: bool
+    no_resampling_pass_rate: float
+    advantage_normalization_type: str
+    mask_truncated_completions: bool
+    pack_length: int
+    max_possible_score: float
+    per_device_train_batch_size: int
+    verbose: bool
 
     def build(
         self,
@@ -65,11 +85,10 @@ class StreamingDataLoaderConfig:
             param_prompt_Q=param_prompt_Q,
             pending_queries_map=pending_queries_map,
             tokenizer=tokenizer,
-            args=self.args,
+            config=self,
             generation_config=generation_config,
             work_dir=self.work_dir,
             global_batch_size=self.global_batch_size,
-            resume_training_step=self.resume_training_step,
             num_training_steps=self.num_training_steps,
             actor_manager=actor_manager,
             model_dims=model_dims,
@@ -83,7 +102,7 @@ class DataLoaderBase:
     def __init__(
         self,
         *,
-        work_dir: PathOrStr,
+        work_dir: Path | str,
         global_batch_size: int,
         dp_world_size: int = 1,
         dp_rank: int = 0,
@@ -152,7 +171,7 @@ class TextDataLoaderBase(DataLoaderBase):
     def __init__(
         self,
         *,
-        work_dir: PathOrStr,
+        work_dir: Path | str,
         global_batch_size: int,
         dp_world_size: int = 1,
         dp_rank: int = 0,
@@ -245,11 +264,10 @@ class StreamingDataLoader(TextDataLoaderBase):
         param_prompt_Q: ray_queue.Queue,
         pending_queries_map: dict,
         tokenizer: PreTrainedTokenizer,
-        args: Any,
+        config: StreamingDataLoaderConfig,
         generation_config: Any,
-        work_dir: PathOrStr,
+        work_dir: Path | str,
         global_batch_size: int,
-        resume_training_step: int = 0,
         num_training_steps: int = 0,
         actor_manager=None,
         model_dims: utils.ModelDims = None,
@@ -271,19 +289,19 @@ class StreamingDataLoader(TextDataLoaderBase):
         self.param_prompt_Q = param_prompt_Q
         self.pending_queries_map = pending_queries_map
         self.tokenizer = tokenizer
-        self.args = args
+        self.config = config
         self.generation_config = generation_config
         self.num_training_steps = num_training_steps
         self.actor_manager = actor_manager
         self.model_dims = model_dims
 
-        self.training_step = resume_training_step
+        self.training_step = 0
         self.current_epoch = 0
 
         dataset_indices = np.arange(len(dataset))
-        self.iter_dataloader = ShufflingIterator(dataset_indices, 1, seed=args.seed + dp_rank)
+        self.iter_dataloader = ShufflingIterator(dataset_indices, 1, seed=config.seed + dp_rank)
 
-        self.local_queue = StdQueue(maxsize=args.async_steps)
+        self.local_queue = StdQueue(maxsize=config.async_steps)
         self.background_thread = None
         self.shutdown_requested = False
 
@@ -342,9 +360,6 @@ class StreamingDataLoader(TextDataLoaderBase):
         self.background_thread.start()
 
     def _data_preparation_loop(self):
-        from open_instruct.grpo_fast import accumulate_inference_batches
-        from open_instruct.queue_types import ShutdownSentinel
-
         for training_step in range(self.training_step, self.num_training_steps):
             if self.shutdown_requested:
                 logger.info(f"[DataLoader Worker {self.dp_rank}] Shutdown requested, exiting")
@@ -354,21 +369,22 @@ class StreamingDataLoader(TextDataLoaderBase):
                 result, batch, reward_metrics, batch_stats = accumulate_inference_batches(
                     self.inference_results_Q,
                     self.pending_queries_map,
-                    self.args,
                     self.generation_config,
                     num_prompts=self.rank_batch_size,
                     model_dims=self.model_dims,
                     tokenizer=self.tokenizer,
                     reward_fn=self.reward_fn,
                     actor_manager=self.actor_manager,
-                    active_sampling=self.args.active_sampling,
-                    filter_zero_std_samples=self.args.filter_zero_std_samples,
+                    active_sampling=self.config.active_sampling,
+                    filter_zero_std_samples=self.config.filter_zero_std_samples,
                     replenish_prompts=True,
-                    no_resampling_pass_rate=self.args.no_resampling_pass_rate,
+                    no_resampling_pass_rate=self.config.no_resampling_pass_rate,
                     iter_dataloader=self.iter_dataloader,
                     prompt_dataset=self.dataset,
                     param_prompt_Q=self.param_prompt_Q,
                     training_step=training_step,
+                    verbose=self.config.verbose,
+                    max_possible_score=self.config.max_possible_score,
                 )
                 if isinstance(result, ShutdownSentinel):
                     logger.info(f"[DataLoader Worker {self.dp_rank}] Received shutdown sentinel, exiting")
@@ -384,19 +400,19 @@ class StreamingDataLoader(TextDataLoaderBase):
                 and not result.request_info.tool_errors[i]
                 for i in range(len(result.request_info.tool_outputs))
             ]
-            scores_per_prompt = scores.reshape(-1, self.args.num_samples_per_prompt_rollout)
+            scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.args.num_samples_per_prompt_rollout, axis=0)
+            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
             std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, self.args.num_samples_per_prompt_rollout, axis=0)
-            if self.args.advantage_normalization_type == "standard":
+            std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
+            if self.config.advantage_normalization_type == "standard":
                 advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif self.args.advantage_normalization_type == "centered":
+            elif self.config.advantage_normalization_type == "centered":
                 advantages = scores - mean_grouped_rewards
             else:
-                raise ValueError(f"Invalid advantage normalization type: {self.args.advantage_normalization_type}")
+                raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
 
-            if self.args.mask_truncated_completions:
+            if self.config.mask_truncated_completions:
                 stop_idxes = torch.tensor(
                     [i for i in range(len(result.finish_reasons)) if result.finish_reasons[i] == "stop"]
                 )
@@ -419,7 +435,7 @@ class StreamingDataLoader(TextDataLoaderBase):
                     queries=batch.queries,
                     responses=result.responses,
                     masks=result.masks,
-                    pack_length=self.args.pack_length,
+                    pack_length=self.config.pack_length,
                     pad_token_id=self.tokenizer.pad_token_id,
                     vllm_logprobs=result.logprobs,
                 )
@@ -438,20 +454,18 @@ class StreamingDataLoader(TextDataLoaderBase):
                 logger.warning(f"No responses in batch {training_step}.")
             else:
                 real_num_responses = len(result.responses)
-                expected_num_responses = (
-                    self.args.num_samples_per_prompt_rollout * self.args.num_unique_prompts_rollout
-                )
+                expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
 
-                unsolved_num_responses = (scores < self.args.max_possible_score).sum()
+                unsolved_num_responses = (scores < self.config.max_possible_score).sum()
                 sequence_lengths = np.array([len(response) for response in result.responses])
                 sequence_length_solved = (
                     np.array([])
                     if np.all(scores == 0)
-                    else np.array(sequence_lengths[scores == self.args.max_possible_score])
+                    else np.array(sequence_lengths[scores == self.config.max_possible_score])
                 )
                 sequence_length_unsolved = (
                     np.array([])
-                    if np.all(scores == self.args.max_possible_score)
+                    if np.all(scores == self.config.max_possible_score)
                     else np.array(sequence_lengths[scores == 0])
                 )
                 stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
@@ -467,7 +481,7 @@ class StreamingDataLoader(TextDataLoaderBase):
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                     "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
                     "val/solve_rate_hist": None,
-                    "val/total_reward_groups": real_num_responses / self.args.num_samples_per_prompt_rollout,
+                    "val/total_reward_groups": real_num_responses / self.config.num_samples_per_prompt_rollout,
                     "val/sequence_lengths": sequence_lengths.mean(),
                     "val/sequence_lengths_min": sequence_lengths.min(),
                     "val/sequence_lengths_max": sequence_lengths.max(),
@@ -503,8 +517,6 @@ class StreamingDataLoader(TextDataLoaderBase):
             self.local_queue.put(collated_data)
 
     def _prepare_collated_data_for_self(self, packed_sequences: PackedSequences) -> dict[str, list[torch.Tensor]]:
-        from open_instruct.grpo_fast import collate_fn
-
         per_device_packed_query_responses = packed_sequences.query_responses
         per_device_packed_tool_masks = packed_sequences.tool_masks
         per_device_packed_attention_masks = packed_sequences.attention_masks
@@ -521,8 +533,8 @@ class StreamingDataLoader(TextDataLoaderBase):
         collated_response_masks = []
         collated_advantages = []
         collated_vllm_logprobs = []
-        for j in range(0, len(per_device_packed_query_responses), self.args.per_device_train_batch_size):
-            micro_range = b_inds[j : j + self.args.per_device_train_batch_size]
+        for j in range(0, len(per_device_packed_query_responses), self.config.per_device_train_batch_size):
+            micro_range = b_inds[j : j + self.config.per_device_train_batch_size]
             collated_query_responses.append(
                 collate_fn(
                     [per_device_packed_query_responses[idx] for idx in micro_range], self.tokenizer.pad_token_id, True
@@ -557,3 +569,351 @@ class StreamingDataLoader(TextDataLoaderBase):
         self.shutdown_requested = True
         if self.background_thread is not None:
             self.background_thread.join(timeout=5.0)
+
+
+def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
+    padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
+    if pin_memory:
+        padded_tensor = padded_tensor.pin_memory()
+    return padded_tensor
+
+
+@dataclass
+class BatchStatistics:
+    prompt_lengths: list[int]
+    response_lengths: list[int]
+    filtered_prompts: int
+    filtered_prompts_zero: int
+    filtered_prompts_solved: int
+    filtered_prompts_nonzero: int
+    percent_solved_mean: float
+    no_resampled_prompts: int
+    total_prompts: int
+
+
+class PendingQueriesMap:
+    def __init__(self):
+        self._map = {}
+        self._lock = threading.Lock()
+
+    def insert(self, dataset_idx, query, ground_truth, dataset, raw_query):
+        with self._lock:
+            if dataset_idx in self._map:
+                existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
+                    dataset_idx
+                ]
+                self._map[dataset_idx] = (
+                    existing_query,
+                    existing_ground_truth,
+                    existing_dataset,
+                    existing_raw_query,
+                    count + 1,
+                )
+            else:
+                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, 1)
+
+    def pop(self, dataset_idx):
+        with self._lock:
+            if dataset_idx not in self._map:
+                raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
+
+            query, ground_truth, dataset, raw_query, count = self._map[dataset_idx]
+
+            if count > 1:
+                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, count - 1)
+            else:
+                del self._map[dataset_idx]
+
+            return query, ground_truth, dataset, raw_query
+
+    def __len__(self):
+        with self._lock:
+            return len(self._map)
+
+    def __contains__(self, dataset_idx):
+        with self._lock:
+            return dataset_idx in self._map
+
+    def __getitem__(self, dataset_idx):
+        with self._lock:
+            return self._map[dataset_idx]
+
+    def keys(self):
+        with self._lock:
+            return list(self._map.keys())
+
+
+def add_prompt_to_generator(
+    example: dict[str, Any],
+    example_index: int,
+    epoch_number: int,
+    training_step: int,
+    pending_queries_map: PendingQueriesMap,
+    param_prompt_Q: ray_queue.Queue,
+    generation_config,
+    is_eval: bool,
+) -> None:
+    query = example[INPUT_IDS_PROMPT_KEY]
+    ground_truth = example[GROUND_TRUTHS_KEY]
+    dataset_name = example[VERIFIER_SOURCE_KEY]
+    raw_query = example[RAW_PROMPT_KEY]
+    pending_queries_map.insert(example_index, query, ground_truth, dataset_name, raw_query)
+
+    param_prompt_Q.put(
+        PromptRequest(
+            prompt=query,
+            generation_config=generation_config,
+            epoch_number=epoch_number,
+            training_step=training_step,
+            dataset_index=example_index,
+            is_eval=is_eval,
+        )
+    )
+
+
+def accumulate_inference_batches(
+    inference_results_Q: ray_queue.Queue,
+    pending_queries_map: PendingQueriesMap,
+    generation_config: vllm.SamplingParams,
+    num_prompts: int,
+    model_dims: utils.ModelDims,
+    tokenizer: PreTrainedTokenizer,
+    reward_fn: Callable,
+    actor_manager=None,
+    timeout: float | None = None,
+    active_sampling: bool = False,
+    filter_zero_std_samples: bool = False,
+    replenish_prompts: bool = False,
+    no_resampling_pass_rate: float | None = None,
+    iter_dataloader: ShufflingIterator | None = None,
+    prompt_dataset: Dataset = None,
+    param_prompt_Q: ray_queue.Queue | None = None,
+    training_step: int = None,
+    verbose: bool = False,
+    max_possible_score: float = 1.0,
+) -> tuple[GenerationResult, Batch, dict, BatchStatistics]:
+    import ray
+
+    if no_resampling_pass_rate is not None:
+        assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
+
+    if replenish_prompts:
+        assert param_prompt_Q is not None and iter_dataloader is not None and prompt_dataset is not None, (
+            "replenish_prompts requires param_prompt_Q and iter_dataloader and prompt_dataset"
+        )
+
+    results = []
+    all_queries = []
+    all_ground_truths = []
+    all_datasets = []
+    all_raw_queries = []
+    all_decoded_responses = []
+    all_reward_metrics = []
+    all_scores = []
+    all_percent_solved = []
+    total_filtered_prompts = 0
+    filtered_prompt_zero = 0
+    filtered_prompt_solved = 0
+    filtered_prompt_nonzero = 0
+    total_no_resampled = 0
+    progress_bar = tqdm(
+        total=num_prompts,
+        desc=f"Accumulating Responses and Rewarding {num_prompts} prompts",
+        bar_format="{l_bar}{bar}{r_bar}\n",
+        disable=not verbose,
+    )
+    num_prompts_sampled = 0
+    while num_prompts_sampled < num_prompts:
+        result = inference_results_Q.get(timeout=timeout)
+
+        if isinstance(result, ShutdownSentinel):
+            return result, None, None, None
+
+        assert len(result.responses) == generation_config.n, (
+            f"Mismatch: individual prompt result has {len(result.responses)} responses "
+            f"but expected {generation_config.n} samples per prompt. "
+            f"Dataset index: {result.dataset_index}, Epoch: {result.epoch_number}"
+        )
+
+        query, ground_truth, dataset_name, raw_query = pending_queries_map.pop(result.dataset_index)
+
+        if replenish_prompts:
+            dataset_index = next(iter_dataloader)
+            add_prompt_to_generator(
+                prompt_dataset[dataset_index],
+                dataset_index,
+                iter_dataloader.epoch_number,
+                training_step,
+                pending_queries_map,
+                param_prompt_Q,
+                generation_config,
+                is_eval=False,
+            )
+
+        for i in range(len(result.finish_reasons)):
+            if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
+                result.responses[i].append(tokenizer.eos_token_id)
+                result.masks[i].append(1)
+                result.logprobs[i].append(float("nan"))
+
+        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+
+        k_queries = repeat_each([query], generation_config.n)
+        k_ground_truths = repeat_each([ground_truth], generation_config.n)
+        k_datasets = repeat_each([dataset_name], generation_config.n)
+        k_raw_queries = repeat_each([raw_query], generation_config.n)
+
+        scores, reward_metrics = asyncio.run(
+            reward_fn(
+                result.responses,
+                decoded_responses,
+                k_ground_truths,
+                k_datasets,
+                result.finish_reasons,
+                result.request_info,
+                k_raw_queries,
+            )
+        )
+
+        percent_solved = np.mean(scores).item() / max_possible_score
+        if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
+            iter_dataloader.exclude_index(result.dataset_index)
+            total_no_resampled += 1
+            logging.debug(
+                f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
+            )
+
+        if filter_zero_std_samples and np.std(scores) == 0:
+            if not active_sampling:
+                num_prompts_sampled += 1
+                progress_bar.update(1)
+
+            total_filtered_prompts += 1
+            if scores[0] == 0:
+                filtered_prompt_zero += 1
+            elif scores[0] == max_possible_score:
+                filtered_prompt_solved += 1
+            else:
+                filtered_prompt_nonzero += 1
+            logging.debug(
+                f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
+            )
+            continue
+        else:
+            num_prompts_sampled += 1
+            progress_bar.update(1)
+
+        results.append(result)
+        all_queries.extend(k_queries)
+        all_ground_truths.extend(k_ground_truths)
+        all_datasets.extend(k_datasets)
+        all_raw_queries.extend(k_raw_queries)
+        all_decoded_responses.extend(decoded_responses)
+        all_scores.extend(scores)
+        all_reward_metrics.append(reward_metrics)
+        all_percent_solved.append(percent_solved)
+
+    combined_responses = []
+    combined_finish_reasons = []
+    combined_masks = []
+    combined_num_calls = []
+    combined_timeouts = []
+    combined_tool_errors = []
+    combined_tool_outputs = []
+    combined_tool_runtimes = []
+    combined_tool_calleds = []
+    combined_logprobs = []
+
+    earliest_start_time = float("inf")
+    prompt_lengths = []
+    response_lengths = []
+
+    total_prompt_tokens = 0
+    total_response_tokens = 0
+    max_generation_time = 0
+
+    for i, result in enumerate(results):
+        combined_responses.extend(result.responses)
+        combined_finish_reasons.extend(result.finish_reasons)
+        combined_masks.extend(result.masks)
+        combined_num_calls.extend(result.request_info.num_calls)
+        combined_timeouts.extend(result.request_info.timeouts)
+        combined_tool_errors.extend(result.request_info.tool_errors)
+        combined_tool_outputs.extend(result.request_info.tool_outputs)
+        combined_tool_runtimes.extend(result.request_info.tool_runtimes)
+        combined_tool_calleds.extend(result.request_info.tool_calleds)
+
+        combined_logprobs.extend(result.logprobs)
+
+        earliest_start_time = min(earliest_start_time, result.start_time)
+
+        prompt_lengths.append(len(all_queries[i * generation_config.n]))
+
+        for response in result.responses:
+            response_lengths.append(len(response))
+
+        total_prompt_tokens += result.token_statistics.num_prompt_tokens
+        total_response_tokens += result.token_statistics.num_response_tokens
+        max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
+
+    total_generation_time = max_generation_time
+
+    accumulated_stats = TokenStatistics(
+        num_prompt_tokens=total_prompt_tokens,
+        num_response_tokens=total_response_tokens,
+        generation_time=total_generation_time,
+        earliest_start_time=earliest_start_time,
+    )
+
+    combined_request_info = RequestInfo(
+        num_calls=combined_num_calls,
+        timeouts=combined_timeouts,
+        tool_errors=combined_tool_errors,
+        tool_outputs=combined_tool_outputs,
+        tool_runtimes=combined_tool_runtimes,
+        tool_calleds=combined_tool_calleds,
+    )
+
+    combined_result = GenerationResult(
+        responses=combined_responses,
+        finish_reasons=combined_finish_reasons,
+        masks=combined_masks,
+        request_info=combined_request_info,
+        dataset_index=None,
+        epoch_number=results[0].epoch_number,
+        token_statistics=accumulated_stats,
+        logprobs=combined_logprobs,
+    )
+
+    if actor_manager is not None:
+        ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
+
+    batch = Batch(
+        queries=all_queries,
+        ground_truths=all_ground_truths,
+        datasets=all_datasets,
+        raw_queries=all_raw_queries,
+        decoded_responses=all_decoded_responses,
+        indices=None,
+        scores=all_scores,
+    )
+
+    combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
+    percent_solved_mean = np.mean(all_percent_solved) if all_percent_solved else 0.0
+
+    batch_stats = BatchStatistics(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        filtered_prompts=total_filtered_prompts,
+        filtered_prompts_zero=filtered_prompt_zero,
+        filtered_prompts_solved=filtered_prompt_solved,
+        filtered_prompts_nonzero=filtered_prompt_nonzero,
+        percent_solved_mean=percent_solved_mean,
+        no_resampled_prompts=total_no_resampled,
+        total_prompts=len(results),
+    )
+    logging.info(
+        f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"
+    )
+
+    return combined_result, batch, combined_reward_metrics, batch_stats
