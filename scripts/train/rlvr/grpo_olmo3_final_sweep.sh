@@ -117,12 +117,12 @@ for num_unique_prompt in "${num_unique_prompts[@]}"; do
         exp_name="grpo_all_mix_p64_4_8k_${gs_model_name}"
     fi
 
-    BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-    BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test-v2}"
+    # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+    # BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
     # --image "saurabhs/open-instruct-integration-test-main" \
     # --image "01K9ZKASZV7KWMB1D1RWGDN18C" # finbarr
-    # --image "hamishivi/open_instruct_rl32_no_ref19" # hamish image with rl32b vllm (lst)
+    # --image "hamishivi/open_instruct_rl32_no_ref19" # hamish image with rl32b vllm
     # --image faezeb/open-instruct-integration-test-fae-new-rl
 
     EXP_NAME=${EXP_NAME:-${exp_name}}
@@ -134,7 +134,7 @@ for num_unique_prompt in "${num_unique_prompts[@]}"; do
                 --workspace ai2/olmo-instruct  \
                 --priority urgent \
                 --pure_docker_mode \
-                --image ${BEAKER_IMAGE} \
+                --image hamishivi/open_instruct_rl32_no_ref19 \
                 --preemptible \
                 --num_nodes 8 \
                 --max_retries 5 \
