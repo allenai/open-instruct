@@ -417,6 +417,8 @@ class Args:
     """multiply the gpus used for each oe-eval task"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+    eval_workspace: str = "ai2/tulu-3-results"
+    """the workspace to launch evaluation jobs on"""
     send_slack_alerts: bool = False
     """Whether to send Slack alerts on training failures"""
 
@@ -1444,17 +1446,18 @@ class PolicyTrainerRayProcess(RayProcess):
         args = self.args
         if self.rank == 0:
             ray.remote(launch_ai2_evals_on_weka).options(num_cpus=1).remote(
-                step_dir,
-                leaderboard_name,
-                args.oe_eval_max_length,
-                wandb_url,
-                training_step,
-                args.oe_eval_tasks,
-                args.stop_strings,
-                args.gs_bucket_path,
-                args.eval_priority,
-                args.oe_eval_beaker_image,
-                args.oe_eval_gpu_multiplier,
+                path=step_dir,
+                leaderboard_name=leaderboard_name,
+                oe_eval_max_length=args.oe_eval_max_length,
+                wandb_url=wandb_url,
+                training_step=training_step,
+                oe_eval_tasks=args.oe_eval_tasks,
+                stop_strings=args.stop_strings,
+                gs_bucket_path=args.gs_bucket_path,
+                eval_priority=args.eval_priority,
+                eval_workspace=args.eval_workspace,
+                beaker_image=args.oe_eval_beaker_image,
+                oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
             )
 
 
