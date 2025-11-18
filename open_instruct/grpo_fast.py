@@ -1247,7 +1247,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.local_metrics["policy/entropy_avg"] = entropy_stats.mean()
                 self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
                 for key, value in batch_metrics.items():
-                    self.local_metrics[key] = value
+                    if value is not None:
+                        self.local_metrics[key] = value
                 return self.local_metrics.get_metrics_list()
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
