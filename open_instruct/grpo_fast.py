@@ -160,8 +160,6 @@ class Args:
     """Whether to skip the cache."""
     shuffle_eval_dataset: bool = False
     """Whether to shuffle the evaluation dataset."""
-    max_prompt_token_length: int = 256
-    """The maximum prompt token length to use for the dataset"""
     system_prompt_override_file: str | None = None
     """Path to a text file containing a system prompt to override the dataset's system prompts"""
 
@@ -210,8 +208,6 @@ class Args:
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
 
     # Generation
-    response_length: int = 256
-    """the length of the response"""
     temperature: float = 0.7
     """the sampling temperature"""
     num_unique_prompts_rollout: int = 16
@@ -1625,7 +1621,9 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
     return beaker_config, wandb_url
 
 
-def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
+def setup_datasets(
+    args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer, streaming_config: streaming_data_loader.StreamingDataLoaderConfig
+):
     """Set up training and evaluation datasets."""
     system_prompt_override = None
     if args.system_prompt_override_file is not None:
@@ -1636,7 +1634,7 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
 
     transform_fn_args = [
         {"system_prompt_override": system_prompt_override},
-        {"max_prompt_token_length": args.max_prompt_token_length},
+        {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
@@ -1699,7 +1697,7 @@ def create_model_and_optimizer(
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
     # Set up tools
-    max_len = args.max_prompt_token_length + args.response_length
+    max_len = data_loader_config.max_prompt_token_length + data_loader_config.response_length
     tool_objects = {}
     if args.tools:
         for tool in args.tools:
@@ -1809,12 +1807,12 @@ def create_model_and_optimizer(
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager, model_dims
 
 
-def create_generation_configs(args: Args):
+def create_generation_configs(args: Args, streaming_config: streaming_data_loader.StreamingDataLoaderConfig):
     """Create generation configs for training and evaluation."""
     generation_config = vllm.SamplingParams(
         temperature=args.temperature,
         top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
-        max_tokens=args.response_length,
+        max_tokens=streaming_config.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
@@ -2486,7 +2484,7 @@ def main(
 
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
+    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config)
 
     if len(train_dataset) < (needed := max(args.async_steps, 1) * args.num_unique_prompts_rollout):
         raise ValueError(
@@ -2513,7 +2511,7 @@ def main(
     # Create dataloader dependencies before model creation
     pending_queries_map = PendingQueriesMap()
     reward_fn = make_reward_fn(args)
-    generation_configs = create_generation_configs(args)
+    generation_configs = create_generation_configs(args, streaming_config)
 
     (policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager, model_dims) = (
         create_model_and_optimizer(
