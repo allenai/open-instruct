@@ -3140,8 +3140,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     if checkpoint_state and "dataloader_state" in checkpoint_state:
         hf_data_loader.load_state_dict(checkpoint_state["dataloader_state"])
         logger.info("Restored dataloader state from checkpoint")
+    else:
+        hf_data_loader.reshuffle()
 
-    hf_data_loader.reshuffle()
     iter_data_loader = iter(hf_data_loader)
 
     # Create additional queues (main queues already created above)
