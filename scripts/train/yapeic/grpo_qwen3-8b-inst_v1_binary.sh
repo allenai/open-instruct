@@ -1,8 +1,8 @@
-beaker experiment create configs/judge_configs/proc_judge.yaml \
-    --name vllm_judge_qwen3-8b_v1_binary \
-    --workspace ai2/oe-data
+# beaker experiment create configs/judge_configs/proc_judge.yaml \
+#     --name vllm_judge_qwen3-8b_v1_binary \
+#     --workspace ai2/oe-data
 
-JUDGE_BASE_URL=http://saturn-cs-aus-253.reviz.ai2.in:8001/v1
+JUDGE_BASE_URL=http://saturn-cs-aus-239.reviz.ai2.in:8001/v1
 
 python mason.py \
     --cluster ai2/jupiter \
@@ -12,7 +12,7 @@ python mason.py \
     --priority high \
     --image nathanl/open_instruct_auto \
     --preemptible \
-    --num_nodes 2 \
+    --num_nodes 1 \
     --budget ai2/oe-base \
     --env HOSTED_VLLM_API_BASE=${JUDGE_BASE_URL} \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -29,8 +29,8 @@ python mason.py \
     --dataset_mixer_eval_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/batch_runs_prefiltered_4_15_new_filtered_v14_pp_v11_tools_v5_ff_v2/grpo_data/v1_binary-format_100k_test.jsonl 1.0 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 1024 \
-    --response_length 5120 \
-    --pack_length 6144 \
+    --response_length 2048 \
+    --pack_length 3072 \
     --model_name_or_path Qwen/Qwen3-8B \
     --apply_verifiable_reward True \
     --llm_judge_model "hosted_vllm/yapeichang/distill_judge_qwen3-8b_sft_v6" \
@@ -44,15 +44,17 @@ python mason.py \
     --num_learners_per_node 4 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 12 \
+    --vllm_num_engines 4 \
     --lr_scheduler_type linear \
     --seed 1 \
-    --local_eval_every 40 \
-    --checkpoint_state_freq 20 \
+    --local_eval_every 110 \
+    --checkpoint_state_freq 30 \
     --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-8b-inst_v1_binary_checkpoint_states \
+    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-8b-inst_v1_binary_checkpoints \
     --save_freq 100 \
     --keep_last_n_checkpoints 10 \
     --gradient_checkpointing \
+    --vllm_gpu_memory_utilization 0.5 \
     --with_tracking \
     --hf_entity yapeichang \
     --hf_repo_id grpo_qwen3-8b-inst_v1_binary \

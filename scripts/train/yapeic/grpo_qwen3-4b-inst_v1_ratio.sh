@@ -2,7 +2,7 @@
 #     --name vllm_judge_qwen3-4b_v1_ratio \
 #     --workspace ai2/oe-data
 
-JUDGE_BASE_URL=http://saturn-cs-aus-242.reviz.ai2.in:8001/v1
+JUDGE_BASE_URL=http://saturn-cs-aus-251.reviz.ai2.in:8001/v1
 
 python mason.py \
     --cluster ai2/jupiter \
@@ -47,12 +47,15 @@ python mason.py \
     --vllm_num_engines 4 \
     --lr_scheduler_type linear \
     --seed 1 \
-    --local_eval_every 40 \
-    --checkpoint_state_freq 20 \
+    --local_eval_every 120 \
+    --checkpoint_state_freq 70 \
     --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-4b-inst_v1_ratio_checkpoint_states \
+    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-4b-inst_v1_ratio_checkpoints \
     --save_freq 100 \
     --keep_last_n_checkpoints 10 \
     --gradient_checkpointing \
+    --deepspeed_offload_param True \
+    --deepspeed_offload_optimizer True \
     --with_tracking \
     --hf_entity yapeichang \
     --hf_repo_id grpo_qwen3-4b-inst_v1_ratio \

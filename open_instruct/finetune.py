@@ -27,7 +27,7 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Literal, Optional
+from typing import Literal
 
 import datasets
 import torch
@@ -283,7 +283,7 @@ class FlatArguments:
     """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
-    hf_entity: Optional[str] = None
+    hf_entity: str | None = None
     """The user or org name of the model repository from the Hugging Face Hub"""
     hf_repo_id: str | None = None
     """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
@@ -700,26 +700,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     last_checkpoint_path = get_last_checkpoint_path(args)
     if last_checkpoint_path:
         accelerator.print(f"Resumed from checkpoint: {last_checkpoint_path}")
-        # Allowlist required DeepSpeed classes for PyTorch 2.6+ safe unpickling when loading optimizer states
-        # Scope the allowlist strictly to this load via the context manager
-        try:
-            from torch.serialization import safe_globals as _safe_globals  # type: ignore
-            from deepspeed.runtime.zero.config import ZeroStageEnum  # type: ignore
-            # LossScaler is referenced by older FP16 optimizer state pickles
-            try:
-                from deepspeed.runtime.fp16.loss_scaler import LossScaler  # type: ignore
-            except Exception:
-                LossScaler = None  # type: ignore
-
-            allowlist = [ZeroStageEnum]
-            if LossScaler is not None:
-                allowlist.append(LossScaler)
-
-            with _safe_globals(allowlist):
-                accelerator.load_state(last_checkpoint_path)
-        except Exception:
-            # Fallback: attempt load without scoped allowlist; may raise with clear message
-            accelerator.load_state(last_checkpoint_path)
+        accelerator.load_state(last_checkpoint_path)
         # Extract `epoch_{i}` or `step_{i}`
         last_checkpoint_path = os.path.basename(last_checkpoint_path)
         training_difference = os.path.splitext(last_checkpoint_path)[0]
@@ -912,28 +893,16 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     total_loss = 0
                     total_aux_loss = 0
 
-                if isinstance(checkpointing_steps, int):
-                    if completed_steps % checkpointing_steps == 0:
-                        output_dir = f"step_{completed_steps}"
-                        if args.output_dir is not None:
-                            output_dir = os.path.join(args.output_dir, output_dir)
-                        
-                        # Save DeepSpeed checkpoint for resumption
-                        accelerator.save_state(output_dir)
-                        with open(
-                            os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
-                        ) as f:
-                            f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-                        
-                        # Also save in HuggingFace format for easy upload
-                        hf_output_dir = f"{output_dir}_hf"
-                        save_with_accelerate(
-                            accelerator, model, tokenizer, hf_output_dir, args.use_lora, chat_template_name=tc.chat_template_name
-                        )
-                        
-                        if accelerator.is_local_main_process:  # TODO: in mason local model this is gonna error out if using something like output/test; because mason used the same shared file ssytem.
-                            clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
-                        accelerator.wait_for_everyone()
+                if isinstance(checkpointing_steps, int) and completed_steps % checkpointing_steps == 0:
+                    output_dir = f"step_{completed_steps}"
+                    if args.output_dir is not None:
+                        output_dir = os.path.join(args.output_dir, output_dir)
+                    accelerator.save_state(output_dir)
+                    with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                        f.write("COMPLETED")
+                    if accelerator.is_local_main_process:
+                        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+                    accelerator.wait_for_everyone()
 
                 if completed_steps >= args.max_train_steps:
                     break
@@ -942,27 +911,17 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             output_dir = f"epoch_{epoch}"
             if args.output_dir is not None:
                 output_dir = os.path.join(args.output_dir, output_dir)
-            
-            # Save DeepSpeed checkpoint for resumption
             accelerator.save_state(output_dir)
+            # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
             with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                 f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-            
-            # Also save in HuggingFace format for easy upload
-            hf_output_dir = f"{output_dir}_hf"
-            save_with_accelerate(
-                accelerator, model, tokenizer, hf_output_dir, args.use_lora, chat_template_name=tc.chat_template_name
-            )
-            
             if accelerator.is_local_main_process:
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
 
-    # Save final model to a separate 'final' directory to avoid uploading intermediate checkpoints
-    final_model_dir = os.path.join(args.output_dir, "final") if args.output_dir is not None else None
-    if final_model_dir is not None:
+    if args.output_dir is not None:
         save_with_accelerate(
-            accelerator, model, tokenizer, final_model_dir, args.use_lora, chat_template_name=tc.chat_template_name
+            accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
         )
 
     # remove all checkpoints to save space
@@ -976,11 +935,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
     ):
-        shutil.copytree(final_model_dir, "/output", dirs_exist_ok=True)
+        shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
     if is_beaker_job() and accelerator.is_main_process and args.try_launch_beaker_eval_jobs:
         launch_ai2_evals_on_weka(
-            path=final_model_dir,
+            path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
             wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
@@ -988,8 +947,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             gs_bucket_path=args.gs_bucket_path,
         )
     if args.push_to_hub:
-        # Upload only the final model directory, not the intermediate checkpoints
-        push_folder_to_hub(accelerator, final_model_dir, args.hf_repo_id, args.hf_repo_revision)
+        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     accelerator.wait_for_everyone()
     if args.with_tracking:
         accelerator.end_training()

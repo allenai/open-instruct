@@ -1,0 +1,47 @@
+python mason.py \
+    --cluster ai2/jupiter \
+    --task_name sft_qwen3-4b-inst_v1_simple \
+    --description "SFT Qwen3-4B, v1 simple template" \
+    --workspace ai2/oe-data \
+    --priority high \
+    --image nathanl/open_instruct_auto \
+    --preemptible \
+    --num_nodes 1 \
+    --budget ai2/oe-base \
+    --gpus 8 -- accelerate launch \
+    --mixed_precision bf16 \
+    --num_processes 8 \
+    --use_deepspeed \
+    --deepspeed_config_file configs/ds_configs/stage2_accelerate.conf \
+    --deepspeed_multinode_launcher standard \
+    open_instruct/finetune.py \
+    --hf_entity yapeichang \
+    --hf_repo_id sft_qwen3-4b-inst_v1_simple \
+    --exp_name sft_qwen3-4b-inst_v1_simple \
+    --model_name_or_path Qwen/Qwen3-4B \
+    --model_revision main \
+    --tokenizer_name Qwen/Qwen3-4B \
+    --tokenizer_revision main \
+    --use_slow_tokenizer False \
+    --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/batch_runs_prefiltered_4_15_new_filtered_v14_pp_v11_tools_v5_ff_v2/sft_data/v1_fewshot_resources_simple.jsonl 1.0 \
+    --clean_checkpoints_at_end false \
+    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/sft_qwen3-4b-inst_v1_simple_checkpoints \
+    --max_seq_length 4096 \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 8 \
+    --learning_rate 5e-6 \
+    --lr_scheduler_type linear \
+    --warmup_ratio 0.03 \
+    --weight_decay 0.0 \
+    --num_train_epochs 3 \
+    --checkpointing_steps epoch \
+    --keep_last_n_checkpoints 3 \
+    --use_flash_attn \
+    --gradient_checkpointing \
+    --report_to wandb \
+    --wandb_project_name yapeic-exp \
+    --wandb_entity ai2-llm \
+    --with_tracking \
+    --logging_steps 1 \
+    --try_launch_beaker_eval_jobs false \
+    --seed 8
