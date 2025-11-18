@@ -92,7 +92,7 @@ fi
 # if model starts with gs://, set evaluate_on_weka to false.
 # All the logic is now handled internally, the flag is useless but keeping for backwards compatibility since people have scripts with it
 EVALUATE_ON_WEKA="true"
-if [[ "$MODEL_LOCATION" == gs://* ]]; then
+if [[ "$MODEL_LOCATION" == gs://* ]] || [[ "$CLUSTER" == "ai2/augusta" ]]; then
     EVALUATE_ON_WEKA="false"
 fi
 
@@ -203,30 +203,30 @@ NEXT_MODEL_DEV=(
     # Knowledge
     "mmlu:cot::hamish_zs_reasoning_deepseek"
     "popqa::hamish_zs_reasoning_deepseek"
-    "simpleqa::tulu-thinker_deepseek"
+    # #"simpleqa::tulu-thinker_deepseek"
     
-    # Reasoning
+    # # Reasoning
     "bbh:cot::hamish_zs_reasoning_deepseek_v2" # OLD: "bbh:cot::hamish_zs_reasoning_deepseek"
     "gpqa:0shot_cot::qwen3-instruct"
     "zebralogic::hamish_zs_reasoning_deepseek"
     "agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek"
 
-    # Math
-    # [faster] minerva_math_500::hamish_zs_reasoning
+    # # Math
+    # # [faster] minerva_math_500::hamish_zs_reasoning
     "minerva_math::hamish_zs_reasoning_deepseek"
-    "gsm8k::zs_cot_latex_deepseek"
-    "omega_500:0-shot-chat_deepseek" # OLD: "omega:0-shot-chat"
+    # #"gsm8k::zs_cot_latex_deepseek"
+    "omega:0-shot-chat_deepseek"
     "aime:zs_cot_r1::pass_at_32_2024_deepseek"
     "aime:zs_cot_r1::pass_at_32_2025_deepseek"  # OLD: "aime::hamish_zs_reasoning"
     
-    # Coding
+    # # Coding
     "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek"
     "mbppplus:0-shot-chat::tulu-thinker_deepseek"
     "livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags"
-    # [TODO not merged] codeeditorbench - requires separate server
-    # [TODO, maybe] cruxeval
+    # # [TODO not merged] codeeditorbench - requires separate server
+    # # [TODO, maybe] cruxeval
     
-    # Chat / IF / Vibes
+    # # Chat / IF / Vibes
     "alpaca_eval_v3::hamish_zs_reasoning_deepseek"
     "ifeval::hamish_zs_reasoning_deepseek"
     # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
@@ -236,7 +236,7 @@ NEXT_MODEL_DEV=(
     # [optional, typos compare] styled_truthfulqa::tulu
 
     # Tool Use
-    "bfcl_all::std" # This requires special logic on model_args and metadata, handled below
+    # "bfcl_all::std" # This requires special logic on model_args and metadata, handled below
 )
 
 NEXT_MODEL_UNSEEN=(
