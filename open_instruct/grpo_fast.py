@@ -1246,10 +1246,15 @@ class PolicyTrainerRayProcess(RayProcess):
                 if args.record_entropy:
                     self.local_metrics["policy/entropy_avg"] = entropy_stats.mean()
                 self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
+                array_metrics = {}
                 for key, value in batch_metrics.items():
-                    if value is not None:
+                    if value is None:
+                        continue
+                    if isinstance(value, np.ndarray):
+                        array_metrics[key] = value
+                    else:
                         self.local_metrics[key] = value
-                return self.local_metrics.get_metrics_list()
+                return self.local_metrics.get_metrics_list(), array_metrics
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
         args = self.args
@@ -1894,10 +1899,12 @@ def one_training_step(
     """Train the model for one step."""
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
-        metrics_list, _ = ray_get_with_progress(
+        results, _ = ray_get_with_progress(
             [policy_group.models[i].step.remote() for i in range(args.world_size)],
             desc=f"Running training step {training_step}",
         )
+        metrics_list = [r[0] for r in results]
+        array_metrics_list = [r[1] for r in results]
         if (
             args.ref_policy_update_freq is not None
             and training_step % args.ref_policy_update_freq == 0
@@ -1935,6 +1942,8 @@ def one_training_step(
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
     average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
+    for key, value in array_metrics_list[0].items():
+        average_metrics[key] = value
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
