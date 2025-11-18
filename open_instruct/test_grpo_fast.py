@@ -23,7 +23,7 @@ from open_instruct.dataset_transformation import (
     VERIFIER_SOURCE_KEY,
 )
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.streaming_data_loader import PendingQueriesMap
+from open_instruct.streaming_data_loader import PendingQueriesMap, ShufflingIterator
 from open_instruct.vllm_utils import create_vllm_engines
 
 
@@ -749,22 +749,16 @@ class TestStreamingAccumulation(TestGrpoFastBase):
     def test_more_engines_than_queries(self):
         """Test that add_prompt_to_generator handles gracefully when engines > queries."""
         # More engines than queries - should handle gracefully with single-prompt batches
-        num_engines = 8
         num_queries = 4
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
         param_prompt_Q = ray_queue.Queue(maxsize=num_queries)
-        pending_queries_map = PendingQueriesMap()
 
         # Track queue for cleanup
         self._ray_queues.append(param_prompt_Q)
 
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
-
-        # Create mock args with inference_batch_size
-        mock_args = MagicMock()
-        mock_args.inference_batch_size = max(1, num_queries // num_engines)
 
         for index in range(len(queries)):
             example = {
@@ -774,14 +768,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
                 RAW_PROMPT_KEY: raw_queries[index],
             }
             grpo_fast.add_prompt_to_generator(
-                example,
-                indices[index],
-                epoch_number=0,
-                training_step=1,
-                pending_queries_map=pending_queries_map,
-                param_prompt_Q=param_prompt_Q,
-                generation_config=mock_generation_config,
-                is_eval=False,
+                example, indices[index], 0, 1, param_prompt_Q, mock_generation_config, False
             )
 
         # Should have 4 batches (one for each query)
@@ -799,27 +786,19 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         # Should have exactly num_queries PromptRequests
         self.assertEqual(prompt_count, num_queries, f"Should have {num_queries} PromptRequests")
-        # All queries should be in the pending map
-        self.assertEqual(len(pending_queries_map), num_queries)
 
     def test_uneven_distribution_no_empty_batches(self):
         """Test that uneven query distribution doesn't create empty batches."""
-        num_engines = 3
-        num_queries = 7  # 7/3 = ceil(2.33) = 3, so distribution should be [3, 3, 1]
+        num_queries = 7
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
         param_prompt_Q = ray_queue.Queue(maxsize=num_queries)
-        pending_queries_map = PendingQueriesMap()
 
         # Track queue for cleanup
         self._ray_queues.append(param_prompt_Q)
 
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
-
-        # Create mock args with inference_batch_size
-        mock_args = MagicMock()
-        mock_args.inference_batch_size = max(1, num_queries // num_engines + (1 if num_queries % num_engines else 0))
 
         for index in range(len(queries)):
             example = {
@@ -829,14 +808,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
                 RAW_PROMPT_KEY: raw_queries[index],
             }
             grpo_fast.add_prompt_to_generator(
-                example,
-                indices[index],
-                epoch_number=0,
-                training_step=1,
-                pending_queries_map=pending_queries_map,
-                param_prompt_Q=param_prompt_Q,
-                generation_config=mock_generation_config,
-                is_eval=False,
+                example, indices[index], 0, 1, param_prompt_Q, mock_generation_config, False
             )
 
         # With single-prompt architecture, verify we have the right number of individual requests
@@ -860,16 +832,23 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         # Create test data
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
 
-        # Create queues and maps
+        # Create queues and mock dataset
         inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
-        pending_queries_map = PendingQueriesMap()
 
         # Track queue for cleanup
         self._ray_queues.append(inference_results_Q)
 
-        # Insert data into pending_queries_map
+        # Create mock dataset for lookup
+        mock_dataset = []
         for i in range(num_prompts):
-            pending_queries_map.insert(i, queries[i], ground_truths[i], datasets[i], raw_queries[i])
+            mock_dataset.append(
+                {
+                    INPUT_IDS_PROMPT_KEY: queries[i],
+                    GROUND_TRUTHS_KEY: ground_truths[i],
+                    VERIFIER_SOURCE_KEY: datasets[i],
+                    RAW_PROMPT_KEY: raw_queries[i],
+                }
+            )
 
         # Create mock results - one per prompt
         for i in range(num_prompts):
@@ -886,14 +865,17 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
             results_list.append(result)
 
-            # Get query for this prompt
+            # Get query for this prompt from dataset
             dataset_index = result.dataset_index
-            q, gt, d, raw_q = pending_queries_map.pop(dataset_index)
+            example = mock_dataset[dataset_index]
+            q = example[INPUT_IDS_PROMPT_KEY]
+            gt = example[GROUND_TRUTHS_KEY]
+            d = example[VERIFIER_SOURCE_KEY]
+            raw_q = example[RAW_PROMPT_KEY]
             queries_list.append((q, gt, d, raw_q))
 
         # Verify all results processed
         self.assertEqual(len(results_list), expected_results)
-        self.assertEqual(len(pending_queries_map), 0)
 
         # Combine in order
         combined_queries = []
@@ -912,17 +894,23 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         # Create test data
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
 
-        # Create queues and maps
+        # Create queues and mock dataset
         inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
-        pending_queries_map = PendingQueriesMap()
 
         # Track queue for cleanup
         self._ray_queues.append(inference_results_Q)
 
-        # Insert data with reference counting for multiple samples
+        # Create mock dataset for lookup
+        mock_dataset = []
         for i in range(num_prompts):
-            for _ in range(num_samples):
-                pending_queries_map.insert(i, queries[i], ground_truths[i], datasets[i], raw_queries[i])
+            mock_dataset.append(
+                {
+                    INPUT_IDS_PROMPT_KEY: queries[i],
+                    GROUND_TRUTHS_KEY: ground_truths[i],
+                    VERIFIER_SOURCE_KEY: datasets[i],
+                    RAW_PROMPT_KEY: raw_queries[i],
+                }
+            )
 
         # Create results - one per prompt with multiple samples
         for i in range(num_prompts):
@@ -939,14 +927,13 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             self.assertEqual(len(result.responses), expected_responses)
             total_responses += len(result.responses)
 
-            # Pop multiple times to match the number of samples (reference counting)
+            # Get query from dataset (can be looked up multiple times)
             idx = result.dataset_index
-            for _ in range(num_samples):
-                pending_queries_map.pop(idx)
+            example = mock_dataset[idx]
+            self.assertIsNotNone(example[INPUT_IDS_PROMPT_KEY])
 
         # Verify total responses
         self.assertEqual(total_responses, num_prompts * num_samples)
-        self.assertEqual(len(pending_queries_map), 0)
 
 
 class TestShufflingIterator(unittest.TestCase):
@@ -957,7 +944,7 @@ class TestShufflingIterator(unittest.TestCase):
 
         data = np.arange(100)
         batch_size = 10
-        iterator = grpo_fast.ShufflingIterator(data, batch_size, seed=42)
+        iterator = ShufflingIterator(data, batch_size, seed=42)
 
         # Get first batch
         batch1 = next(iterator)
@@ -978,7 +965,7 @@ class TestShufflingIterator(unittest.TestCase):
         seed = 42
 
         # Create original iterator
-        iter1 = grpo_fast.ShufflingIterator(data, batch_size, seed=seed)
+        iter1 = ShufflingIterator(data, batch_size, seed=seed)
 
         # Get a few batches
         _ = next(iter1)
@@ -999,7 +986,7 @@ class TestShufflingIterator(unittest.TestCase):
         batch5_original = next(iter1)
 
         # Create new iterator with different seed and restore state
-        iter2 = grpo_fast.ShufflingIterator(data, batch_size, seed=999)
+        iter2 = ShufflingIterator(data, batch_size, seed=999)
         iter2.set_state(state)
 
         # Get batches from restored iterator
@@ -1017,7 +1004,7 @@ class TestShufflingIterator(unittest.TestCase):
         batch_size = 5
 
         # Create iterator and complete one epoch
-        iterator = grpo_fast.ShufflingIterator(data, batch_size, seed=123)
+        iterator = ShufflingIterator(data, batch_size, seed=123)
         for _ in range(4):  # 20 / 5 = 4 batches per epoch
             next(iterator)
 
@@ -1027,7 +1014,7 @@ class TestShufflingIterator(unittest.TestCase):
         self.assertEqual(state["index"], 20)
 
         # Create new iterator and restore state
-        iter2 = grpo_fast.ShufflingIterator(data, batch_size, seed=456)
+        iter2 = ShufflingIterator(data, batch_size, seed=456)
         iter2.set_state(state)
 
         # Next batches should match
@@ -1042,8 +1029,8 @@ class TestShufflingIterator(unittest.TestCase):
         batch_size = 50
 
         # Create two iterators with same seed
-        iter1 = grpo_fast.ShufflingIterator(data, batch_size, seed=42)
-        _ = grpo_fast.ShufflingIterator(data, batch_size, seed=42)
+        iter1 = ShufflingIterator(data, batch_size, seed=42)
+        _ = ShufflingIterator(data, batch_size, seed=42)
 
         # Advance first iterator
         for _ in range(5):
@@ -1051,7 +1038,7 @@ class TestShufflingIterator(unittest.TestCase):
 
         # Save state and create new iterator with different seed
         state = iter1.get_state()
-        iter3 = grpo_fast.ShufflingIterator(data, batch_size, seed=999)
+        iter3 = ShufflingIterator(data, batch_size, seed=999)
 
         # Restore state - this should override the different seed
         iter3.set_state(state)
