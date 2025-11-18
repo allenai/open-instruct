@@ -37,6 +37,8 @@ class GenerationResult:
     token_statistics: TokenStatistics | None = None
     start_time: float | None = None
     logprobs: list[list[float]] | None = None
+    queued_training_step: int | None = None
+    generation_started_training_step: int | None = None
 
 
 @dataclass
