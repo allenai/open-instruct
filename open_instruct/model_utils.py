@@ -14,6 +14,7 @@
 # limitations under the License.
 
 
+import asyncio
 import itertools
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
@@ -21,15 +22,12 @@ from dataclasses import dataclass
 from typing import Literal, Union
 
 import deepspeed
-from deepspeed.runtime.engine import DeepSpeedEngine
-
-import asyncio
-
 import pandas as pd
 import torch
 import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
+from deepspeed.runtime.engine import DeepSpeedEngine
 from huggingface_hub import HfApi
 from rich import print as rprint
 from rich.console import Console
