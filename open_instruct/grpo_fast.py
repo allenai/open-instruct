@@ -599,7 +599,6 @@ class PolicyTrainerRayProcess(RayProcess):
         reward_fn: Callable,
         inference_results_Q: ray_queue.Queue,
         param_prompt_Q: ray_queue.Queue,
-        pending_queries_map: dict,
         tokenizer: PreTrainedTokenizer,
         generation_config,
         actor_manager,
@@ -614,7 +613,6 @@ class PolicyTrainerRayProcess(RayProcess):
             reward_fn=reward_fn,
             inference_results_Q=inference_results_Q,
             param_prompt_Q=param_prompt_Q,
-            pending_queries_map=pending_queries_map,
             tokenizer=tokenizer,
             generation_config=generation_config,
             dp_rank=self.local_rank,
@@ -1392,7 +1390,6 @@ class ModelGroup:
         reward_fn: Callable,
         inference_results_Q: ray_queue.Queue,
         param_prompt_Q: ray_queue.Queue,
-        pending_queries_map: dict,
         tokenizer: PreTrainedTokenizer,
         generation_config,
         actor_manager,
@@ -1423,7 +1420,6 @@ class ModelGroup:
             reward_fn,
             inference_results_Q,
             param_prompt_Q,
-            pending_queries_map,
             tokenizer,
             generation_config,
             actor_manager,
@@ -1473,7 +1469,6 @@ class ModelGroup:
                 reward_fn,
                 inference_results_Q,
                 param_prompt_Q,
-                pending_queries_map,
                 tokenizer,
                 generation_config,
                 actor_manager,
@@ -1665,7 +1660,6 @@ def create_model_and_optimizer(
     data_loader_config: streaming_data_loader.StreamingDataLoaderConfig,
     train_dataset: Dataset,
     reward_fn: Callable,
-    pending_queries_map: dict,
     generation_config,
 ) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict, int, int, ActorManager, utils.ModelDims]:
     """Create the model, optimizer, and vLLM engines."""
@@ -1759,7 +1753,6 @@ def create_model_and_optimizer(
         reward_fn=reward_fn,
         inference_results_Q=inference_results_Q,
         param_prompt_Q=param_prompt_Q,
-        pending_queries_map=pending_queries_map,
         tokenizer=tokenizer,
         generation_config=generation_config,
         actor_manager=actor_manager,
@@ -2287,7 +2280,6 @@ def run_training(
     param_prompt_Q,
     evaluation_inference_results_Q,
     packed_sequences_Q,
-    pending_queries_map,
     eval_pending_queries_map,
     generate_metrics_Q,
     weight_sync_metrics_Q,
@@ -2493,8 +2485,6 @@ def main(
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
-    # Create dataloader dependencies before model creation
-    pending_queries_map = PendingQueriesMap()
     reward_fn = make_reward_fn(args)
     generation_configs = create_generation_configs(args, streaming_config)
 
@@ -2512,7 +2502,6 @@ def main(
             streaming_config,
             train_dataset,
             reward_fn,
-            pending_queries_map,
             generation_configs["train"],
         )
     )
@@ -2558,7 +2547,6 @@ def main(
             param_prompt_Q,
             evaluation_inference_results_Q,
             packed_sequences_Q,
-            pending_queries_map,
             eval_pending_queries_map,
             generate_metrics_Q,
             weight_sync_metrics_Q,

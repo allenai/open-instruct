@@ -710,8 +710,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                 mock_result = self.create_mock_result(i, 1)
                 inference_results_Q.put(mock_result)
 
-        mock_args = self.create_mock_args(num_engines)
-
         completed = threading.Event()
 
         def run_accumulate():
@@ -724,7 +722,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                 grpo_fast.accumulate_inference_batches(
                     inference_results_Q,
                     pending_queries_map,
-                    mock_args,
                     generation_config=mock_generation_config,
                     num_prompts=num_prompts,
                     model_dims=mock_model_dims,

@@ -88,7 +88,6 @@ class StreamingDataLoaderConfig:
         reward_fn: Callable,
         inference_results_Q: ray_queue.Queue,
         param_prompt_Q: ray_queue.Queue,
-        pending_queries_map: dict,
         tokenizer: PreTrainedTokenizer,
         generation_config: Any,
         dp_rank: int,
@@ -109,7 +108,6 @@ class StreamingDataLoaderConfig:
             reward_fn=reward_fn,
             inference_results_Q=inference_results_Q,
             param_prompt_Q=param_prompt_Q,
-            pending_queries_map=pending_queries_map,
             tokenizer=tokenizer,
             config=self,
             generation_config=generation_config,
@@ -292,7 +290,6 @@ class StreamingDataLoader(TextDataLoaderBase):
         reward_fn: Callable,
         inference_results_Q: ray_queue.Queue,
         param_prompt_Q: ray_queue.Queue,
-        pending_queries_map: dict,
         tokenizer: PreTrainedTokenizer,
         config: StreamingDataLoaderConfig,
         generation_config: Any,
@@ -321,7 +318,7 @@ class StreamingDataLoader(TextDataLoaderBase):
         self.reward_fn = reward_fn
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
-        self.pending_queries_map = pending_queries_map
+        self.pending_queries_map = PendingQueriesMap()
         self.tokenizer = tokenizer
         self.config = config
         self.config.max_possible_score = max_possible_score
