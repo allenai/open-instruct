@@ -262,6 +262,14 @@ class TestGrpoFastBase(unittest.TestCase):
 
         return param_prompt_Q, inference_results_Q, pending_queries_map
 
+    def create_pending_data(self, query, ground_truth, dataset, raw_query):
+        return {
+            "query": query,
+            "ground_truth": ground_truth,
+            "dataset": dataset,
+            "raw_query": raw_query,
+        }
+
 
 class TestGrpoFastVLLM(TestGrpoFastBase):
     def test_vllm_queue_system_single_prompt(self):
@@ -379,13 +387,13 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             dataset_index = result.dataset_index
 
             # Get query from pending_queries_map
-            q, gt, d, raw_q = pending_queries_map.pop(dataset_index)
+            pending_data = pending_queries_map.pop(dataset_index)
 
             combined_responses.extend(result.responses)
-            combined_queries.append(q)
-            combined_raw_queries.append(raw_q)
-            combined_ground_truths.append(gt)
-            combined_datasets.append(d)
+            combined_queries.append(pending_data["query"])
+            combined_raw_queries.append(pending_data["raw_query"])
+            combined_ground_truths.append(pending_data["ground_truth"])
+            combined_datasets.append(pending_data["dataset"])
 
         combined_result = GenerationResult(
             responses=combined_responses,
@@ -452,11 +460,11 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             result = inference_results_Q.get()
             dataset_index = result.dataset_index
 
-            q, gt, d, raw_q = pending_queries_map.pop(dataset_index)
-            combined_queries.append(q)
-            combined_raw_queries.append(raw_q)
-            combined_ground_truths.append(gt)
-            combined_datasets.append(d)
+            pending_data = pending_queries_map.pop(dataset_index)
+            combined_queries.append(pending_data["query"])
+            combined_raw_queries.append(pending_data["raw_query"])
+            combined_ground_truths.append(pending_data["ground_truth"])
+            combined_datasets.append(pending_data["dataset"])
 
         # Verify results
         self.assertEqual(combined_queries, queries_next)
@@ -485,7 +493,10 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             for idx, query, ground_truth, dataset, raw_query in zip(
                 dataset_indices, queries_next, ground_truths_next, datasets_next, raw_queries_next
             ):
-                pending_queries_map.insert(idx, query, ground_truth, dataset, raw_query)
+                pending_queries_map.insert(
+                    idx,
+                    self.create_pending_data(query, ground_truth, dataset, raw_query),
+                )
 
         # Simulate vLLM processing with multiple samples
         batch_idx = 0
@@ -507,16 +518,16 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             dataset_index = result.dataset_index
 
             # Pop the query data for this specific result - pop multiple times for multiple samples
-            q, gt, d, raw_q = pending_queries_map.pop(dataset_index)
+            pending_data = pending_queries_map.pop(dataset_index)
             # Pop additional times to handle multiple samples per prompt
             for _ in range(num_samples_per_prompt - 1):
                 pending_queries_map.pop(dataset_index)
 
             combined_responses.extend(result.responses)
-            combined_queries.append(q)
-            combined_raw_queries.append(raw_q)
-            combined_ground_truths.append(gt)
-            combined_datasets.append(d)
+            combined_queries.append(pending_data["query"])
+            combined_raw_queries.append(pending_data["raw_query"])
+            combined_ground_truths.append(pending_data["ground_truth"])
+            combined_datasets.append(pending_data["dataset"])
 
         combined_result = GenerationResult(
             responses=combined_responses,
@@ -647,10 +658,12 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                 for i in range(start_idx, start_idx + entries_per_thread):
                     pending_queries_map.insert(
                         i,
-                        f"query_{thread_id}_{i}",
-                        f"truth_{thread_id}_{i}",
-                        f"dataset_{thread_id}_{i}",
-                        f"query_{thread_id}_{i}",
+                        self.create_pending_data(
+                            f"query_{thread_id}_{i}",
+                            f"truth_{thread_id}_{i}",
+                            f"dataset_{thread_id}_{i}",
+                            f"query_{thread_id}_{i}",
+                        ),
                     )
                     time.sleep(0.0001)
 
@@ -696,7 +709,10 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         # Add entries to map
         for i in range(num_prompts):
-            pending_queries_map.insert(i, f"q_{i}", f"t_{i}", f"d_{i}", f"q_{i}")
+            pending_queries_map.insert(
+                i,
+                self.create_pending_data(f"q_{i}", f"t_{i}", f"d_{i}", f"q_{i}"),
+            )
 
         # Add results from only 3 engines (missing one)
         # With individual prompts, we add individual results
@@ -863,7 +879,10 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         # Insert data into pending_queries_map
         for i in range(num_prompts):
-            pending_queries_map.insert(i, queries[i], ground_truths[i], datasets[i], raw_queries[i])
+            pending_queries_map.insert(
+                i,
+                self.create_pending_data(queries[i], ground_truths[i], datasets[i], raw_queries[i]),
+            )
 
         # Create mock results - one per prompt
         for i in range(num_prompts):
@@ -882,8 +901,8 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
             # Get query for this prompt
             dataset_index = result.dataset_index
-            q, gt, d, raw_q = pending_queries_map.pop(dataset_index)
-            queries_list.append((q, gt, d, raw_q))
+            pending_data = pending_queries_map.pop(dataset_index)
+            queries_list.append(pending_data)
 
         # Verify all results processed
         self.assertEqual(len(results_list), expected_results)
@@ -892,8 +911,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         # Combine in order
         combined_queries = []
         for i in range(num_prompts):
-            q, _, _, _ = queries_list[i]
-            combined_queries.append(q)
+            combined_queries.append(queries_list[i]["query"])
 
         # Verify order is preserved
         self.assertEqual(combined_queries, queries)
@@ -916,7 +934,12 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         # Insert data with reference counting for multiple samples
         for i in range(num_prompts):
             for _ in range(num_samples):
-                pending_queries_map.insert(i, queries[i], ground_truths[i], datasets[i], raw_queries[i])
+                pending_queries_map.insert(
+                    i,
+                    self.create_pending_data(
+                        queries[i], ground_truths[i], datasets[i], raw_queries[i]
+                    ),
+                )
 
         # Create results - one per prompt with multiple samples
         for i in range(num_prompts):

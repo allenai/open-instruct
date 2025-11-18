@@ -1514,44 +1514,36 @@ class PendingQueriesMap:
     """Thread-safe map for tracking pending queries with reference counting."""
 
     def __init__(self):
-        self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
+        # dataset_idx -> [data, count]
+        self._map: dict[int, list[Any]] = {}
         self._lock = threading.Lock()
 
-    def insert(self, dataset_idx, query, ground_truth, dataset, raw_query):
+    def insert(self, dataset_idx: int, data: dict[str, Any]) -> None:
         """Insert or increment count for a dataset index."""
         with self._lock:
             if dataset_idx in self._map:
                 # Already exists - just increment count
-                existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
-                    dataset_idx
-                ]
-                self._map[dataset_idx] = (
-                    existing_query,
-                    existing_ground_truth,
-                    existing_dataset,
-                    existing_raw_query,
-                    count + 1,
-                )
+                self._map[dataset_idx][1] += 1
             else:
                 # New entry - count starts at 1
-                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, 1)
+                self._map[dataset_idx] = [data.copy(), 1]
 
-    def pop(self, dataset_idx):
+    def pop(self, dataset_idx: int) -> dict[str, Any]:
         """Retrieve data and decrement count. Removes entry when count reaches 0."""
         with self._lock:
             if dataset_idx not in self._map:
                 raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
 
-            query, ground_truth, dataset, raw_query, count = self._map[dataset_idx]
+            data, count = self._map[dataset_idx]
 
             if count > 1:
                 # More results expected - just decrement
-                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, count - 1)
+                self._map[dataset_idx][1] -= 1
             else:
                 # Last result - remove entry
                 del self._map[dataset_idx]
 
-            return query, ground_truth, dataset, raw_query
+            return data.copy()
 
     def __len__(self):
         """Return the number of entries in the map."""
@@ -1730,7 +1722,7 @@ def accumulate_inference_batches(
             f"Dataset index: {result.dataset_index}, Epoch: {result.epoch_number}"
         )
 
-        query, ground_truth, dataset_name, raw_query = pending_queries_map.pop(result.dataset_index)
+        pending_data = pending_queries_map.pop(result.dataset_index)
 
         # Replenish generation queue with new prompt
         if replenish_prompts:
@@ -1756,10 +1748,10 @@ def accumulate_inference_batches(
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
         # TODO(finbarrtimbers): Make PendingQueriesMap.pop return a Batch, and add a Batch.repeat method.
-        k_queries = repeat_each([query], generation_config.n)
-        k_ground_truths = repeat_each([ground_truth], generation_config.n)
-        k_datasets = repeat_each([dataset_name], generation_config.n)
-        k_raw_queries = repeat_each([raw_query], generation_config.n)
+        k_queries = repeat_each([pending_data["query"]], generation_config.n)
+        k_ground_truths = repeat_each([pending_data["ground_truth"]], generation_config.n)
+        k_datasets = repeat_each([pending_data["dataset"]], generation_config.n)
+        k_raw_queries = repeat_each([pending_data["raw_query"]], generation_config.n)
 
         scores, reward_metrics = asyncio.run(
             reward_fn(
@@ -1931,7 +1923,7 @@ def data_preparation_thread(
     inference_results_Q: ray_queue.Queue,  # Ray queue
     param_prompt_Q: ray_queue.Queue,
     packed_sequences_Q: Queue,
-    pending_queries_map: dict,
+    pending_queries_map: PendingQueriesMap,
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
@@ -2401,15 +2393,19 @@ def add_prompt_to_generator(
     is_eval: bool,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    query = example[INPUT_IDS_PROMPT_KEY]
-    ground_truth = example[GROUND_TRUTHS_KEY]
-    dataset_name = example[VERIFIER_SOURCE_KEY]
-    raw_query = example[RAW_PROMPT_KEY]
-    pending_queries_map.insert(example_index, query, ground_truth, dataset_name, raw_query)
+    pending_queries_map.insert(
+        example_index,
+        {
+            "query": example[INPUT_IDS_PROMPT_KEY],
+            "ground_truth": example[GROUND_TRUTHS_KEY],
+            "dataset": example[VERIFIER_SOURCE_KEY],
+            "raw_query": example[RAW_PROMPT_KEY],
+        },
+    )
 
     param_prompt_Q.put(
         PromptRequest(
-            prompt=query,
+            prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
             epoch_number=epoch_number,
             training_step=training_step,
