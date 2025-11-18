@@ -77,8 +77,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import data_loader as oc_data_loader
-from open_instruct import logger_utils, vllm_utils
+from open_instruct import data_loader, logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -1590,7 +1589,7 @@ def accumulate_inference_batches(
     tokenizer: PreTrainedTokenizer,
     reward_fn: Callable,
     prompt_dataset: Dataset,
-    iter_dataloader: oc_data_loader.HFDataLoader | None = None,
+    iter_dataloader: data_loader.HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
     training_step: int | None = None,
     actor_manager=None,
@@ -1867,7 +1866,7 @@ def data_preparation_thread(
     num_training_steps: int,
     generation_config,
     resume_training_step: int,
-    iter_dataloader: oc_data_loader.HFDataLoader,
+    iter_dataloader: data_loader.HFDataLoader,
     train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
@@ -3128,7 +3127,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             episode = checkpoint_state["episode"]
             logger.info(f"Restored episode count: {episode}")
 
-    iter_dataloader = oc_data_loader.HFDataLoader(
+    iter_dataloader = data_loader.HFDataLoader(
         dataset=train_dataset, batch_size=1, seed=args.seed, rank=0, world_size=1
     )
 
