@@ -47,12 +47,19 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StreamingDataLoaderConfig:
+    max_prompt_token_length: int = 256
+    response_length: int = 256
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     no_resampling_pass_rate: float | None = None
     advantage_normalization_type: str = "standard"
     mask_truncated_completions: bool = False
     pack_length: int = 512
+
+    def __post_init__(self):
+        assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
+            "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+        )
 
     def build(
         self,
