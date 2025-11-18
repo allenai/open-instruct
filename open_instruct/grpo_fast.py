@@ -1250,10 +1250,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 for key, value in batch_metrics.items():
                     if value is None:
                         continue
-                    if isinstance(value, np.ndarray):
-                        array_metrics[key] = value
-                    else:
+                    if isinstance(value, (int, float, np.floating, np.integer)):
                         self.local_metrics[key] = value
+                    else:
+                        array_metrics[key] = value
                 return self.local_metrics.get_metrics_list(), array_metrics
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
