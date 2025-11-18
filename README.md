@@ -49,6 +49,10 @@ Try some of the models we train with Open Instruct. There is a [free demo](https
 
 Our setup follows our [Dockerfile](./Dockerfile). *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.*
 
+### Contributor instructions
+
+Contributor-facing workflow guidance lives in [AGENTS.md](./AGENTS.md). `CLAUDE.md` is a symbolic link to that file so that older tooling referring to `CLAUDE.md` continues to work without duplication.
+
 ### Installation with uv
 
 We use [uv](https://docs.astral.sh/uv/) for installation and running code. You can install with `uv sync`.
