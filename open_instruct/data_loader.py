@@ -39,3 +39,6 @@ class HFDataLoader(data_loader.TextDataLoaderBase):
         self.epoch_number += 1
         self.index = 0
         self.dataset = self.original_dataset.shuffle(seed=self.seed + self.epoch_number)
+
+    def get_mock_batch(self) -> dict[str, Any]:
+        return self.dataset[0]
