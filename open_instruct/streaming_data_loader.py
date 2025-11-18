@@ -64,7 +64,7 @@ class StreamingDataLoaderConfig:
         )
 
         if self.active_sampling:
-            assert self.async_steps > 1, (
+            assert self.config.async_steps > 1, (
                 "With active_sampling, you should set async_steps > 1 to account for filtering of the first batch. "
                 "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
                 "prompt will cause the trainer to stall waiting for more data  . "
@@ -73,7 +73,7 @@ class StreamingDataLoaderConfig:
                 "filter_zero_std_samples must be True when active_sampling is True. "
                 "Active sampling requires filtering to work correctly."
             )
-        if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
+        if self.config.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
             raise ValueError(
                 "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
                 "as the reward standard deviation will always be 0, causing all samples to be filtered."
@@ -92,8 +92,6 @@ class StreamingDataLoaderConfig:
         fs_local_rank: int,
         num_training_steps: int,
         seed: int,
-        async_steps: int,
-        num_samples_per_prompt_rollout: int,
         per_device_train_batch_size: int,
         verbose: bool,
         work_dir: Path | str,
@@ -116,8 +114,6 @@ class StreamingDataLoaderConfig:
             global_batch_size=global_batch_size,
             num_training_steps=num_training_steps,
             seed=seed,
-            async_steps=async_steps,
-            num_samples_per_prompt_rollout=num_samples_per_prompt_rollout,
             per_device_train_batch_size=per_device_train_batch_size,
             verbose=verbose,
             max_possible_score=max_possible_score,
@@ -301,8 +297,6 @@ class StreamingDataLoader(TextDataLoaderBase):
         global_batch_size: int,
         num_training_steps: int = 0,
         seed: int,
-        async_steps: int,
-        num_samples_per_prompt_rollout: int,
         per_device_train_batch_size: int,
         verbose: bool,
         max_possible_score: float,
@@ -333,8 +327,6 @@ class StreamingDataLoader(TextDataLoaderBase):
         self.actor_manager = actor_manager
         self.model_dims = model_dims
 
-        self.async_steps = async_steps
-        self.num_samples_per_prompt_rollout = num_samples_per_prompt_rollout
         self.per_device_train_batch_size = per_device_train_batch_size
         self.verbose = verbose
 
@@ -344,7 +336,7 @@ class StreamingDataLoader(TextDataLoaderBase):
         dataset_indices = np.arange(len(dataset))
         self.iter_dataloader = ShufflingIterator(dataset_indices, 1, seed=seed + dp_rank)
 
-        self.local_queue = StdQueue(maxsize=async_steps)
+        self.local_queue = StdQueue(maxsize=config.async_steps)
         self.background_thread = None
         self.shutdown_requested = False
 
@@ -403,7 +395,7 @@ class StreamingDataLoader(TextDataLoaderBase):
         self.background_thread.start()
 
     def _data_preparation_loop(self):
-        for _ in range(self.async_steps * self.global_batch_size // self.dp_world_size):
+        for _ in range(self.config.async_steps * self.global_batch_size // self.dp_world_size):
             dataset_index = next(self.iter_dataloader)
             add_prompt_to_generator(
                 self.dataset[dataset_index],
@@ -456,11 +448,11 @@ class StreamingDataLoader(TextDataLoaderBase):
                 and not result.request_info.tool_errors[i]
                 for i in range(len(result.request_info.tool_outputs))
             ]
-            scores_per_prompt = scores.reshape(-1, self.num_samples_per_prompt_rollout)
+            scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.num_samples_per_prompt_rollout, axis=0)
+            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
             std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, self.num_samples_per_prompt_rollout, axis=0)
+            std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
             if self.config.advantage_normalization_type == "standard":
                 advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
             elif self.config.advantage_normalization_type == "centered":
@@ -510,7 +502,7 @@ class StreamingDataLoader(TextDataLoaderBase):
                 logger.warning(f"No responses in batch {training_step}.")
             else:
                 real_num_responses = len(result.responses)
-                expected_num_responses = self.num_samples_per_prompt_rollout * self.global_batch_size
+                expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
 
                 unsolved_num_responses = (scores < self.config.max_possible_score).sum()
                 sequence_lengths = np.array([len(response) for response in result.responses])
@@ -537,7 +529,7 @@ class StreamingDataLoader(TextDataLoaderBase):
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                     "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
                     "val/solve_rate_hist": None,
-                    "val/total_reward_groups": real_num_responses / self.num_samples_per_prompt_rollout,
+                    "val/total_reward_groups": real_num_responses / self.config.num_samples_per_prompt_rollout,
                     "val/sequence_lengths": sequence_lengths.mean(),
                     "val/sequence_lengths_min": sequence_lengths.min(),
                     "val/sequence_lengths_max": sequence_lengths.max(),

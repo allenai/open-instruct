@@ -212,8 +212,6 @@ class Args:
     """the sampling temperature"""
     num_unique_prompts_rollout: int = 16
     """The number of unique prompts during rollout"""
-    num_samples_per_prompt_rollout: int = 4
-    """the number of samples to generate per prompt during rollout, useful for easy-star"""
     stop_strings: list[str] | None = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
@@ -221,8 +219,6 @@ class Args:
     """Whether to use fp8 kv cache. This is useful for larger models or olmo."""
 
     # Algorithm
-    async_steps: int = 1
-    """Number of steps ahead to generate responses. Set to 0 to make the code synchronous. Values greater than 0 learn from a policy up to async_steps old like Cleanba (https://arxiv.org/abs/2310.00036)"""
     num_epochs: int = 1
     """the number of epochs to train"""
     num_mini_batches: int = 1
@@ -631,8 +627,6 @@ class PolicyTrainerRayProcess(RayProcess):
             fs_local_rank=self.local_rank,
             num_training_steps=args.num_training_steps,
             seed=args.seed,
-            async_steps=args.async_steps,
-            num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout,
             per_device_train_batch_size=args.per_device_train_batch_size,
             verbose=args.verbose,
             work_dir=args.output_dir,
@@ -1551,7 +1545,7 @@ def calculate_utilization_metrics(
     return utilization_metrics
 
 
-def setup_runtime_variables(args: Args) -> Args:
+def setup_runtime_variables(args: Args, streaming_config: streaming_data_loader.StreamingDataLoaderConfig) -> Args:
     """Set up runtime variables for the experiment."""
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
@@ -1560,7 +1554,7 @@ def setup_runtime_variables(args: Args) -> Args:
         args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     args.world_size = sum(args.num_learners_per_node)
     args.num_training_steps = args.total_episodes // (
-        args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+        args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
     )
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
@@ -1779,7 +1773,7 @@ def create_model_and_optimizer(
 
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
     resume_training_step = results[0] + 1
-    episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * data_loader_config.num_samples_per_prompt_rollout
     logger.info("======== ✅ all models initialized =========")
 
     ray_get_with_progress(
@@ -1799,7 +1793,7 @@ def create_generation_configs(args: Args, streaming_config: streaming_data_loade
         max_tokens=streaming_config.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
-        n=args.num_samples_per_prompt_rollout,
+        n=streaming_config.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
         seed=args.seed,
         logprobs=1,  # Enable logprobs to compare with local calculations
@@ -1878,6 +1872,7 @@ def weight_sync_thread(
 
 def one_training_step(
     args: Args,
+    streaming_config: streaming_data_loader.StreamingDataLoaderConfig,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
     data_thread_metrics: dict[str, Any],
@@ -1949,7 +1944,7 @@ def one_training_step(
         prompt_lengths=prompt_lengths,
         response_lengths=response_lengths,
         total_generation_time=total_generation_time,
-        samples_per_prompt=args.num_samples_per_prompt_rollout,
+        samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
         num_engines=args.vllm_num_engines,
         num_gpus_per_engine=args.vllm_tensor_parallel_size,
         training_time=train_timer.duration,
@@ -1962,7 +1957,7 @@ def one_training_step(
         "training_step": training_step,
         "val/num_total_tokens": num_total_tokens,
         "val/num_step_tokens": num_step_tokens,
-        "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
+        "epoch": episode / streaming_config.num_samples_per_prompt_rollout / len(train_dataset),
         "learner_tokens_per_second_overall": num_total_tokens / total_training_time,
         "learner_tokens_per_second_step": num_step_tokens / step_time,
         "time/total": step_time,
@@ -2270,6 +2265,7 @@ def cleanup_training_resources(
 
 def run_training(
     args,
+    streaming_config,
     tokenizer,
     train_dataset,
     eval_dataset,
@@ -2370,7 +2366,7 @@ def run_training(
                     is_eval=True,
                 )
 
-        episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+        episode += args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
         data_thread_metrics = {}
         for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
@@ -2387,6 +2383,7 @@ def run_training(
 
         one_training_step(
             args,
+            streaming_config,
             policy_group,
             tokenizer,
             data_thread_metrics,
@@ -2459,7 +2456,7 @@ def main(
     streaming_config: streaming_data_loader.StreamingDataLoaderConfig,
 ):
     tokenizer = make_tokenizer(tc, model_config)
-    args = setup_runtime_variables(args)
+    args = setup_runtime_variables(args, streaming_config)
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -2470,7 +2467,7 @@ def main(
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config)
 
-    if len(train_dataset) < (needed := max(args.async_steps, 1) * args.num_unique_prompts_rollout):
+    if len(train_dataset) < (needed := max(streaming_config.async_steps, 1) * args.num_unique_prompts_rollout):
         raise ValueError(
             f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
         )
@@ -2486,7 +2483,7 @@ def main(
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
     # all prompts from async_steps + 1 training steps
-    queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
+    queue_size = (streaming_config.async_steps + 1) * args.num_unique_prompts_rollout
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.
@@ -2528,10 +2525,10 @@ def main(
             logger.info(f"Restored episode count: {episode}")
 
     # Create additional queues (main queues already created above)
-    packed_sequences_Q = Queue(maxsize=args.async_steps)
+    packed_sequences_Q = Queue(maxsize=streaming_config.async_steps)
     eval_pending_queries_map = PendingQueriesMap()
-    generate_metrics_Q = Queue(maxsize=args.async_steps)
-    weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
+    generate_metrics_Q = Queue(maxsize=streaming_config.async_steps)
+    weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
 
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
@@ -2539,6 +2536,7 @@ def main(
     try:
         episode = run_training(
             args,
+            streaming_config,
             tokenizer,
             train_dataset,
             eval_dataset,
