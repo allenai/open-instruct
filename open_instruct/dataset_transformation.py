@@ -1827,20 +1827,6 @@ class LocalDatasetTransformationCache:
         return loaded_dataset, all_statistics
 
 
-def get_cached_dataset(
-    dcs: List[DatasetConfig],
-    tc: TokenizerConfig,
-    hf_entity: Optional[str] = None,
-    dataset_local_cache_dir: Optional[str] = None,
-    dataset_skip_cache: bool = False,
-) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
-    if dataset_local_cache_dir is not None:
-        cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
-    else:
-        cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
-
-
 def load_dataset_configs(
     dataset_mixer_list: List[str],
     dataset_mixer_list_splits: List[str],
@@ -1898,7 +1884,7 @@ def load_dataset_configs(
     return dcs
 
 
-def get_cached_dataset_tulu_with_statistics(
+def get_cached_dataset(
     dataset_mixer_list: List[str],
     dataset_mixer_list_splits: List[str],
     tc: TokenizerConfig,
@@ -1910,10 +1896,9 @@ def get_cached_dataset_tulu_with_statistics(
     hf_entity: Optional[str] = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
-    drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
     system_prompt_override: Optional[str] = None,
-) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
+) -> Tuple[Dataset, Dict[str, Any]]:
     if dataset_config_hash is None:
         dcs = load_dataset_configs(
             dataset_mixer_list,
@@ -1935,13 +1920,12 @@ def get_cached_dataset_tulu_with_statistics(
 
     dataset, statistics = cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
-    if drop_dataset_source:
-        dataset = remove_dataset_source_field(dataset)
+    dataset = remove_dataset_source_field(dataset)
 
     return dataset, statistics
 
 
-def get_cached_dataset_tulu(
+def cache_dataset(
     dataset_mixer_list: List[str],
     dataset_mixer_list_splits: List[str],
     tc: TokenizerConfig,
@@ -1955,8 +1939,35 @@ def get_cached_dataset_tulu(
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
     system_prompt_override: Optional[str] = None,
-) -> Dataset:
-    return get_cached_dataset_tulu_with_statistics(
+    dataset_mixer_eval_list: Optional[List[str]] = None,
+    dataset_mixer_eval_list_splits: Optional[List[str]] = None,
+    dataset_config_eval_hash: Optional[str] = None,
+) -> Tuple[Tuple[str, str], Optional[Tuple[str, str]]]:
+    """Cache dataset(s) and return cache information.
+
+    Args:
+        dataset_mixer_list: List of datasets to mix for training
+        dataset_mixer_list_splits: List of splits to use
+        tc: TokenizerConfig for tokenization
+        dataset_transform_fn: List of transform functions to apply
+        transform_fn_args: Arguments for transform functions
+        target_columns: Columns to keep in final dataset
+        dataset_cache_mode: Cache mode ("hf" or "local")
+        dataset_config_hash: Optional pre-computed hash
+        hf_entity: HuggingFace entity for HF cache mode
+        dataset_local_cache_dir: Directory for local cache
+        dataset_skip_cache: Whether to skip cache
+        dataset_config_seed: Random seed for dataset operations
+        system_prompt_override: Optional system prompt override
+        dataset_mixer_eval_list: Optional list of datasets for eval
+        dataset_mixer_eval_list_splits: Optional list of splits for eval
+        dataset_config_eval_hash: Optional pre-computed hash for eval
+
+    Returns:
+        Tuple of (train_cache_info, eval_cache_info) where each is (cache_path, config_hash)
+        eval_cache_info is None if no eval dataset provided
+    """
+    train_dataset, _ = get_cached_dataset(
         dataset_mixer_list=dataset_mixer_list,
         dataset_mixer_list_splits=dataset_mixer_list_splits,
         tc=tc,
@@ -1968,7 +1979,69 @@ def get_cached_dataset_tulu(
         hf_entity=hf_entity,
         dataset_local_cache_dir=dataset_local_cache_dir,
         dataset_skip_cache=dataset_skip_cache,
-        drop_dataset_source=True,
         dataset_config_seed=dataset_config_seed,
         system_prompt_override=system_prompt_override,
-    )[0]
+    )
+
+    if dataset_config_hash is None:
+        dcs = load_dataset_configs(
+            dataset_mixer_list,
+            dataset_mixer_list_splits,
+            dataset_transform_fn,
+            transform_fn_args,
+            target_columns,
+            dataset_config_seed,
+        )
+        train_config_hash = compute_config_hash(dcs, tc)
+    else:
+        train_config_hash = dataset_config_hash
+
+    if dataset_cache_mode == "local":
+        train_cache_path = os.path.join(dataset_local_cache_dir, train_config_hash)
+    else:
+        train_cache_path = f"hf://{hf_entity}/{train_config_hash}"
+
+    for key in [INPUT_IDS_PROMPT_KEY, CHOSEN_INPUT_IDS_KEY, INPUT_IDS_KEY]:
+        if key in train_dataset[0]:
+            visualize_token(train_dataset[0][key], tc.tokenizer)
+            break
+
+    eval_cache_info = None
+    if dataset_mixer_eval_list is not None and len(dataset_mixer_eval_list) > 0:
+        eval_dataset, _ = get_cached_dataset(
+            dataset_mixer_list=dataset_mixer_eval_list,
+            dataset_mixer_list_splits=dataset_mixer_eval_list_splits or dataset_mixer_list_splits,
+            tc=tc,
+            dataset_transform_fn=dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=target_columns,
+            dataset_cache_mode=dataset_cache_mode,
+            dataset_config_hash=dataset_config_eval_hash,
+            hf_entity=hf_entity,
+            dataset_local_cache_dir=dataset_local_cache_dir,
+            dataset_skip_cache=dataset_skip_cache,
+            dataset_config_seed=dataset_config_seed,
+            system_prompt_override=system_prompt_override,
+        )
+
+        if dataset_config_eval_hash is None:
+            eval_dcs = load_dataset_configs(
+                dataset_mixer_eval_list,
+                dataset_mixer_eval_list_splits or dataset_mixer_list_splits,
+                dataset_transform_fn,
+                transform_fn_args,
+                target_columns,
+                dataset_config_seed,
+            )
+            eval_config_hash = compute_config_hash(eval_dcs, tc)
+        else:
+            eval_config_hash = dataset_config_eval_hash
+
+        if dataset_cache_mode == "local":
+            eval_cache_path = os.path.join(dataset_local_cache_dir, eval_config_hash)
+        else:
+            eval_cache_path = f"hf://{hf_entity}/{eval_config_hash}"
+
+        eval_cache_info = (eval_cache_path, eval_config_hash)
+
+    return (train_cache_path, train_config_hash), eval_cache_info

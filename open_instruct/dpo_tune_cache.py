@@ -58,7 +58,7 @@ from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
-    get_cached_dataset_tulu,
+    get_cached_dataset,
     visualize_token,
 )
 from open_instruct.dpo_utils import (
@@ -329,8 +329,6 @@ class FlatArguments:
     """Whether to launch beaker evaluation jobs after training"""
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
 
     packing: bool = field(
         default=False,
@@ -614,7 +612,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
         transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
-        train_dataset = get_cached_dataset_tulu(
+        train_dataset, _ = get_cached_dataset(
             dataset_mixer_list=args.dataset_mixer_list,
             dataset_mixer_list_splits=args.dataset_mixer_list_splits,
             tc=tc,
@@ -631,9 +629,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         train_dataset.set_format(type="pt")
     if accelerator.is_main_process:
         visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
-
-    if args.cache_dataset_only:
-        return
 
     # Load pretrained model and tokenizer
     if args.config_name:

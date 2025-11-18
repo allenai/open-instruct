@@ -13,7 +13,7 @@ from open_instruct.dataset_transformation import (
     REJECTED_INPUT_IDS_KEY,
     SimplePreferenceCollator,
     TokenizerConfig,
-    get_cached_dataset_tulu,
+    get_cached_dataset,
 )
 from open_instruct.model_utils import get_reward, print_rich_table
 
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     model = AutoModelForSequenceClassification.from_pretrained("EleutherAI/pythia-14m", num_labels=1)
     tc = TokenizerConfig(tokenizer_name_or_path="EleutherAI/pythia-14m")
     tokenizer = tc.tokenizer
-    eval_dataset = get_cached_dataset_tulu(
+    eval_dataset = get_cached_dataset(
         ["trl-internal-testing/sentiment-trl-style", "1.0"],
         ["test"],
         tc,

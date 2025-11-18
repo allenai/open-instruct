@@ -79,7 +79,7 @@ from open_instruct.dataset_transformation import (
     LABELS_KEY,
     TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE,
     TokenizerConfig,
-    get_cached_dataset_tulu_with_statistics,
+    get_cached_dataset_with_statistics,
     remove_dataset_source_field,
     visualize_token,
 )
@@ -187,7 +187,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         ("sft_tulu_filter_v1", {}),  # remove examples that don't have any labels
     ]
 
-    train_dataset, dataset_statistics = get_cached_dataset_tulu_with_statistics(
+    train_dataset, dataset_statistics = get_cached_dataset_with_statistics(
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=args.dataset_mixer_list_splits,
         tc=tc,

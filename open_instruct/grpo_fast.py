@@ -85,7 +85,7 @@ from open_instruct.dataset_transformation import (
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
     TokenizerConfig,
-    get_cached_dataset_tulu,
+    get_cached_dataset,
     visualize_token,
 )
 from open_instruct.ground_truth_utils import (
@@ -387,8 +387,6 @@ class Args:
     """Where to save the model"""
     save_traces: bool = False
     """Whether to save learning data traces"""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
     keep_last_n_checkpoints: int = 3
     """How many checkpoints to keep in the output directory. -1 for all."""
     checkpoint_state_freq: int = -1
@@ -2217,7 +2215,7 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
         {"system_prompt_override": system_prompt_override},
         {"max_prompt_token_length": args.max_prompt_token_length},
     ]
-    train_dataset = get_cached_dataset_tulu(
+    train_dataset, _ = get_cached_dataset(
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=args.dataset_mixer_list_splits,
         tc=tc,
@@ -2234,7 +2232,7 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
 
     eval_dataset = None
     if len(args.dataset_mixer_eval_list) > 0:
-        eval_dataset = get_cached_dataset_tulu(
+        eval_dataset, _ = get_cached_dataset(
             dataset_mixer_list=args.dataset_mixer_eval_list,
             dataset_mixer_list_splits=args.dataset_mixer_eval_list_splits,
             tc=tc,
@@ -3164,9 +3162,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         raise ValueError(
             f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
         )
-
-    if args.cache_dataset_only:
-        return
 
     pprint([args, model_config])
 

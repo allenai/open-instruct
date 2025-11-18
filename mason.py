@@ -4,15 +4,14 @@ import os
 import random
 import re
 import secrets
-import select
 import string
-import sys
 import time
 
 import beaker
 from rich.console import Console
 from rich.text import Text
 
+from open_instruct.dataset_transformation import TokenizerConfig, cache_dataset
 from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS
 
 console = Console()
@@ -32,43 +31,41 @@ OPEN_INSTRUCT_COMMANDS = [
 
 OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo_fast.py"]
 
-CACHE_EXCLUDED_ARGS = {
-    "--with_tracking": False,
-    "--checkpoint_state_freq": True,
-    "--checkpoint_state_dir": True,
-    "--gs_checkpoint_state_dir": True,
-}
-
 
 # ----------------------------------------------------------------------
 # Mason logic
-def build_command_without_args(command, args_to_remove):
-    """Build new command list excluding specified arguments.
+def parse_command_args(command):
+    """Parse command-line arguments into a dictionary.
 
     Args:
-        command: List of command arguments
-        args_to_remove: Dict mapping argument names to boolean indicating if they have values
-                       e.g., {"--with_tracking": False, "--checkpoint_state_dir": True}
+        command: List of command arguments starting with script name
 
     Returns:
-        New command list with specified arguments removed
+        Dictionary mapping argument names (without --) to their values
     """
-    result = []
-    skip_next = False
-
-    for item in command:
-        if skip_next:
-            skip_next = False
-            continue
-
-        if item in args_to_remove:
-            if args_to_remove[item]:
-                skip_next = True
-            continue
-
-        result.append(item)
-
-    return result
+    args_dict = {}
+    i = 1
+    while i < len(command):
+        arg = command[i]
+        if arg.startswith("--"):
+            arg_name = arg[2:]
+            if i + 1 < len(command) and not command[i + 1].startswith("--"):
+                values = []
+                j = i + 1
+                while j < len(command) and not command[j].startswith("--"):
+                    values.append(command[j])
+                    j += 1
+                if len(values) == 1:
+                    args_dict[arg_name] = values[0]
+                else:
+                    args_dict[arg_name] = values
+                i = j
+            else:
+                args_dict[arg_name] = True
+                i += 1
+        else:
+            i += 1
+    return args_dict
 
 
 def parse_beaker_dataset(dataset_str):
@@ -463,58 +460,92 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 except ValueError:
                     continue
 
-                filtered_command = build_command_without_args(command[idx:], CACHE_EXCLUDED_ARGS)
-                caching_command = "python " + " ".join(filtered_command) + " --cache_dataset_only"
-                console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
-                import subprocess
+                console.log("📦📦📦 Caching dataset")
 
-                # Use Popen to get real-time output while also capturing it
-                process = subprocess.Popen(
-                    caching_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+                cmd_args = parse_command_args(command[idx:])
+
+                tc = TokenizerConfig(
+                    tokenizer_name_or_path=cmd_args.get("model_name_or_path"),
+                    tokenizer_revision=cmd_args.get("model_revision"),
+                    trust_remote_code=cmd_args.get("trust_remote_code", False),
+                    use_fast=cmd_args.get("use_fast_tokenizer", True),
+                    chat_template_name=cmd_args.get("chat_template_name"),
+                    add_bos=cmd_args.get("add_bos", False),
+                    get_tokenizer_fn=cmd_args.get("get_tokenizer_fn", "open_instruct.model_utils:get_tokenizer"),
+                    tokenizer_files_hash=None,
+                    ground_truths_key=cmd_args.get("ground_truths_key", "ground_truth"),
+                    sft_messages_key=cmd_args.get("sft_messages_key", "messages"),
                 )
 
-                stdout_data, stderr_data = [], []
+                dataset_mixer_list = cmd_args.get("dataset_mixer_list", [])
+                if isinstance(dataset_mixer_list, str):
+                    dataset_mixer_list = [dataset_mixer_list]
 
-                # Set up select to monitor both stdout and stderr
-                streams = [process.stdout, process.stderr]
-                while True:
-                    # Wait for output on either stream
-                    reads = select.select(streams, [], [])[0]
+                dataset_transform_fn = cmd_args.get("dataset_transform_fn", [])
+                if isinstance(dataset_transform_fn, str):
+                    dataset_transform_fn = [dataset_transform_fn]
 
-                    done = True
-                    for stream in reads:
-                        line = stream.readline()
-                        if line:
-                            done = False
-                            is_stdout = stream == process.stdout
-                            print(line.rstrip(), file=sys.stdout if is_stdout else sys.stderr)
-                            if is_stdout:
-                                stdout_data.append(line)
-                            else:
-                                stderr_data.append(line)
+                max_seq_length = cmd_args.get("max_seq_length")
+                max_prompt_token_length = cmd_args.get("max_prompt_token_length")
 
-                    if done and process.poll() is not None:
-                        break
+                system_prompt_override_file = cmd_args.get("system_prompt_override_file")
+                system_prompt_override = None
+                if system_prompt_override_file:
+                    with open(system_prompt_override_file) as f:
+                        system_prompt_override = f.read().strip()
 
-                result = type(
-                    "SubprocessResult",
-                    (),
-                    {"returncode": process.returncode, "stdout": "".join(stdout_data), "stderr": "".join(stderr_data)},
-                )
-                stdout = result.stdout
-                # Extract the cached dataset path from stdout if it exists
-                for line in stdout.splitlines():
-                    if "✅ Found cached dataset at" in line:
-                        dataset_cache_path = line.split("✅ Found cached dataset at")[1].strip()
-                        dataset_config_hash = dataset_cache_path.split("/")[-1]
-                        console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
-                        console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
-                        dataset_cache_paths.append(dataset_cache_path)
-                        dataset_config_hashes.append(dataset_config_hash)
-                return_code = result.returncode
-                if return_code != 0:
-                    raise Exception(f"Error code {return_code} when creating cached dataset")
-                console.log("✅✅✅ Finished running the caching command")
+                if max_seq_length:
+                    transform_fn_args = [{"max_seq_length": int(max_seq_length)}, {}]
+                elif max_prompt_token_length:
+                    transform_fn_args = [
+                        {"system_prompt_override": system_prompt_override},
+                        {"max_prompt_token_length": int(max_prompt_token_length)},
+                    ]
+                else:
+                    transform_fn_args = [{}, {}]
+
+                dataset_mixer_eval_list = cmd_args.get("dataset_mixer_eval_list", [])
+                if isinstance(dataset_mixer_eval_list, str):
+                    dataset_mixer_eval_list = [dataset_mixer_eval_list]
+                if not dataset_mixer_eval_list:
+                    dataset_mixer_eval_list = None
+
+                try:
+                    (train_cache_path, train_config_hash), eval_cache_info = cache_dataset(
+                        dataset_mixer_list=dataset_mixer_list,
+                        dataset_mixer_list_splits=cmd_args.get("dataset_mixer_list_splits", ["train"]),
+                        tc=tc,
+                        dataset_transform_fn=dataset_transform_fn,
+                        transform_fn_args=transform_fn_args,
+                        target_columns=cmd_args.get("dataset_target_columns"),
+                        dataset_cache_mode=cmd_args.get("dataset_cache_mode", "local"),
+                        dataset_config_hash=cmd_args.get("dataset_config_hash"),
+                        hf_entity=cmd_args.get("hf_entity"),
+                        dataset_local_cache_dir=cmd_args.get("dataset_local_cache_dir", "local_dataset_cache"),
+                        dataset_skip_cache=cmd_args.get("dataset_skip_cache", False),
+                        dataset_config_seed=int(cmd_args.get("dataset_config_seed", 42)),
+                        system_prompt_override=system_prompt_override,
+                        dataset_mixer_eval_list=dataset_mixer_eval_list,
+                        dataset_mixer_eval_list_splits=cmd_args.get("dataset_mixer_eval_list_splits"),
+                        dataset_config_eval_hash=cmd_args.get("dataset_config_eval_hash"),
+                    )
+
+                    console.log(f"📦 Found cached dataset at: {train_cache_path}")
+                    console.log(f"📦 Found cached dataset config hash: {train_config_hash}")
+                    dataset_cache_paths.append(train_cache_path)
+                    dataset_config_hashes.append(train_config_hash)
+
+                    if eval_cache_info:
+                        eval_cache_path, eval_config_hash = eval_cache_info
+                        console.log(f"📦 Found cached eval dataset at: {eval_cache_path}")
+                        console.log(f"📦 Found cached eval dataset config hash: {eval_config_hash}")
+                        dataset_cache_paths.append(eval_cache_path)
+                        dataset_config_hashes.append(eval_config_hash)
+
+                except Exception as e:
+                    raise Exception(f"Error when creating cached dataset: {e}") from e
+
+                console.log("✅✅✅ Finished caching the dataset")
 
                 if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:
                     need_to_override_checkpoint_state_dir = True

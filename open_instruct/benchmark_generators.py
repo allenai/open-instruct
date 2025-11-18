@@ -210,7 +210,7 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
     ]
 
     # Load dataset
-    dataset = dataset_transformation.get_cached_dataset_tulu(
+    dataset = dataset_transformation.get_cached_dataset(
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=args.dataset_mixer_list_splits,
         tc=tokenizer_config,

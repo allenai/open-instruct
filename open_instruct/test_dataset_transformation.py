@@ -126,7 +126,7 @@ class TestCachedDataset(unittest.TestCase):
             shutil.rmtree(self.temp_dir.name, ignore_errors=True)
         gc.collect()
 
-    def test_get_cached_dataset_tulu_sft(self):
+    def test_get_cached_dataset_sft(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
             tokenizer_name_or_path="meta-llama/Llama-3.1-8B",
             tokenizer_revision="main",
@@ -139,7 +139,7 @@ class TestCachedDataset(unittest.TestCase):
         dataset_transform_fn = ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
 
         transform_fn_args = [{"max_seq_length": 4096}, {}]
-        dataset = open_instruct.dataset_transformation.get_cached_dataset_tulu(
+        dataset, _ = open_instruct.dataset_transformation.get_cached_dataset(
             dataset_mixer_list,
             dataset_mixer_list_splits,
             tc,
@@ -156,7 +156,7 @@ class TestCachedDataset(unittest.TestCase):
         for i in range(len(dataset)):
             self.assertEqual(dataset[i]["input_ids"], gold_tokenized_dataset[i]["input_ids"])
 
-    def test_get_cached_dataset_tulu_preference(self):
+    def test_get_cached_dataset_preference(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
             tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT",
             tokenizer_revision="main",
@@ -168,7 +168,7 @@ class TestCachedDataset(unittest.TestCase):
         dataset_mixer_list_splits = ["train[:1%]"]
         dataset_transform_fn = ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
         transform_fn_args = [{"max_seq_length": 2048}, {}]
-        dataset = open_instruct.dataset_transformation.get_cached_dataset_tulu(
+        dataset, _ = open_instruct.dataset_transformation.get_cached_dataset(
             dataset_mixer_list,
             dataset_mixer_list_splits,
             tc,
@@ -185,7 +185,7 @@ class TestCachedDataset(unittest.TestCase):
         for i in range(len(dataset)):
             self.assertEqual(dataset[i]["chosen_input_ids"], gold_tokenized_dataset[i]["chosen_input_ids"])
 
-    def test_get_cached_dataset_tulu_rlvr(self):
+    def test_get_cached_dataset_rlvr(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
             tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-DPO",
             tokenizer_revision="main",
@@ -197,7 +197,7 @@ class TestCachedDataset(unittest.TestCase):
         dataset_mixer_list_splits = ["train[:1%]"]
         dataset_transform_fn = ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"]
         transform_fn_args = [{}, {"max_prompt_token_length": 2048}]
-        dataset = open_instruct.dataset_transformation.get_cached_dataset_tulu(
+        dataset, _ = open_instruct.dataset_transformation.get_cached_dataset(
             dataset_mixer_list,
             dataset_mixer_list_splits,
             tc,

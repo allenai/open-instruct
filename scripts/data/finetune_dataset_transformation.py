@@ -1,4 +1,4 @@
-from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu, visualize_token
+from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset, visualize_token
 
 tc = TokenizerConfig(
     tokenizer_name_or_path="meta-llama/Llama-3.1-8B",
@@ -16,7 +16,7 @@ transform_fn_args = [
     {"max_seq_length": 4096},
     {},
 ]
-train_dataset = get_cached_dataset_tulu(
+train_dataset = get_cached_dataset(
     dataset_mixer_list,
     dataset_mixer_list_splits,
     tc,

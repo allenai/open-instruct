@@ -25,7 +25,7 @@ from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     SimplePreferenceCollator,
     TokenizerConfig,
-    get_cached_dataset_tulu,
+    get_cached_dataset,
     visualize_token,
 )
 from open_instruct.model_utils import (
@@ -81,8 +81,6 @@ class Args:
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -257,7 +255,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         {"max_token_length": args.max_token_length, "max_prompt_token_length": args.max_prompt_token_length},
     ]
     with accelerator.main_process_first():
-        train_dataset = get_cached_dataset_tulu(
+        train_dataset, _ = get_cached_dataset(
             dataset_mixer_list=args.dataset_mixer_list,
             dataset_mixer_list_splits=args.dataset_mixer_list_splits,
             tc=tc,
@@ -272,7 +270,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         if len(args.dataset_mixer_eval_list) > 0:
-            eval_dataset = get_cached_dataset_tulu(
+            eval_dataset, _ = get_cached_dataset(
                 args.dataset_mixer_eval_list,
                 args.dataset_mixer_eval_list_splits,
                 tc,
@@ -287,8 +285,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
     if accelerator.is_main_process:
         visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
-    if args.cache_dataset_only:
-        return
 
     # ------------------------------------------------------------
     # Runtime setups and quick logging
