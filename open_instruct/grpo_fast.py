@@ -1897,9 +1897,11 @@ def run_training(
         health_check_time = time.perf_counter() - health_check_start
 
         if (
-            training_step % args.local_eval_every == 0
-            and eval_data_loader is not None
-            and (args.eval_on_step_0 or training_step > 1)
+            eval_data_loader is not None
+            and (
+                (args.eval_on_step_0 and training_step == resume_training_step)
+                or (training_step % args.local_eval_every == 0 and training_step > 1)
+            )
         ):
             if not last_eval_collected:
                 logger.warning(
