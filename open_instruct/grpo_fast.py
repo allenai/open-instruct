@@ -933,6 +933,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def step(self):
         batch_data = next(self.dataloader)
+        batch_metrics = batch_data["metrics"]
         collated_query_responses = batch_data["collated_query_responses"]
         collated_tool_masks = batch_data["collated_tool_masks"]
         collated_attention_masks = batch_data["collated_attention_masks"]
@@ -1245,6 +1246,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 if args.record_entropy:
                     self.local_metrics["policy/entropy_avg"] = entropy_stats.mean()
                 self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
+                for key, value in batch_metrics.items():
+                    self.local_metrics[key] = value
                 return self.local_metrics.get_metrics_list()
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
@@ -1934,7 +1937,7 @@ def one_training_step(
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
-    total_generation_time = data_thread_metrics["time/getting_response"]
+    total_generation_time = average_metrics["time/getting_response"]
 
     utilization_metrics = calculate_utilization_metrics(
         model_dims=model_dims,

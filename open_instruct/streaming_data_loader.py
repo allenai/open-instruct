@@ -562,6 +562,7 @@ class StreamingDataLoader(TextDataLoaderBase):
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
                 metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
 
+            collated_data["metrics"] = metrics
             self.local_queue.put(collated_data)
 
     def _prepare_collated_data_for_self(self, packed_sequences: PackedSequences) -> dict[str, list[torch.Tensor]]:
