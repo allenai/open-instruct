@@ -1597,7 +1597,10 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
 
 
 def setup_datasets(
-    args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer, streaming_config: streaming_data_loader.StreamingDataLoaderConfig
+    args: Args,
+    tc: TokenizerConfig,
+    tokenizer: PreTrainedTokenizer,
+    streaming_config: streaming_data_loader.StreamingDataLoaderConfig,
 ):
     """Set up training and evaluation datasets."""
     system_prompt_override = None
@@ -1770,7 +1773,11 @@ def create_model_and_optimizer(
 
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
     resume_training_step = results[0] + 1
-    episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * data_loader_config.num_samples_per_prompt_rollout
+    episode = (
+        (resume_training_step - 1)
+        * args.num_unique_prompts_rollout
+        * data_loader_config.num_samples_per_prompt_rollout
+    )
     logger.info("======== ✅ all models initialized =========")
 
     ray_get_with_progress(
