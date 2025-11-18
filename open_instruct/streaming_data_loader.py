@@ -49,6 +49,8 @@ logger = logging.getLogger(__name__)
 class StreamingDataLoaderConfig:
     max_prompt_token_length: int = 256
     response_length: int = 256
+    async_steps: int = 1
+    num_samples_per_prompt_rollout: int = 4
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     no_resampling_pass_rate: float | None = None
@@ -60,6 +62,22 @@ class StreamingDataLoaderConfig:
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
+
+        if self.active_sampling:
+            assert self.async_steps > 1, (
+                "With active_sampling, you should set async_steps > 1 to account for filtering of the first batch. "
+                "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
+                "prompt will cause the trainer to stall waiting for more data  . "
+            )
+            assert self.filter_zero_std_samples, (
+                "filter_zero_std_samples must be True when active_sampling is True. "
+                "Active sampling requires filtering to work correctly."
+            )
+        if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
+            raise ValueError(
+                "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
+                "as the reward standard deviation will always be 0, causing all samples to be filtered."
+            )
 
     def build(
         self,
