@@ -2013,7 +2013,6 @@ def maybe_evaluate(
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_pending_queries_map,
-            args,
             eval_generation_config,
             num_prompts=num_eval_prompts,
             model_dims=model_dims,
