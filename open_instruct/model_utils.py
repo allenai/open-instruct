@@ -20,14 +20,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Literal, Union
 
-try:
-    import deepspeed
-    from deepspeed.runtime.engine import DeepSpeedEngine
-except ImportError:
-    pass
+import deepspeed
+from deepspeed.runtime.engine import DeepSpeedEngine
+
 import asyncio
 
-import deepspeed
 import pandas as pd
 import torch
 import transformers
