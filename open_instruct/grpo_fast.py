@@ -37,12 +37,7 @@ with contextlib.suppress(Exception):
     import deepspeed
 
 from open_instruct import streaming_data_loader, utils
-from open_instruct.streaming_data_loader import (
-    PendingQueriesMap,
-    accumulate_inference_batches,
-    add_prompt_to_generator,
-    collate_fn,
-)
+from open_instruct.streaming_data_loader import accumulate_inference_batches, add_prompt_to_generator, collate_fn
 
 # isort: on
 import asyncio
@@ -1885,15 +1880,12 @@ def one_training_step(
     episode: int,
     training_step: int,
     num_total_tokens: int,
-    num_step_tokens: int,
     start_time: float,
     train_dataset: datasets.Dataset,
     training_start_time: float,
     wandb_url: str,
     chat_template_name: str,
     model_dims: utils.ModelDims,
-    prompt_lengths: list[int],
-    response_lengths: list[int],
     actor_manager: ActorManager | None = None,
 ) -> None:
     """Train the model for one step."""
@@ -1948,6 +1940,9 @@ def one_training_step(
     total_training_time = time.perf_counter() - training_start_time
 
     total_generation_time = average_metrics["time/getting_response"]
+    prompt_lengths = array_metrics_list[0]["batch/prompt_lengths"]
+    response_lengths = array_metrics_list[0]["batch/response_lengths"]
+    num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
     utilization_metrics = calculate_utilization_metrics(
         model_dims=model_dims,
@@ -1996,7 +1991,7 @@ def maybe_evaluate(
     tokenizer,
     reward_fn,
     episode,
-    eval_pending_queries_map: PendingQueriesMap,
+    eval_dataset,
     eval_generation_config,
     generate_metrics_Q: Queue,
     num_eval_prompts: int,
@@ -2012,12 +2007,12 @@ def maybe_evaluate(
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
-            eval_pending_queries_map,
             eval_generation_config,
             num_prompts=num_eval_prompts,
             model_dims=model_dims,
             tokenizer=tokenizer,
             reward_fn=reward_fn,
+            dataset=eval_dataset,
             actor_manager=actor_manager,
             timeout=timeout,
             active_sampling=False,
@@ -2292,7 +2287,6 @@ def run_training(
     param_prompt_Q,
     evaluation_inference_results_Q,
     packed_sequences_Q,
-    eval_pending_queries_map,
     generate_metrics_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
@@ -2368,7 +2362,6 @@ def run_training(
                     eval_index,
                     0,
                     training_step,
-                    eval_pending_queries_map,
                     param_prompt_Q,
                     generation_configs["eval"],
                     is_eval=True,
@@ -2385,10 +2378,6 @@ def run_training(
 
         data_thread_metrics["time/health_check"] = health_check_time
 
-        num_step_tokens = 0
-        prompt_lengths = []
-        response_lengths = []
-
         one_training_step(
             args,
             streaming_config,
@@ -2398,15 +2387,12 @@ def run_training(
             episode,
             training_step,
             num_total_tokens,
-            num_step_tokens,
             start_time,
             train_dataset,
             training_start_time,
             wandb_url,
             tc.chat_template_name,
             model_dims,
-            prompt_lengths,
-            response_lengths,
             actor_manager,
         )
 
@@ -2443,7 +2429,7 @@ def run_training(
             tokenizer,
             reward_fn,
             episode,
-            eval_pending_queries_map,
+            eval_dataset,
             generation_configs["eval"],
             generate_metrics_Q,
             len(eval_dataset) if eval_dataset else 0,
@@ -2531,7 +2517,6 @@ def main(
 
     # Create additional queues (main queues already created above)
     packed_sequences_Q = Queue(maxsize=streaming_config.async_steps)
-    eval_pending_queries_map = PendingQueriesMap()
     generate_metrics_Q = Queue(maxsize=streaming_config.async_steps)
     weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
 
@@ -2559,7 +2544,6 @@ def main(
             param_prompt_Q,
             evaluation_inference_results_Q,
             packed_sequences_Q,
-            eval_pending_queries_map,
             generate_metrics_Q,
             weight_sync_metrics_Q,
             actor_manager,

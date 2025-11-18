@@ -318,7 +318,6 @@ class StreamingDataLoader(TextDataLoaderBase):
         self.reward_fn = reward_fn
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
-        self.pending_queries_map = PendingQueriesMap()
         self.tokenizer = tokenizer
         self.config = config
         self.config.max_possible_score = max_possible_score
@@ -402,7 +401,6 @@ class StreamingDataLoader(TextDataLoaderBase):
                 dataset_index,
                 self.iter_dataloader.epoch_number,
                 self.training_step,
-                self.pending_queries_map,
                 self.param_prompt_Q,
                 self.generation_config,
                 is_eval=False,
@@ -416,19 +414,18 @@ class StreamingDataLoader(TextDataLoaderBase):
             with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
                 result, batch, reward_metrics, batch_stats = accumulate_inference_batches(
                     self.inference_results_Q,
-                    self.pending_queries_map,
                     self.generation_config,
                     num_prompts=self.rank_batch_size,
                     model_dims=self.model_dims,
                     tokenizer=self.tokenizer,
                     reward_fn=self.reward_fn,
+                    dataset=self.dataset,
                     actor_manager=self.actor_manager,
                     active_sampling=self.config.active_sampling,
                     filter_zero_std_samples=self.config.filter_zero_std_samples,
                     replenish_prompts=True,
                     no_resampling_pass_rate=self.config.no_resampling_pass_rate,
                     iter_dataloader=self.iter_dataloader,
-                    prompt_dataset=self.dataset,
                     param_prompt_Q=self.param_prompt_Q,
                     training_step=training_step,
                     verbose=self.verbose,
@@ -698,16 +695,11 @@ def add_prompt_to_generator(
     example_index: int,
     epoch_number: int,
     training_step: int,
-    pending_queries_map: PendingQueriesMap,
     param_prompt_Q: ray_queue.Queue,
     generation_config,
     is_eval: bool,
 ) -> None:
     query = example[INPUT_IDS_PROMPT_KEY]
-    ground_truth = example[GROUND_TRUTHS_KEY]
-    dataset_name = example[VERIFIER_SOURCE_KEY]
-    raw_query = example[RAW_PROMPT_KEY]
-    pending_queries_map.insert(example_index, query, ground_truth, dataset_name, raw_query)
 
     param_prompt_Q.put(
         PromptRequest(
@@ -723,12 +715,12 @@ def add_prompt_to_generator(
 
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
-    pending_queries_map: PendingQueriesMap,
     generation_config: vllm.SamplingParams,
     num_prompts: int,
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
     reward_fn: Callable,
+    dataset: Dataset,
     actor_manager=None,
     timeout: float | None = None,
     active_sampling: bool = False,
@@ -736,7 +728,6 @@ def accumulate_inference_batches(
     replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: ShufflingIterator | None = None,
-    prompt_dataset: Dataset = None,
     param_prompt_Q: ray_queue.Queue | None = None,
     training_step: int = None,
     verbose: bool = False,
@@ -748,8 +739,8 @@ def accumulate_inference_batches(
         assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
 
     if replenish_prompts:
-        assert param_prompt_Q is not None and iter_dataloader is not None and prompt_dataset is not None, (
-            "replenish_prompts requires param_prompt_Q and iter_dataloader and prompt_dataset"
+        assert param_prompt_Q is not None and iter_dataloader is not None and dataset is not None, (
+            "replenish_prompts requires param_prompt_Q and iter_dataloader and dataset"
         )
 
     results = []
@@ -785,16 +776,19 @@ def accumulate_inference_batches(
             f"Dataset index: {result.dataset_index}, Epoch: {result.epoch_number}"
         )
 
-        query, ground_truth, dataset_name, raw_query = pending_queries_map.pop(result.dataset_index)
+        example = dataset[result.dataset_index]
+        query = example[INPUT_IDS_PROMPT_KEY]
+        ground_truth = example[GROUND_TRUTHS_KEY]
+        dataset_name = example[VERIFIER_SOURCE_KEY]
+        raw_query = example[RAW_PROMPT_KEY]
 
         if replenish_prompts:
             dataset_index = next(iter_dataloader)
             add_prompt_to_generator(
-                prompt_dataset[dataset_index],
+                dataset[dataset_index],
                 dataset_index,
                 iter_dataloader.epoch_number,
                 training_step,
-                pending_queries_map,
                 param_prompt_Q,
                 generation_config,
                 is_eval=False,
