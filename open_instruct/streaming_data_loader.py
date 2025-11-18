@@ -528,7 +528,7 @@ class StreamingDataLoader(TextDataLoaderBase):
                     "real_batch_size_ratio": real_num_responses / expected_num_responses,
                     "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                     "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
-                    "val/solve_rate_hist": None,
+                    "val/solve_rate_hist": batch_stats.percent_solved_hist,
                     "val/total_reward_groups": real_num_responses / self.config.num_samples_per_prompt_rollout,
                     "val/sequence_lengths": sequence_lengths.mean(),
                     "val/sequence_lengths_min": sequence_lengths.min(),
@@ -636,6 +636,7 @@ class BatchStatistics:
     filtered_prompts_solved: int
     filtered_prompts_nonzero: int
     percent_solved_mean: float
+    percent_solved_hist: np.ndarray
     no_resampled_prompts: int
     total_prompts: int
 
@@ -958,6 +959,7 @@ def accumulate_inference_batches(
         filtered_prompts_solved=filtered_prompt_solved,
         filtered_prompts_nonzero=filtered_prompt_nonzero,
         percent_solved_mean=percent_solved_mean,
+        percent_solved_hist=np.array(all_percent_solved),
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
     )
