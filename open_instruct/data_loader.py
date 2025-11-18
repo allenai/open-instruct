@@ -23,7 +23,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=0
         )
 
-        dataset = dataset.map(lambda _, idx: {"dataset_index": idx}, with_indices=True)
+        dataset = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
         self.original_dataset = dataset.shard(num_shards=world_size, index=rank)
         self.seed = seed
 
