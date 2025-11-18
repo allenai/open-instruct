@@ -68,7 +68,6 @@ import vllm
 import wandb
 from datasets import Dataset
 from huggingface_hub import HfApi
-from olmo_core.data import data_loader
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -78,6 +77,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
+from open_instruct import data_loader as oc_data_loader
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
@@ -702,72 +702,6 @@ class ShufflingIterator:
             self.exclude_list = []
 
         self.effective_size = len(self.data) - (len(self.data) % self.batch_size)
-
-
-class HFDatasetDataLoader(data_loader.TextDataLoaderBase):
-    def __init__(self, dataset: Dataset, batch_size: int, seed: int, rank: int = 0, world_size: int = 1):
-        self.dataset = dataset
-        self.batch_size = batch_size
-        self.seed = seed
-        self.rank = rank
-        self.world_size = world_size
-        self.epoch_number = 0
-        self.index = 0
-
-        indices = np.arange(len(dataset))
-        shard_size = len(indices) // world_size
-        start_idx = rank * shard_size
-        end_idx = start_idx + shard_size if rank < world_size - 1 else len(indices)
-        self.shard_indices = indices[start_idx:end_idx]
-
-        self.rng = np.random.default_rng(seed)
-        self.rng.shuffle(self.shard_indices)
-
-        self.effective_size = len(self.shard_indices) - (len(self.shard_indices) % batch_size)
-
-    def __iter__(self):
-        return self
-
-    def __next__(self) -> dict[str, Any]:
-        if self.index >= self.effective_size:
-            raise StopIteration
-
-        idx = self.shard_indices[self.index]
-        self.index += 1
-
-        return self.dataset[int(idx)] | {"dataset_index": int(idx)}
-
-    def reshuffle(self):
-        self.epoch_number += 1
-        self.index = 0
-        self.rng.shuffle(self.shard_indices)
-
-    def reset(self):
-        self.index = 0
-
-    @property
-    def total_batches(self) -> int:
-        return self.effective_size
-
-    def state_dict(self) -> dict[str, Any]:
-        return {
-            "epoch_number": self.epoch_number,
-            "index": self.index,
-            "shard_indices": self.shard_indices.copy(),
-            "rng_state": self.rng.bit_generator.state,
-        }
-
-    def load_state_dict(self, state: dict[str, Any]) -> None:
-        self.epoch_number = state["epoch_number"]
-        self.index = state["index"]
-        self.shard_indices = state["shard_indices"].copy()
-        self.rng.bit_generator.state = state["rng_state"]
-
-    def _iter_batches(self):
-        raise NotImplementedError("Use __next__ instead")
-
-    def get_mock_batch(self) -> dict[str, Any]:
-        return self.dataset[0]
 
 
 @ray.remote(num_gpus=1)
@@ -1656,7 +1590,7 @@ def accumulate_inference_batches(
     tokenizer: PreTrainedTokenizer,
     reward_fn: Callable,
     prompt_dataset: Dataset,
-    iter_dataloader: HFDatasetDataLoader | None = None,
+    iter_dataloader: oc_data_loader.HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
     training_step: int | None = None,
     actor_manager=None,
@@ -1933,7 +1867,7 @@ def data_preparation_thread(
     num_training_steps: int,
     generation_config,
     resume_training_step: int,
-    iter_dataloader: HFDatasetDataLoader,
+    iter_dataloader: oc_data_loader.HFDataLoader,
     train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
@@ -3194,7 +3128,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             episode = checkpoint_state["episode"]
             logger.info(f"Restored episode count: {episode}")
 
-    iter_dataloader = HFDatasetDataLoader(dataset=train_dataset, batch_size=1, seed=args.seed, rank=0, world_size=1)
+    iter_dataloader = oc_data_loader.HFDataLoader(
+        dataset=train_dataset, batch_size=1, seed=args.seed, rank=0, world_size=1
+    )
 
     if checkpoint_state and "dataloader_state" in checkpoint_state:
         iter_dataloader.load_state_dict(checkpoint_state["dataloader_state"])
