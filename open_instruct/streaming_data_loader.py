@@ -62,9 +62,12 @@ class StreamingDataLoaderConfig:
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
+        assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
+        if self.num_samples_per_prompt_rollout == 1:
+            logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
 
         if self.active_sampling:
-            assert self.config.async_steps > 1, (
+            assert self.async_steps > 1, (
                 "With active_sampling, you should set async_steps > 1 to account for filtering of the first batch. "
                 "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
                 "prompt will cause the trainer to stall waiting for more data  . "
@@ -73,7 +76,7 @@ class StreamingDataLoaderConfig:
                 "filter_zero_std_samples must be True when active_sampling is True. "
                 "Active sampling requires filtering to work correctly."
             )
-        if self.config.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
+        if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
             raise ValueError(
                 "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
                 "as the reward standard deviation will always be 0, causing all samples to be filtered."

@@ -431,9 +431,6 @@ class Args:
             assert self.masked_mean_denominator > 0, (
                 f"masked_mean_denominator (={self.masked_mean_denominator}) must be greater than 0!"
             )
-        assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
-        if self.num_samples_per_prompt_rollout == 1:
-            logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
         )
