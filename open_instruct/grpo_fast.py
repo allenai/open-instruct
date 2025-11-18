@@ -444,9 +444,6 @@ class Args:
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
-        if self.inference_batch_size is None:
-            total_prompts = self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout
-            self.inference_batch_size = max(1, math.ceil(total_prompts / self.vllm_num_engines))
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
@@ -1553,6 +1550,9 @@ def setup_runtime_variables(args: Args, streaming_config: streaming_data_loader.
     args.num_training_steps = args.total_episodes // (
         args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
     )
+    if args.inference_batch_size is None:
+        total_prompts = streaming_config.num_samples_per_prompt_rollout * args.num_unique_prompts_rollout
+        args.inference_batch_size = max(1, math.ceil(total_prompts / args.vllm_num_engines))
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
