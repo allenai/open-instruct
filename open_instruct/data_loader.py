@@ -16,7 +16,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._world_size = world_size
         self.seed = seed
         self._batch_size = batch_size
-        self._exclude_list: list[int] = []
+        self._exclude_set: set[int] = set()
 
         self.dataset = self._source.shard(num_shards=world_size, index=rank).shuffle(seed=seed)
         self.effective_size = len(self.dataset) - (len(self.dataset) % batch_size)
@@ -42,27 +42,28 @@ class HFDataLoader(data_loader.DataLoaderBase):
         return self._epoch if self._epoch is not None else 0
 
     def exclude_index(self, index: int) -> None:
-        self._exclude_list.append(index)
+        self._exclude_set.add(index)
 
     def state_dict(self) -> dict[str, Any]:
-        return {"epoch": self._epoch, "batches_processed": self.batches_processed, "exclude_list": self._exclude_list}
+        return {
+            "epoch": self._epoch,
+            "batches_processed": self.batches_processed,
+            "exclude_set": list(self._exclude_set),
+        }
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         self._epoch = state["epoch"]
         self.batches_processed = state["batches_processed"]
-        self._exclude_list = state.get("exclude_list", [])
+        self._exclude_set = set(state.get("exclude_set", []))
         if self._epoch is not None:
             self._apply_exclude_and_shuffle(self.seed + self._epoch)
         self._current_iter = None
 
     def _apply_exclude_and_shuffle(self, seed: int) -> None:
         sharded = self._source.shard(num_shards=self._world_size, index=self._rank)
-        if self._exclude_list:
-            exclude_set = set(self._exclude_list)
-            filtered = sharded.filter(lambda x: x["dataset_index"] not in exclude_set)
-            self.dataset = filtered.shuffle(seed=seed)
-        else:
-            self.dataset = sharded.shuffle(seed=seed)
+        if self._exclude_set:
+            sharded = sharded.filter(lambda x: x["dataset_index"] not in self._exclude_set)
+        self.dataset = sharded.shuffle(seed=seed)
         self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
 
     def reshuffle(self, epoch: int | None = None, **kwargs):
