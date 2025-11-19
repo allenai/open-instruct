@@ -56,6 +56,7 @@ from datetime import timedelta
 from queue import Empty, Full, Queue
 from typing import Any, Literal
 
+import backoff
 import datasets
 import numpy as np
 import pandas as pd
@@ -2561,26 +2562,7 @@ def one_training_step(
                 [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
             )
 
-    save_time = 0
-    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
-        with Timer("[Main Thread] 🗡️ Saving model") as timer:
-            checkpoint_dir = f"{args.output_dir}_checkpoints"
-            step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-            logger.info(f"Saving model at step {training_step} to {step_dir}")
-            ray_get_with_progress(
-                [
-                    policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
-                    for i in range(args.world_size)
-                ],
-                desc=f"Saving model at step {training_step}",
-            )
-            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                for i in range(args.world_size):
-                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                        step_dir, leaderboard_name, wandb_url, training_step
-                    )
-        save_time += timer.duration
+    save_time = maybe_save_checkpoint(args, training_step, policy_group, chat_template_name, tokenizer, wandb_url)
 
     if len(update_ref_policy_future) > 0:
         with Timer("[Main Thread] 🔃 Updating reference policy"):
@@ -2632,6 +2614,34 @@ def one_training_step(
             if (isinstance(value, (np.ndarray, list))) and len(value) > 0:
                 metrics[key] = wandb.Histogram(value)
         wandb.log(metrics, step=episode)
+
+
+@backoff.on_exception(backoff.expo, Exception, max_tries=3)
+def maybe_save_checkpoint(
+    args: Args, training_step: int, policy_group, chat_template_name: str, tokenizer, wandb_url: str
+) -> float:
+    save_time = 0
+    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
+        with Timer("[Main Thread] 🗡️ Saving model") as timer:
+            checkpoint_dir = f"{args.output_dir}_checkpoints"
+            step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
+            logger.info(f"Saving model at step {training_step} to {step_dir}")
+            ray_get_with_progress(
+                [
+                    policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
+                    for i in range(args.world_size)
+                ],
+                desc=f"Saving model at step {training_step}",
+            )
+            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                for i in range(args.world_size):
+                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                        step_dir, leaderboard_name, wandb_url, training_step
+                    )
+        save_time = timer.duration
+
+    return save_time
 
 
 def maybe_evaluate(
