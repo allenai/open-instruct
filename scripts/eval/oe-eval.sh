@@ -369,7 +369,7 @@ for TASK in "${TASKS[@]}"; do
             --model-args "$MODEL_ARGS" \
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
-            --gpus "$GPU_COUNT" \
+            --gpus 2 \
             --gantry-args "$GANTRY_ARGS" \
             ${REVISION_ARG} \
             ${WANDB_ARG} \
