@@ -228,9 +228,6 @@ class Args:
     stop_strings: list[str] | None = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
-    use_fp8_kv_cache: bool = False
-    """Whether to use fp8 kv cache. This is useful for larger models or olmo."""
-
     # Algorithm
     async_steps: int = 1
     """Number of steps ahead to generate responses. Set to 0 to make the code synchronous. Values greater than 0 learn from a policy up to async_steps old like Cleanba (https://arxiv.org/abs/2310.00036)"""
@@ -337,8 +334,6 @@ class Args:
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
-    inference_batch_size: int | None = None
-    """inference batch size per vLLM engine. If None, calculated as ceil(num_unique_prompts_rollout / vllm_num_engines) * num_samples_per_prompt_rollout"""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
     vllm_enforce_eager: bool = False
@@ -477,9 +472,6 @@ class Args:
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
-        if self.inference_batch_size is None:
-            total_prompts = self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout
-            self.inference_batch_size = max(1, math.ceil(total_prompts / self.vllm_num_engines))
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -2197,8 +2189,6 @@ def create_model_and_optimizer(
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
-        inference_batch_size=args.inference_batch_size,
-        use_fp8_kv_cache=args.use_fp8_kv_cache,
         inflight_updates=args.inflight_updates,
     )
 
@@ -2207,14 +2197,21 @@ def create_model_and_optimizer(
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     logger.info("======== ✅ all models and vLLM engines initialized =========")
 
-    # Get and set KV cache max concurrency from the first engine (all engines have the same config)
-    # fp8 kv cache for now forces v0 engine and breaks this.
-    if vllm_engines and not args.use_fp8_kv_cache:
-        kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
-        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
-    else:
-        # dummy value
-        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
+    kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
+    ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
+    expected_batch_size = (
+        args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout // args.vllm_num_engines
+    )
+    if kv_cache_max_concurrency < expected_batch_size:
+        nodes_needed = (
+            args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout // kv_cache_max_concurrency
+        )
+        logger.warning(
+            f"kv_cache_max_concurrency ({kv_cache_max_concurrency}) is lower than "
+            f"num_unique_prompts_rollout * num_samples_per_prompt_rollout // vllm_num_engines ({expected_batch_size}). "
+            f"This means actors will have to run multiple sequential batches, hurting performance. "
+            f"You might want to use more inference nodes ({nodes_needed} nodes to generate the entire batch simultaneously)."
+        )
 
     ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
@@ -2946,9 +2943,6 @@ def run_training(
             iter_dataloader,
         )
 
-        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger_event.set()
-
         # Checkpoint after one_training_step (or even if it was skipped)
         # This ensures we checkpoint progress even if the exact checkpoint step has no data
         if (
@@ -2976,6 +2970,9 @@ def run_training(
                     desc=f"Saving checkpoint state at step {training_step}",
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+
+        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
+        weight_sync_trigger_event.set()
 
         maybe_evaluate(
             args,

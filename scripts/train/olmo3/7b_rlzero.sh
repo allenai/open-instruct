@@ -4,7 +4,7 @@
 MODEL_NAME_OR_PATH="/weka/oe-adapt-default/michaeln/checkpoints/olmo3-7b-base"
 GS_MODEL_NAME="olmo3_7b_base"
 
-DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_template_filtered 1.0 saurabh5/MATH_3000_Filtered_olmo_completions_new_template_filtered 1.0"
+DATASETS="hamishivi/rlvr_orz_math_57k_collected_filtered 1.0"
 
 # math evals
 # EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
@@ -41,7 +41,7 @@ source configs/beaker_configs/ray_node_setup.sh \&\& \
 python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
-    --async_steps 8 \
+    --async_steps 4 \
     --inflight_updates \
     --no_resampling_pass_rate 0.875 \
     --truncated_importance_sampling_ratio_cap 2.0 \
@@ -59,7 +59,7 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
-    --pack_length 18432 \
+    --pack_length 32768 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name olmo_thinker_dapo \
     --non_stop_penalty False \
@@ -72,16 +72,15 @@ python open_instruct/grpo_fast.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 25 \
-    --save_freq 50 \
-    --beaker_eval_freq 50 \
+    --local_eval_every 100 \
+    --save_freq 100 \
+    --beaker_eval_freq 100 \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
-    --output_dir /output/olmo3-7b-rlzero/checkpoints \
-    --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-7b_rlzero/ \
+    --output_dir /output/olmo3-7b-rlzero-spurious/checkpoints \
     --mask_truncated_completions True \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \

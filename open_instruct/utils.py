@@ -700,16 +700,18 @@ def get_wandb_tags() -> list[str]:
     if "GIT_COMMIT" in os.environ:
         git_commit = os.environ["GIT_COMMIT"]
         tags.append(f"commit: {git_commit}")
-        # try finding the pull request number on github
-        prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
-        if prs.status_code == 200:
+        try:
+            # try finding the pull request number on github
+            prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
+            prs.raise_for_status()
             prs = prs.json()
-            if len(prs["items"]):
-                pr = prs["items"][0]
-                tags.append(f"pr: {pr['number']}")
+            pr = prs["items"][0]
+            tags.append(f"pr: {pr['number']}")
+        except (requests.exceptions.RequestException, KeyError, IndexError, ValueError) as e:
+            logger.warning(f"Failed to get PR number from GitHub API: {e}.")
     if "GIT_BRANCH" in os.environ:
         tags.append(f"branch: {os.environ['GIT_BRANCH']}")
-    tags = [tag[:64] for tag in tags if len(tag) > 64]
+    tags = [tag[:64] for tag in tags]
     return tags
 
 
