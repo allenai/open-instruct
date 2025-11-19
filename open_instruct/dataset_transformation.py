@@ -318,7 +318,7 @@ CHAT_TEMPLATES = {
     ),
     # olmo-core-compatible chat templates:
     # TODO: unify these 3 chat templates and send variables through the tokenizer's apply_chat_template kwargs
-    "olmo": (
+    "olmo_old": (
         "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
         "{% if not has_system %}"
         "{{ '<|im_start|>system\nYou are OLMo, a helpful function-calling AI assistant built by Ai2. Your date cutoff is November 2024, and your model weights are available at https://huggingface.co/allenai. You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
@@ -361,7 +361,7 @@ CHAT_TEMPLATES = {
     "olmo_thinker": (
         "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
         "{% if not has_system %}"
-        "{{ '<|im_start|>system\nYou are OLMo, a helpful function-calling AI assistant built by Ai2. Your date cutoff is November 2024, and your model weights are available at https://huggingface.co/allenai. You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
+        "{{ '<|im_start|>system\nYou are a helpful AI assistant.<|im_end|>\n' }}"
         "{% endif %}"
         "{% for message in messages %}"
         "{% if message['role'] == 'system' %}"
@@ -398,10 +398,95 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
-    "olmo_thinker_no_think": (
+    "olmo_thinker_no_think_7b": (
         "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
         "{% if not has_system %}"
         "{{ '<|im_start|>system\nYou are Olmo, a helpful AI assistant built by Ai2. Your date cutoff is December 2024, and your model weights are available at https://huggingface.co/allenai.<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + message['content'] }}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ ' <functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ ' You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'user' %}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% if message.get('content', none) is not none %}"
+        "{{ message['content'] }}"
+        "{% endif %}"
+        "{% if message.get('function_calls', none) is not none %}"
+        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ '<|im_end|>' + '\n' }}"
+        "{% else %}"
+        "{{ eos_token }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'environment' %}"
+        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "olmo_thinker_remove_intermediate_thinking": (
+        "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
+        "{% if not has_system %}"
+        "{{ '<|im_start|>system\nYou are a helpful AI assistant.<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + message['content'] }}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ ' <functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ ' You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'user' %}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% set content = message.get('content', none) %}"
+        "{% if content is not none %}"
+        "{% set content = content | string %}"
+        "{% if not loop.last and '</think>' in content and '<think>' in content %}"
+        "{% set content = content.split('</think>')[-1].lstrip('\\n') %}"
+        "{% endif %}"
+        "{{ content }}"
+        "{% endif %}"
+        "{% if message.get('function_calls', none) is not none %}"
+        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ '<|im_end|>' + '\n' }}"
+        "{% else %}"
+        "{{ eos_token }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'environment' %}"
+        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n<think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "olmo_thinker_no_think_sft_tokenization": (
+        "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
+        "{% if not has_system %}"
+        "{{ '<|im_start|>system\nYou are a helpful AI assistant.<|im_end|>\n' }}"
         "{% endif %}"
         "{% for message in messages %}"
         "{% if message['role'] == 'system' %}"
@@ -1740,20 +1825,6 @@ class LocalDatasetTransformationCache:
 
         loaded_dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
         return loaded_dataset, all_statistics
-
-
-def get_cached_dataset(
-    dcs: List[DatasetConfig],
-    tc: TokenizerConfig,
-    hf_entity: Optional[str] = None,
-    dataset_local_cache_dir: Optional[str] = None,
-    dataset_skip_cache: bool = False,
-) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
-    if dataset_local_cache_dir is not None:
-        cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
-    else:
-        cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
 
 def load_dataset_configs(

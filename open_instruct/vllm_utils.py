@@ -515,30 +515,25 @@ class LLMRayActor:
         results_queue: ray_queue.Queue,
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
-        inference_batch_size: int | None,
         inflight_updates: bool,
         **kwargs,
     ):
         assert_threaded_actor(self)
-        self._init_config(tools, max_tool_calls, inference_batch_size, inflight_updates)
+        self._init_config(tools, max_tool_calls, inflight_updates)
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
-        self._init_executor()
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
+        self.inference_batch_size = self.get_kv_cache_info()
+        self._init_executor()
 
     def _init_config(
-        self,
-        tools: dict[str, Tool] | None,
-        max_tool_calls: dict[str, int] | None,
-        inference_batch_size: int | None,
-        inflight_updates: bool,
+        self, tools: dict[str, Tool] | None, max_tool_calls: dict[str, int] | None, inflight_updates: bool
     ) -> None:
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
-        self.inference_batch_size = inference_batch_size
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
         self.active_tasks = {}
@@ -794,7 +789,6 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
-    inference_batch_size: int | None = None,
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
 ) -> list[LLMRayActor]:
@@ -874,13 +868,14 @@ def create_vllm_engines(
                 actor_manager=actor_manager,
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
-                inference_batch_size=inference_batch_size,
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
             )
         )
 
-    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300)
+    ray_get_with_progress(
+        [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=1200
+    )
 
     return vllm_engines

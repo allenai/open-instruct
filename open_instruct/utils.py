@@ -43,6 +43,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import defaultdict
 from collections.abc import Iterable
 from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
@@ -67,6 +68,10 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
 from open_instruct import logger_utils
 
+WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
+GCP_CLUSTERS = ["ai2/augusta"]
+INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
+
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
@@ -74,6 +79,38 @@ MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+class MetricsTracker:
+    """A simple class to preallocate all metrics in an array
+    so we can do only one allreduce operation to get the metrics mean"""
+
+    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
+        self.metrics = torch.zeros(max_metrics, device=device)
+        self.names2idx = {}
+        self.current_idx = 0
+        self.max_metrics = max_metrics
+
+    def _maybe_register_metric(self, name: str) -> int:
+        if name not in self.names2idx:
+            if self.current_idx >= self.max_metrics:
+                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
+            self.names2idx[name] = self.current_idx
+            self.current_idx += 1
+        return self.names2idx[name]
+
+    def __getitem__(self, name: str) -> torch.Tensor:
+        idx = self._maybe_register_metric(name)
+        return self.metrics[idx]
+
+    def __setitem__(self, name: str, value):
+        idx = self._maybe_register_metric(name)
+        self.metrics[idx] = value
+
+    def get_metrics_list(self) -> dict[str, float]:
+        # Convert to Python floats for logging systems (wandb, tensorboard)
+        metrics_list = self.metrics.tolist()
+        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 
 
 def max_num_processes() -> int:
@@ -663,16 +700,18 @@ def get_wandb_tags() -> list[str]:
     if "GIT_COMMIT" in os.environ:
         git_commit = os.environ["GIT_COMMIT"]
         tags.append(f"commit: {git_commit}")
-        # try finding the pull request number on github
-        prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
-        if prs.status_code == 200:
+        try:
+            # try finding the pull request number on github
+            prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
+            prs.raise_for_status()
             prs = prs.json()
-            if len(prs["items"]):
-                pr = prs["items"][0]
-                tags.append(f"pr: {pr['number']}")
+            pr = prs["items"][0]
+            tags.append(f"pr: {pr['number']}")
+        except (requests.exceptions.RequestException, KeyError, IndexError, ValueError) as e:
+            logger.warning(f"Failed to get PR number from GitHub API: {e}.")
     if "GIT_BRANCH" in os.environ:
         tags.append(f"branch: {os.environ['GIT_BRANCH']}")
-    tags = [tag[:64] for tag in tags if len(tag) > 64]
+    tags = [tag[:64] for tag in tags]
     return tags
 
 
@@ -1130,14 +1169,14 @@ def launch_ai2_evals_on_weka(
     stop_strings: list[str] | None = None,
     gs_bucket_path: str | None = None,
     eval_priority: str | None = "normal",
+    eval_workspace: str | None = "ai2/tulu-3-results",
     beaker_image: str | None = None,
+    oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    weka_cluster = "ai2/saturn ai2/neptune"
-    gcp_cluster = "ai2/augusta"
-    cluster = weka_cluster if gs_bucket_path is None else gcp_cluster
     beaker_users = get_beaker_whoami()
 
     if gs_bucket_path is not None:
+        cluster_str = f"--cluster {' '.join(GCP_CLUSTERS)}"
         if beaker_users is not None:
             gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
         else:
@@ -1157,14 +1196,14 @@ def launch_ai2_evals_on_weka(
 
         # Update path to use the GS bucket path for evaluation
         path = gs_saved_path
-
+    else:
+        cluster_str = ""
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \
---location {path} \
---cluster {cluster} \
+--location {path} {cluster_str} \
 --is_tuned \
---workspace "tulu-3-results" \
+--workspace {eval_workspace} \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
@@ -1178,7 +1217,7 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
         command += f" --step {training_step}"
-    if cluster == weka_cluster:
+    if gs_bucket_path is None:
         command += " --evaluate_on_weka"
     if oe_eval_tasks is not None:
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
@@ -1186,6 +1225,8 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
     if beaker_image is not None:
         command += f" --beaker_image {beaker_image}"
+    if oe_eval_gpu_multiplier is not None:
+        command += f" --gpu_multiplier {oe_eval_gpu_multiplier}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
@@ -1680,6 +1721,8 @@ GPU_SPECS = {
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
     "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
     "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
+    # Specs from https://www.techpowerup.com/gpu-specs/geforce-rtx-4090-mobile.c3949.
+    "4090 laptop": {"flops": 32.98e12, "memory_size": 24e9, "memory_bandwidth": 576e9},
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
@@ -2250,6 +2293,22 @@ class ModelDims:
 
         return {"mfu": learner_mfu}
 
+    def approximate_learner_utilization(
+        self, total_tokens: int, avg_sequence_length: float, training_time: float, num_training_gpus: int
+    ) -> dict[str, float]:
+        num_sequences = int(total_tokens / avg_sequence_length)
+        sequence_lengths = [int(avg_sequence_length)] * num_sequences
+
+        training_flops = self.flops(
+            prompt_lengths=sequence_lengths, response_lengths=None, samples_per_prompt=1, is_training=True
+        )
+
+        training_flops_per_second = training_flops / training_time
+        total_training_device_flops = self.device_flops * num_training_gpus
+        learner_mfu = 100 * training_flops_per_second / total_training_device_flops
+
+        return {"mfu": learner_mfu}
+
 
 def get_device_name(device_name: str) -> str:
     """Normalize a GPU device name to a standard key used in GPU_SPECS.
@@ -2350,3 +2409,55 @@ def check_calculation(
     )
 
     logger.warning(warning_message)
+
+
+def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, Any]:
+    """Assumes same number of metric_records in each dict in the list"""
+    buckets = defaultdict(list)
+    for metrics in reward_metrics:
+        for key, value in metrics.items():
+            buckets[key].append(value)
+
+    combined: dict[str, Any] = {}
+    for key, records in buckets.items():
+        sample_value = records[0]
+        if isinstance(sample_value, np.ndarray):
+            combined[key] = [x for value in records for x in value]
+        elif isinstance(sample_value, (list | tuple)):
+            concatenated: list[Any] = []
+            for value in records:
+                concatenated.extend(list(value))
+            combined[key] = concatenated
+        elif isinstance(sample_value, (int | float | bool | np.integer | np.floating)):
+            # combine and get average value
+            combined[key] = sum(value for value in records) / len(records) if len(records) > 0 else sample_value
+        else:
+            # Fallback: keep the latest value if aggregation strategy is unclear.
+            combined[key] = records[-1]
+    return combined
+
+
+def send_slack_alert(error: Exception) -> None:
+    """Sends an alert about a training failure to a Slack webhook (if the env var SLACK_WEBHOOK is set)."""
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
+    if not slack_webhook_url:
+        logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
+        return
+    beaker_url = get_beaker_experiment_url()
+    beaker_message = f"Check it out: {beaker_url}. " if beaker_url else ""
+    message = f"<!here> A RL job has died. {beaker_message}Error message: {str(error)}."
+    payload = {"text": message}
+    response = requests.post(slack_webhook_url, json=payload)
+    if not response.ok:
+        logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
+
+
+def get_beaker_experiment_url() -> str | None:
+    """If the env var BEAKER_WORKLOAD_ID is set, gets the current experiment URL."""
+    try:
+        beaker_client = beaker.Beaker.from_env()
+        workload = beaker_client.workload.get(os.environ["BEAKER_WORKLOAD_ID"])
+        url = beaker_client.experiment.url(workload.experiment)
+        return url
+    except Exception:
+        return None
