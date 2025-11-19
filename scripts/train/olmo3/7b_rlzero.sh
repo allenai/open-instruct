@@ -4,7 +4,7 @@
 MODEL_NAME_OR_PATH="/weka/oe-adapt-default/michaeln/checkpoints/olmo3-7b-base"
 GS_MODEL_NAME="olmo3_7b_base"
 
-DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_template_filtered 1.0 saurabh5/MATH_3000_Filtered_olmo_completions_new_template_filtered 1.0"
+DATASETS="hamishivi/rlvr_orz_math_57k_collected_filtered 1.0"
 
 # math evals
 # EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
@@ -30,7 +30,7 @@ python mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 8 \
+    --num_nodes 5 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $GS_MODEL_NAME \
@@ -67,7 +67,7 @@ python open_instruct/grpo_fast.py \
     --total_episodes 512256 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
-    --vllm_num_engines 56 \
+    --vllm_num_engines 32 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
@@ -80,8 +80,7 @@ python open_instruct/grpo_fast.py \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
-    --output_dir /output/olmo3-7b-rlzero/checkpoints \
-    --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-7b_rlzero/ \
+    --output_dir /output/olmo3-7b-rlzero-spurious/checkpoints \
     --mask_truncated_completions True \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
