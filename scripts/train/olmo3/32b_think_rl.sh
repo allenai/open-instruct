@@ -30,7 +30,7 @@ uv run python mason.py \
         --num_unique_prompts_rollout 64 \
         --num_mini_batches 1 \
         --num_epochs 1 \
-        --learning_rate 1e-6 \
+        --learning_rate 2e-6 \
         --per_device_train_batch_size 1 \
         --output_dir /output \
         --kl_estimator kl3 \
