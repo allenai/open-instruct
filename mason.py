@@ -1,5 +1,4 @@
 import argparse
-import backoff
 import hashlib
 import os
 import random
@@ -10,7 +9,9 @@ import string
 import sys
 import time
 
+import backoff
 import beaker
+import requests
 from rich.console import Console
 from rich.text import Text
 
@@ -839,7 +840,7 @@ def main():
         console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.experiment.id}")
         return exp
 
-    launch_epxeriment()
+    launch_experiment()
 
 
 if __name__ == "__main__":
