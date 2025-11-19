@@ -24,6 +24,7 @@ git checkout $COMMIT
 ./scripts/train/build_image_and_launch.sh $SCRIPT_NAME
 ```
 
-You can also check out the beaker link to see the **exact run** that produced the model!
+This will build an image and launch it. You can also check out the beaker link to see the **exact run** that produced the model! If you are external to Ai2, we have many [fine job postings](https://allenai.org/careers), but, unfortunately, do not have great advice on how to launch these jobs. Preliminary steps to launch on your own infrastructure would involve:
 
-This will build an image and launch it. If you are external to Ai2, we have many [fine job postings](https://allenai.org/careers), but, unfortunately, do not have great advice on how to launch these jobs.
+1. Modifying the launch scripts to remove the stuff attached to the `mason.py` command
+2. Setting up your own cluster with the requisite number of {H,A}100 nodes, connected together via Ray.
