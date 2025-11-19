@@ -1,32 +1,31 @@
 python mason.py \
     --cluster ai2/jupiter \
-    --task_name sft_qwen3-4b-inst_v1_simple_run2 \
-    --description "SFT Qwen3-4B, v1 simple template, run 2" \
+    --task_name test_sft \
+    --description "test SFT" \
     --workspace ai2/oe-data \
     --priority high \
     --image nathanl/open_instruct_auto \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-base \
-    --gpus 8 -- accelerate launch \
+    --gpus 1 -- accelerate launch \
     --mixed_precision bf16 \
-    --num_processes 8 \
+    --num_processes 1 \
     --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_config_file configs/ds_configs/stage2_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --hf_entity yapeichang \
-    --hf_repo_id sft_qwen3-4b-inst_v1_simple_run2 \
-    --exp_name sft_qwen3-4b-inst_v1_simple_run2 \
-    --model_name_or_path Qwen/Qwen3-4B \
+    --hf_repo_id test_sft \
+    --exp_name test_sft \
+    --model_name_or_path Qwen/Qwen3-1.7B \
     --model_revision main \
-    --tokenizer_name Qwen/Qwen3-4B \
+    --tokenizer_name Qwen/Qwen3-1.7B \
     --tokenizer_revision main \
     --use_slow_tokenizer False \
-    --dataset_transform_fn sft_qwen3_tokenize_and_truncate_no_thinking_v1 sft_tulu_filter_v1 \
     --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/batch_runs_prefiltered_4_15_new_filtered_v14_pp_v11_tools_v5_ff_v2/sft_data/v1_fewshot_resources_simple.jsonl 1.0 \
     --clean_checkpoints_at_end false \
-    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/sft_qwen3-4b-inst_v1_simple_run2_checkpoints \
+    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/test_sft_checkpoints \
     --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \
@@ -34,9 +33,9 @@ python mason.py \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
-    --num_train_epochs 1 \
+    --num_train_epochs 3 \
     --checkpointing_steps epoch \
-    --keep_last_n_checkpoints 1 \
+    --keep_last_n_checkpoints 3 \
     --use_flash_attn \
     --gradient_checkpointing \
     --report_to wandb \
