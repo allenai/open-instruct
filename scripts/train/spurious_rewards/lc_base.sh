@@ -33,7 +33,7 @@ python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/tulu-thinker \
-    --priority high \
+    --priority urgent \
     --pure_docker_mode \
     --image stellal/open_instruct_dev \
     --preemptible \
@@ -88,4 +88,4 @@ python open_instruct/grpo_fast.py \
     --try_launch_beaker_eval_jobs_on_weka True \
     --oe_eval_tasks ${evals} \
     --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto $@ \
-    --eval_priority high
+    --eval_priority urgent
