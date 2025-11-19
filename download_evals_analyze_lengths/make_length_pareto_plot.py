@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from adjustText import adjust_text
 from pathlib import Path
+from typing import Dict
 
 # Import the category definitions from download_and_analyze
 from download_and_analyze import DEFAULT_ALIASES
@@ -22,15 +23,23 @@ Ai2_colors = {
 }
 
 def parse_score_and_length_tsv_by_category(length_tsv_path, score_tsv_path, category_name, category_aliases):
-    """Parse TSV files and average only the columns belonging to the specified category."""
+    """Parse TSV files and average only the columns belonging to the specified category.
+    
+    Returns an OrderedDict preserving the order from the TSV files.
+    """
+    from collections import OrderedDict
+    
     # Parse length TSV - average across category eval columns
-    length_data = {}
+    # Use OrderedDict to preserve row order from TSV
+    length_data = OrderedDict()
+    model_order = []  # Track the order models appear in the TSV
+    
     with open(length_tsv_path, 'r') as f:
         reader = csv.DictReader(f, delimiter='\t')
         rows = list(reader)
         
         if not rows:
-            return {}
+            return OrderedDict()
         
         # Get all column names except model
         all_cols = [k for k in rows[0].keys() if k not in ['model', 'model_name']]
@@ -40,7 +49,7 @@ def parse_score_and_length_tsv_by_category(length_tsv_path, score_tsv_path, cate
         
         if not category_cols:
             print(f"[{category_name} - LENGTH] No matching columns found in TSV")
-            return {}
+            return OrderedDict()
         
         # Identify columns with any missing values (within this category)
         valid_cols = []
@@ -74,6 +83,7 @@ def parse_score_and_length_tsv_by_category(length_tsv_path, score_tsv_path, cate
         print(f"[{category_name} - LENGTH] Using {len(valid_cols)} column(s) for averaging")
         
         # Compute averages using only valid columns in this category
+        # Preserve the order from the TSV
         for row in rows:
             model_name = row.get('model', row.get('model_name', '')).strip()
             if not model_name:
@@ -86,6 +96,8 @@ def parse_score_and_length_tsv_by_category(length_tsv_path, score_tsv_path, cate
             
             if values:
                 length_data[model_name] = sum(values) / len(values)
+                if model_name not in model_order:
+                    model_order.append(model_name)
     
     # Parse score TSV - average across category eval columns
     score_data = {}
@@ -94,14 +106,14 @@ def parse_score_and_length_tsv_by_category(length_tsv_path, score_tsv_path, cate
         rows = list(reader)
         
         if not rows:
-            return {}
+            return OrderedDict()
         
         all_cols = [k for k in rows[0].keys() if k not in ['model', 'model_name']]
         category_cols = [col for col in all_cols if col in category_aliases]
         
         if not category_cols:
             print(f"[{category_name} - SCORE] No matching columns found in TSV")
-            return {}
+            return OrderedDict()
         
         valid_cols = []
         excluded_cols = {}
@@ -147,11 +159,11 @@ def parse_score_and_length_tsv_by_category(length_tsv_path, score_tsv_path, cate
             if values:
                 score_data[model_name] = sum(values) / len(values)
     
-    # Combine into the desired dictionary format
-    result = {}
-    all_models = set(length_data.keys()) | set(score_data.keys())
+    # Combine into the desired dictionary format, preserving TSV order
+    result = OrderedDict()
     
-    for model in all_models:
+    # Iterate through models in the order they appeared in the TSV
+    for model in model_order:
         if model in length_data and model in score_data:
             result[model] = {
                 "eval_average": score_data[model],
@@ -206,6 +218,11 @@ def parse_args():
         "--separate-label-legend",
         action="store_true",
         help="Use numbered labels on points with a separate legend mapping numbers to model names (useful for crowded plots)",
+    )
+    parser.add_argument(
+        "--log-scale",
+        action="store_true",
+        help="Also generate log-scale plots in addition to linear plots (default: linear only)",
     )
     return parser.parse_args()
 
@@ -428,12 +445,14 @@ if __name__ == "__main__":
         
         print(f"\nFound data for {len(data)} models in {category_name}")
         
-        # Create both log and linear plots for this category
-        print(f"Creating logarithmic plot for {category_name}...")
-        create_plot(data, category_name, use_log_scale=True, output_dir=args.output_dir, use_numbered_labels=args.separate_label_legend)
-        
+        # Create linear plot (always)
         print(f"Creating linear plot for {category_name}...")
         create_plot(data, category_name, use_log_scale=False, output_dir=args.output_dir, use_numbered_labels=args.separate_label_legend)
+        
+        # Create log plot (only if flag is set)
+        if args.log_scale:
+            print(f"Creating logarithmic plot for {category_name}...")
+            create_plot(data, category_name, use_log_scale=True, output_dir=args.output_dir, use_numbered_labels=args.separate_label_legend)
     
     # Generate overall plot across all categories
     print(f"\n{'='*70}")
@@ -456,11 +475,14 @@ if __name__ == "__main__":
     if overall_data:
         print(f"\nFound data for {len(overall_data)} models in Overall")
         
-        print(f"Creating logarithmic plot for Overall...")
-        create_plot(overall_data, "Overall", use_log_scale=True, output_dir=args.output_dir, use_numbered_labels=args.separate_label_legend)
-        
+        # Create linear plot (always)
         print(f"Creating linear plot for Overall...")
         create_plot(overall_data, "Overall", use_log_scale=False, output_dir=args.output_dir, use_numbered_labels=args.separate_label_legend)
+        
+        # Create log plot (only if flag is set)
+        if args.log_scale:
+            print(f"Creating logarithmic plot for Overall...")
+            create_plot(overall_data, "Overall", use_log_scale=True, output_dir=args.output_dir, use_numbered_labels=args.separate_label_legend)
     else:
         print(f"⚠️  WARNING: No valid data for Overall. Skipping plots.\n")
     

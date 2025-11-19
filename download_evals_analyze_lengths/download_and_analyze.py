@@ -40,10 +40,12 @@ DEFAULT_ALIASES: Dict[str, list[str]] = {
     "Knowledge": [
         "mmlu:cot::hamish_zs_reasoning_deepseek",
         "popqa::hamish_zs_reasoning_deepseek",
-        "gpqa:0shot_cot::hamish_zs_reasoning_deepseek",
+        "gpqa_0shot_cot::qwen3_instruct",
+        "gpqa:0shot_cot::hamish_zs_reasoning_deepseek"
     ],
     "Reasoning": [
         "bbh:cot::hamish_zs_reasoning_deepseek_v2",
+        #"bbh:cot::hamish_zs_reasoning",
         "zebralogic::hamish_zs_reasoning_deepseek",
         "agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek",
     ],
@@ -51,7 +53,7 @@ DEFAULT_ALIASES: Dict[str, list[str]] = {
         #"minerva_math::hamish_zs_reasoning_deepseek",
         "minerva_math_500::hamish_zs_reasoning_deepseek",
         #"omega_compositional:0-shot-chat_deepseek",
-        "omega_500:0-shot-chat_deepseek",
+        "omega_500::0-shot-chat_deepseek",
         "aime:zs_cot_r1::pass_at_32_2025_deepseek",
         "aime:zs_cot_r1::pass_at_32_2024_deepseek",
     ],
@@ -61,10 +63,12 @@ DEFAULT_ALIASES: Dict[str, list[str]] = {
         #"livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags",
         "livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite",
     ],
-    "IF & Chat": [
+    "Alpaca Eval": [
         "alpaca_eval_v3::hamish_zs_reasoning_deepseek",
-        "ifeval::hamish_zs_reasoning_deepseek",
     ],
+    "IF": [
+        "ifeval::hamish_zs_reasoning_deepseek",
+    ]
     # "Tool Use": ["bfcl_all::std"]
 }
 
