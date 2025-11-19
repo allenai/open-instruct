@@ -2918,8 +2918,10 @@ def run_training(
         )
 
     # Send initial data to ensure we have a N-step offset.
-    for _ in range(args.async_steps * args.num_unique_prompts_rollout):
+    for i in range(args.async_steps * args.num_unique_prompts_rollout):
         example = next(iter_data_loader)
+        if i == 0:
+            logger.info(f"First example keys: {list(example.keys())}")
         add_prompt_to_generator(
             example[INPUT_IDS_PROMPT_KEY],
             example["dataset_index"],
