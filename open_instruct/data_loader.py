@@ -31,9 +31,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.effective_size = len(self.dataset) - (len(self.dataset) % batch_size)
 
     def _iter_batches(self) -> Iterator[dict[str, Any]]:
-        while self.batches_processed < self.effective_size:
-            item = self.dataset[self.batches_processed]
-            yield item
+        for i in range(self.batches_processed, self.effective_size):
+            yield self.dataset[i]
 
     @property
     def total_batches(self) -> int:
