@@ -41,7 +41,7 @@ DEFAULT_ALIASES: Dict[str, list[str]] = {
         "mmlu:cot::hamish_zs_reasoning_deepseek",
         "popqa::hamish_zs_reasoning_deepseek",
         "gpqa_0shot_cot::qwen3_instruct",
-        "gpqa:0shot_cot::hamish_zs_reasoning_deepseek"
+        #"gpqa:0shot_cot::hamish_zs_reasoning_deepseek"
     ],
     "Reasoning": [
         "bbh:cot::hamish_zs_reasoning_deepseek_v2",
