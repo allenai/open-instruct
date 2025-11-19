@@ -3,7 +3,7 @@
 For our recent [Olmo3 paper](insert link), we used the following scripts to train our models:
 
 | Model           | Script name           | Beaker Link | Commit |
-|-----------------|-----------------------|--------|
+|-----------------|----------------------|---|--------|
 | 7B Think DPO    | `7b_think_dpo.sh`     |   |  [`68da0a1`](https://github.com/allenai/open-instruct/commit/68da0a1) |
 | 32B Think DPO   | `32b_think_dpo.sh`    |   |  [`2fd104e`](https://github.com/allenai/open-instruct/commit/2fd104e) |
 | 7B Instruct DPO | `7b_instruct_dpo.sh`  |   |  [`2fd104e`](https://github.com/allenai/open-instruct/commit/2fd104e) |
