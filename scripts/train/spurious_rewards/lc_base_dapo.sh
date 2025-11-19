@@ -34,7 +34,7 @@ NUM_GPUS=${NUM_GPUS:-8}
 python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
-    --workspace ai2/tulu-thinker \
+    --workspace ai2/olmo-instruct \
     --priority urgent \
     --pure_docker_mode \
     --image stellal/open_instruct_dev \
