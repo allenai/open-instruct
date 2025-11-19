@@ -1,14 +1,15 @@
 MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-1e-4-5e-5/
 NUM_NODES=16
-for LR in 8e-8 1e-7 3e-7 5e-7 8e-7
+for LR in 7e-8
 do
-    EXP_NAME="olmo3-32b-DPO-8k-4b_reject-${LR}"
+    EXP_NAME="olmo3-32b-DPO-8k-0.6b-150k-lucafilt-s42-${LR}"
     uv run python mason.py \
         --cluster ai2/augusta \
         --gs_model_name olmo3-merge-32b-1e-4-5e-5 \
         --workspace ai2/olmo-instruct \
         --priority urgent \
         --max_retries 2 \
+        --no_auto_dataset_cache \
         --preemptible \
         --image scottg/open_instruct_dev_dpo_faster --pure_docker_mode \
         --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
@@ -30,7 +31,7 @@ do
         --model_name_or_path $MODEL_NAME \
         --tokenizer_name $MODEL_NAME \
         --use_slow_tokenizer False \
-        --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-4b_reject-scottmix-DECON-keyword-filtered 1.0 \
+        --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-ftd-topic-ftd-dedup5_take2 1.0 \
         --max_train_samples 150000 \
         --dataset_skip_cache \
         --zero_stage 3 \
@@ -51,6 +52,10 @@ do
         --chat_template_name olmo123 \
         --with_tracking \
         --log_grad_norm True \
+        --seed 42 \
         --oe_eval_max_length 32768 \
-        --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek"
+        --oe_eval_gpu_multiplier 4 \
+        --eval_workspace ai2/olmo-instruct \
+        --eval_priority urgent \
+        --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu_humanities:cot::hamish_zs_reasoning_deepseek,mmlu_other:cot::hamish_zs_reasoning_deepseek,mmlu_social_sciences:cot::hamish_zs_reasoning_deepseek,mmlu_stem:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek"
 done
