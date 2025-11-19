@@ -31,7 +31,7 @@ general_evals_int="gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-cha
 #   50 100 150 200 250 300 350 400 450 500 550 600 650 700 750 800 850 900 950
 # )
 steps=(
-  400 500 550
+  150
 )
 
 cluster="ai2/augusta"
@@ -53,6 +53,7 @@ path="gs://ai2-llm/post-training//faezeb/output/grpo_math_mix8k_p64_4_F_olmo3-r-
 path="gs://ai2-llm/post-training//faezeb/output/grpo_all_mix_p64_4_8k_olmo3-r-nonreason-sft-lc-permissive-dpo__1__1760977564_checkpoints"
 path="/weka/oe-adapt-default/tongc/model_checkpoints/olmo3-mixed-grpo-fact-beta1em2-lr5em6/olmo3-mixed-grpo-fact-beta1em2-lr5em6__1__1761866622_checkpoints"
 path="gs://ai2-llm/post-training//faezeb/output/grpo_all_mix_p64_4_8k_olmo3-instruct-test-final-dpo-v2__1__1763177452_checkpoints"
+path="gs://ai2-llm/post-training//faezeb/output/grpo_math_only_p64_4_8k_olmo3-instruct-dpo-lbc__1__1763362445_checkpoints"
 
 
 # if nonreasoner in path then use 16384 else if reasoner in path use 32768

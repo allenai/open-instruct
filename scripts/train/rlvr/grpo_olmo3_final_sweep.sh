@@ -60,6 +60,7 @@ model_name_or_path="/weka/oe-adapt-default/allennlp/deletable_checkpoint/victori
 # model_name_or_path="/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-instruct-dpo-1116-vibes/olmo3-7b-DPO-1115-newb-tpc-d5-lbc100-bal-1e-6-1__42__1763293644" # nov 16 tentative final checkpoint row 33 # was replace by row 27
 model_name_or_path="/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-instruct-dpo-1116-vibes/olmo3-7b-DPO-1115-newbase-tpc-dedup5-1e-6-hpz1__42__1763287884" # nov 16 tentative final checkpoint row 21
 # model_name_or_path="/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-instruct-dpo-1116-vibes/olmo3-7b-DPO-1115-newb-tpc-d5-lbc100-1e-6-hpz1__42__1763329758" # nov 16 tentative final checkpoint row 27 lbc
+# model_name_or_path="/weka/oe-adapt-default/allennlp/deletable_checkpoint/faezeb/FINAL_olmo_instruct_7b_rl/grpo_math_only_p64_4_8k_olmo3-instruct-dpo-lbc__1__1763362445_checkpoints/step_200"
 
 
 # gs_model_name="olmo2.5-6T-lc-r1-reasoning"
@@ -111,10 +112,10 @@ for num_unique_prompt in "${num_unique_prompts[@]}"; do
 
         # hosted_vllm="http://ceres-cs-aus-451.reviz.ai2.in:8003/v1" # died
         # hosted_vllm="http://saturn-cs-aus-250.reviz.ai2.in:8001/v1" # seems not to be working
-        hosted_vllm="http://saturn-cs-aus-243.reviz.ai2.in:8004/v1" # urgent / working
+        # hosted_vllm="http://saturn-cs-aus-243.reviz.ai2.in:8004/v1" # urgent / working
         # hosted_vllm="http://saturn-cs-aus-237.reviz.ai2.in:8002/v1" # working
-        # hosted_vllm="http://ceres-cs-aus-446.reviz.ai2.in:8003/v1"
-        exp_name="grpo_all_mix_p64_4_8k_${gs_model_name}"
+        hosted_vllm="http://ceres-cs-aus-446.reviz.ai2.in:8003/v1"
+        exp_name="grpo_math_only_p64_4_8k_${gs_model_name}"
     fi
 
     # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
@@ -152,7 +153,7 @@ for num_unique_prompt in "${num_unique_prompts[@]}"; do
                 --learning_rate 1e-6 \
                 --per_device_train_batch_size 1 \
                 --kl_estimator kl3 \
-                --dataset_mixer_list ${nonreasoner_integration_mix_decon} \
+                --dataset_mixer_list ${nonreasoner_math_mix_decon} \
                 --dataset_mixer_list_splits train \
                 --dataset_mixer_eval_list hamishivi/omega-combined 4 allenai/IF_multi_constraints_upto5 4 saurabh5/rlvr_acecoder_filtered 4 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2 4 hamishivi/virtuoussy_multi_subject_rlvr 4 \
                 --dataset_mixer_eval_list_splits train \

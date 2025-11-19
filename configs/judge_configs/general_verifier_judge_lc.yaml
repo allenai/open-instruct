@@ -21,7 +21,7 @@ tasks:
           --max-num-seqs 64 \
           --enable-chunked-prefill \
           --trust-remote-code \
-          --port 8002 \
+          --port 8005 \
           --chat-template /weka/oe-adapt-default/hamishi/qwen_no_think_config.jinja"
       ]
     datasets:
