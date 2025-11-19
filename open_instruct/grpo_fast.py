@@ -949,6 +949,10 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_vllm_logprobs, self.device)
         # accumulation steps should always be at least 1
         accumulation_steps = max(math.ceil(len(collated_query_responses) / self.num_mini_batches - 0.5), 1)
+        # Sync accumulation_steps across ranks so all learners call allreduce on the same iterations
+        accumulation_steps_tensor = torch.tensor([accumulation_steps], device=self.device, dtype=torch.int32)
+        torch.distributed.all_reduce(accumulation_steps_tensor, op=torch.distributed.ReduceOp.MIN)
+        accumulation_steps = int(accumulation_steps_tensor.item())
         leftover = len(collated_query_responses) % accumulation_steps
         if leftover > 0:
             collated_query_responses = collated_query_responses[0:-leftover]
