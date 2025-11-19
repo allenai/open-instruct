@@ -4,10 +4,10 @@ For our recent [Olmo3 paper](insert link), we used the following scripts to trai
 
 | Model           | Script name           | Beaker Link | Commit |
 |-----------------|----------------------|---|--------|
-| 7B Think DPO    | `7b_think_dpo.sh`     |   |  [`68da0a1`](https://github.com/allenai/open-instruct/commit/68da0a1) |
-| 32B Think DPO   | `32b_think_dpo.sh`    |   |  [`2fd104e`](https://github.com/allenai/open-instruct/commit/2fd104e) |
-| 7B Instruct DPO | `7b_instruct_dpo.sh`  |   |  [`2fd104e`](https://github.com/allenai/open-instruct/commit/2fd104e) |
-| 7B Instruct RL  | `7b_instruct_rl.sh`   |  |  [`9ade62d`](https://github.com/allenai/open-instruct/commit/9ade62d) |
+| 7B Think DPO    | `7b_think_dpo.sh`     |  |  [`68da0a1`](https://github.com/allenai/open-instruct/commit/68da0a1) |
+| 32B Think DPO   | `32b_think_dpo.sh`    | https://beaker.org/ex/01K9VYQV2RFPS9ECP63JFQFVDN  |  [`2fd104e`](https://github.com/allenai/open-instruct/commit/2fd104e) |
+| 7B Instruct DPO | `7b_instruct_dpo.sh`  | https://beaker.org/ex/01KA62AJW9P8AWA3YKWE4Y6XZD  |  [`2fd104e`](https://github.com/allenai/open-instruct/commit/2fd104e) |
+| 7B Instruct RL  | `7b_instruct_rl.sh`   | https://beaker.org/ex/01KA8BY8MMAQWENWY4087MAPFE  |  [`9ade62d`](https://github.com/allenai/open-instruct/commit/9ade62d) |
 | 7B Think RL     | `7b_think_rl.sh` | https://beaker.org/ex/01KADRVRYEPW4YPKNN0RRNS137   |  [`42aa63c`](https://github.com/allenai/open-instruct/commit/42aa63c) |
 | 7B Think RL (no pipeline)   | `7b_think_rl_no_pipeline.sh` | https://beaker.org/ex/01K6JZVN4EN3VHTJ820BV23HGC   |  [`42aa63c`](https://github.com/allenai/open-instruct/commit/42aa63c) |
 | 32B RL          | `32b_think_rl.sh` | https://beaker.org/ex/01KA4ZXT7MCVK493Y2B3K0BC82 |  [`42aa63c`](https://github.com/allenai/open-instruct/commit/42aa63c) |
