@@ -1,4 +1,4 @@
-
+BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 
 # data mixes
 nonreasoner_integration_mix_decon="hamishivi/rlvr_acecoder_filtered_filtered 20000 hamishivi/omega-combined-no-boxed_filtered 20000 hamishivi/rlvr_orz_math_57k_collected_filtered 14000 hamishivi/polaris_53k 14000 hamishivi/MathSub-30K_filtered 9000 hamishivi/DAPO-Math-17k-Processed_filtered 7000 allenai/IF_multi_constraints_upto5_filtered_dpo_0625_filter-keyword-filtered-topic-char-topic-filtered 38000 allenai/rlvr_general_mix-keyword-filtered-topic-chars-char-filt-topic-filtered 50000" #hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2_filtered 22000 hamishivi/virtuoussy_multi_subject_rlvr_filtered 20000 hamishivi/new-wildchat-english-general_filtered 19000"
@@ -28,7 +28,7 @@ uv run python mason.py \
         --workspace ai2/olmo-instruct  \
         --priority urgent \
         --pure_docker_mode \
-        --image hamishivi/open_instruct_rl32_no_ref19 \
+        --image $BEAKER_IMAGE \
         --preemptible \
         --num_nodes 8 \
         --max_retries 5 \

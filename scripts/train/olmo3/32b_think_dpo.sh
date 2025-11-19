@@ -1,4 +1,5 @@
-MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-1e-4-5e-5/ 
+BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
+MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-1e-4-5e-5/
 NUM_NODES=16
 for LR in 7e-8 8e-8 9e-8
 do
@@ -11,7 +12,7 @@ do
         --max_retries 2 \
         --no_auto_dataset_cache \
         --preemptible \
-        --image scottg/open_instruct_dev_dpo_faster_old --pure_docker_mode \
+        --image $BEAKER_IMAGE --pure_docker_mode \
         --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
         --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64:$LD_LIBRARY_PATH \
         --env NCCL_PROTO=Simple,LL128 \

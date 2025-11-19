@@ -1,6 +1,6 @@
 # Launch with ./scripts/train/build_image_and_launch.sh scripts/train/32b_dpo_smoke_test.sh.
 # Must launch in a Beaker session on a cluster with Weka access.
-BEAKER_IMAGE=$1
+BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 
 MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-2e-5-5e-5
 NUM_NODES=16

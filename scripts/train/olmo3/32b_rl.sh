@@ -1,16 +1,16 @@
 #!/bin/bash
 
 
+BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 export exp_name=test_olmo3_32b_rl_run_${RANDOM}
 export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 hamishivi/code_rlvr_mixture_dpo 1.0 hamishivi/IF_multi_constraints_upto5_filtered_dpo_0625_filter 30186 allenai/rlvr_general_mix-keyword-filtered 21387"
-export beaker_image=hamishivi/open_instruct_rl32_test10
 export model_path=/weka/oe-adapt-default/hamishi/model_checkpoints/olmo3-merge-32b-1e-4-5e-5/olmo3-merge-32b-1e-4-5e-5/
 
 
-python mason.py \
+uv run python mason.py \
     --budget ai2/oe-adapt \
     --cluster ai2/augusta \
-    --image ${beaker_image} \
+    --image $BEAKER_IMAGE \
     --pure_docker_mode \
     --workspace ai2/olmo-instruct \
     --priority urgent \

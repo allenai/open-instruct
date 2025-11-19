@@ -7,7 +7,8 @@ Model           | Script name        | Commit |
 7B Think DPO    | `7b_think_dpo.sh`     | 68da0a1
 32B Think DPO   | `32b_think_dpo.sh`    | 2fd104e
 7B Instruct DPO | `7b_instruct_dpo.sh`  | 2fd104e
-7B RL           | `7b_rl.sh`            | 9ade62d
+7B Instruct RL  | `7b_instruct_rl.sh`   | 9ade62d
+7B RL           | `7b_rl.sh`           | 42aa63c
 32B RL          | `32b_rl.sh`           | 42aa63c
 
 

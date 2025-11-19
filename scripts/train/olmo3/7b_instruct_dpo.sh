@@ -1,3 +1,4 @@
+BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
 for LR in 1e-6
 do
@@ -9,7 +10,7 @@ do
         --priority urgent \
         --max_retries 2 \
         --preemptible \
-        --image scottg/open_instruct_dev_dpo_faster_old_1115 --pure_docker_mode \
+        --image $BEAKER_IMAGE --pure_docker_mode \
 	    --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
         --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64:$LD_LIBRARY_PATH \
         --env NCCL_PROTO=Simple,LL128 \
