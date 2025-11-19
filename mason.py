@@ -795,7 +795,9 @@ def main():
             beaker_client = beaker.Beaker.from_env()
         beaker_secrets = [secret.name for secret in beaker_client.secret.list()]
         whoami = beaker_client.user.get().name
-
+        print(f"{beaker_client.MAX_RETRIES=}")
+        print(f"{beaker_client.TIMEOUT=}")
+    return
     full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
     if is_external_user:
         console.rule("[bold red]Non-Ai2 User Detected[/bold red]")
