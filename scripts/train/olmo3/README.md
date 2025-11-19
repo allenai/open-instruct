@@ -4,7 +4,7 @@ For our recent [Olmo3 paper](insert link), we used the following scripts to trai
 
 | Model           | Script name           | Beaker Link | Commit |
 |-----------------|----------------------|---|--------|
-| 7B Think DPO    | `7b_think_dpo.sh`     |  |  [`68da0a1`](https://github.com/allenai/open-instruct/commit/68da0a1) |
+| 7B Think DPO    | `7b_think_dpo.sh`     | https://beaker.org/ex/01K5SXG8YH7NZDT5JCWJSNFCKG |  [`68da0a1`](https://github.com/allenai/open-instruct/commit/68da0a1) |
 | 32B Think DPO   | `32b_think_dpo.sh`    | https://beaker.org/ex/01K9VYQV2RFPS9ECP63JFQFVDN  |  [`2fd104e`](https://github.com/allenai/open-instruct/commit/2fd104e) |
 | 7B Instruct DPO | `7b_instruct_dpo.sh`  | https://beaker.org/ex/01KA62AJW9P8AWA3YKWE4Y6XZD  |  [`2fd104e`](https://github.com/allenai/open-instruct/commit/2fd104e) |
 | 7B Instruct RL  | `7b_instruct_rl.sh`   | https://beaker.org/ex/01KA8BY8MMAQWENWY4087MAPFE  |  [`9ade62d`](https://github.com/allenai/open-instruct/commit/9ade62d) |
