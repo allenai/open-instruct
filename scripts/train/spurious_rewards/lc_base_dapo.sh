@@ -51,9 +51,9 @@ source configs/beaker_configs/code_api_setup.sh \&\& \
 python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
-    --num_samples_per_prompt_rollout 16 \
-    --num_unique_prompts_rollout 128 \
-    --num_mini_batches 4 \
+    --num_samples_per_prompt_rollout 8 \
+    --num_unique_prompts_rollout 32 \
+    --num_mini_batches 1 \
     --num_epochs 4 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -64,8 +64,8 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 8192 \
     --max_prompt_token_length 2048 \
-    --response_length 6144 \
-    --pack_length 8192 \
+    --response_length 8192 \
+    --pack_length 10240 \
     --model_name_or_path ${model_name_or_path} \
     --chat_template_name olmo_thinker_dapo \
     --stop_strings "</answer>" \
@@ -90,4 +90,6 @@ python open_instruct/grpo_fast.py \
     --try_launch_beaker_eval_jobs_on_weka True \
     --oe_eval_tasks ${evals} \
     --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto $@ \
-    --eval_priority urgent
+    --eval_priority urgent \
+    --truncated_importance_sampling_ratio_cap 2.0 \
+    --advantage_normalization_type centered 
