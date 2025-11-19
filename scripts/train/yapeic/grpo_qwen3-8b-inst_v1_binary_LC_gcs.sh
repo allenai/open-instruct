@@ -1,8 +1,8 @@
-# beaker experiment create configs/judge_configs/proc_judge.yaml \
+# beaker experiment create configs/judge_configs/proc_judge_augusta.yaml \
 #     --name vllm_judge_qwen3-8b_v1_binary_LC_gcs \
 #     --workspace ai2/oe-data
 
-JUDGE_BASE_URL=http://saturn-cs-aus-242.reviz.ai2.in:8001/v1
+JUDGE_BASE_URL=http://augusta-gcp-391.reviz.ai2.in:8001/v1
 
 python mason.py \
     --cluster ai2/augusta \
@@ -10,14 +10,17 @@ python mason.py \
     --description "GRPO Qwen3-8B, v1 binary (length control)" \
     --workspace ai2/oe-data \
     --priority high \
-    --image nathanl/open_instruct_auto \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-base \
     --env HOSTED_VLLM_API_BASE=${JUDGE_BASE_URL} \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --secret HF_TOKEN=yapeic_HF_TOKEN \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& \
+    git clone --depth 1 --branch yapeic/exp https://github.com/allenai/open-instruct.git /workspace/open-instruct \&\& \
+    cd /workspace/open-instruct \&\& \
+    python open_instruct/grpo_fast.py \
     --exp_name grpo_qwen3-8b-inst_v1_binary_LC_gcs \
     --beta 0.0 \
     --num_unique_prompts_rollout 4 \

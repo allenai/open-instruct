@@ -1,0 +1,35 @@
+version: v2
+budget: ai2/oe-base
+description: "VLLM Server for distilled judge"
+tasks:
+  - name: "vllm-judge"
+    image:
+      beaker: ai2/pytorch2.0.0-cuda11.8-python3.10
+    hostNetworking: true
+    command: ["/bin/sh", "-c"]
+    envVars: [
+      { name: "HF_TOKEN", secret: "yapeic_HF_TOKEN" }
+    ]
+    arguments:
+      [
+        "pip install vllm gcsfs && \
+          python -c \"import gcsfs; fs=gcsfs.GCSFileSystem(); f=fs.open('gs://ai2-llm/checkpoints/yapeic/qwen3-no-thinking.jinja','rb'); o=open('/tmp/qwen3-no-thinking.jinja','wb'); o.write(f.read()); o.close(); f.close()\" && \
+          VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve yapeichang/distill_judge_qwen3-8b_sft_v6 \
+            --revision distill_judge_qwen3-8b_sft_v6__8__1762751165 \
+            --tensor-parallel-size 1 \
+            --max-model-len 32768 \
+            --override-generation-config \"{\\\"temperature\\\": 0.0, \\\"max_new_tokens\\\": 4096}\" \
+            --trust-remote-code \
+            --port 8001 \
+            --enforce-eager \
+            --hf-token $HF_TOKEN \
+            --chat-template /tmp/qwen3-no-thinking.jinja"
+      ]
+    constraints:
+      cluster:
+        - ai2/augusta
+    resources:
+      gpuCount: 1
+    context:
+      priority: high
+      preemptible: False

@@ -47,8 +47,8 @@ python mason.py \
     --vllm_num_engines 4 \
     --lr_scheduler_type linear \
     --seed 1 \
-    --local_eval_every 110 \
-    --checkpoint_state_freq 30 \
+    --local_eval_every 40 \
+    --checkpoint_state_freq 60 \
     --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-4b-inst_v1_binary_LC_checkpoint_states \
     --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-4b-inst_v1_binary_LC_checkpoints \
     --save_freq 100 \
