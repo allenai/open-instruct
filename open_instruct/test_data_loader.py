@@ -105,6 +105,59 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(new_loader.epoch_number, loader.epoch_number)
         self.assertEqual(new_loader.batches_processed, loader.batches_processed)
 
+    def test_reproducibility_across_runs(self):
+        data = {"text": [f"example_{i}" for i in range(50)], "label": list(range(50))}
+        dataset = datasets.Dataset.from_dict(data)
+
+        loader1 = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+        )
+        loader2 = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+        )
+
+        indices1 = [batch["dataset_index"] for batch in loader1]
+        indices2 = [batch["dataset_index"] for batch in loader2]
+        self.assertEqual(indices1, indices2)
+
+        loader1.reshuffle(epoch=1)
+        loader2.reshuffle(epoch=1)
+        indices1_epoch1 = [batch["dataset_index"] for batch in loader1]
+        indices2_epoch1 = [batch["dataset_index"] for batch in loader2]
+        self.assertEqual(indices1_epoch1, indices2_epoch1)
+
+        self.assertNotEqual(indices1, indices1_epoch1)
+
+    def test_checkpoint_resumption_exact_position(self):
+        data = {"text": [f"example_{i}" for i in range(50)], "label": list(range(50))}
+        dataset = datasets.Dataset.from_dict(data)
+
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+        )
+
+        loader.reshuffle(epoch=1)
+        first_10 = []
+        for _ in range(10):
+            first_10.append(loader.next_item()["dataset_index"])
+
+        state = loader.state_dict()
+
+        remaining_original = []
+        for _ in range(40):
+            remaining_original.append(loader.next_item()["dataset_index"])
+
+        new_loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+        )
+        new_loader.load_state_dict(state)
+
+        remaining_restored = []
+        for _ in range(40):
+            remaining_restored.append(new_loader.next_item()["dataset_index"])
+
+        self.assertEqual(remaining_original, remaining_restored)
+
 
 if __name__ == "__main__":
     unittest.main()

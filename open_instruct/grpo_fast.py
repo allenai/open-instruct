@@ -1590,7 +1590,6 @@ def accumulate_inference_batches(
     reward_fn: Callable,
     prompt_dataset: Dataset,
     hf_data_loader: data_loader.HFDataLoader | None = None,
-    iter_data_loader=None,
     param_prompt_Q: ray_queue.Queue | None = None,
     training_step: int | None = None,
     actor_manager=None,
@@ -1607,8 +1606,7 @@ def accumulate_inference_batches(
         args: Arguments containing vllm_num_engines and batch size info
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
-        hf_data_loader: Dataloader for state management
-        iter_data_loader: Iterator for iterating through dataset
+        hf_data_loader: Dataloader for state management and iteration
         prompt_dataset: Dataset containing prompts
         param_prompt_Q: Queue containing prompts to send to generator
         training_step: Current training step
@@ -1661,14 +1659,10 @@ def accumulate_inference_batches(
         )
 
         example = prompt_dataset[result.dataset_index]
-        query = example[INPUT_IDS_PROMPT_KEY]
-        ground_truth = example[GROUND_TRUTHS_KEY]
-        dataset_name = example[VERIFIER_SOURCE_KEY]
-        raw_query = example[RAW_PROMPT_KEY]
 
         # Replenish generation queue with new prompt
         if replenish_prompts:
-            next_example = next(iter_data_loader)
+            next_example = hf_data_loader.next_item()
             add_prompt_to_generator(
                 next_example[INPUT_IDS_PROMPT_KEY],
                 next_example["dataset_index"],
@@ -1688,10 +1682,10 @@ def accumulate_inference_batches(
 
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
-        k_queries = repeat_each([query], generation_config.n)
-        k_ground_truths = repeat_each([ground_truth], generation_config.n)
-        k_datasets = repeat_each([dataset_name], generation_config.n)
-        k_raw_queries = repeat_each([raw_query], generation_config.n)
+        k_queries = repeat_each([example[INPUT_IDS_PROMPT_KEY]], generation_config.n)
+        k_ground_truths = repeat_each([example[GROUND_TRUTHS_KEY]], generation_config.n)
+        k_datasets = repeat_each([example[VERIFIER_SOURCE_KEY]], generation_config.n)
+        k_raw_queries = repeat_each([example[RAW_PROMPT_KEY]], generation_config.n)
 
         scores, reward_metrics = asyncio.run(
             reward_fn(
@@ -1869,7 +1863,6 @@ def data_preparation_thread(
     generation_config,
     resume_training_step: int,
     hf_data_loader: data_loader.HFDataLoader,
-    iter_data_loader,
     train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
@@ -1886,7 +1879,6 @@ def data_preparation_thread(
                 tokenizer=tokenizer,
                 reward_fn=reward_fn,
                 hf_data_loader=hf_data_loader,
-                iter_data_loader=iter_data_loader,
                 prompt_dataset=train_dataset,
                 param_prompt_Q=param_prompt_Q,
                 training_step=training_step,
@@ -2462,7 +2454,6 @@ def one_training_step(
     prompt_lengths: list[int],
     response_lengths: list[int],
     actor_manager: ActorManager | None = None,
-    iter_data_loader: Iterator | None = None,
 ) -> None:
     """Train the model for one step."""
     update_ref_policy_future = []
@@ -2851,7 +2842,6 @@ def run_training(
     vllm_engines,
     generation_configs,
     hf_data_loader,
-    iter_data_loader,
     reward_fn,
     resume_training_step,
     episode,
@@ -2903,7 +2893,6 @@ def run_training(
         generation_configs["train"],
         resume_training_step,
         hf_data_loader,
-        iter_data_loader,
         train_dataset,
         actor_manager,
         model_dims,
@@ -2918,10 +2907,8 @@ def run_training(
         )
 
     # Send initial data to ensure we have a N-step offset.
-    for i in range(args.async_steps * args.num_unique_prompts_rollout):
-        example = next(iter_data_loader)
-        if i == 0:
-            logger.info(f"First example keys: {list(example.keys())}")
+    for _ in range(args.async_steps * args.num_unique_prompts_rollout):
+        example = hf_data_loader.next_item()
         add_prompt_to_generator(
             example[INPUT_IDS_PROMPT_KEY],
             example["dataset_index"],
@@ -3015,7 +3002,6 @@ def run_training(
             prompt_lengths,
             response_lengths,
             actor_manager,
-            iter_data_loader,
         )
 
         # Checkpoint after one_training_step (or even if it was skipped)
@@ -3136,7 +3122,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             logger.info(f"Restored episode count: {episode}")
 
     hf_data_loader = data_loader.HFDataLoader(
-        dataset=train_dataset, batch_size=1, seed=args.seed, rank=0, world_size=1
+        dataset=train_dataset, batch_size=1, seed=args.seed, rank=0, world_size=1, work_dir=args.output_dir
     )
 
     if checkpoint_state and "dataloader_state" in checkpoint_state:
@@ -3144,8 +3130,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         logger.info("Restored dataloader state from checkpoint")
     else:
         hf_data_loader.reshuffle()
-
-    iter_data_loader = iter(hf_data_loader)
 
     # Create additional queues (main queues already created above)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
@@ -3167,7 +3151,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             vllm_engines,
             generation_configs,
             hf_data_loader,
-            iter_data_loader,
             reward_fn,
             resume_training_step,
             episode,
