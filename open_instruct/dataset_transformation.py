@@ -1827,20 +1827,6 @@ class LocalDatasetTransformationCache:
         return loaded_dataset, all_statistics
 
 
-def get_cached_dataset(
-    dcs: List[DatasetConfig],
-    tc: TokenizerConfig,
-    hf_entity: Optional[str] = None,
-    dataset_local_cache_dir: Optional[str] = None,
-    dataset_skip_cache: bool = False,
-) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
-    if dataset_local_cache_dir is not None:
-        cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
-    else:
-        cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
-
-
 def load_dataset_configs(
     dataset_mixer_list: List[str],
     dataset_mixer_list_splits: List[str],
