@@ -7,6 +7,7 @@ requires-python = "==3.12.*"
 dependencies = [
     "accelerate>=1.10.1",
     "antlr4-python3-runtime==4.11",
+    "backoff>=2.2.1",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
     "datasets>=4.0.0",
     "debugpy>=1.8.13",
