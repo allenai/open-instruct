@@ -1,47 +1,25 @@
 #!/bin/bash
 
-# OLMo 3 model
-MODEL_NAME_OR_PATH="/weka/oe-adapt-default/michaeln/checkpoints/olmo3-7b-base"
-GS_MODEL_NAME="olmo3_7b_base"
+MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
+DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
-DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_template_filtered 1.0 saurabh5/MATH_3000_Filtered_olmo_completions_new_template_filtered 1.0"
-
-# math evals
-# EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
-EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo,minerva_math_500::hamish_zs_reasoning_dapo"
-
-# AIME 2024, 2025 local evals
-LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
+# AIME 2024, 2025 local single-sample evals
+# Full, bootstrapped pass@32 evals must be run separately
+LOCAL_EVALS="allenai/aime2024-25-rlvr 1.0 allenai/aime2024-25-rlvr 1.0"
 LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
 
+EXPERIMENT_NAME="olmo3-7b_rlzero"
 
-EXP_NAME="olmo3-7b_rlzero_${GS_MODEL_NAME}"
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
-shift  # Remove the image name from the argument list
-
-cluster=ai2/augusta
-
-python mason.py \
-    --task_name ${EXP_NAME} \
-    --cluster ${cluster} \
-    --workspace ai2/olmo-instruct \
-    --priority high \
-    --pure_docker_mode \
-    --image ${BEAKER_IMAGE} \
-    --preemptible \
-    --num_nodes 5 \
-    --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
-    --gs_model_name $GS_MODEL_NAME \
-    --gpus 8 \
-    --budget ai2/oe-adapt \
-    -- \
-source configs/beaker_configs/ray_node_setup.sh \&\& \
 python open_instruct/grpo_fast.py \
-    --exp_name ${EXP_NAME} \
+    --exp_name ${EXPERIMENT_NAME} \
+    --model_name_or_path ${MODEL_NAME_OR_PATH} \
+    --chat_template_name olmo_thinker_rlzero \
+    --dataset_mixer_list $DATASETS \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list $LOCAL_EVALS \
+    --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --beta 0.0 \
-    --async_steps 8 \
+    --async_steps 4 \
     --inflight_updates \
     --no_resampling_pass_rate 0.875 \
     --truncated_importance_sampling_ratio_cap 2.0 \
@@ -53,15 +31,9 @@ python open_instruct/grpo_fast.py \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --kl_estimator kl3 \
-    --dataset_mixer_list $DATASETS \
-    --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list $LOCAL_EVALS \
-    --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
     --pack_length 18432 \
-    --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name olmo_thinker_dapo \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 512256 \
@@ -72,24 +44,12 @@ python open_instruct/grpo_fast.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 25 \
-    --save_freq 50 \
-    --beaker_eval_freq 50 \
+    --local_eval_every 100 \
+    --save_freq 100 \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
-    --output_dir /output/olmo3-7b-rlzero/checkpoints \
-    --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-7b_rlzero/ \
     --mask_truncated_completions True \
-    --oe_eval_max_length 32768 \
-    --try_launch_beaker_eval_jobs_on_weka True \
-    --eval_priority high \
-    --eval_on_step_0 True \
-    --oe_eval_tasks $EVALS \
-    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 
-
-# TODO
-#     --oe_eval_gpu_multiplier 4 \
-#     --oe_eval_beaker_image michaeln/oe_eval_rlzero
+    --eval_on_step_0 True
