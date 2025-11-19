@@ -2618,7 +2618,7 @@ def one_training_step(
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
 def maybe_save_checkpoint(
-    args: Args, training_step: int, policy_group, chat_template_name: str, tokenizer, wandb_url: str
+    args: Args, training_step: int, policy_group: ModelGroup, chat_template_name: str, tokenizer: PreTrainedTokenizer, wandb_url: str
 ) -> float:
     save_time = 0
     if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
