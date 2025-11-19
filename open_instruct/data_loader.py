@@ -1,4 +1,3 @@
-import tempfile
 from collections.abc import Iterator
 from typing import Any
 
@@ -7,18 +6,7 @@ from olmo_core.data import data_loader
 
 
 class HFDataLoader(data_loader.DataLoaderBase):
-    def __init__(
-        self,
-        dataset: Dataset,
-        batch_size: int,
-        seed: int,
-        rank: int = 0,
-        world_size: int = 1,
-        work_dir: str | None = None,
-    ):
-        if work_dir is None:
-            work_dir = tempfile.gettempdir()
-
+    def __init__(self, dataset: Dataset, batch_size: int, seed: int, rank: int, world_size: int, work_dir: str):
         super().__init__(
             work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=0
         )
