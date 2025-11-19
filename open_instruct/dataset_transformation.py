@@ -553,6 +553,18 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "olmo_thinker_dapo": (
+        "Solve the following math problem step by step. "
+        "The last line of your response should be the answer to the problem in form Answer: $Answer (without quotes) where $Answer is the answer to the problem."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '\nRemember to put your answer on its own line after \"Answer:\"' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    )
 }
 # flake8: noqa
 

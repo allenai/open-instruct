@@ -13,8 +13,8 @@ evals="minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,minerva_math_500::h
 evals="aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,mmlu:cot::hamish_zs_reasoning_deepseek,gpqa:0shot_cot::qwen3-instruct,zebralogic::hamish_zs_reasoning_deepseek,minerva_math::hamish_zs_reasoning_deepseek,gsm8k::zs_cot_latex_deepseek,omega_500:0-shot-chat_deepseek,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek"
 
 # all I've changed with the checkpoints is the config.json, model_type=olmo3 and architectures is OLMo3ForCausalLM 
-model_name_or_path="/weka/oe-training-default/ai2-llm/checkpoints/tylerr/long-context/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_packing_yarn-fullonly_50B-fb13a737/step11921-hf/"
-gs_model_name="olmo3-LC_base_final"
+model_name_or_path="Qwen/Qwen2.5-Math-7B"
+gs_model_name="qwen25_math_7b"
 #
 # model_name_or_path="/weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft/olmo3-hparam-search/olmo2.5-LC-R3-olmo2-tulu3-mix-num_3"
 # gs_model_name="olmo2.5-lc-r3-jacobsft-mix3"
@@ -67,14 +67,14 @@ python open_instruct/grpo_fast.py \
     --response_length 6144 \
     --pack_length 8192 \
     --model_name_or_path ${model_name_or_path} \
-    --chat_template_name olmo_thinker_dapo \
+    --chat_template_name olmo_thinker_r1_style_nochat \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 1024000 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 8 \
-    --vllm_num_engines 56 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
