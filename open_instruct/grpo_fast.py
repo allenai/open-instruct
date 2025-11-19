@@ -443,6 +443,10 @@ class Args:
     # code-tool specific settings
     code_tool_api_endpoint: str | None = None
 
+    # GCS sync settings for snapshots
+    gs_snapshots_dir: str | None = None
+    """Optional GCS directory to sync periodic model snapshots (output/<run_name>_checkpoints)"""
+
     def __post_init__(self):
         if os.environ.get("VLLM_USE_V1") == "0":
             logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
@@ -485,6 +489,8 @@ class Args:
             raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
         if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
+        if self.gs_snapshots_dir is not None and not self.gs_snapshots_dir.startswith("gs://"):
+            raise ValueError(f"`gs_snapshots_dir` must start with 'gs://', got: {self.gs_snapshots_dir}")
 
         if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
             if self.checkpoint_state_dir is None:
@@ -2176,6 +2182,14 @@ def setup_runtime_variables(args: Args) -> Args:
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
     args.tool_use = args.tools is not None and len(args.tools) > 0
+    # Derive GCS snapshots dir if gs_bucket_path is provided and not explicitly set
+    if args.gs_bucket_path is not None and args.gs_snapshots_dir is None:
+        snapshots_dir_name = os.path.basename(args.output_dir) + "_checkpoints"
+        beaker_users = get_beaker_whoami()
+        if beaker_users is not None:
+            args.gs_snapshots_dir = f"{args.gs_bucket_path}/{beaker_users}/{snapshots_dir_name}"
+        else:
+            args.gs_snapshots_dir = f"{args.gs_bucket_path}/{snapshots_dir_name}"
     return args
 
 
@@ -2574,6 +2588,9 @@ def one_training_step(
                 ],
                 desc=f"Saving model at step {training_step}",
             )
+            # Optionally sync the entire snapshots directory to GCS in the background
+            if args.gs_snapshots_dir is not None:
+                ray.remote(sync_gs_bucket).options(num_cpus=1).remote(checkpoint_dir, args.gs_snapshots_dir)
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
                 for i in range(args.world_size):

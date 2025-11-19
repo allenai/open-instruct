@@ -38,7 +38,6 @@ from open_instruct.math_utils import (
 from open_instruct.utils import extract_final_answer
 
 from pydantic import BaseModel
-from transformers import AutoTokenizer
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -1045,6 +1044,7 @@ class CodeVerifier(VerifierFunction):
 
 class ProcedureFormatVerifier(VerifierFunction):
     """
+    THIS IS FOR JUDGE DISTILLATION (we never actually trained any reasoning judges)
     Verifier for procedures, check whether the format matches the schema.
     """
 
@@ -1072,6 +1072,7 @@ class ProcedureFormatVerifier(VerifierFunction):
 
 class ProcedureBinaryVerifier(VerifierFunction):
     """
+    THIS IS FOR JUDGE DISTILLATION (we never actually trained any reasoning judges)
     Verifier for procedures, check whether the binary fail / no fail judgment matches.
     """
     
@@ -1097,13 +1098,8 @@ class ProcedureStepLengthConfig(VerifierConfig):
     """
     Config for ProcedureStepLengthVerifier.
     """
-    # Prefer an explicit tokenizer for the verifier; if not provided, fall back to model_name_or_path
-    verifier_tokenizer_name_or_path: Optional[str] = None
-    verifier_tokenizer_revision: Optional[str] = None
-    verifier_tokenizer_use_fast: bool = True
-    verifier_tokenizer_trust_remote_code: bool = True
-    # Fallback source for tokenizer if the explicit verifier tokenizer path is not set
-    model_name_or_path: Optional[str] = None
+    # Length measure: "auto" (alias of "whitespace"), "whitespace", or "chars_no_space"
+    length_measure: str = "auto"
     # Fractional band around reference length (e.g., 0.05 = ±5%)
     final_len_band_fraction: float = 0.05
     # Exponential decay rate (higher = steeper penalty beyond the band)
@@ -1112,8 +1108,8 @@ class ProcedureStepLengthConfig(VerifierConfig):
 
 class ProcedureStepLengthVerifier(VerifierFunction):
     """
-    Verifier that scores based on how close the model final answer's token length is
-    to the reference's token length, measured with the policy tokenizer.
+    Verifier that scores based on how close the model final answer's length is
+    to the reference's length, using a configurable text measure (whitespace words or non-space chars).
 
     - Label is an already-formatted reference steps string (no extra formatting done here).
     - Only the final answer portion of the model output is counted.
@@ -1124,52 +1120,27 @@ class ProcedureStepLengthVerifier(VerifierFunction):
 
     def __init__(self, verifier_config: ProcedureStepLengthConfig | None = None) -> None:
         super().__init__("procedure_step_length", verifier_config=verifier_config, weight=1.0)
-        self._tokenizer = None
 
     @classmethod
     def get_config_class(cls) -> type:
         return ProcedureStepLengthConfig
 
-    def _ensure_tokenizer(self):
-        if self._tokenizer is not None:
-            return
-        cfg = self.verifier_config
-        name_or_path = None
-        if hasattr(cfg, "verifier_tokenizer_name_or_path") and cfg.verifier_tokenizer_name_or_path:
-            name_or_path = cfg.verifier_tokenizer_name_or_path
-        elif hasattr(cfg, "model_name_or_path") and cfg.model_name_or_path:
-            name_or_path = cfg.model_name_or_path
-        if name_or_path is None:
-            raise ValueError(
-                "ProcedureStepLengthVerifier requires a tokenizer path. "
-                "Provide --verifier_tokenizer_name_or_path or ensure model_name_or_path is available."
-            )
-        self._tokenizer = AutoTokenizer.from_pretrained(
-            name_or_path,
-            revision=getattr(cfg, "verifier_tokenizer_revision", None),
-            use_fast=bool(getattr(cfg, "verifier_tokenizer_use_fast", True)),
-            trust_remote_code=bool(getattr(cfg, "verifier_tokenizer_trust_remote_code", False)),
-        )
+    @staticmethod
+    def _word_len(text: str) -> int:
+        # Robust word count via whitespace split
+        text = text or ""
+        return len(text.split())
 
     @staticmethod
-    def _to_reference_text(label: Any) -> list[str]:
-        # Support a single string or list of strings (we'll take the max score over candidates)
-        if isinstance(label, list):
-            return [str(x) for x in label if isinstance(x, (str, int, float))]
-        return [str(label)]
-
-    def _token_len(self, text: str) -> int:
-        # Count tokens without adding special tokens
-        ids = self._tokenizer.encode(text or "", add_special_tokens=False)
-        return len(ids)
+    def _char_len_no_space(text: str) -> int:
+        # Count non-whitespace characters
+        text = text or ""
+        return len(re.sub(r"\s+", "", text))
 
     def __call__(
         self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
     ) -> VerificationResult:
         try:
-            self._ensure_tokenizer()
-            # Prepare reference candidates (strings)
-            ref_texts = self._to_reference_text(label)
             # Extract only the final answer content from prediction
             pred_final = extract_final_answer(prediction) or ""
 
@@ -1177,36 +1148,35 @@ class ProcedureStepLengthVerifier(VerifierFunction):
             tau = float(getattr(self.verifier_config, "final_len_band_fraction", 0.1))
             tau = max(0.0, min(0.99, tau))  # clamp for safety
 
-            pred_len = self._token_len(pred_final)
-            best_score = 0.0
-            for ref in ref_texts:
-                ref_len = self._token_len(ref)
-                if ref_len <= 0:
-                    # No valid reference length; treat as 0 score
-                    continue
-                ratio = pred_len / ref_len
-                # No penalty if shorter than or within the upper band
-                if ratio <= (1.0 + tau):
-                    score = 1.0
-                else:
-                    # Exponential penalty only for the over-length beyond the upper band
-                    over_norm = (ratio - (1.0 + tau)) / (1.0 - tau)
-                    alpha = float(getattr(self.verifier_config, "final_len_exp_alpha", 5.0))
-                    score = math.exp(-alpha * max(0.0, over_norm))
-                if score > best_score:
-                    best_score = score
+            # Choose length measurement
+            measure = getattr(self.verifier_config, "length_measure", "auto")
+            def measure_len(text: str) -> int:
+                if measure == "whitespace":
+                    return self._word_len(text)
+                if measure == "chars_no_space":
+                    return self._char_len_no_space(text)
+                # auto and any other value: default to whitespace-based length
+                return self._word_len(text)
 
-            return VerificationResult(score=best_score)
+            pred_len = measure_len(pred_final)
+            assert isinstance(label, str), "Label must be a string"
+            ref_text = str(label)
+            ref_len = measure_len(ref_text)
+            if ref_len <= 0:
+                return VerificationResult(score=0.0)
+            ratio = pred_len / ref_len
+            # No penalty if shorter than or within the upper band
+            if ratio <= (1.0 + tau):
+                score = 1.0
+            else:
+                # Exponential penalty only for the over-length beyond the upper band
+                over_norm = (ratio - (1.0 + tau)) / (1.0 - tau)
+                alpha = float(getattr(self.verifier_config, "final_len_exp_alpha", 5.0))
+                score = math.exp(-alpha * max(0.0, over_norm))
+
+            return VerificationResult(score=score)
         except Exception:
             return VerificationResult(score=0.0)
-
-        label_cf = label_obj.get("critical_failures", []) if isinstance(label_obj, dict) else []
-        answer_cf = answer_obj.get("critical_failures", []) if isinstance(answer_obj, dict) else []
-
-        label_has_failures = bool(label_cf)
-        answer_has_failures = bool(answer_cf)
-
-        return VerificationResult(score=1.0 if label_has_failures == answer_has_failures else 0.0)
 
 
 class ProcedureStepFormatVerifier(VerifierFunction):
