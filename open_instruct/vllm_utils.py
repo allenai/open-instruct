@@ -18,6 +18,7 @@
 import asyncio
 import os
 import queue
+import socket
 import sys
 import threading
 import time
@@ -28,6 +29,8 @@ from concurrent import futures
 from datetime import timedelta
 from typing import Any
 
+import httpx
+import openai
 import ray
 import torch
 import torch.distributed
@@ -45,6 +48,8 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from vllm.entrypoints.launcher import serve_http
+from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
@@ -132,29 +137,48 @@ async def process_request_async(
     iteration = 0
 
     while True:
-        iteration_request_id = f"{sub_request_id}_iter{iteration}"
-        outputs = [
-            o
-            async for o in actor.llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
-            if o.finished
-        ]
-        assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
-        request_output = outputs[0]
+        api_response = await actor.openai_client.completions.create(
+            model="default",
+            prompt=current_prompt.prompt_token_ids,
+            temperature=current_sampling_params.temperature,
+            top_p=current_sampling_params.top_p,
+            n=1,
+            max_tokens=current_sampling_params.max_tokens,
+            stop=current_sampling_params.stop if current_sampling_params.stop else None,
+            seed=current_sampling_params.seed,
+            logprobs=current_sampling_params.logprobs if current_sampling_params.logprobs else None,
+            extra_body={"return_token_ids": True},
+        )
+
         iteration += 1
-        output = request_output.outputs[0]
+        choice = api_response.choices[0]
 
         if final_prompt_token_ids is None:
-            final_prompt_token_ids = request_output.prompt_token_ids
+            final_prompt_token_ids = api_response.prompt_token_ids
 
-        accumulated_tokens.extend(output.token_ids)
-        accumulated_logprobs.extend(output.logprobs)
-        masks.extend([1] * len(output.token_ids))
+        token_ids = choice.token_ids
+        accumulated_tokens.extend(token_ids)
+
+        if choice.logprobs and choice.logprobs.token_logprobs:
+            logprobs_dicts = [
+                {token_id: types.SimpleNamespace(logprob=logprob)}
+                for token_id, logprob in zip(token_ids, choice.logprobs.token_logprobs)
+            ]
+            accumulated_logprobs.extend(logprobs_dicts)
+        else:
+            accumulated_logprobs.extend([{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in token_ids])
+
+        masks.extend([1] * len(token_ids))
+
+        output_text = choice.text
+        finish_reason = choice.finish_reason
+        stop_reason = finish_reason
 
         if not actor.tools or not actor.max_tool_calls:
             break
 
         triggered_tool, stop_str = get_triggered_tool(
-            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
+            output_text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
         )
         if triggered_tool is None:
             break
@@ -162,7 +186,7 @@ async def process_request_async(
         assert actor.executor is not None, f"executor is None for request {sub_request_id}"
 
         loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
+        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output_text)
 
         tool_called = True
         num_calls += 1
@@ -200,14 +224,18 @@ async def process_request_async(
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
 
+    cumulative_logprob = sum(
+        list(logprob_dict.values())[0].logprob for logprob_dict in accumulated_logprobs if logprob_dict
+    )
+
     complete_output = vllm.CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
         text="",
         token_ids=accumulated_tokens,
-        cumulative_logprob=output.cumulative_logprob,
+        cumulative_logprob=cumulative_logprob,
         logprobs=accumulated_logprobs,
-        finish_reason=output.finish_reason,
-        stop_reason=output.stop_reason,
+        finish_reason=finish_reason,
+        stop_reason=stop_reason,
     )
 
     if actor.tools:
@@ -227,9 +255,9 @@ async def process_request_async(
             "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
             "request_output": vllm.RequestOutput(
                 request_id=sub_request_id,
-                prompt=request_output.prompt,
+                prompt="",
                 prompt_token_ids=final_prompt_token_ids,
-                prompt_logprobs=request_output.prompt_logprobs,
+                prompt_logprobs=None,
                 outputs=[complete_output],
                 finished=True,
             ),
@@ -473,6 +501,17 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
         add_request(actor, request)
 
 
+def find_free_port(start_port: int = 8000, end_port: int = 9000) -> int:
+    for port in range(start_port, end_port):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("127.0.0.1", port))
+                return port
+        except OSError:
+            continue
+    raise RuntimeError(f"No free port found in range {start_port}-{end_port}")
+
+
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
 
@@ -526,6 +565,7 @@ class LLMRayActor:
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
+        self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
 
@@ -580,25 +620,76 @@ class LLMRayActor:
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
 
+        self.server_port = find_free_port()
         init_complete = threading.Event()
         self.loop = None
         self.llm_engine = None
+        self.openai_client = None
+        self.shutdown_task = None
 
-        async def _init_engine():
+        async def _init_engine_and_server():
             running_loop = asyncio.get_running_loop()
             assert running_loop == self.loop, f"Loop mismatch! running={running_loop}, actor.loop={self.loop}"
-            return vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
+
+            engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
+
+            import argparse
+
+            args = argparse.Namespace(
+                disable_fastapi_docs=True,
+                api_keys=None,
+                enable_request_id_headers=False,
+                enable_auto_tool_choice=False,
+                tool_call_parser="auto",
+            )
+            app = build_app(args)
+            await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.bind(("127.0.0.1", self.server_port))
+            sock.listen(1)
+
+            logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
+
+            shutdown_task = asyncio.create_task(
+                serve_http(app, sock=sock, host="127.0.0.1", port=self.server_port, log_level="warning")
+            )
+
+            await asyncio.sleep(0.1)
+
+            return engine_client, shutdown_task
 
         def _run_loop():
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
-            self.llm_engine = self.loop.run_until_complete(_init_engine())
+            self.llm_engine, self.shutdown_task = self.loop.run_until_complete(_init_engine_and_server())
             init_complete.set()
             self.loop.run_forever()
 
         self.loop_thread = threading.Thread(target=_run_loop, daemon=True)
         self.loop_thread.start()
         init_complete.wait()
+
+    def _init_openai_client(self) -> None:
+        base_url = f"http://127.0.0.1:{self.server_port}/v1"
+        self.openai_client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=60.0)
+
+        logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
+        start_time = time.time()
+        timeout = 60
+
+        while time.time() - start_time < timeout:
+            try:
+                with httpx.Client() as client:
+                    response = client.get(f"http://127.0.0.1:{self.server_port}/health", timeout=2.0)
+                    if response.status_code == 200:
+                        logger.info("vLLM OpenAI API server is ready")
+                        return
+            except (httpx.ConnectError, httpx.TimeoutException):
+                pass
+            time.sleep(0.5)
+
+        raise RuntimeError(f"vLLM OpenAI API server did not start within {timeout} seconds")
 
     def get_model_dims(self):
         """Get only the model dimensions without loading weights."""
@@ -749,6 +840,21 @@ class LLMRayActor:
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_config)
 
         return int(max_concurrency)
+
+    def shutdown(self) -> None:
+        if self.openai_client is not None:
+            asyncio.run(self.openai_client.close())
+            self.openai_client = None
+
+        if self.shutdown_task is not None and self.loop is not None:
+            asyncio.run_coroutine_threadsafe(self.shutdown_task.cancel(), self.loop)
+            self.shutdown_task = None
+
+        if self.loop is not None and self.loop_thread is not None:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            self.loop_thread.join(timeout=5)
+            self.loop = None
+            self.loop_thread = None
 
 
 def get_cuda_arch_list() -> str:
