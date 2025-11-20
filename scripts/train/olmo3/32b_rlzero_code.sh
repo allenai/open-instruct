@@ -66,7 +66,6 @@ python mason.py \
     --vllm_num_engines 16 \
     --gather_whole_model False \
     --vllm_tensor_parallel_size 4 \
-    --inference_batch_size 125 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
