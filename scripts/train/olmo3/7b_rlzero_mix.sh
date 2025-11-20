@@ -1,16 +1,15 @@
 #!/bin/bash
 
-# OLMo 3 model
-MODEL_NAME_OR_PATH="/weka/oe-training-default/ai2-llm/checkpoints/tylerr/long-context/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_packing_yarn-fullonly_50B-fb13a737/step11921-hf"
 
-DATASETS="hamishivi/rlvr_general_mix 13314"
+MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
+DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
-LOCAL_EVALS="hamishivi/rlvr_general_mix 8"
+LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 8"
 LOCAL_EVAL_SPLITS="train"
 
 EVALS="alpaca_eval_v3::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,gpqa:0shot_cot::hamish_zs_reasoning_deepseek"
 
-EXP_NAME="grpo_general_from_zero"
+EXP_NAME="olmo3_7b_rlzero_mix"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift

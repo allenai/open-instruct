@@ -1,28 +1,22 @@
 #!/bin/bash
 
-# OLMo 3 model
-MODEL_NAME_OR_PATH="/weka/oe-adapt-default/michaeln/checkpoints/olmo3-7b-base"
-GS_MODEL_NAME="olmo3_7b_base"
+MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
+DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
-DATASETS="saurabh5/DAPO-Math-17k-Processed_filtered_olmo_completions_new_template_filtered 1.0 saurabh5/MATH_3000_Filtered_olmo_completions_new_template_filtered 1.0"
-
-# AIME 2024, 2025 local evals
-LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
+# AIME 2024, 2025 local single-sample evals
+# Full, bootstrapped pass@32 evals must be run separately
+LOCAL_EVALS="allenai/aime2024-25-rlvr 1.0 allenai/aime2024-25-rlvr 1.0"
 LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
 
-# math evals
 EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
 
-EXP_NAME="grpo_17kfilter_${GS_MODEL_NAME}"
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+EXP_NAME="olmo3_7b_rlzero_math"
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift
 
-cluster=ai2/augusta
-
 python mason.py \
     --task_name ${EXP_NAME} \
-    --cluster ${cluster} \
+    --cluster ai2/augusta \
     --workspace ai2/olmo-instruct \
     --priority high \
     --pure_docker_mode \
