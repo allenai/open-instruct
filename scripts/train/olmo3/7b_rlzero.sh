@@ -8,9 +8,8 @@ DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
 # math evals
 # EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
-EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo,minerva_math_500::hamish_zs_reasoning_dapo"
+EVALS="aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero,minerva_math_500::hamish_zs_reasoning_rlzero"
 
-# AIME 2024, 2025 local evals
 LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 16"
 LOCAL_EVAL_SPLITS="train"
 
@@ -26,7 +25,7 @@ python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/olmo-instruct \
-    --priority urgent \
+    --priority high \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
@@ -72,7 +71,7 @@ python open_instruct/grpo_fast.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 100 \
+    --local_eval_every 25 \
     --save_freq 100 \
     --beaker_eval_freq 100 \
     --checkpoint_state_freq 100 \
@@ -80,15 +79,11 @@ python open_instruct/grpo_fast.py \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
-    --output_dir /output/olmo3-7b-rlzero-math/checkpoints \
-    --mask_truncated_completions True \
+    --mask_truncated_completions False \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
     --eval_on_step_0 True \
     --oe_eval_tasks $EVALS \
+    --oe_eval_gpu_multiplier 4 \
     --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@ 
-
-# TODO
-#     --oe_eval_gpu_multiplier 4 \
-#     --oe_eval_beaker_image michaeln/oe_eval_rlzero
