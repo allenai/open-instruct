@@ -10,13 +10,12 @@ BENCHMARKS = [
 
     # Reasoning
     #("agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek", None),
-    ("agi_eval_english_lsat-ar:0shot_cot::hamish_zs_reasoning_deepseek", None),
-    ("agi_eval_english_lsat-lr:0shot_cot::hamish_zs_reasoning_deepseek", None),
-    ("agi_eval_english_lsat-rc:0shot_cot::hamish_zs_reasoning_deepseek", None),
+    ("agi_eval_lsat-ar:0shot_cot::hamish_zs_reasoning_deepseek", None),
+    ("agi_eval_lsat-lr:0shot_cot::hamish_zs_reasoning_deepseek", None),
+    ("agi_eval_lsat-rc:0shot_cot::hamish_zs_reasoning_deepseek", None),
 
     # Math
-    ("minerva_math_500::hamish_zs_reasoning", None),
-    #("aime:zs_cot_r1::pass_at_32_2025_deepseek", 420),
+    ("minerva_math_500::hamish_zs_reasoning_deepseek", None),
     
     # Coding
     ("codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek", None),
@@ -67,9 +66,20 @@ def main():
         help="Maximum generation length for the model.",
     )
     parser.add_argument(
-        "--reasoning_model",
+        "--temperature",
+        type=float,
+        default=0.6,
+        help="Sampling temperature for the model.",
+    )
+    parser.add_argument(
+        "--evaluate_safety",
         action="store_true",
-        help="Flag indicating if the model is a reasoning model.",
+        help="Flag indicating if we should evaluate on the safety benchmark.",
+    )
+    parser.add_argument(
+        "--evaluate_reasoning_safety",
+        action="store_true",
+        help="Flag indicating if we should evaluate on the reasoning safety benchmark.",
     )
     parser.add_argument(
         "--evaluate_tool_use",
@@ -93,15 +103,19 @@ def main():
         benchmarks = BENCHMARKS
         if args.evaluate_tool_use:
             benchmarks.append(TOOL_USE_BENCHMARK)
-        if args.reasoning_model:
+        if args.evaluate_reasoning_safety:
             benchmarks.append(SAFETY_REASONING_BENCHMARK)
-        else:
+        elif args.evaluate_safety:
             benchmarks.append(SAFETY_BENCHMARK)
     for benchmark, limit in benchmarks:
         print(f"\n\n{benchmark}")
         print("=" * len(benchmark))
         # Run the evaluation command
-        model_args = {"api_base_url": args.model_url}
+        model_args = {
+            "api_base_url": args.model_url,
+            "max_length": args.max_length,
+            "process_output": "r1_style",
+        }
         command_list = [
             "python",
             "oe-eval-internal/oe_eval/launch.py",
@@ -121,8 +135,13 @@ def main():
         )
         if limit:
             command_list.append(f"--limit {limit}")
-        if args.max_length:
-            task_args = {"chat_overrides": {"generation_kwargs": {"max_gen_toks": args.max_length}}}
+        if args.max_length or args.temperature:
+            generation_kwargs = {}
+            if args.max_length:
+                generation_kwargs["max_gen_toks"] = args.max_length
+            if args.temperature:
+                generation_kwargs["temperature"] = args.temperature
+            task_args = {"chat_overrides": {"generation_kwargs": generation_kwargs}}
             command_list.append(f"--task-args '{json.dumps(task_args)}'")
         if args.beaker_workspace:
             command_list.append(f"--beaker-workspace {args.beaker_workspace}")
