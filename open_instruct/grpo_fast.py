@@ -1939,7 +1939,13 @@ def one_training_step(
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
-    average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
+    all_keys = set()
+    for m in metrics_list:
+        all_keys.update(m.keys())
+    average_metrics = {}
+    for k in all_keys:
+        values = [m[k] for m in metrics_list if k in m]
+        average_metrics[k] = sum(values) / len(values)
     for key, value in array_metrics_list[0].items():
         average_metrics[key] = value
     step_time = time.perf_counter() - start_time
