@@ -31,14 +31,14 @@ do
         --use_slow_tokenizer False \
         --dataset_mixer_list allenai/olmo-3-pref-mix-deltas-complement2-DECON-tpc-kwd-ch-dedup5-lbc100-grafmix-unbal 125000 \
             allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_reje-426124-rm-gemma3-kwd-ftd-ch-ftd-topic-ftd-dedup5-lbc100 125000 \
-            allenai/general_responses_dev_8maxturns_truncate-9fbef8-enrejected-kwd-ftd-cn-ftd-topic-filt-lb100 1250 \
-            allenai/paraphrase_train_dev_8maxturns_truncated-6e031f-dorejected-kwd-ftd-cn-ftd-topic-filt-lb100 938 \
-            allenai/repeat_tulu_5maxturns_big_truncated2048_victoriagrejected-kwd-ftd-cn-ftd-topic-filt-lb100 312 \
-            allenai/self-talk_gpt3.5_gpt4o_prefpairs_truncat-1848c9-agrejected-kwd-ftd-cn-ftd-topic-filt-lb100 2500 \
-            allenai/general-responses-truncated-gpt-dedup-topic-filt-lb100 1250 \
-            allenai/paraphrase-truncated-gpt-dedup-topic-filt-lb100 938 \
-            allenai/repeat-truncated-gpt-dedup-topic-filt-lb100 312 \
-            allenai/self-talk-truncated-gpt-deduped-topic-filt-lb100 2500 \
+            allenai/related-query_qwen_pairs_filtered_lbc100 1250 \
+            allenai/paraphrase_qwen_pairs_filtered_lbc100 938 \
+            allenai/repeat_qwen_pairs_filtered_lbc100 312 \
+            allenai/self-talk_qwen_pairs_filtered_lbc100 2500 \
+            allenai/related-query_gpt_pairs_filtered_lbc100 1250 \
+            allenai/paraphrase_gpt_pairs_filtered_lbc100 938 \
+            allenai/repeat_gpt_pairs_filtered_lbc100 312 \
+            allenai/self-talk_gpt_pairs_filtered_lbc100 2500 \
         --max_seq_length 16384 \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps 4 \
