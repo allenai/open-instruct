@@ -4,15 +4,15 @@
 MODEL_NAME_OR_PATH="/weka/oe-adapt-default/michaeln/checkpoints/olmo3-7b-base"
 GS_MODEL_NAME="olmo3_7b_base"
 
-DATASETS="hamishivi/rlvr_orz_math_57k_collected_filtered 1.0"
+DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
 # math evals
 # EVALS="minerva_math_500::hamish_zs_reasoning_deepseek"
 EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo,minerva_math_500::hamish_zs_reasoning_dapo"
 
 # AIME 2024, 2025 local evals
-LOCAL_EVALS="mnoukhov/aime2024-25-rlvr 1.0 mnoukhov/aime2024-25-rlvr 1.0"
-LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
+LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 16"
+LOCAL_EVAL_SPLITS="train"
 
 
 EXP_NAME="olmo3-7b_rlzero_${GS_MODEL_NAME}"
@@ -30,7 +30,7 @@ python mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 5 \
+    --num_nodes 8 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gs_model_name $GS_MODEL_NAME \
@@ -59,7 +59,7 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
-    --pack_length 32768 \
+    --pack_length 18432 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name olmo_thinker_dapo \
     --non_stop_penalty False \
@@ -67,7 +67,7 @@ python open_instruct/grpo_fast.py \
     --total_episodes 512256 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
-    --vllm_num_engines 32 \
+    --vllm_num_engines 56 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
@@ -80,7 +80,7 @@ python open_instruct/grpo_fast.py \
     --with_tracking \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
-    --output_dir /output/olmo3-7b-rlzero-spurious/checkpoints \
+    --output_dir /output/olmo3-7b-rlzero-math/checkpoints \
     --mask_truncated_completions True \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
