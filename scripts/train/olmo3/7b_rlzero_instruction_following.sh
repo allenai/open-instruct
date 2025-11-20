@@ -1,14 +1,27 @@
 #!/bin/bash
 
+<<<<<<< HEAD
 MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
 DATASETS="allenai/Dolci-RLZero-IF-7B 1.0"
 
 LOCAL_EVALS="allenai/Dolci-RLZero-IF-7B 8"
+=======
+# OLMo 3 model
+MODEL_NAME_OR_PATH="/weka/oe-training-default/ai2-llm/checkpoints/tylerr/long-context/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_packing_yarn-fullonly_50B-fb13a737/step11921-hf"
+
+DATASETS="saurabh5/IF_multi_constraints_upto5_filtered_olmo_completions_filtered 13314"
+
+LOCAL_EVALS="hamishivi/IF_multi_constraints_upto5_filtered 8"
+>>>>>>> 3af17aacff528025142a54449fcf8ce51a20363c
 LOCAL_EVAL_SPLITS="train"
 
 EVALS="ifeval::hamish_zs_reasoning_deepseek"
 
+<<<<<<< HEAD
 EXP_NAME="olmo3_7b_rlzero_if"
+=======
+EXP_NAME="grpo_if_from_zero"
+>>>>>>> 3af17aacff528025142a54449fcf8ce51a20363c
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift
@@ -52,7 +65,12 @@ python open_instruct/grpo_fast.py \
     --response_length 16384 \
     --pack_length 18432 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
+<<<<<<< HEAD
     --chat_template_name olmo_thinker_rlzero \
+=======
+    --chat_template_name olmo_thinker \
+    --stop_strings "</answer>" \
+>>>>>>> 3af17aacff528025142a54449fcf8ce51a20363c
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 10000000 \
