@@ -641,6 +641,18 @@ class LLMRayActor:
                 enable_request_id_headers=False,
                 enable_auto_tool_choice=False,
                 tool_call_parser="auto",
+                root_path="",
+                middleware=[],
+                return_tokens_as_token_ids=False,
+                enable_prompt_tokens_details=False,
+                chat_template=None,
+                chat_template_content_format="auto",
+                response_role="assistant",
+                ssl_keyfile=None,
+                ssl_certfile=None,
+                ssl_ca_certs=None,
+                ssl_cert_reqs=0,
+                enable_frontend_multiprocessing=False,
             )
             app = build_app(args)
             await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
