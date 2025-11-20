@@ -63,6 +63,7 @@ NUM_PREFETCH_WORKERS = 2
 NUM_TOOL_WORKERS = 20
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
+INFERENCE_INIT_TIMEOUT_S = 120
 
 
 def assert_threaded_actor(instance):
@@ -637,7 +638,7 @@ class LLMRayActor:
 
             args = argparse.Namespace(
                 disable_fastapi_docs=True,
-                api_keys=None,
+                api_key=None,
                 enable_request_id_headers=False,
                 enable_auto_tool_choice=False,
                 tool_call_parser="auto",
@@ -653,6 +654,13 @@ class LLMRayActor:
                 ssl_ca_certs=None,
                 ssl_cert_reqs=0,
                 enable_frontend_multiprocessing=False,
+                allowed_origins=["*"],
+                allow_credentials=False,
+                allowed_methods=["*"],
+                allowed_headers=["*"],
+                tokens_only=False,
+                enable_log_outputs=False,
+                log_error_stack=False,
             )
             app = build_app(args)
             await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
@@ -680,7 +688,11 @@ class LLMRayActor:
 
         self.loop_thread = threading.Thread(target=_run_loop, daemon=True)
         self.loop_thread.start()
-        init_complete.wait()
+
+        if init_complete.wait(timeout=INFERENCE_INIT_TIMEOUT_S):
+            return
+        message = "timed out" if self.loop_thread.is_alive() else "thread died before completing"
+        raise RuntimeError(f"vLLM engine {message}")
 
     def _init_openai_client(self) -> None:
         base_url = f"http://127.0.0.1:{self.server_port}/v1"
