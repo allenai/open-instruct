@@ -26,7 +26,7 @@ python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/olmo-instruct \
-    --priority high \
+    --priority urgent \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \

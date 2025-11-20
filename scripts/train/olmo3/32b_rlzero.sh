@@ -28,11 +28,11 @@ python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/olmo-instruct \
-    --priority high \
+    --priority urgent \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 10 \
+    --num_nodes 12 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
@@ -68,10 +68,9 @@ python open_instruct/grpo_fast.py \
     --total_episodes 512256 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 8 8 8 \
-    --vllm_num_engines 12 \
+    --vllm_num_engines 16 \
     --gather_whole_model False \
     --vllm_tensor_parallel_size 4 \
-    --inference_batch_size 125 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
