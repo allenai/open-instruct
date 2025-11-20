@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import requests
+import tiktoken
 from litellm import acompletion
 
 from open_instruct import logger_utils
@@ -1099,11 +1100,13 @@ class ProcedureStepLengthConfig(VerifierConfig):
     Config for ProcedureStepLengthVerifier.
     """
     # Length measure: "auto" (alias of "whitespace"), "whitespace", or "chars_no_space"
-    length_measure: str = "auto"
+    length_measure: str = "tiktoken"
+    # Optional tiktoken encoding name to use when length_measure == "tiktoken" (e.g., "gpt2", "cl100k_base")
+    tiktoken_encoding: str = "o200k_base"
     # Fractional band around reference length (e.g., 0.05 = ±5%)
-    final_len_band_fraction: float = 0.05
+    final_len_band_fraction: float = 0.1
     # Exponential decay rate (higher = steeper penalty beyond the band)
-    final_len_exp_alpha: float = 6.0
+    final_len_exp_alpha: float = 5.0
 
 
 class ProcedureStepLengthVerifier(VerifierFunction):
@@ -1113,13 +1116,19 @@ class ProcedureStepLengthVerifier(VerifierFunction):
 
     - Label is an already-formatted reference steps string (no extra formatting done here).
     - Only the final answer portion of the model output is counted.
-    - Dead-zone: score is 1.0 if p <= (1 + tau) * r (no penalty for short responses)
-    - Above-band: score decays exponentially: score = exp(-alpha * over_norm),
-      where over_norm = (p/r - (1 + tau)) / (1 - tau)
+    - Dead-zone (two-sided): score is 1.0 if |p/r - 1| <= tau (no penalty within band)
+    - Outside band (either under- or over-length): score decays exponentially:
+      score = exp(-alpha * over_norm), where over_norm = (|p/r - 1| - tau) / (1 - tau)
     """
 
     def __init__(self, verifier_config: ProcedureStepLengthConfig | None = None) -> None:
         super().__init__("procedure_step_length", verifier_config=verifier_config, weight=1.0)
+        measure = getattr(self.verifier_config, "length_measure", "auto")
+        if measure == "tiktoken":
+            enc_name = getattr(self.verifier_config, "tiktoken_encoding", "o200k_base")
+            self._encoding = tiktoken.get_encoding(enc_name)
+        else:
+            self._encoding = None
 
     @classmethod
     def get_config_class(cls) -> type:
@@ -1155,7 +1164,9 @@ class ProcedureStepLengthVerifier(VerifierFunction):
                     return self._word_len(text)
                 if measure == "chars_no_space":
                     return self._char_len_no_space(text)
-                # auto and any other value: default to whitespace-based length
+                if measure == "tiktoken":
+                    assert self._encoding is not None, "Encoding not initialized"
+                    return len(self._encoding.encode(text))
                 return self._word_len(text)
 
             pred_len = measure_len(pred_final)
@@ -1164,13 +1175,17 @@ class ProcedureStepLengthVerifier(VerifierFunction):
             ref_len = measure_len(ref_text)
             if ref_len <= 0:
                 return VerificationResult(score=0.0)
+            # Treat empty final answer as 0 score to avoid rewarding emptiness
+            if pred_len == 0:
+                return VerificationResult(score=0.0)
+
             ratio = pred_len / ref_len
-            # No penalty if shorter than or within the upper band
-            if ratio <= (1.0 + tau):
+            # Two-sided band around the reference length
+            if abs(ratio - 1.0) <= tau:
                 score = 1.0
             else:
-                # Exponential penalty only for the over-length beyond the upper band
-                over_norm = (ratio - (1.0 + tau)) / (1.0 - tau)
+                # Exponential penalty outside the band (both under- and over-length)
+                over_norm = (abs(ratio - 1.0) - tau) / (1.0 - tau)
                 alpha = float(getattr(self.verifier_config, "final_len_exp_alpha", 5.0))
                 score = math.exp(-alpha * max(0.0, over_norm))
 
