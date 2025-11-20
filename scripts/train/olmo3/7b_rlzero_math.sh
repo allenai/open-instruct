@@ -59,7 +59,7 @@ python open_instruct/grpo_fast.py \
     --response_length 12000 \
     --pack_length 32768 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name olmo_thinker_dapo \
+    --chat_template_name olmo_thinker_rlzero \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 512000 \

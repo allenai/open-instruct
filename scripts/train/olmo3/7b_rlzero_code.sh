@@ -54,7 +54,7 @@ python open_instruct/grpo_fast.py \
     --response_length 16384 \
     --pack_length 18432 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name olmo_thinker \
+    --chat_template_name olmo_thinker_code_rlzero \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
     --temperature 1.0 \
