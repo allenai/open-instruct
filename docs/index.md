@@ -42,6 +42,7 @@ Try some of the models we train with Open Instruct. There is a [free demo](https
 
 ## News
 
+- [2025-11-20] We released [Olmo 3](https://allenai.org/blog/olmo3)!
 - [2025-02-12] We released the [`allenai/Llama-3.1-Tulu-3.1-8B` model](https://huggingface.co/allenai/Llama-3.1-Tulu-3.1-8B), which is trained with our GRPO recipe and outperforms the old [`allenai/Llama-3.1-Tulu-3-8B` model](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B) in almost all of our evals.
 - [2024-11-22] We released [TÜLU 3: Pushing Frontiers in Open Language Model Post-Training](https://arxiv.org/abs/2411.15124) and updated our entire stack of open post-training recipes with both Llama 3.1 and OLMo 2.
 - [2024-07-01] We released [Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback](https://arxiv.org/abs/2406.09279) and have majorly updated our codebase to support new models and package versions.
@@ -65,7 +66,7 @@ If you used this repository or our models, please cite our work:
 Tulu 1:
 ```bibtex
 @misc{wang2023far,
-   title={How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources}, 
+   title={How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources},
    author={Yizhong Wang and Hamish Ivison and Pradeep Dasigi and Jack Hessel and Tushar Khot and Khyathi Raghavi Chandu and David Wadden and Kelsey MacMillan and Noah A. Smith and Iz Beltagy and Hannaneh Hajishirzi},
    year={2023},
    eprint={2306.04751},
@@ -77,7 +78,7 @@ Tulu 1:
 Tulu 2:
 ```bibtex
 @misc{ivison2023camels,
-      title={Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2}, 
+      title={Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2},
       author={Hamish Ivison and Yizhong Wang and Valentina Pyatkin and Nathan Lambert and Matthew Peters and Pradeep Dasigi and Joel Jang and David Wadden and Noah A. Smith and Iz Beltagy and Hannaneh Hajishirzi},
       year={2023},
       eprint={2311.10702},
@@ -89,7 +90,7 @@ Tulu 2:
 Tulu 2.5:
 ```bibtex
 @misc{ivison2024unpacking,
-      title={Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback}, 
+      title={Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback},
       author={Hamish Ivison and Yizhong Wang and Jiacheng Liu and Zeqiu Wu and Valentina Pyatkin and Nathan Lambert and Noah A. Smith and Yejin Choi and Hannaneh Hajishirzi},
       year={2024},
       eprint={2406.09279},
