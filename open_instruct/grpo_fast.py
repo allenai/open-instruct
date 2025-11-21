@@ -2468,7 +2468,7 @@ def load_data_from_packing_thread(
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
                 return None, {}, num_total_tokens, 0, None, None, 0
             try:
-                packed_data = packed_sequences_Q.get(timeout=30.0)
+                packed_data = packed_sequences_Q.get(timeout=1000.0)
                 break
             except Empty:
                 health_check_fn()
