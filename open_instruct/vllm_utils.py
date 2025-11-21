@@ -140,7 +140,7 @@ async def process_request_async(
 
     while True:
         api_response = await actor.openai_client.completions.create(
-            model="default",
+            model=actor.model_name,
             prompt=current_prompt["prompt_token_ids"],
             temperature=current_sampling_params.temperature,
             top_p=current_sampling_params.top_p,
@@ -703,6 +703,7 @@ class LLMRayActor:
     def _init_openai_client(self) -> None:
         base_url = f"http://127.0.0.1:{self.server_port}/v1"
         self.openai_client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=60.0)
+        self.model_name = self.llm_engine.vllm_config.model_config.model
 
         logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
         start_time = time.time()
