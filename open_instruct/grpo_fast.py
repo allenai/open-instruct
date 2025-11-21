@@ -947,7 +947,6 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def step(self):
         batch_data = next(self.dataloader)
-        torch.distributed.barrier()
         batch_metrics = batch_data["metrics"]
         collated_query_responses = batch_data["collated_query_responses"]
         collated_tool_masks = batch_data["collated_tool_masks"]
