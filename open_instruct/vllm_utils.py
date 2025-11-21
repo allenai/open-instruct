@@ -156,7 +156,7 @@ async def process_request_async(
         choice = api_response.choices[0]
 
         if final_prompt_token_ids is None:
-            final_prompt_token_ids = api_response.prompt_token_ids
+            final_prompt_token_ids = choice.prompt_token_ids
 
         token_ids = choice.token_ids
         accumulated_tokens.extend(token_ids)
