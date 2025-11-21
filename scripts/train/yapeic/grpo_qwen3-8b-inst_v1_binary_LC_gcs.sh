@@ -2,7 +2,7 @@
 #     --name vllm_judge_qwen3-8b_v1_binary_LC_gcs \
 #     --workspace ai2/oe-data
 
-JUDGE_BASE_URL=http://augusta-gcp-391.reviz.ai2.in:8001/v1
+JUDGE_BASE_URL=http://augusta-gcp-368.reviz.ai2.in:8001/v1
 
 python mason.py \
     --cluster ai2/augusta \
@@ -20,6 +20,8 @@ python mason.py \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& \
     git clone --depth 1 --branch yapeic/exp https://github.com/allenai/open-instruct.git /workspace/open-instruct \&\& \
     cd /workspace/open-instruct \&\& \
+    echo "open-instruct branch:" \&\& git -C /workspace/open-instruct branch --show-current \&\& \
+    echo "open-instruct commit:" \&\& git -C /workspace/open-instruct rev-parse HEAD \&\& \
     python open_instruct/grpo_fast.py \
     --exp_name grpo_qwen3-8b-inst_v1_binary_LC_gcs \
     --beta 0.0 \

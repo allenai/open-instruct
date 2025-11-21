@@ -141,20 +141,25 @@ def main():
     
     max_step = None
     max_step_path = None
+    any_uploaded = False
     
     for step_num, folder_path in step_folders:
         revision = f"step_{step_num}"
         print(f"\nProcessing step_{step_num}...")
-        upload_folder_if_not_exists(api, folder_path, args.hf_repo_id, revision, args.private)
+        did_upload = upload_folder_if_not_exists(api, folder_path, args.hf_repo_id, revision, args.private)
+        if did_upload:
+            any_uploaded = True
         
         if max_step is None or step_num > max_step:
             max_step = step_num
             max_step_path = folder_path
     
-    if max_step is not None:
+    if any_uploaded and max_step is not None:
         print(f"\n{'='*60}")
         print(f"Copying step_{max_step} to main branch...")
         copy_revision_to_main(api, args.hf_repo_id, f"step_{max_step}")
+    elif not any_uploaded:
+        print("No new revisions uploaded; skipping copying to main.")
     else:
         print("No steps found to copy to main.")
 

@@ -6,8 +6,13 @@ settings=(
     # "yapeichang/grpo_qwen3-4b-inst_v1_ratio,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-4b-inst_v1_ratio_checkpoints"
     # "yapeichang/grpo_qwen3-8b-inst_v1_binary,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-8b-inst_v1_binary_checkpoints"
     # "yapeichang/grpo_qwen3-8b-inst_v1_ratio,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-8b-inst_v1_ratio_checkpoints"
-    "yapeichang/grpo_qwen3-8b-inst_v1_binary_LC_sym,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-8b-inst_v1_binary_LC_sym_checkpoints"
+    # "yapeichang/grpo_qwen3-8b-inst_v1_binary_LC_sym,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-8b-inst_v1_binary_LC_sym_checkpoints"
     # "yapeichang/grpo_qwen3-4b-inst_v1_binary_LC_sym,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-4b-inst_v1_binary_LC_sym_checkpoints"
+    "yapeichang/grpo_qwen3-4b-inst_v1_binary_LC_sym_r2,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-4b-inst_v1_binary_LC_sym_r2_checkpoints"
+    "yapeichang/grpo_qwen3-8b-inst_v1_binary_LC_sym_r2,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-8b-inst_v1_binary_LC_sym_r2_checkpoints"
+    "yapeichang/grpo_qwen3-4b-inst_v1_binary_science_LC_sym_r2,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-4b-inst_v1_binary_science_LC_sym_r2_checkpoints"
+    "yapeichang/grpo_qwen3-8b-inst_v1_binary_science_LC_sym_r2,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_qwen3-8b-inst_v1_binary_science_LC_sym_r2_checkpoints"
+    "yapeichang/grpo_olmo3-7b-think_v1_binary_LC_sym_r2,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3-7b-think_v1_binary_LC_sym_r2_checkpoints"
 )
 
 for setting in "${settings[@]}"; do
