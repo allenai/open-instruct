@@ -141,7 +141,7 @@ async def process_request_async(
     while True:
         api_response = await actor.openai_client.completions.create(
             model="default",
-            prompt=current_prompt.prompt_token_ids,
+            prompt=current_prompt["prompt_token_ids"],
             temperature=current_sampling_params.temperature,
             top_p=current_sampling_params.top_p,
             n=1,
@@ -532,7 +532,7 @@ def _create_server_args(model_path: str) -> argparse.Namespace:
     parser = FlexibleArgumentParser()
     parser = make_arg_parser(parser)
 
-    args = parser.parse_args([model_path])
+    args = parser.parse_args(["--model", model_path])
 
     args.disable_fastapi_docs = True
 
