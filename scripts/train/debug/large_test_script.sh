@@ -5,7 +5,7 @@ num_prompts=25376
 exp_name=rlvr_ace_fn_and_og_ocr_stdio_from_base_with_perf_penalty
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 uv run python mason.py \
-        --cluster ai2/jupiter \
+        --cluster ai2/saturn \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
         --workspace ai2/open-instruct-dev \
@@ -20,6 +20,7 @@ uv run python mason.py \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
+        --load_ref_policy false \
         --num_samples_per_prompt_rollout 16 \
         --num_unique_prompts_rollout 32 \
         --num_mini_batches 1 \

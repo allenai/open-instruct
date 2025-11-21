@@ -100,6 +100,7 @@ from open_instruct.model_utils import (
     disable_dropout_in_model,
     entropy_from_logits,
     get_olmo3_generation_config,
+    load_ref_policy,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -259,6 +260,8 @@ class Args:
     """
     ref_policy_update_freq: int | None = None
     """How many training steps to take before updating the reference policy."""
+    load_ref_policy: bool = True
+    """Whether to load and use a reference policy for KL penalty calculation."""
     advantage_normalization_type: Literal["standard", "centered"] = "standard"
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
@@ -509,6 +512,11 @@ class Args:
                 assert self.mask_tool_use, (
                     "Must mask tool use when using vLLM logprobs or truncated importance sampling."
                 )
+        if not self.load_ref_policy and self.beta != 0.0:
+            raise ValueError(
+                "When load_ref_policy=False, beta must be 0.0. "
+                f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
+            )
 
         # Figure out max possible RLVR score
         self.max_possible_score = 0
@@ -833,7 +841,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 # Save reference policy path to load later (after ref_policy is initialized)
                 self.ref_policy_checkpoint_path = None
-                if states.get("ref_policy_saved", False):
+                if args.load_ref_policy and states.get("ref_policy_saved", False):
                     ref_policy_dir = os.path.join(args.checkpoint_state_dir, "ref_policy")
                     model_path = os.path.join(ref_policy_dir, "pytorch_model.bin")
                     if os.path.exists(model_path):
@@ -846,42 +854,27 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model.train()
 
         # reference model
-        ds_config = get_eval_ds_config(
-            offload=args.deepspeed_offload_param,
-            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-            # stage 2 is optimizer sharding which doesn't apply to inference
-            stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
-            bf16=True,
-        )
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["gradient_accumulation_steps"] = 1
-        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
-        else:
-            dschf = None
-        logger.info(f"DeepSpeed config: {dschf=}")
+        if args.load_ref_policy:
+            ds_config, self.ref_policy_hf_ds_config = get_eval_ds_config(
+                offload=False,
+                # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+                # stage 2 is optimizer sharding which doesn't apply to inference
+                stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+                bf16=True,
+                per_device_train_batch_size=args.per_device_train_batch_size,
+            )
 
-        self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
-            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
-        )
-        disable_dropout_in_model(self.ref_policy)
-        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
-        self.ref_policy.eval()
-
-        # Load reference policy checkpoint if available
-        if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
-            state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device)
-            if hasattr(self.ref_policy, "module"):
-                # If wrapped by DeepSpeed
-                self.ref_policy.module.load_state_dict(state_dict)
-            else:
-                self.ref_policy.load_state_dict(state_dict)
-            logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
+            self.ref_policy: PreTrainedModel = load_ref_policy(
+                model_config=model_config,
+                ds_config=ds_config,
+                deepspeed_stage=args.deepspeed_stage,
+                local_rank=self.local_rank,
+                device=self.device,
+                rank=self.rank,
+                checkpoint_path=self.ref_policy_checkpoint_path
+                if hasattr(self, "ref_policy_checkpoint_path")
+                else None,
+            )
         self.local_metrics = utils.MetricsTracker(device=self.device)
         return optimization_steps_done
 
@@ -999,6 +992,8 @@ class PolicyTrainerRayProcess(RayProcess):
         return all_refs
 
     def update_ref_policy(self):
+        if not self.args.load_ref_policy:
+            return
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
             if self.args.deepspeed_stage == 3:
                 with deepspeed.zero.GatheredParameters([param, ref_param], modifier_rank=0):
@@ -1006,6 +1001,55 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+
+    def compute_logprobs(
+        self,
+        model: PreTrainedModel,
+        collated_query_responses: list[torch.Tensor],
+        collated_tool_masks: list[torch.Tensor],
+        collated_attention_masks: list[torch.Tensor],
+        collated_position_ids: list[torch.Tensor],
+        collated_response_masks: list[torch.Tensor],
+        pad_token_id: int,
+        use_grad: bool = False,
+        return_entropy: bool = False,
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor] | None]:
+        collated_logprobs = []
+        collated_entropies = [] if return_entropy else None
+
+        context = contextlib.nullcontext() if use_grad else torch.no_grad()
+        with context:
+            for i in range(len(collated_query_responses)):
+                query_response = collated_query_responses[i]
+                tool_mask = collated_tool_masks[i]
+                attention_mask = collated_attention_masks[i]
+                position_id = collated_position_ids[i]
+                response_mask = collated_response_masks[i]
+
+                logprob, entropy = self.forward(
+                    model,
+                    query_response,
+                    attention_mask,
+                    position_id,
+                    pad_token_id,
+                    self.args.temperature,
+                    return_entropy=return_entropy,
+                )
+
+                if self.args.mask_tool_use and self.args.tool_use:
+                    response_mask = response_mask.bool() & tool_mask.bool()
+                else:
+                    response_mask = response_mask.bool()
+
+                logprob = torch.masked_fill(logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                collated_logprobs.append(logprob)
+
+                if return_entropy:
+                    collated_entropies.append(entropy)
+
+                torch.cuda.empty_cache()
+
+        return collated_logprobs, collated_entropies
 
     def train(
         self,
@@ -1043,70 +1087,60 @@ class PolicyTrainerRayProcess(RayProcess):
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
 
-        # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
-        with Timer("Inference Calculation", noop=self.rank != 0), torch.no_grad():
-            for i in range(len(collated_query_responses)):
-                query_response = collated_query_responses[i]
-                tool_mask = collated_tool_masks[i]
-                attention_mask = collated_attention_masks[i]
-                position_id = collated_position_ids[i]
-                response_mask = collated_response_masks[i]
-                ref_logprob, _ = self.forward(
+        if args.load_ref_policy:
+            with Timer("Inference Calculation", noop=self.rank != 0):
+                collated_ref_logprobs, _ = self.compute_logprobs(
                     self.ref_policy,
-                    query_response,
-                    attention_mask,
-                    position_id,
+                    collated_query_responses,
+                    collated_tool_masks,
+                    collated_attention_masks,
+                    collated_position_ids,
+                    collated_response_masks,
                     pad_token_id,
-                    args.temperature,
+                    use_grad=False,
                     return_entropy=False,
                 )
-                if args.mask_tool_use and args.tool_use:
-                    # mask logprobs for tool tokens
-                    response_mask = response_mask.bool() & tool_mask.bool()
-                else:
-                    response_mask = response_mask.bool()
-                ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                collated_ref_logprobs.append(ref_logprob)
-                torch.cuda.empty_cache()
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
         # from the generator (note that async mode means these are a bit diff!)
         old_logprobs = [None for _ in range(len(collated_query_responses))]
         if num_mini_batches > 1:
-            with Timer("Old logprobs Calculation", noop=self.rank != 0), torch.no_grad():
-                for i in range(len(collated_query_responses)):
-                    query_response = collated_query_responses[i]
-                    tool_mask = collated_tool_masks[i]
-                    attention_mask = collated_attention_masks[i]
-                    position_id = collated_position_ids[i]
-                    response_mask = collated_response_masks[i]
-                    if not args.use_vllm_logprobs:
-                        local_old_logprob, _ = self.forward(
-                            self.model,
-                            query_response,
-                            attention_mask,
-                            position_id,
-                            pad_token_id,
-                            args.temperature,
-                            return_entropy=False,
-                        )
-                    vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
-                    if args.mask_tool_use and args.tool_use:
-                        response_mask = response_mask.bool() & tool_mask.bool()
-                    else:
-                        response_mask = response_mask.bool()
-                    if not args.use_vllm_logprobs:
-                        local_old_logprob = torch.masked_fill(
-                            local_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB
-                        )
-                    vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                    vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
-                    if args.use_vllm_logprobs:
-                        old_logprobs[i] = vllm_old_logprob
-                    else:
-                        old_logprobs[i] = local_old_logprob
-                    torch.cuda.empty_cache()
+            with Timer("Old logprobs Calculation", noop=self.rank != 0):
+                local_old_logprobs = None
+                if not args.use_vllm_logprobs:
+                    local_old_logprobs, _ = self.compute_logprobs(
+                        self.model,
+                        collated_query_responses,
+                        collated_tool_masks,
+                        collated_attention_masks,
+                        collated_position_ids,
+                        collated_response_masks,
+                        pad_token_id,
+                        use_grad=False,
+                        return_entropy=False,
+                    )
+
+                with torch.no_grad():
+                    for i in range(len(collated_query_responses)):
+                        tool_mask = collated_tool_masks[i]
+                        response_mask = collated_response_masks[i]
+
+                        if args.mask_tool_use and args.tool_use:
+                            response_mask = response_mask.bool() & tool_mask.bool()
+                        else:
+                            response_mask = response_mask.bool()
+
+                        vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
+                        vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                        vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
+
+                        if args.use_vllm_logprobs:
+                            old_logprobs[i] = vllm_old_logprob
+                        else:
+                            old_logprobs[i] = local_old_logprobs[i]
+
+                        torch.cuda.empty_cache()
 
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -1123,7 +1157,6 @@ class PolicyTrainerRayProcess(RayProcess):
             entropy_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
-                    mb_ref_logprob = collated_ref_logprobs[i]
                     mb_query_responses = collated_query_responses[i]
                     mb_tool_mask = collated_tool_masks[i]
                     mb_advantages = collated_advantages[i]
@@ -1237,30 +1270,35 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
-                    # Here we recalculate kl: we want the KL loss to backpropagate through the model
-                    # We also clamp the KL loss to avoid numerical instability
-                    # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
-                    ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
-                    kl1 = ref_logprobs_diff
-                    kl2 = (ref_logprobs_diff) ** 2 / 2
-                    kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
-                    kl4 = ratio * ref_logprobs_diff
-                    if args.kl_estimator == "kl1":
-                        kl = kl1
-                    elif args.kl_estimator == "kl2":
-                        kl = kl2
-                    elif args.kl_estimator == "kl3":
-                        kl = kl3
-                    elif args.kl_estimator == "kl4":
-                        kl = kl4
-
-                    # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(
-                        pg_loss_max + (args.beta * kl),
-                        mb_response_masks_bool,
-                        args.masked_mean_axis,
-                        args.masked_mean_denominator,
-                    )
+                    if args.load_ref_policy:
+                        mb_ref_logprob = collated_ref_logprobs[i]
+                        # Here we recalculate kl: we want the KL loss to backpropagate through the model
+                        # We also clamp the KL loss to avoid numerical instability
+                        # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
+                        ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
+                        kl1 = ref_logprobs_diff
+                        kl2 = (ref_logprobs_diff) ** 2 / 2
+                        kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
+                        kl4 = ratio * ref_logprobs_diff
+                        if args.kl_estimator == "kl1":
+                            kl = kl1
+                        elif args.kl_estimator == "kl2":
+                            kl = kl2
+                        elif args.kl_estimator == "kl3":
+                            kl = kl3
+                        elif args.kl_estimator == "kl4":
+                            kl = kl4
+                        # grpo change: directly subtract KL in loss (add)
+                        loss = masked_mean(
+                            pg_loss_max + (args.beta * kl),
+                            mb_response_masks_bool,
+                            args.masked_mean_axis,
+                            args.masked_mean_denominator,
+                        )
+                    else:
+                        loss = masked_mean(
+                            pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        )
                     loss = loss / accumulation_steps
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
@@ -1269,27 +1307,28 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
-                        # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl1_stats[i] = masked_mean(
-                            kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                        ).float()
-                        kl2_stats[i] = masked_mean(
-                            kl2, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                        ).float()
-                        kl3_stats[i] = masked_mean(
-                            kl3, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                        ).float()
-                        kl4_stats[i] = masked_mean(
-                            kl4, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                        ).float()
-                        if args.kl_estimator == "kl1":
-                            kl_loss_stats[i] = kl1_stats[i] * args.beta
-                        elif args.kl_estimator == "kl2":
-                            kl_loss_stats[i] = kl2_stats[i] * args.beta
-                        elif args.kl_estimator == "kl3":
-                            kl_loss_stats[i] = kl3_stats[i] * args.beta
-                        elif args.kl_estimator == "kl4":
-                            kl_loss_stats[i] = kl4_stats[i] * args.beta
+                        if args.load_ref_policy:
+                            # NOTE: in packed implementation, kl calculation are averages over response tokens
+                            kl1_stats[i] = masked_mean(
+                                kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
+                            kl2_stats[i] = masked_mean(
+                                kl2, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
+                            kl3_stats[i] = masked_mean(
+                                kl3, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
+                            kl4_stats[i] = masked_mean(
+                                kl4, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
+                            if args.kl_estimator == "kl1":
+                                kl_loss_stats[i] = kl1_stats[i] * args.beta
+                            elif args.kl_estimator == "kl2":
+                                kl_loss_stats[i] = kl2_stats[i] * args.beta
+                            elif args.kl_estimator == "kl3":
+                                kl_loss_stats[i] = kl3_stats[i] * args.beta
+                            elif args.kl_estimator == "kl4":
+                                kl_loss_stats[i] = kl4_stats[i] * args.beta
                         pg_clipfrac_stats[i] = masked_mean(
                             (pg_losses2 > pg_losses).float(),
                             mb_response_masks_bool,
@@ -1310,12 +1349,13 @@ class PolicyTrainerRayProcess(RayProcess):
                             ).float()
 
             with torch.no_grad():
-                self.local_metrics["objective/kl_avg"] = kl1_stats.mean()
-                self.local_metrics["objective/kl2_avg"] = kl2_stats.mean()
-                self.local_metrics["objective/kl3_avg"] = kl3_stats.mean()
-                self.local_metrics["objective/kl4_avg"] = kl4_stats.mean()
+                if args.load_ref_policy:
+                    self.local_metrics["objective/kl_avg"] = kl1_stats.mean()
+                    self.local_metrics["objective/kl2_avg"] = kl2_stats.mean()
+                    self.local_metrics["objective/kl3_avg"] = kl3_stats.mean()
+                    self.local_metrics["objective/kl4_avg"] = kl4_stats.mean()
+                    self.local_metrics["loss/kl_avg"] = kl_loss_stats.mean()
                 self.local_metrics["loss/policy_avg"] = pg_loss_stats.mean()
-                self.local_metrics["loss/kl_avg"] = kl_loss_stats.mean()
                 self.local_metrics["loss/total_avg"] = loss_stats.mean()
                 self.local_metrics["policy/clipfrac_avg"] = pg_clipfrac_stats.mean()
                 self.local_metrics["val/ratio"] = ratio_stats.mean()
@@ -1347,7 +1387,7 @@ class PolicyTrainerRayProcess(RayProcess):
         client_state["rank"] = self.rank
 
         # Save reference policy checkpoint (model only, no optimizer)
-        if hasattr(self, "ref_policy") and self.ref_policy is not None:
+        if self.args.load_ref_policy:
             ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
             os.makedirs(ref_policy_dir, exist_ok=True)
 
@@ -1357,7 +1397,6 @@ class PolicyTrainerRayProcess(RayProcess):
             if self.rank == 0:
                 # Only rank 0 saves the model state
                 model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
-
                 # Save the state dict
                 torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
@@ -2553,13 +2592,15 @@ def one_training_step(
             desc=f"Running training step {training_step}",
         )
         if (
-            args.ref_policy_update_freq is not None
+            args.load_ref_policy
+            and args.ref_policy_update_freq is not None
             and training_step % args.ref_policy_update_freq == 0
             and args.alpha > 0
         ):
             update_ref_policy_future.extend(
                 [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
             )
+            ray_get_with_progress(update_ref_policy_future, desc=f"Updating reference policy at step {training_step}")
 
     save_time = 0
     if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
@@ -2581,10 +2622,6 @@ def one_training_step(
                         step_dir, leaderboard_name, wandb_url, training_step
                     )
         save_time += timer.duration
-
-    if len(update_ref_policy_future) > 0:
-        with Timer("[Main Thread] 🔃 Updating reference policy"):
-            ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
