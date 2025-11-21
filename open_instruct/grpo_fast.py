@@ -664,7 +664,11 @@ class PolicyTrainerRayProcess(RayProcess):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
+        logger.info(
+            f"[DEBUG] Rank {self.rank}: Initializing DeepSpeed distributed (timeout={args.backend_timeout} minutes)..."
+        )
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
+        logger.info(f"[DEBUG] Rank {self.rank}: DeepSpeed distributed initialized successfully")
 
         ds_config = get_train_ds_config(
             offload=args.deepspeed_offload_param,
@@ -839,8 +843,11 @@ class PolicyTrainerRayProcess(RayProcess):
         return logprob, entropy
 
     def setup_model_update_group(self, vllm_engines):
+        logger = logger_utils.setup_logger(__name__)
+        logger.info(f"[DEBUG] Rank {self.rank}: Entered setup_model_update_group")
         self.vllm_engines = vllm_engines
         if self.rank == 0:
+            logger.info(f"[DEBUG] Rank 0: Initializing process group for {len(vllm_engines)} vLLM engines")
             master_address = ray._private.services.get_node_ip_address()
             with socket.socket() as sock:
                 sock.bind(("", 0))
@@ -851,6 +858,10 @@ class PolicyTrainerRayProcess(RayProcess):
             )
             world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
             backend = self.args.vllm_sync_backend
+            logger.info(
+                f"[DEBUG] Rank 0: master_address={master_address}, master_port={master_port}, "
+                f"world_size={world_size}, backend={backend}"
+            )
             refs = [
                 engine.init_process_group.remote(
                     master_address,
@@ -871,8 +882,15 @@ class PolicyTrainerRayProcess(RayProcess):
                 group_name="openrlhf",
                 timeout=timedelta(minutes=self.args.backend_timeout),
             )
+            logger.info(
+                f"[DEBUG] Rank 0: Waiting for {len(refs)} vLLM engines to initialize process groups (timeout=600s)..."
+            )
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
+            logger.info("[DEBUG] Rank 0: All vLLM engines initialized, approaching barrier")
+        else:
+            logger.info(f"[DEBUG] Rank {self.rank}: Approaching barrier")
         torch.distributed.barrier()
+        logger.info(f"[DEBUG] Rank {self.rank}: Passed barrier successfully")
 
     def broadcast_to_vllm(self):
         # avoid OOM
@@ -1736,21 +1754,26 @@ def create_model_and_optimizer(
         use_fp8_kv_cache=args.use_fp8_kv_cache,
         inflight_updates=args.inflight_updates,
     )
+    logger.info(f"[DEBUG] Created {len(vllm_engines)} vLLM engines")
 
     # Get model dimensions from vLLM engine
+    logger.info("[DEBUG] Fetching model dimensions from first vLLM engine...")
     model_dims = ray.get(vllm_engines[0].get_model_dims.remote())
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
     # Get and set KV cache max concurrency from the first engine (all engines have the same config)
     # fp8 kv cache for now forces v0 engine and breaks this.
+    logger.info("[DEBUG] Setting up KV cache configuration...")
     if vllm_engines and not args.use_fp8_kv_cache:
         kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
     else:
         # dummy value
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
+    logger.info("[DEBUG] KV cache configuration complete")
 
     # Now create policy actors with all dependencies
+    logger.info("[DEBUG] Creating ModelGroup with policy actors...")
     wandb_url = wandb.run.get_url() if args.with_tracking else None
     policy_group = ModelGroup(
         pg,
@@ -1768,7 +1791,9 @@ def create_model_and_optimizer(
         actor_manager=actor_manager,
         model_dims=model_dims,
     )
+    logger.info(f"[DEBUG] ModelGroup created with {len(policy_group.models)} policy actors")
 
+    logger.info("[DEBUG] Starting model initialization across all ranks...")
     inits = [
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
         for model in policy_group.models
@@ -1783,6 +1808,7 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ all models initialized =========")
 
+    logger.info("[DEBUG] Setting up model update group across all ranks...")
     ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
         desc="Setting up model update group",

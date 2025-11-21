@@ -831,7 +831,9 @@ def create_vllm_engines(
     # ensure we use bundles on the same node where possible if tp>1.
     bundle_indices_list = get_bundle_indices_list(pg)
 
+    logger.info(f"[DEBUG] Creating {num_engines} vLLM engines with tensor_parallel_size={tensor_parallel_size}")
     for i in range(num_engines):
+        logger.info(f"[DEBUG] Creating vLLM engine {i + 1}/{num_engines}")
         bundle_indices = None
         bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
 
@@ -880,9 +882,12 @@ def create_vllm_engines(
                 calculate_kv_scales=use_fp8_kv_cache,
             )
         )
+        logger.info(f"[DEBUG] vLLM engine {i + 1}/{num_engines} actor created")
 
+    logger.info(f"[DEBUG] All {num_engines} vLLM engine actors created, waiting for ready() (timeout=1200s)...")
     ray_get_with_progress(
         [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=1200
     )
+    logger.info(f"[DEBUG] All {num_engines} vLLM engines ready!")
 
     return vllm_engines
