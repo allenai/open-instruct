@@ -15,6 +15,7 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import argparse
 import asyncio
 import os
 import queue
@@ -513,6 +514,41 @@ def find_free_port(start_port: int = 8000, end_port: int = 9000) -> int:
     raise RuntimeError(f"No free port found in range {start_port}-{end_port}")
 
 
+def _create_server_args() -> argparse.Namespace:
+    """Create OpenAI API server arguments with sensible defaults.
+
+    Based on vLLM's FrontendArgs defaults, but tailored for internal-only use.
+    Returns a namespace suitable for build_app() and init_app_state().
+    """
+    return argparse.Namespace(
+        disable_fastapi_docs=True,
+        api_key=None,
+        enable_request_id_headers=False,
+        enable_auto_tool_choice=False,
+        tool_call_parser="auto",
+        root_path="",
+        middleware=[],
+        return_tokens_as_token_ids=False,
+        enable_prompt_tokens_details=False,
+        chat_template=None,
+        chat_template_content_format="auto",
+        response_role="assistant",
+        ssl_keyfile=None,
+        ssl_certfile=None,
+        ssl_ca_certs=None,
+        ssl_cert_reqs=0,
+        enable_frontend_multiprocessing=False,
+        allowed_origins=["*"],
+        allow_credentials=False,
+        allowed_methods=["*"],
+        allowed_headers=["*"],
+        tokens_only=False,
+        enable_log_outputs=False,
+        log_error_stack=False,
+        served_model_name=None,
+    )
+
+
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
 
@@ -634,34 +670,7 @@ class LLMRayActor:
 
             engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
-            import argparse
-
-            args = argparse.Namespace(
-                disable_fastapi_docs=True,
-                api_key=None,
-                enable_request_id_headers=False,
-                enable_auto_tool_choice=False,
-                tool_call_parser="auto",
-                root_path="",
-                middleware=[],
-                return_tokens_as_token_ids=False,
-                enable_prompt_tokens_details=False,
-                chat_template=None,
-                chat_template_content_format="auto",
-                response_role="assistant",
-                ssl_keyfile=None,
-                ssl_certfile=None,
-                ssl_ca_certs=None,
-                ssl_cert_reqs=0,
-                enable_frontend_multiprocessing=False,
-                allowed_origins=["*"],
-                allow_credentials=False,
-                allowed_methods=["*"],
-                allowed_headers=["*"],
-                tokens_only=False,
-                enable_log_outputs=False,
-                log_error_stack=False,
-            )
+            args = _create_server_args()
             app = build_app(args)
             await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
 
