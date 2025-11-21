@@ -2469,8 +2469,8 @@ def load_data_from_packing_thread(
                 return None, {}, num_total_tokens, 0, None, None, 0
             try:
                 # When running at 32k generation length, it typically takes 900s to generate data,
-                # so we set the timeout to be slightly more than that.
-                packed_data = packed_sequences_Q.get(timeout=1000.0)
+                # so you might see this fire a bunch of times. That's normal!
+                packed_data = packed_sequences_Q.get(timeout=300)
                 break
             except Empty:
                 health_check_fn()
