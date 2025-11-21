@@ -9,7 +9,7 @@ For our recent [Olmo3 paper](insert link), we used the following scripts to trai
 | 7B Instruct DPO | `7b_instruct_dpo.sh`  | https://beaker.org/ex/01KA62AJW9P8AWA3YKWE4Y6XZD  |  [`2fd104e`](https://github.com/allenai/open-instruct/commit/2fd104e) |
 | 7B Instruct RL  | `7b_instruct_rl.sh`   | https://beaker.org/ex/01KA8BY8MMAQWENWY4087MAPFE  |  [`9ade62d`](https://github.com/allenai/open-instruct/commit/9ade62d) |
 | 7B Think RL     | `7b_think_rl.sh` | https://beaker.org/ex/01KADRVRYEPW4YPKNN0RRNS137   |  [`42aa63c`](https://github.com/allenai/open-instruct/commit/42aa63c) |
-| 7B Think RL (no pipeline)   | `7b_think_rl_no_pipeline.sh` | https://beaker.org/ex/01K6JZVN4EN3VHTJ820BV23HGC   |  [`42aa63c`](https://github.com/allenai/open-instruct/commit/42aa63c) |
+| 7B Think RL (no pipeline)   | `7b_think_no_pipeline.sh` | https://beaker.org/ex/01K6JZVN4EN3VHTJ820BV23HGC   |  [`42aa63c`](https://github.com/allenai/open-instruct/commit/42aa63c) |
 | 32B RL          | `32b_think_rl.sh` | https://beaker.org/ex/01KA4ZXT7MCVK493Y2B3K0BC82 |  [`42aa63c`](https://github.com/allenai/open-instruct/commit/42aa63c) |
 | 7B RL Zero Math | `7b_rlzero_math.sh`   | https://beaker.org/ex/01K8V8TSX5K8BGZPJATZEE1003/  |  [`d928a7c`](https://github.com/allenai/open-instruct/commit/d928a7c) |
 | 7B RL Zero Code | `7b_rlzero_code.sh`   | https://beaker.org/ex/01K7FSWM4717FAR9KF6GE958CA/  |  [`d928a7c`](https://github.com/allenai/open-instruct/commit/d928a7c) |
