@@ -31,6 +31,7 @@ jobs:
         run: |
           git fetch origin ${{ github.base_ref }}
           git checkout origin/${{ github.base_ref }}
+          uv sync --group dev --no-install-project
           uv run mkdocs build
           cp -r site site-base
       - name: Compare docs and comment if different
