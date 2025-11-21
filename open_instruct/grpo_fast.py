@@ -230,7 +230,7 @@ class Args:
     The returned output will not contain the stop strings."""
     # Algorithm
     async_steps: int = 1
-    """Number of steps ahead to generate responses. Set to 0 to make the code synchronous. Values greater than 0 learn from a policy up to async_steps old like Cleanba (https://arxiv.org/abs/2310.00036)"""
+    """Number of steps ahead to generate responses. Fully synchronous training is not supported, so async_steps must be greater than 0. The trainer learns from a policy up to async_steps old like Cleanba (https://arxiv.org/abs/2310.00036)"""
     num_epochs: int = 1
     """the number of epochs to train"""
     num_mini_batches: int = 1
@@ -540,6 +540,8 @@ class Args:
                 "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
                 "as the reward standard deviation will always be 0, causing all samples to be filtered."
             )
+        if self.async_steps < 1:
+            raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
 
 
 def masked_mean(
