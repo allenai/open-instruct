@@ -10,7 +10,6 @@ import sys
 import time
 
 import beaker
-from beaker.common import to_nanoseconds
 from rich.console import Console
 from rich.text import Text
 
@@ -765,6 +764,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         ),
         resources=beaker.BeakerTaskResources(gpu_count=args.gpus, shared_memory=args.shared_memory),
         replicas=args.num_nodes,
+        timeout=args.timeout,
     )
     if args.num_nodes > 1:
         spec.leader_selection = True
@@ -774,9 +774,6 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         spec.host_networking = False
     else:
         spec.host_networking = True
-
-    if args.timeout is not None:
-        spec.timeout = to_nanoseconds(args.timeout)
 
     return spec
 
