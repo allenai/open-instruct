@@ -40,12 +40,30 @@ jobs:
             echo "DOCS_CHANGED=true" >> $GITHUB_ENV
             echo "## Documentation Changes Detected" > comment.md
             echo "" >> comment.md
-            echo "The following documentation files have changed:" >> comment.md
-            echo "\`\`\`" >> comment.md
-            diff -rq site-pr site-base | grep -v "^Only in" | head -50 >> comment.md || true
-            echo "\`\`\`" >> comment.md
+
+            # Get list of changed files
+            changed_files=$(diff -rq site-pr site-base | grep "^Files" | grep "differ$" | head -10)
+
+            if [ -n "$changed_files" ]; then
+              echo "$changed_files" | while IFS= read -r line; do
+                # Extract file paths from "Files site-pr/path and site-base/path differ"
+                file1=$(echo "$line" | awk '{print $2}')
+                file2=$(echo "$line" | awk '{print $4}')
+                filename=$(echo "$file1" | sed 's|site-pr/||')
+
+                echo "<details>" >> comment.md
+                echo "<summary>📄 <code>$filename</code></summary>" >> comment.md
+                echo "" >> comment.md
+                echo "\`\`\`diff" >> comment.md
+                diff -u "$file2" "$file1" | head -20 >> comment.md || true
+                echo "\`\`\`" >> comment.md
+                echo "</details>" >> comment.md
+                echo "" >> comment.md
+              done
+            fi
+
             echo "" >> comment.md
-            echo "Please review the documentation changes in the generated site." >> comment.md
+            echo "_Showing first 20 lines of diff for each changed file (up to 10 files)._" >> comment.md
           else
             echo "DOCS_CHANGED=false" >> $GITHUB_ENV
           fi
