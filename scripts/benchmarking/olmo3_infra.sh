@@ -23,7 +23,7 @@ for split_var in mixin_it_up; do
         --preemptible \
         --num_nodes 2 \
         --max_retries 0 \
-	--timeout $((2 * 60 * 60)) \
+	--timeout 2h \
         --env RAY_CGRAPH_get_timeout=300 \
         --env TORCH_NCCL_ENABLE_MONITORING=0 \
         --gs_model_name sm0922-rsn-dpo-delta-yolo_scottmix1_150k-8e-8__42__1758585338-olmo-25-final2 \

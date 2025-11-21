@@ -10,6 +10,7 @@ import sys
 import time
 
 import beaker
+from beaker.common import to_nanoseconds
 from rich.console import Console
 from rich.text import Text
 
@@ -191,8 +192,8 @@ def get_args():
     )
     parser.add_argument(
         "--timeout",
-        type=int,
-        help="Timeout for the Beaker task in seconds (e.g., 7200 for 2 hours). If not specified, no timeout is set.",
+        type=str,
+        help="Timeout for the Beaker task as a duration string (e.g., '15m', '1h', '2h30m'). If not specified, no timeout is set.",
         default=None,
     )
     # Split up the mason args from the Python args.
@@ -775,7 +776,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         spec.host_networking = True
 
     if args.timeout is not None:
-        spec.timeout = args.timeout
+        spec.timeout = to_nanoseconds(args.timeout)
 
     return spec
 
