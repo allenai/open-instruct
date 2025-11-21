@@ -1650,6 +1650,7 @@ def setup_datasets(
         system_prompt_override=system_prompt_override,
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
+    train_dataset = train_dataset.map(lambda example, idx: {**example, "index": idx}, with_indices=True)
 
     eval_dataset = None
     if len(args.dataset_mixer_eval_list) > 0:

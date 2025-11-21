@@ -395,9 +395,11 @@ class StreamingDataLoader(TextDataLoaderBase):
 
     def _data_preparation_loop(self):
         for _ in range(self.config.async_steps * self.global_batch_size // self.dp_world_size):
-            dataset_index = next(self.iter_dataloader)
+            local_index = next(self.iter_dataloader)
+            example = self.dataset[local_index]
+            dataset_index = example["index"]
             add_prompt_to_generator(
-                self.dataset[dataset_index],
+                example,
                 dataset_index,
                 self.iter_dataloader.epoch_number,
                 self.training_step,
@@ -783,9 +785,11 @@ def accumulate_inference_batches(
         raw_query = example[RAW_PROMPT_KEY]
 
         if replenish_prompts:
-            dataset_index = next(iter_dataloader)
+            local_index = next(iter_dataloader)
+            example = dataset[local_index]
+            dataset_index = example["index"]
             add_prompt_to_generator(
-                dataset[dataset_index],
+                example,
                 dataset_index,
                 iter_dataloader.epoch_number,
                 training_step,
