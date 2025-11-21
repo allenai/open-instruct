@@ -1,15 +1,68 @@
-name: ci 
+name: ci
 on:
   push:
     branches:
-      - master 
+      - master
       - main
       - benchmark
+  pull_request:
   merge_group:
 permissions:
   contents: write
+  pull-requests: write
 jobs:
+  check-docs-diff:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+      - name: Build docs from PR branch
+        run: |
+          uv sync --group dev --no-install-project
+          uv run mkdocs build
+          cp -r site site-pr
+      - name: Build docs from base branch
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          git checkout origin/${{ github.base_ref }}
+          uv run mkdocs build
+          cp -r site site-base
+      - name: Compare docs and comment if different
+        run: |
+          if ! diff -rq site-pr site-base > /dev/null 2>&1; then
+            echo "DOCS_CHANGED=true" >> $GITHUB_ENV
+            echo "## Documentation Changes Detected" > comment.md
+            echo "" >> comment.md
+            echo "The following documentation files have changed:" >> comment.md
+            echo "\`\`\`" >> comment.md
+            diff -rq site-pr site-base | grep -v "^Only in" | head -50 >> comment.md || true
+            echo "\`\`\`" >> comment.md
+            echo "" >> comment.md
+            echo "Please review the documentation changes in the generated site." >> comment.md
+          else
+            echo "DOCS_CHANGED=false" >> $GITHUB_ENV
+          fi
+      - name: Post comment
+        if: env.DOCS_CHANGED == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const comment = fs.readFileSync('comment.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
   deploy:
+    if: github.event_name == 'push' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
