@@ -680,16 +680,23 @@ class LLMRayActor:
             return engine_client, shutdown_task
 
         def _run_loop():
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-            self.llm_engine, self.shutdown_task = self.loop.run_until_complete(_init_engine_and_server())
-            init_complete.set()
+            try:
+                self.loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self.loop)
+                self.llm_engine, self.shutdown_task = self.loop.run_until_complete(_init_engine_and_server())
+            except Exception:
+                logger.exception("vLLM engine initialization failed")
+                raise
+            finally:
+                init_complete.set()
             self.loop.run_forever()
 
         self.loop_thread = threading.Thread(target=_run_loop, daemon=True)
         self.loop_thread.start()
 
         if init_complete.wait(timeout=INFERENCE_INIT_TIMEOUT_S):
+            if self.llm_engine is None:
+                raise RuntimeError("vLLM engine initialization failed. Check Ray worker logs for details.")
             return
         message = "timed out" if self.loop_thread.is_alive() else "thread died before completing"
         raise RuntimeError(f"vLLM engine {message}")
