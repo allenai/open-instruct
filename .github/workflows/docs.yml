@@ -1,4 +1,4 @@
-name: ci
+name: docs
 on:
   push:
     branches:
@@ -11,7 +11,7 @@ permissions:
   contents: write
   pull-requests: write
 jobs:
-  check-docs-diff:
+  check-diff:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -80,7 +80,7 @@ jobs:
               repo: context.repo.repo,
               body: comment
             });
-  deploy:
+  update-deployed:
     if: github.event_name == 'push' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     steps:
