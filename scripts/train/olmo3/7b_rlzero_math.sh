@@ -11,6 +11,7 @@ LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
 EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
 
 EXP_NAME="olmo3_7b_rlzero_math"
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift
 
@@ -28,9 +29,8 @@ python mason.py \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
     --budget ai2/oe-adapt \
-    -- \
-source configs/beaker_configs/ray_node_setup.sh \&\& \
-python open_instruct/grpo_fast.py \
+    -- source configs/beaker_configs/ray_node_setup.sh \
+\&\& uv run open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
     --async_steps 4 \

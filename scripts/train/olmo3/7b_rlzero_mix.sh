@@ -1,11 +1,10 @@
 #!/bin/bash
 
-
 MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
-DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
+DATASETS="allenai/Dolci-RLZero-Code-7B 1.0 allenai/Dolci-RLZero-IF-7B 1.0 allenai/Dolci-RLZero-Code-7B 1.0 allenai/Dolci-RLZero-General-7B 1.0"
 
-LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 8"
-LOCAL_EVAL_SPLITS="train"
+DATASETS="allenai/Dolci-RLZero-Code-7B 8 allenai/Dolci-RLZero-IF-7B 8 allenai/Dolci-RLZero-Code-7B 8 allenai/Dolci-RLZero-General-7B 8"
+LOCAL_EVAL_SPLITS="train train train train train train train train"
 
 EVALS="alpaca_eval_v3::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,gpqa:0shot_cot::hamish_zs_reasoning_deepseek"
 
@@ -29,9 +28,8 @@ python mason.py \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
     --budget ai2/oe-adapt \
-    -- \
-source configs/beaker_configs/ray_node_setup.sh \&\& \
-python open_instruct/grpo_fast.py \
+    -- source configs/beaker_configs/ray_node_setup.sh \
+\&\& uv run open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
     --async_steps 4 \
