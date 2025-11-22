@@ -60,15 +60,19 @@ class TestPythonCodeTool(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Start the tool server for tests."""
-        # Start the server in a subprocess
+        import os
+
+        env = os.environ.copy()
+        env.pop("OPEN_INSTRUCT_TOOL_API_KEY", None)
+
         cls.server_process = subprocess.Popen(
             ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1212"],
             cwd="open_instruct/tool_utils",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            start_new_session=True,  # Create new process group
+            start_new_session=True,
+            env=env,
         )
-        # Wait for server to start
         time.sleep(3)
         cls.api_endpoint = "http://localhost:1212/execute"
 
