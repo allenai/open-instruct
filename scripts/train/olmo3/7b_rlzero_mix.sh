@@ -3,7 +3,7 @@
 MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
 DATASETS="allenai/Dolci-RLZero-Code-7B 1.0 allenai/Dolci-RLZero-IF-7B 1.0 allenai/Dolci-RLZero-Code-7B 1.0 allenai/Dolci-RLZero-General-7B 1.0"
 
-DATASETS="allenai/Dolci-RLZero-Code-7B 8 allenai/Dolci-RLZero-IF-7B 8 allenai/Dolci-RLZero-Code-7B 8 allenai/Dolci-RLZero-General-7B 8"
+LOCAL_EVALS="allenai/Dolci-RLZero-Code-7B 8 allenai/Dolci-RLZero-IF-7B 8 allenai/Dolci-RLZero-Code-7B 8 allenai/Dolci-RLZero-General-7B 8"
 LOCAL_EVAL_SPLITS="train train train train train train train train"
 
 EVALS="alpaca_eval_v3::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,gpqa:0shot_cot::hamish_zs_reasoning_deepseek"
