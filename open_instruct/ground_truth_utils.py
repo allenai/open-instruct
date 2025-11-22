@@ -1104,9 +1104,9 @@ class ProcedureStepLengthConfig(VerifierConfig):
     # Optional tiktoken encoding name to use when length_measure == "tiktoken" (e.g., "gpt2", "cl100k_base")
     tiktoken_encoding: str = "o200k_base"
     # Fractional band around reference length (e.g., 0.05 = ±5%)
-    final_len_band_fraction: float = 0.2
+    final_len_band_fraction: float = 0.25
     # Exponential decay rate (higher = steeper penalty beyond the band)
-    final_len_exp_alpha: float = 5.0
+    final_len_exp_alpha: float = 10.0
 
 
 class ProcedureStepLengthVerifier(VerifierFunction):
@@ -1154,7 +1154,7 @@ class ProcedureStepLengthVerifier(VerifierFunction):
             pred_final = extract_final_answer(prediction) or ""
 
             # Compute candidate scores; choose the best (max)
-            tau = float(getattr(self.verifier_config, "final_len_band_fraction", 0.2))
+            tau = float(getattr(self.verifier_config, "final_len_band_fraction", 0.25))
             tau = max(0.0, min(0.99, tau))  # clamp for safety
 
             # Choose length measurement
@@ -1186,7 +1186,7 @@ class ProcedureStepLengthVerifier(VerifierFunction):
             else:
                 # Exponential penalty outside the band (both under- and over-length)
                 over_norm = (abs(ratio - 1.0) - tau) / (1.0 - tau)
-                alpha = float(getattr(self.verifier_config, "final_len_exp_alpha", 5.0))
+                alpha = float(getattr(self.verifier_config, "final_len_exp_alpha", 10.0))
                 score = math.exp(-alpha * max(0.0, over_norm))
 
             return VerificationResult(score=score)
