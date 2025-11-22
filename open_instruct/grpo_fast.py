@@ -1396,6 +1396,17 @@ class PolicyTrainerRayProcess(RayProcess):
         if chat_template_name is not None and "olmo" in chat_template_name:
             # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
             model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
+        else:
+            # Ensure a safe generation config at save time to avoid HF validation errors
+            # when do_sample is False but sampling params are present in the base repo.
+            from transformers import GenerationConfig
+
+            model_to_save.generation_config = GenerationConfig(
+                temperature=None,
+                top_p=None,
+                eos_token_id=tokenizer.eos_token_id,
+                bos_token_id=getattr(tokenizer, "bos_token_id", None),
+            )
 
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
@@ -2450,7 +2461,7 @@ def load_data_from_packing_thread(
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
                 return None, {}, num_total_tokens, 0, None, None, 0
             try:
-                packed_data = packed_sequences_Q.get(timeout=30.0)
+                packed_data = packed_sequences_Q.get(timeout=300.0)
                 break
             except Empty:
                 health_check_fn()
