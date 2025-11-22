@@ -16,7 +16,7 @@ uv run python mason.py \
     --priority urgent \
     --gs_model_name "sft_olmo3_32b_rl_run_testing" \
     --preemptible \
-    --num_nodes 18 \
+    --num_nodes 28 \
     --gpus 8 \
     --max_retries 0 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
