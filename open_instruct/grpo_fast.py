@@ -1702,7 +1702,7 @@ def accumulate_inference_batches(
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: ShufflingIterator | None = None,
     prompt_dataset: Dataset = None,
-    param_prompt_Q: ray_queue.Queue | None = None,
+    prompt_Q: ray_queue.Queue | None = None,
     training_step: int = None,
 ) -> tuple[GenerationResult, Batch, dict, BatchStatistics]:
     """Accumulate multiple inference results into a single training batch.
@@ -1720,7 +1720,7 @@ def accumulate_inference_batches(
         no_resampling_pass_rate: Optional rate at which to note samples solved at greater than this rate
             and exclude them from further sampling
         iter_dataloader: Optional, used for no_resampling_pass_rate
-        param_prompt_Q: Queue containing prompts to send to generator, used to replenish used prompts
+        prompt_Q: Queue containing prompts to send to generator, used to replenish used prompts
 
     Raises:
         queue.Empty: If timeout is specified and no data is available within timeout.
@@ -1733,8 +1733,8 @@ def accumulate_inference_batches(
         assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
 
     if replenish_prompts:
-        assert param_prompt_Q is not None and iter_dataloader is not None and prompt_dataset is not None, (
-            "replenish_prompts requires param_prompt_Q and iter_dataloader and prompt_dataset"
+        assert prompt_Q is not None and iter_dataloader is not None and prompt_dataset is not None, (
+            "replenish_prompts requires prompt_Q and iter_dataloader and prompt_dataset"
         )
 
     results = []
@@ -1782,7 +1782,7 @@ def accumulate_inference_batches(
                 iter_dataloader.epoch_number,
                 training_step,
                 pending_queries_map,
-                param_prompt_Q,
+                prompt_Q,
                 generation_config,
                 is_eval=False,
             )
@@ -1970,7 +1970,7 @@ def accumulate_inference_batches(
 def data_preparation_thread(
     reward_fn: Callable,
     inference_results_Q: ray_queue.Queue,  # Ray queue
-    param_prompt_Q: ray_queue.Queue,
+    prompt_Q: ray_queue.Queue,
     packed_sequences_Q: Queue,
     pending_queries_map: dict,
     args: Args,
@@ -2002,7 +2002,7 @@ def data_preparation_thread(
                 no_resampling_pass_rate=args.no_resampling_pass_rate,
                 iter_dataloader=iter_dataloader,
                 prompt_dataset=train_dataset,
-                param_prompt_Q=param_prompt_Q,
+                prompt_Q=prompt_Q,
                 training_step=training_step,
             )
             if isinstance(result, ShutdownSentinel):
@@ -2304,7 +2304,7 @@ def create_model_and_optimizer(
     wandb_url: str,
     tokenizer: PreTrainedTokenizer,
     inference_results_Q: ray_queue.Queue,
-    param_prompt_Q: ray_queue.Queue,
+    prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
 ) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
@@ -2349,7 +2349,7 @@ def create_model_and_optimizer(
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
-        "Param Prompt Queue": param_prompt_Q,
+        "Param Prompt Queue": prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
@@ -2370,7 +2370,7 @@ def create_model_and_optimizer(
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
-        prompt_queue=param_prompt_Q,
+        prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
@@ -2437,7 +2437,7 @@ def add_prompt_to_generator(
     epoch_number: int,
     training_step: int,
     pending_queries_map: PendingQueriesMap,
-    param_prompt_Q: ray_queue.Queue,
+    prompt_Q: ray_queue.Queue,
     generation_config,
     is_eval: bool,
 ) -> None:
@@ -2448,7 +2448,7 @@ def add_prompt_to_generator(
     raw_query = example[RAW_PROMPT_KEY]
     pending_queries_map.insert(example_index, query, ground_truth, dataset_name, raw_query)
 
-    param_prompt_Q.put(
+    prompt_Q.put(
         PromptRequest(
             prompt=query,
             generation_config=generation_config,
@@ -2684,16 +2684,15 @@ def maybe_evaluate(
     episode,
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
-    generate_metrics_Q: Queue,
     num_eval_prompts: int,
     model_dims: utils.ModelDims,
     actor_manager=None,
 ):
     """Optionally evaluate the model."""
     try:
-        # timeout 0.01 if this is the last training step or we're not evaluating
+        # timeout 0.01 if this is not the last training step
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
+        timeout = 0.01 if training_step < args.num_training_steps else 100
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
@@ -2714,12 +2713,6 @@ def maybe_evaluate(
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
 
-        eval_generate_metrics = {}
-        try:
-            eval_generate_metrics = generate_metrics_Q.get_nowait()
-        except Empty:
-            logger.info("[Main Thread] didn't get eval generation metrics")
-
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
         eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
             eval_result.finish_reasons
@@ -2733,8 +2726,6 @@ def maybe_evaluate(
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
         }
-        if "time/generation" in eval_generate_metrics:
-            eval_metrics["eval/generation_time"] = eval_generate_metrics["time/generation"]
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
@@ -2976,12 +2967,11 @@ def run_training(
     stop_event,
     executor,
     inference_results_Q,
-    param_prompt_Q,
+    prompt_Q,
     evaluation_inference_results_Q,
     packed_sequences_Q,
     pending_queries_map,
     eval_pending_queries_map,
-    generate_metrics_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
     model_dims: utils.ModelDims,
@@ -3013,7 +3003,7 @@ def run_training(
         data_preparation_thread,
         reward_fn,
         inference_results_Q,
-        param_prompt_Q,
+        prompt_Q,
         packed_sequences_Q,
         pending_queries_map,
         args,
@@ -3044,7 +3034,7 @@ def run_training(
             iter_dataloader.epoch_number,
             resume_training_step,
             pending_queries_map,
-            param_prompt_Q,
+            prompt_Q,
             generation_configs["train"],
             is_eval=False,
         )
@@ -3097,7 +3087,7 @@ def run_training(
                     iter_dataloader.epoch_number,
                     training_step,
                     eval_pending_queries_map,
-                    param_prompt_Q,
+                    prompt_Q,
                     generation_configs["eval"],
                     is_eval=True,
                 )
@@ -3106,11 +3096,10 @@ def run_training(
 
         episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
 
-        for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
-            try:
-                data_thread_metrics |= metrics_Q.get_nowait()
-            except Empty:
-                logger.info("[Main Thread] didn't get train generation metrics")
+        try:
+            data_thread_metrics |= weight_sync_metrics_Q.get_nowait()
+        except Empty:
+            logger.info("[Main Thread] didn't get train generation metrics")
 
         data_thread_metrics["time/health_check"] = health_check_time
 
@@ -3167,20 +3156,20 @@ def run_training(
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
         weight_sync_trigger_event.set()
 
-        maybe_evaluate(
-            args,
-            training_step,
-            evaluation_inference_results_Q,
-            tokenizer,
-            reward_fn,
-            episode,
-            eval_pending_queries_map,
-            generation_configs["eval"],
-            generate_metrics_Q,
-            len(eval_dataset) if eval_dataset else 0,
-            model_dims,
-            actor_manager,
-        )
+        if eval_dataset is not None:
+            maybe_evaluate(
+                args,
+                training_step,
+                evaluation_inference_results_Q,
+                tokenizer,
+                reward_fn,
+                episode,
+                eval_pending_queries_map,
+                generation_configs["eval"],
+                len(eval_dataset),
+                model_dims,
+                actor_manager,
+            )
 
     if resume_training_step > args.num_training_steps:
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
@@ -3216,10 +3205,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
-    # all prompts from async_steps + 1 training steps
-    queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
+    # - all prompts from async_steps + 1 training steps
+    # - all eval prompts
+    num_eval_prompts = len(eval_dataset) if eval_dataset is not None else 0
+    queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
-    param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    prompt_Q = ray_queue.Queue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
@@ -3232,7 +3223,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             wandb_url,
             tokenizer,
             inference_results_Q,
-            param_prompt_Q,
+            prompt_Q,
             evaluation_inference_results_Q,
         )
     )
@@ -3264,7 +3255,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     pending_queries_map = PendingQueriesMap()
     eval_pending_queries_map = PendingQueriesMap()
-    generate_metrics_Q = Queue(maxsize=args.async_steps)
     weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
 
     reward_fn = make_reward_fn(args)
@@ -3290,12 +3280,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             stop_event,
             executor,
             inference_results_Q,
-            param_prompt_Q,
+            prompt_Q,
             evaluation_inference_results_Q,
             packed_sequences_Q,
             pending_queries_map,
             eval_pending_queries_map,
-            generate_metrics_Q,
             weight_sync_metrics_Q,
             actor_manager,
             model_dims,
@@ -3307,7 +3296,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         raise
     finally:
         cleanup_training_resources(
-            stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
+            stop_event, executor, [inference_results_Q, prompt_Q, evaluation_inference_results_Q], actor_manager
         )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
