@@ -2022,7 +2022,7 @@ def data_preparation_thread(
                 return
             if result is None:
                 logger.info("[Data Preparation Thread] All prompts filtered, putting empty batch into queue")
-                packed_sequences = rl_utils.PackedSequences(
+                packed_sequences = PackedSequences(
                     query_responses=[],
                     attention_masks=[],
                     response_masks=[],
