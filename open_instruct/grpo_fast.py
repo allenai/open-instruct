@@ -253,8 +253,7 @@ class Args:
     masked_mean_denominator: float | str | None = "token"
     """Optional constant denominator for masked_mean; if set, divides by this instead of mask.sum.
     Special value "token" means use total_batch_tokens (computed across all ranks in distributed training).
-    When using "token", total_batch_tokens is gathered via allreduce across all ranks.
-    Special value "num_prompts" means use the number of prompts in the batch."""
+    When using "token", total_batch_tokens is gathered via allreduce across all ranks."""
     alpha: float = 0.6
     """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
     reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
@@ -1211,10 +1210,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     if args.masked_mean_denominator == "token":
                         group_start = (i // accumulation_steps) * accumulation_steps
                         loss_denominator = accumulation_group_tokens[group_start]
-                    elif args.masked_mean_denominator == "num_prompts":
-                        # For prompt-level loss, we average across tokens (axis=1) then across batch
-                        loss_denominator = None
-                        loss_axis = 1
 
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
@@ -1324,9 +1319,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     # for stats computation, for now no denominator is used
                     # unless masked_mean_denominator is a numeric value.
                     stats_denominator = (
-                        args.masked_mean_denominator
-                        if args.masked_mean_denominator not in ["token", "num_prompts"]
-                        else None
+                        args.masked_mean_denominator if args.masked_mean_denominator != "token" else None
                     )
 
                     if args.load_ref_policy:

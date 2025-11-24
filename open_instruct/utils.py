@@ -2499,8 +2499,8 @@ def get_denominator(masked_mean_denominator: float | str | None) -> float | str 
         return None
 
     if isinstance(masked_mean_denominator, str):
-        assert masked_mean_denominator in ["token", "num_prompts"], (
-            f"masked_mean_denominator string value must be 'token', 'num_prompts' or number, got {masked_mean_denominator}"
+        assert masked_mean_denominator == "token", (
+            f"masked_mean_denominator string value must be 'token' or number, got {masked_mean_denominator}"
         )
         return masked_mean_denominator
 
