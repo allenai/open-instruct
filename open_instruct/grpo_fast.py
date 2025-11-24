@@ -50,7 +50,7 @@ import threading
 import time
 from argparse import Namespace
 from collections import defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from queue import Empty, Full, Queue
@@ -647,70 +647,6 @@ def prepare_collated_data_for_workers(
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
     for i in range(len(tensors_list)):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
-
-
-class ShufflingIterator:
-    def __init__(self, data: np.ndarray, batch_size: int, seed: int | None = None):
-        self.data = data.copy()
-        self.batch_size = batch_size
-        self.index = 0
-        self.epoch_number = 0
-        self.rng = np.random.default_rng(seed)
-        self.rng.shuffle(self.data)
-        self.exclude_list = []
-
-        self._update_effective_size()
-
-    def __iter__(self) -> Iterator[list[int]]:
-        return self
-
-    def __next__(self) -> list[int] | int:
-        """Return a list of next indices or a single index if batch size is 1"""
-        if self.index >= self.effective_size:
-            self.index = 0
-            self._update_effective_size()
-            self.epoch_number += 1
-            self.rng.shuffle(self.data)
-
-        end_index = self.index + self.batch_size
-        batch = self.data[self.index : end_index].tolist()
-        if self.batch_size == 1:
-            batch = batch[0]
-        self.index = end_index
-
-        return batch
-
-    def get_state(self) -> dict[str, Any]:
-        """Get the current state of the iterator for checkpointing."""
-        return {
-            "index": self.index,
-            "epoch_number": self.epoch_number,
-            "data": self.data.copy(),
-            "rng_state": self.rng.bit_generator.state,
-            "exclude_list": self.exclude_list.copy(),
-        }
-
-    def set_state(self, state: dict[str, Any]) -> None:
-        """Restore the iterator state from a checkpoint."""
-        self.index = state["index"]
-        self.epoch_number = state.get("epoch_number", 0)
-        self.data = state["data"].copy()
-        self.rng.bit_generator.state = state["rng_state"]
-        self.exclude_list = state.get("exclude_list", [])
-        self._update_effective_size()
-
-    def exclude_index(self, index: int) -> None:
-        """Exclude provided data points from future sampling."""
-        self.exclude_list.append(index)
-
-    def _update_effective_size(self) -> None:
-        """Ensure the effective dataset size is divisible by batch_size and filter out all the indices excluded in the last epoch"""
-        if self.exclude_list:
-            mask = ~np.isin(self.data, self.exclude_list)
-            self.data = self.data[mask]
-            self.exclude_list = []
-
-        self.effective_size = len(self.data) - (len(self.data) % self.batch_size)
 
 
 @ray.remote(num_gpus=1)
@@ -1631,7 +1567,6 @@ def accumulate_inference_batches(
     reward_fn: Callable,
     prompt_dataset: Dataset,
     hf_data_loader: data_loader.HFDataLoader | None = None,
-    hf_data_loader_iter: Iterator[dict[str, Any]] | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
     training_step: int | None = None,
     actor_manager=None,
@@ -1704,7 +1639,7 @@ def accumulate_inference_batches(
 
         # Replenish generation queue with new prompt
         if replenish_prompts:
-            next_example = next(hf_data_loader_iter)
+            next_example = next(hf_data_loader)
             add_prompt_to_generator(
                 next_example[INPUT_IDS_PROMPT_KEY],
                 next_example["dataset_index"],
@@ -1912,7 +1847,6 @@ def data_preparation_thread(
     generation_config,
     resume_training_step: int,
     hf_data_loader: data_loader.HFDataLoader,
-    hf_data_loader_iter: Iterator[dict[str, Any]],
     train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
@@ -1929,7 +1863,6 @@ def data_preparation_thread(
                 tokenizer=tokenizer,
                 reward_fn=reward_fn,
                 hf_data_loader=hf_data_loader,
-                hf_data_loader_iter=hf_data_loader_iter,
                 prompt_dataset=train_dataset,
                 param_prompt_Q=param_prompt_Q,
                 training_step=training_step,
@@ -2920,7 +2853,6 @@ def run_training(
     vllm_engines,
     generation_configs,
     hf_data_loader,
-    hf_data_loader_iter,
     reward_fn,
     resume_training_step,
     episode,
@@ -2972,7 +2904,6 @@ def run_training(
         generation_configs["train"],
         resume_training_step,
         hf_data_loader,
-        hf_data_loader_iter,
         train_dataset,
         actor_manager,
         model_dims,
@@ -2988,7 +2919,7 @@ def run_training(
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps * args.num_unique_prompts_rollout):
-        example = next(hf_data_loader_iter)
+        example = next(hf_data_loader)
         add_prompt_to_generator(
             example[INPUT_IDS_PROMPT_KEY],
             example["dataset_index"],
@@ -3211,8 +3142,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     else:
         hf_data_loader.reshuffle()
 
-    hf_data_loader_iter = iter(hf_data_loader)
-
     # Create additional queues (main queues already created above)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     generate_metrics_Q = Queue(maxsize=args.async_steps)
@@ -3233,7 +3162,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             vllm_engines,
             generation_configs,
             hf_data_loader,
-            hf_data_loader_iter,
             reward_fn,
             resume_training_step,
             episode,
