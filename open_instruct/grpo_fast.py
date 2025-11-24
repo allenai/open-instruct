@@ -1075,9 +1075,7 @@ class PolicyTrainerRayProcess(RayProcess):
             # Gather total tokens across all ranks for this accumulation group
             if dist.is_available() and dist.is_initialized():
                 dist.barrier()
-                local_group_tokens_tensor = torch.tensor(
-                    local_group_tokens, dtype=torch.float32, device=self.device
-                )
+                local_group_tokens_tensor = torch.tensor(local_group_tokens, dtype=torch.float32, device=self.device)
                 dist.all_reduce(local_group_tokens_tensor, op=dist.ReduceOp.SUM, group=None)
                 accumulation_group_tokens[group_start] = local_group_tokens_tensor.item()
             else:
@@ -1194,10 +1192,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 accumulation_group_tokens = {}
                 if args.masked_mean_denominator == "token":
                     accumulation_group_tokens = self.calculate_group_tokens(
-                        accumulation_steps,
-                        collated_query_responses,
-                        collated_response_masks,
-                        collated_tool_masks,
+                        accumulation_steps, collated_query_responses, collated_response_masks, collated_tool_masks
                     )
 
                 for i in range(len(collated_query_responses)):

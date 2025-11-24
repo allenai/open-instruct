@@ -528,8 +528,7 @@ class TestModelDims(unittest.TestCase):
 
 
 @pytest.mark.parametrize(
-    "denominator,expected",
-    [(None, None), ("token", "token"), ("num_prompts", "num_prompts"), (10.0, 10.0), (5, 5)],
+    "denominator,expected", [(None, None), ("token", "token"), ("num_prompts", "num_prompts"), (10.0, 10.0), (5, 5)]
 )
 def test_get_denominator_valid_inputs(denominator, expected):
     assert utils.get_denominator(denominator) == expected
