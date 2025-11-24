@@ -2012,13 +2012,6 @@ def data_preparation_thread(
         getting_response_time = timer.duration
         scores = np.array(batch.scores)
 
-        good_outputs = [
-            len(result.request_info.tool_outputs[i]) > 0
-            and result.request_info.tool_calleds[i]
-            and not result.request_info.timeouts[i]
-            and not result.request_info.tool_errors[i]
-            for i in range(len(result.request_info.tool_outputs))
-        ]
         scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
         mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
         mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
@@ -2031,14 +2024,34 @@ def data_preparation_thread(
         else:
             raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
+        # metrics that need to be calculated before any filtering
+        stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
+            result.finish_reasons
+        )
+        good_outputs = [
+            len(result.request_info.tool_outputs[i]) > 0
+            and result.request_info.tool_calleds[i]
+            and not result.request_info.timeouts[i]
+            and not result.request_info.tool_errors[i]
+            for i in range(len(result.request_info.tool_outputs))
+        ]
+        sequence_lengths = np.array([len(response) for response in result.responses])
+        sequence_length_solved = (
+            np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == args.max_possible_score])
+        )
+        sequence_length_unsolved = (
+            np.array([]) if np.all(scores == args.max_possible_score) else np.array(sequence_lengths[scores == 0])
+        )
+
+        num_masked_truncated = 0
         if args.mask_truncated_completions:
             stop_idxes = torch.tensor(
                 [i for i in range(len(result.finish_reasons)) if result.finish_reasons[i] == "stop"]
             )
-            num_truncated = len(result.finish_reasons) - len(stop_idxes)
-            if num_truncated > 0:
+            num_masked_truncated = len(result.finish_reasons) - len(stop_idxes)
+            if num_masked_truncated > 0:
                 logger.info(
-                    f"[Truncated completions filtering] Filtered {num_truncated} responses that didn't finish with 'stop'. "
+                    f"[Truncated completions filtering] Filtered {num_masked_truncated} responses that didn't finish with 'stop'. "
                     f"Retention rate: {len(stop_idxes) / len(result.finish_reasons):.2%}"
                 )
             scores = scores[stop_idxes]
@@ -2108,18 +2121,7 @@ def data_preparation_thread(
         else:
             real_num_responses = len(result.responses)
             expected_num_responses = args.num_samples_per_prompt_rollout * args.num_unique_prompts_rollout
-
             unsolved_num_responses = (scores < args.max_possible_score).sum()
-            sequence_lengths = np.array([len(response) for response in result.responses])
-            sequence_length_solved = (
-                np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == args.max_possible_score])
-            )
-            sequence_length_unsolved = (
-                np.array([]) if np.all(scores == args.max_possible_score) else np.array(sequence_lengths[scores == 0])
-            )
-            stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
-                result.finish_reasons
-            )
 
             batch_metrics = asdict(batch_stats)
             batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics.items()}
@@ -2129,6 +2131,7 @@ def data_preparation_thread(
                 "real_batch_size_ratio": real_num_responses / expected_num_responses,
                 "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                 "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
+                "val/masked_truncated_responses": num_masked_truncated,
                 "val/solve_rate_hist": None,
                 "val/total_reward_groups": real_num_responses / args.num_samples_per_prompt_rollout,
                 "val/sequence_lengths": sequence_lengths.mean(),
