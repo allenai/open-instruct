@@ -2021,7 +2021,31 @@ def data_preparation_thread(
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
                 return
             if result is None:
-                logger.info("[Data Preparation Thread] All prompts filtered, skipping this training step")
+                logger.info("[Data Preparation Thread] All prompts filtered, putting empty batch into queue")
+                packed_sequences = rl_utils.PackedSequences(
+                    query_responses=[],
+                    attention_masks=[],
+                    response_masks=[],
+                    original_responses=[],
+                    tool_masks=[],
+                    advantages=[],
+                    position_ids=[],
+                    vllm_logprobs=[],
+                )
+                collated_data = []
+                packed_sequences_Q.put(
+                    {
+                        "packed_sequences": packed_sequences,
+                        "collated_data": collated_data,
+                        "metrics": {},
+                        "responses_count": 0,
+                        "num_new_tokens": 0,
+                        "B": 0,
+                        "prompt_lengths": [],
+                        "response_lengths": [],
+                        "num_filtered_prompts": 0,
+                    }
+                )
                 continue
 
         getting_response_time = timer.duration
