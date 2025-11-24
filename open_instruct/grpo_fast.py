@@ -1805,11 +1805,15 @@ def create_model_and_optimizer(
         kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
         expected_batch_size = (
-            args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout // args.vllm_num_engines
+            args.num_unique_prompts_rollout
+            * data_loader_config.num_samples_per_prompt_rollout
+            // args.vllm_num_engines
         )
         if kv_cache_max_concurrency < expected_batch_size:
             nodes_needed = (
-                args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout // kv_cache_max_concurrency
+                args.num_unique_prompts_rollout
+                * data_loader_config.num_samples_per_prompt_rollout
+                // kv_cache_max_concurrency
             )
             logger.warning(
                 f"kv_cache_max_concurrency ({kv_cache_max_concurrency}) is lower than "
