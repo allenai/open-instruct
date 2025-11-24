@@ -266,7 +266,7 @@ class TestGrpoFastBase(unittest.TestCase):
                 RAW_PROMPT_KEY: raw_queries[i],
             }
             grpo_fast.add_prompt_to_generator(
-                example, indices[i], 0, training_step, pending_queries_map, param_prompt_Q, mock_generation_config, False
+                example, indices[i], 0, training_step, param_prompt_Q, mock_generation_config, False
             )
 
         return param_prompt_Q, inference_results_Q, mock_dataset
