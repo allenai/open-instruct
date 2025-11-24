@@ -19,7 +19,8 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
-import requests
+import aiohttp
+import backoff
 from litellm import acompletion
 
 from open_instruct import logger_utils
@@ -804,8 +805,7 @@ class CodeVerifier(VerifierFunction):
     The API URL should be provided during initialization.
     """
 
-    # Class-level session cache to reuse connections
-    _session_cache = weakref.WeakKeyDictionary()
+    _aiohttp_session: aiohttp.ClientSession | None = None
 
     def __init__(self, verifier_config: CodeVerifierConfig) -> None:
         super().__init__("code", verifier_config=verifier_config, weight=1.0)
@@ -814,34 +814,27 @@ class CodeVerifier(VerifierFunction):
 
     def extract_python_code(self, model_output: str) -> str:
         """Extract the last code block between ``` markers from the model output."""
-        # Find content between ``` markers
         pattern = r"```(?:python)?(.*?)```"
         matches = re.findall(pattern, model_output, re.DOTALL)
 
         if not matches:
             return model_output
 
-        # Return the last match, stripped of whitespace
         return matches[-1].strip()
 
-    # Create a session pool for better performance
-    _session_pool = None
+    @classmethod
+    async def _get_aiohttp_session(cls) -> aiohttp.ClientSession:
+        if cls._aiohttp_session is None or cls._aiohttp_session.closed:
+            connector = aiohttp.TCPConnector(limit=100, limit_per_host=100)
+            timeout = aiohttp.ClientTimeout(total=300)
+            cls._aiohttp_session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+        return cls._aiohttp_session
 
     @classmethod
-    def _get_session(cls):
-        if cls._session_pool is None:
-            cls._session_pool = requests.Session()
-            # Configure connection pooling
-            adapter = requests.adapters.HTTPAdapter(
-                pool_connections=100,
-                pool_maxsize=100,
-                max_retries=requests.adapters.Retry(
-                    total=3, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504]
-                ),
-            )
-            cls._session_pool.mount("http://", adapter)
-            cls._session_pool.mount("https://", adapter)
-        return cls._session_pool
+    async def close_session(cls) -> None:
+        if cls._aiohttp_session is not None and not cls._aiohttp_session.closed:
+            await cls._aiohttp_session.close()
+            cls._aiohttp_session = None
 
     async def async_call(
         self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
@@ -858,41 +851,37 @@ class CodeVerifier(VerifierFunction):
         Returns:
             VerificationResult with score as the pass rate of test cases
         """
-        # Extract Python code from the model output
         python_code = self.extract_python_code(prediction)
 
-        # Test data
         payload = {
             "program": python_code,
             "tests": label,
             "max_execution_time": self.verifier_config.code_max_execution_time,
         }
 
-        try:
-            # Use connection pooling session
-            session = self._get_session()
+        http_timeout = aiohttp.ClientTimeout(
+            total=max(30, min(300, self.verifier_config.code_max_execution_time * 10))
+        )
 
-            # Calculate timeout
-            http_timeout = max(30, min(300, self.verifier_config.code_max_execution_time * 10))
-
-            # Make request in thread pool to keep it async
-            def make_request():
-                response = session.post(
-                    self.verifier_config.code_api_url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=http_timeout,
-                )
+        @backoff.on_exception(backoff.expo, Exception, max_tries=3, max_time=60)
+        async def _make_request() -> dict:
+            session = await self._get_aiohttp_session()
+            async with session.post(
+                self.verifier_config.code_api_url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=http_timeout,
+            ) as response:
                 response.raise_for_status()
-                return response.json()
+                return await response.json()
 
-            result = await asyncio.to_thread(make_request)
+        try:
+            result = await _make_request()
             passes = result["results"]
             pass_rate = sum(passes) / len(passes) if passes else 0.0
             score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
             if self.apply_perf_penalty and score > 0.0:
                 runtimes = result["runtimes"]
-                # for each runtime, multiply the percent of the timeout that was used
                 multipliers = [
                     (self.verifier_config.code_max_execution_time - runtime)
                     / self.verifier_config.code_max_execution_time

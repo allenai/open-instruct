@@ -13,6 +13,7 @@ dependencies = [
     "debugpy>=1.8.13",
     "deepspeed<0.17.3",  # version 17.3 and up break our training code right now
     "hf-transfer>=0.1.8",
+    "aiohttp>=3.9.0",
     "litellm>=1.72.0,<1.75.2",  # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
     "nltk>=3.9.1",
