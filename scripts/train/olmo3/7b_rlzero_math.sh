@@ -22,7 +22,7 @@ python mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 12 \
+    --num_nodes 8 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
@@ -57,7 +57,7 @@ python mason.py \
     --total_episodes 512256 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
-    --vllm_num_engines 88 \
+    --vllm_num_engines 56 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
@@ -76,4 +76,5 @@ python mason.py \
     --eval_on_step_0 True \
     --oe_eval_tasks $EVALS \
     --oe_eval_gpu_multiplier 4 \
+    --gs_checkpoint_state_dir gs://ai2-llm/post-training//michaeln//weka/oe-adapt-default/allennlp/deletable_checkpoint_states/michaeln/1763659376_833843 \
     --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@
