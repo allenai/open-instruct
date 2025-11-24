@@ -118,6 +118,7 @@ from open_instruct.utils import (
     combine_reward_metrics,
     download_latest_checkpoint_from_gs,
     get_beaker_whoami,
+    get_denominator,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
     get_train_ds_config,
@@ -249,12 +250,11 @@ class Args:
     """the KL estimator to use"""
     pack_length: int = 512
     """the length of the pack (you should prob set to the max length of the model)"""
-    masked_mean_axis: int | None = None
-    """the axis to compute the mean of the masked values"""
-    masked_mean_denominator: float | str | None = None
+    masked_mean_denominator: float | str | None = "token"
     """Optional constant denominator for masked_mean; if set, divides by this instead of mask.sum.
     Special value "token" means use total_batch_tokens (computed across all ranks in distributed training).
-    When using "token", total_batch_tokens is gathered via allreduce across all ranks."""
+    When using "token", total_batch_tokens is gathered via allreduce across all ranks.
+    Special value "num_prompts" means use the number of prompts in the batch."""
     alpha: float = 0.6
     """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
     reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
@@ -458,18 +458,7 @@ class Args:
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
-        if self.masked_mean_denominator is not None:
-            if isinstance(self.masked_mean_denominator, str):
-                assert self.masked_mean_denominator == "token", (
-                    f"masked_mean_denominator string value must be 'token' or number, got {self.masked_mean_denominator}"
-                )
-                assert self.masked_mean_axis is None, (
-                    "masked_mean_axis must not be provided when using 'token' normalization"
-                )
-            else:
-                assert self.masked_mean_denominator > 0, (
-                    f"masked_mean_denominator (={self.masked_mean_denominator}) must be greater than 0!"
-                )
+        self.masked_mean_denominator = get_denominator(self.masked_mean_denominator)
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -1205,11 +1194,16 @@ class PolicyTrainerRayProcess(RayProcess):
                     if args.mask_tool_use and args.tool_use:
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
 
-                    # Get total tokens for this accumulation group if using "token" normalization
-                    # This ensures all minibatches in the accumulation group are normalized by the same total
+                    # Determine the denominator for masked_mean normalization
+                    loss_denominator = args.masked_mean_denominator
+                    loss_axis = None
                     if args.masked_mean_denominator == "token":
                         group_start = (i // accumulation_steps) * accumulation_steps
-                        total_batch_tokens = accumulation_group_tokens[group_start]
+                        loss_denominator = accumulation_group_tokens[group_start]
+                    elif args.masked_mean_denominator == "num_prompts":
+                        # For prompt-level loss, we average across tokens (axis=1) then across batch
+                        loss_denominator = None
+                        loss_axis = 1
 
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
@@ -1319,7 +1313,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     # for stats computation, for now no denominator is used
                     # unless masked_mean_denominator is a numeric value.
                     stats_denominator = (
-                        args.masked_mean_denominator if args.masked_mean_denominator != "token" else None
+                        args.masked_mean_denominator
+                        if args.masked_mean_denominator not in ["token", "num_prompts"]
+                        else None
                     )
 
                     if args.load_ref_policy:
@@ -1342,16 +1338,12 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl = kl4
                         # grpo change: directly subtract KL in loss (add)
                         loss = masked_mean(
-                            pg_loss_max + (args.beta * kl),
-                            mb_response_masks_bool,
-                            args.masked_mean_axis,
-                            args.masked_mean_denominator,
+                            pg_loss_max + (args.beta * kl), mb_response_masks_bool, loss_axis, loss_denominator
                         )
                     else:
-                        loss = masked_mean(
-                            pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                        )
-                    loss = loss / accumulation_steps
+                        loss = masked_mean(pg_loss_max, mb_response_masks_bool, loss_axis, loss_denominator)
+                    if args.masked_mean_denominator != "token":
+                        loss = loss / accumulation_steps
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
                     self.model.backward(loss)
@@ -1362,43 +1354,30 @@ class PolicyTrainerRayProcess(RayProcess):
                         if args.load_ref_policy:
                             # NOTE: in packed implementation, kl calculation are averages over response tokens
                             kl1_stats[i] = masked_mean(
-                                kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                                kl1, mb_response_masks_bool, loss_axis, loss_denominator
                             ).float()
-                            kl2_stats[i] = masked_mean(
-                                kl2, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                            ).float()
-                            kl3_stats[i] = masked_mean(
-                                kl3, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                            ).float()
-                            kl4_stats[i] = masked_mean(
-                                kl4, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                            ).float()
-                            if args.kl_estimator == "kl1":
-                                kl_loss_stats[i] = kl1_stats[i] * args.beta
-                            elif args.kl_estimator == "kl2":
-                                kl_loss_stats[i] = kl2_stats[i] * args.beta
-                            elif args.kl_estimator == "kl3":
-                                kl_loss_stats[i] = kl3_stats[i] * args.beta
-                            elif args.kl_estimator == "kl4":
-                                kl_loss_stats[i] = kl4_stats[i] * args.beta
-                        pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(),
-                            mb_response_masks_bool,
-                            args.masked_mean_axis,
-                            stats_denominator,
-                        )
-                        pg_loss_stats[i] = masked_mean(
-                            pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, stats_denominator
-                        )
-                        loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(
-                            ratio, mb_response_masks_bool, args.masked_mean_axis, stats_denominator
-                        )
-                        if args.record_entropy:
-                            # Calculate entropy statistics
-                            entropy_stats[i] = masked_mean(
-                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis, stats_denominator
-                            ).float()
+                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, loss_axis, loss_denominator).float()
+                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, loss_axis, loss_denominator).float()
+                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, loss_axis, loss_denominator).float()
+                        if args.kl_estimator == "kl1":
+                            kl_loss_stats[i] = kl1_stats[i] * args.beta
+                        elif args.kl_estimator == "kl2":
+                            kl_loss_stats[i] = kl2_stats[i] * args.beta
+                        elif args.kl_estimator == "kl3":
+                            kl_loss_stats[i] = kl3_stats[i] * args.beta
+                        elif args.kl_estimator == "kl4":
+                            kl_loss_stats[i] = kl4_stats[i] * args.beta
+                    pg_clipfrac_stats[i] = masked_mean(
+                        (pg_losses2 > pg_losses).float(), mb_response_masks_bool, loss_axis, stats_denominator
+                    )
+                    pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, loss_axis, stats_denominator)
+                    loss_stats[i] = loss
+                    ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, loss_axis, stats_denominator)
+                    if args.record_entropy:
+                        # Calculate entropy statistics
+                        entropy_stats[i] = masked_mean(
+                            mb_entropy, mb_response_masks_bool, loss_axis, stats_denominator
+                        ).float()
 
             with torch.no_grad():
                 if args.load_ref_policy:

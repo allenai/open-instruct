@@ -2491,3 +2491,18 @@ def get_beaker_experiment_url() -> str | None:
         return url
     except Exception:
         return None
+
+
+def get_denominator(masked_mean_denominator: float | str | None) -> float | str | None:
+    """Validate and return the masked mean denominator value."""
+    if masked_mean_denominator is None:
+        return None
+
+    if isinstance(masked_mean_denominator, str):
+        assert masked_mean_denominator in ["token", "num_prompts"], (
+            f"masked_mean_denominator string value must be 'token', 'num_prompts' or number, got {masked_mean_denominator}"
+        )
+        return masked_mean_denominator
+
+    assert masked_mean_denominator > 0, f"masked_mean_denominator (={masked_mean_denominator}) must be greater than 0!"
+    return masked_mean_denominator
