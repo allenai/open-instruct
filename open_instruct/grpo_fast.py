@@ -107,7 +107,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.rl_utils import PackedSequences, Timer, pack_sequences
+from open_instruct.rl_utils import PackedSequences, Timer, masked_group_mean, masked_mean, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -253,6 +253,7 @@ class Args:
     masked_mean_denominator: float | str | None = "token"
     """Optional constant denominator for masked_mean; if set, divides by this instead of mask.sum.
     Special value "token" means use total_batch_tokens (computed across all ranks in distributed training).
+    Special value "group" means use group-level averaging (average across tokens in a group, then average across groups).
     When using "token", total_batch_tokens is gathered via allreduce across all ranks."""
     alpha: float = 0.6
     """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
@@ -542,13 +543,6 @@ class Args:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
 
 
-def masked_mean(
-    values: torch.Tensor, mask: torch.Tensor, axis: int | None = None, denominator: float | None = None
-) -> torch.Tensor:
-    """Compute mean of tensor with a masked values."""
-    numerator = (values * mask).sum(axis=axis)
-    denom = mask.sum(axis=axis) if denominator is None else denominator
-    return (numerator / denom).mean()
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
@@ -1319,8 +1313,19 @@ class PolicyTrainerRayProcess(RayProcess):
                     # for stats computation, for now no denominator is used
                     # unless masked_mean_denominator is a numeric value.
                     stats_denominator = (
-                        args.masked_mean_denominator if args.masked_mean_denominator != "token" else None
+                        args.masked_mean_denominator
+                        if args.masked_mean_denominator != "token" and args.masked_mean_denominator != "group"
+                        else None
                     )
+
+                    # Define reduction function based on configuration
+                    if args.masked_mean_denominator == "group":
+                        group_ids = (mb_response_masks[:, 1:] - 1) // args.num_samples_per_prompt_rollout
+
+                        def reduce_fn(v, m, a=None, d=None):
+                            return masked_group_mean(v, m, group_ids)
+                    else:
+                        reduce_fn = masked_mean
 
                     if args.load_ref_policy:
                         mb_ref_logprob = collated_ref_logprobs[i]
@@ -1341,13 +1346,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         elif args.kl_estimator == "kl4":
                             kl = kl4
                         # grpo change: directly subtract KL in loss (add)
-                        loss = masked_mean(
+                        loss = reduce_fn(
                             pg_loss_max + (args.beta * kl), mb_response_masks_bool, loss_axis, loss_denominator
                         )
                     else:
-                        loss = masked_mean(pg_loss_max, mb_response_masks_bool, loss_axis, loss_denominator)
+                        loss = reduce_fn(pg_loss_max, mb_response_masks_bool, loss_axis, loss_denominator)
                     if args.masked_mean_denominator != "token":
                         loss = loss / accumulation_steps
+
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
                     self.model.backward(loss)
@@ -1357,12 +1363,12 @@ class PolicyTrainerRayProcess(RayProcess):
                     with torch.no_grad():
                         if args.load_ref_policy:
                             # NOTE: in packed implementation, kl calculation are averages over response tokens
-                            kl1_stats[i] = masked_mean(
+                            kl1_stats[i] = reduce_fn(
                                 kl1, mb_response_masks_bool, loss_axis, stats_denominator
                             ).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, loss_axis, stats_denominator).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, loss_axis, stats_denominator).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, loss_axis, stats_denominator).float()
+                        kl2_stats[i] = reduce_fn(kl2, mb_response_masks_bool, loss_axis, stats_denominator).float()
+                        kl3_stats[i] = reduce_fn(kl3, mb_response_masks_bool, loss_axis, stats_denominator).float()
+                        kl4_stats[i] = reduce_fn(kl4, mb_response_masks_bool, loss_axis, stats_denominator).float()
                         if args.kl_estimator == "kl1":
                             kl_loss_stats[i] = kl1_stats[i] * args.beta
                         elif args.kl_estimator == "kl2":
@@ -1371,15 +1377,15 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl_loss_stats[i] = kl3_stats[i] * args.beta
                         elif args.kl_estimator == "kl4":
                             kl_loss_stats[i] = kl4_stats[i] * args.beta
-                    pg_clipfrac_stats[i] = masked_mean(
+                    pg_clipfrac_stats[i] = reduce_fn(
                         (pg_losses2 > pg_losses).float(), mb_response_masks_bool, loss_axis, stats_denominator
                     )
-                    pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, loss_axis, stats_denominator)
+                    pg_loss_stats[i] = reduce_fn(pg_loss_max, mb_response_masks_bool, loss_axis, stats_denominator)
                     loss_stats[i] = loss
-                    ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, loss_axis, stats_denominator)
+                    ratio_stats[i] = reduce_fn(ratio, mb_response_masks_bool, loss_axis, stats_denominator)
                     if args.record_entropy:
                         # Calculate entropy statistics
-                        entropy_stats[i] = masked_mean(
+                        entropy_stats[i] = reduce_fn(
                             mb_entropy, mb_response_masks_bool, loss_axis, stats_denominator
                         ).float()
 
