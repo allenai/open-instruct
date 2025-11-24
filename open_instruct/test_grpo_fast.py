@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, Mock
 import numpy as np
 import ray
 import torch
+from datasets import Dataset
 from parameterized import parameterized
 from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
@@ -234,8 +235,6 @@ class TestGrpoFastBase(unittest.TestCase):
             VERIFIER_SOURCE_KEY: datasets,
             RAW_PROMPT_KEY: raw_queries,
         }
-        from datasets import Dataset
-
         return Dataset.from_dict(data)
 
     def setup_and_add_prompts_to_generator(
