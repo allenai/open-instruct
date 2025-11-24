@@ -2031,6 +2031,9 @@ def data_preparation_thread(
         else:
             raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
+        stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
+            result.finish_reasons
+        )
         if args.mask_truncated_completions:
             stop_idxes = torch.tensor(
                 [i for i in range(len(result.finish_reasons)) if result.finish_reasons[i] == "stop"]
@@ -2116,9 +2119,6 @@ def data_preparation_thread(
             )
             sequence_length_unsolved = (
                 np.array([]) if np.all(scores == args.max_possible_score) else np.array(sequence_lengths[scores == 0])
-            )
-            stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
-                result.finish_reasons
             )
 
             batch_metrics = asdict(batch_stats)
