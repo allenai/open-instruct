@@ -50,7 +50,7 @@ import threading
 import time
 from argparse import Namespace
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from queue import Empty, Full, Queue
@@ -1566,7 +1566,8 @@ def accumulate_inference_batches(
     tokenizer: PreTrainedTokenizer,
     reward_fn: Callable,
     prompt_dataset: Dataset,
-    hf_data_loader: data_loader.HFDataLoader | None = None,
+    hf_data_loader_iter: Iterator[dict[str, Any]] | None = None,
+    epoch: int = 0,
     param_prompt_Q: ray_queue.Queue | None = None,
     training_step: int | None = None,
     actor_manager=None,
@@ -1583,7 +1584,8 @@ def accumulate_inference_batches(
         args: Arguments containing vllm_num_engines and batch size info
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
-        hf_data_loader: Dataloader for state management and iteration
+        hf_data_loader_iter: Iterator over the dataloader
+        epoch: Current epoch number
         prompt_dataset: Dataset containing prompts
         param_prompt_Q: Queue containing prompts to send to generator
         training_step: Current training step
@@ -1639,11 +1641,11 @@ def accumulate_inference_batches(
 
         # Replenish generation queue with new prompt
         if replenish_prompts:
-            next_example = next(hf_data_loader)
+            next_example = next(hf_data_loader_iter)
             add_prompt_to_generator(
                 next_example[INPUT_IDS_PROMPT_KEY],
                 next_example["dataset_index"],
-                hf_data_loader._epoch or 0,
+                epoch,
                 training_step,
                 param_prompt_Q,
                 generation_config,
@@ -1846,7 +1848,8 @@ def data_preparation_thread(
     num_training_steps: int,
     generation_config,
     resume_training_step: int,
-    hf_data_loader: data_loader.HFDataLoader,
+    hf_data_loader_iter: Iterator[dict[str, Any]],
+    epoch: int,
     train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
@@ -1862,7 +1865,8 @@ def data_preparation_thread(
                 model_dims=model_dims,
                 tokenizer=tokenizer,
                 reward_fn=reward_fn,
-                hf_data_loader=hf_data_loader,
+                hf_data_loader_iter=hf_data_loader_iter,
+                epoch=epoch,
                 prompt_dataset=train_dataset,
                 param_prompt_Q=param_prompt_Q,
                 training_step=training_step,
@@ -2873,6 +2877,8 @@ def run_training(
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
+    hf_data_loader_iter = iter(hf_data_loader)
+
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
     weight_sync_thread_future = executor.submit(
@@ -2903,7 +2909,8 @@ def run_training(
         args.num_training_steps,
         generation_configs["train"],
         resume_training_step,
-        hf_data_loader,
+        hf_data_loader_iter,
+        hf_data_loader._epoch or 0,
         train_dataset,
         actor_manager,
         model_dims,
@@ -2919,7 +2926,7 @@ def run_training(
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps * args.num_unique_prompts_rollout):
-        example = next(hf_data_loader)
+        example = next(hf_data_loader_iter)
         add_prompt_to_generator(
             example[INPUT_IDS_PROMPT_KEY],
             example["dataset_index"],
