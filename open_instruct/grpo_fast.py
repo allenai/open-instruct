@@ -107,7 +107,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.rl_utils import PackedSequences, Timer, masked_group_mean, masked_mean, pack_sequences
+from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -1043,35 +1043,74 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return collated_logprobs, collated_entropies
 
-    def calculate_group_tokens(
+    def calculate_token_counts(
         self,
         accumulation_steps: int,
-        collated_query_responses: list[torch.Tensor],
         collated_response_masks: list[torch.Tensor],
         collated_tool_masks: list[torch.Tensor],
-    ) -> dict[int, float]:
-        accumulation_group_tokens = {}
-        for group_start in range(0, len(collated_query_responses), accumulation_steps):
-            group_end = min(group_start + accumulation_steps, len(collated_query_responses))
-            # Calculate local tokens for all minibatches in this accumulation group
-            local_group_tokens = 0.0
+        mode: str = "token",
+    ) -> dict[int, float | torch.Tensor]:
+        accumulation_counts = {}
+
+        max_group_id = 0
+        if mode == "group":
+            # First pass to determine max group index
+            for i in range(len(collated_response_masks)):
+                mb_response_masks = collated_response_masks[i]
+                # group_id = (sample_index) // n
+                # sample_index starts at 0. response_mask contains sample_index + 1.
+                # So (response_mask - 1) // n
+                max_group_id = max(
+                    max_group_id, ((mb_response_masks.max().item() - 1) // self.args.num_samples_per_prompt_rollout)
+                )
+
+            # All reduce max_group_id to ensure all ranks have the same tensor size
+            if dist.is_available() and dist.is_initialized():
+                dist.barrier()
+                max_group_id_tensor = torch.tensor(max_group_id, dtype=torch.long, device=self.device)
+                dist.all_reduce(max_group_id_tensor, op=dist.ReduceOp.MAX, group=None)
+                max_group_id = max_group_id_tensor.item()
+
+        for group_start in range(0, len(collated_response_masks), accumulation_steps):
+            group_end = min(group_start + accumulation_steps, len(collated_response_masks))
+
+            if mode == "group":
+                counts = torch.zeros(max_group_id + 1, device=self.device, dtype=torch.float32)
+            else:
+                counts = torch.tensor(0.0, device=self.device, dtype=torch.float32)
+
             for i in range(group_start, group_end):
                 mb_response_masks = collated_response_masks[i]
                 mb_response_masks_bool = mb_response_masks[:, 1:].bool()
                 if self.args.mask_tool_use and self.args.tool_use:
                     mb_tool_mask = collated_tool_masks[i]
                     mb_response_masks_bool = mb_response_masks_bool & mb_tool_mask[:, 1:].bool()
-                local_group_tokens += mb_response_masks_bool.sum().item()
 
-            # Gather total tokens across all ranks for this accumulation group
+                if mode == "group":
+                    # Filter valid tokens
+                    valid_mask = mb_response_masks_bool
+                    flat_mask = valid_mask.flatten()
+                    if flat_mask.any():
+                        # Get group IDs for valid tokens
+                        flat_response_masks = mb_response_masks[:, 1:].flatten()
+                        valid_response_masks = flat_response_masks[flat_mask]
+                        group_ids = (valid_response_masks - 1) // self.args.num_samples_per_prompt_rollout
+                        # Accumulate counts
+                        counts.scatter_add_(0, group_ids, torch.ones_like(group_ids, dtype=torch.float32))
+                else:
+                    counts += mb_response_masks_bool.sum().float()
+
+            # All reduce counts
             if dist.is_available() and dist.is_initialized():
                 dist.barrier()
-                local_group_tokens_tensor = torch.tensor(local_group_tokens, dtype=torch.float32, device=self.device)
-                dist.all_reduce(local_group_tokens_tensor, op=dist.ReduceOp.SUM, group=None)
-                accumulation_group_tokens[group_start] = local_group_tokens_tensor.item()
+                dist.all_reduce(counts, op=dist.ReduceOp.SUM, group=None)
+
+            if mode == "token":
+                accumulation_counts[group_start] = counts.item()
             else:
-                accumulation_group_tokens[group_start] = local_group_tokens
-        return accumulation_group_tokens
+                accumulation_counts[group_start] = counts
+
+        return accumulation_counts
 
     def train(
         self,
@@ -1180,10 +1219,13 @@ class PolicyTrainerRayProcess(RayProcess):
             for epoch_idx in range(args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
-                accumulation_group_tokens = {}
-                if args.masked_mean_denominator == "token":
-                    accumulation_group_tokens = self.calculate_group_tokens(
-                        accumulation_steps, collated_query_responses, collated_response_masks, collated_tool_masks
+                accumulation_token_counts = {}
+                if args.masked_mean_denominator in ["token", "group"]:
+                    accumulation_token_counts = self.calculate_token_counts(
+                        accumulation_steps,
+                        collated_response_masks,
+                        collated_tool_masks,
+                        mode=args.masked_mean_denominator,
                     )
 
                 for i in range(len(collated_query_responses)):
@@ -1201,7 +1243,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     loss_axis = None
                     if args.masked_mean_denominator == "token":
                         group_start = (i // accumulation_steps) * accumulation_steps
-                        loss_denominator = accumulation_group_tokens[group_start]
+                        loss_denominator = accumulation_token_counts[group_start]
 
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
@@ -1318,10 +1360,37 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Define reduction function based on configuration
                     if args.masked_mean_denominator == "group":
+                        group_start = (i // accumulation_steps) * accumulation_steps
+                        group_counts = accumulation_token_counts[group_start]
+                        total_active_groups = (group_counts > 0).sum().item()
                         group_ids = (mb_response_masks[:, 1:] - 1) // args.num_samples_per_prompt_rollout
 
-                        def reduce_fn(v, m, a=None, d=None, group_ids=group_ids):
-                            return masked_group_mean(v, m, group_ids)
+                        def reduce_fn(v, m, a=None, d=None):
+                            flat_v = v.flatten()
+                            flat_m = m.flatten().bool()
+                            flat_g = group_ids.flatten()
+
+                            # if no valid tokens in batch.
+                            if not flat_m.any():
+                                return torch.tensor(0.0, device=v.device)
+
+                            valid_v = flat_v[flat_m]
+                            valid_g = flat_g[flat_m]
+
+                            valid_counts = group_counts[valid_g]
+                            # Avoid division by zero if count is 0 (should not happen for valid tokens)
+                            valid_counts = torch.max(
+                                valid_counts, torch.tensor(1.0, device=valid_counts.device, dtype=valid_counts.dtype)
+                            )
+
+                            weights = 1.0 / (valid_counts * total_active_groups)
+
+                            # Sum weighted values
+                            loss = (valid_v * weights).sum()
+                            scale = dist.get_world_size() if dist.is_available() and dist.is_initialized() else 1
+                            scale *= accumulation_steps
+
+                            return loss * scale
                     else:
                         reduce_fn = masked_mean
 
@@ -1349,7 +1418,16 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
                     else:
                         loss = reduce_fn(pg_loss_max, mb_response_masks_bool, loss_axis, loss_denominator)
-                    if args.masked_mean_denominator != "token":
+                    if args.masked_mean_denominator == "token":
+                        # In token mode, we divide by the GLOBAL total number of tokens.
+                        # DDP averages gradients across ranks (dividing by world_size).
+                        # To get the true global mean gradient (sum_all_gradients / global_tokens),
+                        # we must multiply by world_size to cancel out DDP's division.
+                        if dist.is_available() and dist.is_initialized():
+                            loss *= dist.get_world_size()
+                    elif args.masked_mean_denominator != "group":
+                        # For "group" mode, the scaling is handled inside reduce_fn.
+                        # For default (None) or numeric modes, we divide by accumulation_steps here.
                         loss = loss / accumulation_steps
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
