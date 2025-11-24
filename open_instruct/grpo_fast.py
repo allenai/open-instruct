@@ -1052,6 +1052,38 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return collated_logprobs, collated_entropies
 
+    def calculate_group_tokens(
+        self,
+        accumulation_steps: int,
+        collated_query_responses: list[torch.Tensor],
+        collated_response_masks: list[torch.Tensor],
+        collated_tool_masks: list[torch.Tensor],
+    ) -> dict[int, float]:
+        accumulation_group_tokens = {}
+        for group_start in range(0, len(collated_query_responses), accumulation_steps):
+            group_end = min(group_start + accumulation_steps, len(collated_query_responses))
+            # Calculate local tokens for all minibatches in this accumulation group
+            local_group_tokens = 0.0
+            for i in range(group_start, group_end):
+                mb_response_masks = collated_response_masks[i]
+                mb_response_masks_bool = mb_response_masks[:, 1:].bool()
+                if self.args.mask_tool_use and self.args.tool_use:
+                    mb_tool_mask = collated_tool_masks[i]
+                    mb_response_masks_bool = mb_response_masks_bool & mb_tool_mask[:, 1:].bool()
+                local_group_tokens += mb_response_masks_bool.sum().item()
+
+            # Gather total tokens across all ranks for this accumulation group
+            if dist.is_available() and dist.is_initialized():
+                dist.barrier()
+                local_group_tokens_tensor = torch.tensor(
+                    local_group_tokens, dtype=torch.float32, device=self.device
+                )
+                dist.all_reduce(local_group_tokens_tensor, op=dist.ReduceOp.SUM, group=None)
+                accumulation_group_tokens[group_start] = local_group_tokens_tensor.item()
+            else:
+                accumulation_group_tokens[group_start] = local_group_tokens
+        return accumulation_group_tokens
+
     def train(
         self,
         collated_query_responses,
@@ -1161,28 +1193,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 # This ensures all minibatches in an accumulation group are normalized by the same total
                 accumulation_group_tokens = {}
                 if args.masked_mean_denominator == "token":
-                    for group_start in range(0, len(collated_query_responses), accumulation_steps):
-                        group_end = min(group_start + accumulation_steps, len(collated_query_responses))
-                        # Calculate local tokens for all minibatches in this accumulation group
-                        local_group_tokens = 0.0
-                        for i in range(group_start, group_end):
-                            mb_response_masks = collated_response_masks[i]
-                            mb_response_masks_bool = mb_response_masks[:, 1:].bool()
-                            if args.mask_tool_use and args.tool_use:
-                                mb_tool_mask = collated_tool_masks[i]
-                                mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
-                            local_group_tokens += mb_response_masks_bool.sum().item()
-
-                        # Gather total tokens across all ranks for this accumulation group
-                        if dist.is_available() and dist.is_initialized():
-                            dist.barrier()
-                            local_group_tokens_tensor = torch.tensor(
-                                local_group_tokens, dtype=torch.float32, device=self.device
-                            )
-                            dist.all_reduce(local_group_tokens_tensor, op=dist.ReduceOp.SUM, group=None)
-                            accumulation_group_tokens[group_start] = local_group_tokens_tensor.item()
-                        else:
-                            accumulation_group_tokens[group_start] = local_group_tokens
+                    accumulation_group_tokens = self.calculate_group_tokens(
+                        accumulation_steps,
+                        collated_query_responses,
+                        collated_response_masks,
+                        collated_tool_masks,
+                    )
 
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
@@ -1354,11 +1370,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         if args.load_ref_policy:
                             # NOTE: in packed implementation, kl calculation are averages over response tokens
                             kl1_stats[i] = masked_mean(
-                                kl1, mb_response_masks_bool, loss_axis, loss_denominator
+                                kl1, mb_response_masks_bool, loss_axis, stats_denominator
                             ).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, loss_axis, loss_denominator).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, loss_axis, loss_denominator).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, loss_axis, loss_denominator).float()
+                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, loss_axis, stats_denominator).float()
+                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, loss_axis, stats_denominator).float()
+                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, loss_axis, stats_denominator).float()
                         if args.kl_estimator == "kl1":
                             kl_loss_stats[i] = kl1_stats[i] * args.beta
                         elif args.kl_estimator == "kl2":

@@ -528,13 +528,14 @@ class TestModelDims(unittest.TestCase):
 
 
 @pytest.mark.parametrize(
-    "denominator,axis,expected", [(None, None, None), ("token", None, "token"), (10.0, None, 10.0), (5, 1, 5)]
+    "denominator,expected",
+    [(None, None), ("token", "token"), ("num_prompts", "num_prompts"), (10.0, 10.0), (5, 5)],
 )
-def test_get_denominator_valid_inputs(denominator, axis, expected):
-    assert utils.get_denominator(denominator, axis) == expected
+def test_get_denominator_valid_inputs(denominator, expected):
+    assert utils.get_denominator(denominator) == expected
 
 
-@pytest.mark.parametrize("denominator,axis", [("token", 0), ("not-token", None), (0, None), (-1.0, None)])
-def test_get_denominator_invalid_inputs(denominator, axis):
+@pytest.mark.parametrize("denominator", ["not-token", 0, -1.0])
+def test_get_denominator_invalid_inputs(denominator):
     with pytest.raises(AssertionError):
-        utils.get_denominator(denominator, axis)
+        utils.get_denominator(denominator)
