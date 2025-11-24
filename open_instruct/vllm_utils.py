@@ -151,21 +151,13 @@ async def process_request_async(
     iteration = 0
 
     while True:
-        sampling_params_dict = dataclasses.asdict(current_sampling_params)
-        sampling_params_dict.update(
-            {
-                "model": actor.model_name,
-                "prompt": current_prompt["prompt_token_ids"],
-                "n": 1,
-                "extra_body": {"return_token_ids": True},
-            }
+        api_response = await actor.openai_client.completions.create(
+            model=actor.model_name,
+            prompt=current_prompt["prompt_token_ids"],
+            n=1,
+            extra_body={"return_token_ids": True},
+            **dataclasses.asdict(current_sampling_params),
         )
-        if not sampling_params_dict.get("stop"):
-            sampling_params_dict["stop"] = None
-        if not sampling_params_dict.get("logprobs"):
-            sampling_params_dict["logprobs"] = None
-
-        api_response = await actor.openai_client.completions.create(**sampling_params_dict)
 
         iteration += 1
         choice = api_response.choices[0]
