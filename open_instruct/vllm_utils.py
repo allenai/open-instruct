@@ -146,7 +146,7 @@ async def process_request_async(
 
     current_prompt = prompt
     current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
-    current_sampling_params = dataclasses.replace(sampling_params)
+    current_sampling_params = sampling_params
     prompt_logprobs = None
     iteration = 0
 
