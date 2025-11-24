@@ -232,12 +232,12 @@ class TestGrpoFastBase(unittest.TestCase):
         """Setup queues and add prompts to generator - common pattern."""
         # Queue size must be at least as large as the number of queries to avoid blocking
         queue_size = max(len(queries), num_engines * 2)
-        param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
+        prompt_Q = ray_queue.Queue(maxsize=queue_size)
         inference_results_Q = ray_queue.Queue(maxsize=queue_size)
         pending_queries_map = grpo_fast.PendingQueriesMap()
 
         # Track queues for cleanup
-        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
+        self._ray_queues.extend([prompt_Q, inference_results_Q])
 
         mock_generation_config = MagicMock()
         mock_generation_config.n = 4
@@ -250,17 +250,10 @@ class TestGrpoFastBase(unittest.TestCase):
                 RAW_PROMPT_KEY: raw_queries[index],
             }
             grpo_fast.add_prompt_to_generator(
-                example,
-                indices[index],
-                0,
-                training_step,
-                pending_queries_map,
-                param_prompt_Q,
-                mock_generation_config,
-                False,
+                example, indices[index], 0, training_step, pending_queries_map, prompt_Q, mock_generation_config, False
             )
 
-        return param_prompt_Q, inference_results_Q, pending_queries_map
+        return prompt_Q, inference_results_Q, pending_queries_map
 
 
 class TestGrpoFastVLLM(TestGrpoFastBase):
@@ -279,11 +272,11 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         prompt_token_ids = tokenizer.encode(test_prompt, return_tensors="pt").tolist()[0]
 
         # Create Ray queues
-        param_prompt_Q = ray_queue.Queue(maxsize=1)
+        prompt_Q = ray_queue.Queue(maxsize=1)
         inference_results_Q = ray_queue.Queue(maxsize=1)
 
         # Track queues for cleanup
-        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
+        self._ray_queues.extend([prompt_Q, inference_results_Q])
 
         # Create vLLM engines with queues
         vllm_engines = create_vllm_engines(
@@ -297,7 +290,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             enable_prefix_caching=False,
             max_model_len=512,
             vllm_gpu_memory_utilization=0.5,  # Use less GPU memory for testing
-            prompt_queue=param_prompt_Q,
+            prompt_queue=prompt_Q,
             results_queue=inference_results_Q,
         )
 
@@ -313,9 +306,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         [e.process_from_queue.remote() for e in vllm_engines]
 
         # Put the test prompt in the queue using PromptRequest
-        param_prompt_Q.put(
-            PromptRequest(prompt=prompt_token_ids, dataset_index=0, generation_config=generation_config)
-        )
+        prompt_Q.put(PromptRequest(prompt=prompt_token_ids, dataset_index=0, generation_config=generation_config))
 
         # Get the result
         result = inference_results_Q.get()
@@ -334,7 +325,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         self.assertGreater(len(generated_text), 0)
 
         # Send stop signal
-        param_prompt_Q.put(None)
+        prompt_Q.put(None)
 
     @parameterized.expand([(1, 16), (2, 32), (4, 64), (8, 128)])
     def test_batch_splitting_and_engine_configurations(self, vllm_num_engines: int, num_unique_prompts_rollout: int):
@@ -345,7 +336,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
+        prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
@@ -353,12 +344,12 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         self.assertEqual(len(pending_queries_map), num_unique_prompts_rollout)
 
         # Verify that we have the expected number of items in the queue (one per prompt)
-        self.assertEqual(param_prompt_Q.qsize(), num_unique_prompts_rollout)
+        self.assertEqual(prompt_Q.qsize(), num_unique_prompts_rollout)
 
         # Simulate vLLM processing
         batch_idx = 0
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
             self.assertIsInstance(request, PromptRequest)
             self.assertEqual(request.training_step, 1)
             self.assertIsInstance(request.dataset_index, int)
@@ -430,14 +421,14 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
+        prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
         # Simulate vLLM processing
         batch_idx = 0
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
             mock_result = self.create_mock_result(request.dataset_index, request.epoch_number)
             inference_results_Q.put(mock_result)
             batch_idx += 1
@@ -475,7 +466,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
+        prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
@@ -489,8 +480,8 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 
         # Simulate vLLM processing with multiple samples
         batch_idx = 0
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
             mock_result = self.create_mock_result(request.dataset_index, request.epoch_number, num_samples_per_prompt)
             inference_results_Q.put(mock_result)
             batch_idx += 1
@@ -595,14 +586,14 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         tokenizer, reward_fn = self.create_mock_tokenizer_and_reward_fn()
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
+        prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
             queries, ground_truths, datasets, raw_queries, indices, num_engines
         )
 
         # Get all requests and process in reverse order
         requests = []
-        while not param_prompt_Q.empty():
-            requests.append(param_prompt_Q.get())
+        while not prompt_Q.empty():
+            requests.append(prompt_Q.get())
 
         # Put results back in REVERSE order to simulate out-of-order processing
         for request in reversed(requests):
@@ -751,11 +742,11 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         num_queries = 4
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
-        param_prompt_Q = ray_queue.Queue(maxsize=num_queries)
+        prompt_Q = ray_queue.Queue(maxsize=num_queries)
         pending_queries_map = grpo_fast.PendingQueriesMap()
 
         # Track queue for cleanup
-        self._ray_queues.append(param_prompt_Q)
+        self._ray_queues.append(prompt_Q)
 
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
@@ -773,20 +764,18 @@ class TestStreamingAccumulation(TestGrpoFastBase):
                 epoch_number=0,
                 training_step=1,
                 pending_queries_map=pending_queries_map,
-                param_prompt_Q=param_prompt_Q,
+                prompt_Q=prompt_Q,
                 generation_config=mock_generation_config,
                 is_eval=False,
             )
 
         # Should have 4 batches (one for each query)
-        self.assertEqual(
-            param_prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries"
-        )
+        self.assertEqual(prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries")
 
         # Each request should have exactly 1 prompt
         prompt_count = 0
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
             self.assertIsInstance(request, PromptRequest)
             self.assertIsNotNone(request.prompt, "Each request should have a prompt")
             prompt_count += 1
@@ -802,11 +791,11 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         num_queries = 7  # 7/3 = ceil(2.33) = 3, so distribution should be [3, 3, 1]
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
-        param_prompt_Q = ray_queue.Queue(maxsize=num_queries)
+        prompt_Q = ray_queue.Queue(maxsize=num_queries)
         pending_queries_map = grpo_fast.PendingQueriesMap()
 
         # Track queue for cleanup
-        self._ray_queues.append(param_prompt_Q)
+        self._ray_queues.append(prompt_Q)
 
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
@@ -828,15 +817,15 @@ class TestStreamingAccumulation(TestGrpoFastBase):
                 epoch_number=0,
                 training_step=1,
                 pending_queries_map=pending_queries_map,
-                param_prompt_Q=param_prompt_Q,
+                prompt_Q=prompt_Q,
                 generation_config=mock_generation_config,
                 is_eval=False,
             )
 
         # With single-prompt architecture, verify we have the right number of individual requests
         request_count = 0
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
             self.assertIsInstance(request, PromptRequest)
             self.assertIsNotNone(request.prompt, "Each request should have a prompt")
             request_count += 1
