@@ -503,15 +503,12 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
         add_request(actor, request)
 
 
-def find_free_port(start_port: int = 8000, end_port: int = 9000) -> int:
-    for port in range(start_port, end_port):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(("127.0.0.1", port))
-                return port
-        except OSError:
-            continue
-    raise RuntimeError(f"No free port found in range {start_port}-{end_port}")
+def find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+    return port
 
 
 def _create_server_args(model_path: str) -> argparse.Namespace:
