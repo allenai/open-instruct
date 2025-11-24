@@ -37,46 +37,21 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.effective_size = len(self.dataset) - (len(self.dataset) % batch_size)
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
-        """Return an iterable over all batches in the epoch.
-
-        Part of the DataLoaderBase API. This method yields individual items from the
-        dataset, starting from the current batch position.
-
-        Returns:
-            An iterable over dataset items for the current epoch.
-        """
+        """Return an iterable over all batches in the epoch."""
         for i in range(self.batches_processed, self.effective_size):
             yield self.dataset[i]
 
     @property
     def total_batches(self) -> int:
-        """Return the total number of batches in an epoch.
-
-        Part of the DataLoaderBase API.
-
-        Returns:
-            The total number of batches available in the dataset.
-        """
+        """Return the total number of batches in an epoch."""
         return self.effective_size
 
-    def state_dict(self) -> dict[str, Any]:
-        """Return a state dictionary for checkpointing.
-
-        Part of the DataLoaderBase API.
-
-        Returns:
-            A dictionary containing the epoch and batches_processed.
-        """
+    def state_dict(self) -> dict[str, float]:
+        """Return a state dictionary for checkpointing."""
         return {"epoch": self._epoch, "batches_processed": self.batches_processed}
 
-    def load_state_dict(self, state: dict[str, Any]) -> None:
-        """Load a state dictionary to restore the data loader's state.
-
-        Part of the DataLoaderBase API.
-
-        Args:
-            state: A state dictionary from state_dict().
-        """
+    def load_state_dict(self, state: dict[str, float]) -> None:
+        """Load a state dictionary to restore the data loader's state."""
         self._epoch = state["epoch"]
         self.batches_processed = state["batches_processed"]
         if self._epoch is not None:
@@ -85,8 +60,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
         """Reshuffle the dataset for a new epoch.
-
-        Part of the DataLoaderBase API. Should be called before starting each epoch.
 
         Args:
             epoch: The epoch number. If None, increments from the current epoch
@@ -103,7 +76,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
 
-        Part of the DataLoaderBase API. Used by the trainer to do a dry-run of the
+        Used by the trainer to do a dry-run of the
         forward and backward pass before training officially starts.
 
         Returns:
