@@ -22,7 +22,7 @@ python mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 8 \
+    --num_nodes 12 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
@@ -31,7 +31,7 @@ python mason.py \
 \&\& uv run open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
-    --async_steps 4 \
+    --async_steps 8 \
     --inflight_updates \
     --no_resample_pass_rate 0.875 \
     --truncated_importance_sampling_ratio_cap 2.0 \
@@ -57,7 +57,7 @@ python mason.py \
     --total_episodes 512256 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
-    --vllm_num_engines 56 \
+    --vllm_num_engines 88 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
