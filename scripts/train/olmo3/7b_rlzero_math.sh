@@ -3,12 +3,10 @@
 MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
 DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
-# AIME 2024, 2025 local single-sample evals
-# Full, bootstrapped pass@32 evals must be run separately
-LOCAL_EVALS="allenai/aime2024-25-rlvr 1.0 allenai/aime2024-25-rlvr 1.0"
-LOCAL_EVAL_SPLITS="test_2024 test_2024 test_2025 test_2025"
+LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 16"
+LOCAL_EVAL_SPLITS="train train"
 
-EVALS="aime:zs_cot_r1::pass_at_32_2024_dapo,aime:zs_cot_r1::pass_at_32_2025_dapo"
+EVALS="aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero"
 
 EXP_NAME="olmo3_7b_rlzero_math"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
@@ -35,12 +33,12 @@ python mason.py \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \
+    --no_resample_pass_rate 0.875 \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
-    --active_fill_completions \
-    --no_resample_solve_rate 0.9 \
-    --num_samples_per_prompt_rollout 16 \
-    --num_unique_prompts_rollout 16 \
+    --active_sampling \
+    --num_samples_per_prompt_rollout 8 \
+    --num_unique_prompts_rollout 32 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -50,21 +48,21 @@ python mason.py \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
-    --response_length 12000 \
-    --pack_length 32768 \
+    --response_length 16384 \
+    --pack_length 18432 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name olmo_thinker_rlzero \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 512000 \
+    --total_episodes 512256 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
-    --vllm_num_engines 64 \
+    --vllm_num_engines 56 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 100 \
+    --local_eval_every 25 \
     --save_freq 100 \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
@@ -75,7 +73,7 @@ python mason.py \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
+    --eval_on_step_0 True \
     --oe_eval_tasks $EVALS \
     --oe_eval_gpu_multiplier 4 \
-    --oe_eval_beaker_image michaeln/oe_eval_rlzero \
-    --output_dir /output/olmo3-7b-rlzero-math/checkpoints $@
+    --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@
