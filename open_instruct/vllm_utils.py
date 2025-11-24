@@ -32,6 +32,7 @@ from datetime import timedelta
 from typing import Any
 
 import aiohttp
+import backoff
 import openai
 import ray
 import torch
@@ -52,9 +53,12 @@ from torch.distributed.distributed_c10d import (
 )
 from vllm.entrypoints.launcher import serve_http
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
+from vllm.entrypoints.openai.cli_args import make_arg_parser
+from vllm.utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
+from open_instruct.actor_manager import find_free_port
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ModelDims, ray_get_with_progress
@@ -251,7 +255,7 @@ async def process_request_async(
             "request_output": vllm.RequestOutput(
                 request_id=sub_request_id,
                 prompt="",
-                prompt_token_ids=current_prompt_token_ids,
+                prompt_token_ids=actor.request_metadata[base_request_id]["prompt_token_ids"],
                 prompt_logprobs=prompt_logprobs,
                 outputs=[complete_output],
                 finished=True,
@@ -496,36 +500,11 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
         add_request(actor, request)
 
 
-def find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        s.listen(1)
-        port = s.getsockname()[1]
-    return port
-
-
 def _create_server_args(model_path: str) -> argparse.Namespace:
-    """Create OpenAI API server arguments using vLLM's parser.
-
-    Uses vLLM's official argument parser to get all default values,
-    then overrides settings for internal-only use.
-
-    Args:
-        model_path: The model path from engine config
-
-    Returns:
-        Complete argparse.Namespace with all required attributes
-    """
-    from vllm.entrypoints.openai.cli_args import make_arg_parser
-    from vllm.utils import FlexibleArgumentParser
-
     parser = FlexibleArgumentParser()
     parser = make_arg_parser(parser)
-
     args = parser.parse_args(["--model", model_path])
-
     args.disable_fastapi_docs = True
-
     return args
 
 
@@ -694,9 +673,8 @@ class LLMRayActor:
         self.model_name = self.llm_engine.vllm_config.model_config.model
 
         logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
-        start_time = time.time()
-        timeout = 60
 
+        @backoff.on_exception(backoff.constant, aiohttp.ClientError, max_time=60, interval=0.5)
         async def check_health():
             async with (
                 aiohttp.ClientSession() as session,
@@ -704,18 +682,11 @@ class LLMRayActor:
                     f"http://127.0.0.1:{self.server_port}/health", timeout=aiohttp.ClientTimeout(total=2.0)
                 ) as response,
             ):
-                return response.status == 200
+                if response.status != 200:
+                    raise aiohttp.ClientError(f"Health check failed with status {response.status}")
 
-        while time.time() - start_time < timeout:
-            try:
-                if asyncio.run(check_health()):
-                    logger.info("vLLM OpenAI API server is ready")
-                    return
-            except aiohttp.ClientError:
-                pass
-            time.sleep(0.5)
-
-        raise RuntimeError(f"vLLM OpenAI API server did not start within {timeout} seconds")
+        asyncio.run(check_health())
+        logger.info("vLLM OpenAI API server is ready")
 
     def get_model_dims(self):
         """Get only the model dimensions without loading weights."""
