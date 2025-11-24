@@ -33,7 +33,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen2.5-0.5B \
+    --model_name_or_path Qwen/Qwen2.5-1.5B \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
@@ -57,4 +57,6 @@ uv run python mason.py \
     --push_to_hub false \
     --active_sampling \
     --async_steps 8 \
+    --no_resampling_pass_rate 0.6 \
+    --verbose \
     --single_gpu_mode

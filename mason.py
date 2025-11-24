@@ -13,6 +13,8 @@ import beaker
 from rich.console import Console
 from rich.text import Text
 
+from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS
+
 console = Console()
 
 
@@ -23,8 +25,6 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/dpo_tune_cache.py",
     "open_instruct/grpo_fast.py",
     "open_instruct/ppo.py",
-    "open_instruct/grpo_vllm_thread_ray_gtrl.py",
-    "open_instruct/ppo_vllm_thread_ray_gtrl.py",
     "open_instruct/reward_modeling.py",
 ]
 
@@ -86,11 +86,6 @@ def parse_env_var(env_var_str: str) -> dict[str, str]:
         raise argparse.ArgumentTypeError("Environment variable name cannot be empty")
     return {"name": name, "value": value}
 
-
-WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
-GCP_CLUSTERS = ["ai2/augusta"]
-
-INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
 
 # by default, we turn off vllm compile cache
 # torch compile caching seems consistently broken, but the actual compiling isn't.
@@ -196,8 +191,8 @@ def get_args():
     )
     parser.add_argument(
         "--timeout",
-        type=int,
-        help="Timeout for the Beaker task in seconds (e.g., 7200 for 2 hours). If not specified, no timeout is set.",
+        type=str,
+        help="Timeout for the Beaker task as a duration string (e.g., '15m', '1h', '2h30m'). If not specified, no timeout is set.",
         default=None,
     )
     # Split up the mason args from the Python args.
@@ -589,24 +584,29 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     model_revision = command[idx + 1]
                     break
 
-            commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
-            if os.path.exists(model_name_or_path):
-                path = model_name_or_path
-                assert args.gs_model_name is not None, "for local models to upload to gs, you must set --gs_model_name"
-                model_name_or_path = args.gs_model_name
-                commit_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
-                console.log(
-                    f"Local model is already downloaded, using gs_model_name {model_name_or_path}, with hash of model path {commit_hash}"
-                )
+            if model_name_or_path.startswith("gs://"):
+                gs_saved_path = model_name_or_path
             else:
-                download_from_hf(model_name_or_path, model_revision)  # first download the model
-                path = download_from_hf(model_name_or_path, model_revision)  # then get the path
-            gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_models/{model_name_or_path}/{commit_hash}"
-            gs_folder = gs_folder_exists(
-                gs_saved_path
-            )  # race condition exists, but it's fine since we are launching mason sequentially
-            if not gs_folder:
-                upload_to_gs_bucket(path, gs_saved_path)
+                commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
+                if os.path.exists(model_name_or_path):
+                    path = model_name_or_path
+                    assert args.gs_model_name is not None, (
+                        "for local models to upload to gs, you must set --gs_model_name"
+                    )
+                    model_name_or_path = args.gs_model_name
+                    commit_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
+                    console.log(
+                        f"Local model is already downloaded, using gs_model_name {model_name_or_path}, with hash of model path {commit_hash}"
+                    )
+                else:
+                    download_from_hf(model_name_or_path, model_revision)  # first download the model
+                    path = download_from_hf(model_name_or_path, model_revision)  # then get the path
+                gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_models/{model_name_or_path}/{commit_hash}"
+                gs_folder = gs_folder_exists(
+                    gs_saved_path
+                )  # race condition exists, but it's fine since we are launching mason sequentially
+                if not gs_folder:
+                    upload_to_gs_bucket(path, gs_saved_path)
 
             download_path = gs_saved_path.replace("gs://", "/gs/")
             download_path_without_last_folder = download_path.rsplit("/", 1)[0]
@@ -764,6 +764,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         ),
         resources=beaker.BeakerTaskResources(gpu_count=args.gpus, shared_memory=args.shared_memory),
         replicas=args.num_nodes,
+        timeout=args.timeout,
     )
     if args.num_nodes > 1:
         spec.leader_selection = True
@@ -773,9 +774,6 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         spec.host_networking = False
     else:
         spec.host_networking = True
-
-    if args.timeout is not None:
-        spec.timeout = args.timeout
 
     return spec
 

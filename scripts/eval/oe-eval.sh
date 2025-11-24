@@ -207,7 +207,7 @@ NEXT_MODEL_DEV=(
     
     # Reasoning
     "bbh:cot::hamish_zs_reasoning_deepseek_v2" # OLD: "bbh:cot::hamish_zs_reasoning_deepseek"
-    "gpqa:0shot_cot::hamish_zs_reasoning_deepseek"
+    "gpqa:0shot_cot::qwen3-instruct"
     "zebralogic::hamish_zs_reasoning_deepseek"
     "agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek"
 
