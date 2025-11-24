@@ -814,12 +814,14 @@ class CodeVerifier(VerifierFunction):
 
     def extract_python_code(self, model_output: str) -> str:
         """Extract the last code block between ``` markers from the model output."""
+        # Find content between ``` markers
         pattern = r"```(?:python)?(.*?)```"
         matches = re.findall(pattern, model_output, re.DOTALL)
 
         if not matches:
             return model_output
 
+        # Return the last match, stripped of whitespace
         return matches[-1].strip()
 
     @classmethod
@@ -851,14 +853,17 @@ class CodeVerifier(VerifierFunction):
         Returns:
             VerificationResult with score as the pass rate of test cases
         """
+        # Extract Python code from the model output
         python_code = self.extract_python_code(prediction)
 
+        # Test data
         payload = {
             "program": python_code,
             "tests": label,
             "max_execution_time": self.verifier_config.code_max_execution_time,
         }
 
+        # Calculate timeout
         http_timeout = aiohttp.ClientTimeout(
             total=max(30, min(300, self.verifier_config.code_max_execution_time * 10))
         )
@@ -882,6 +887,7 @@ class CodeVerifier(VerifierFunction):
             score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
             if self.apply_perf_penalty and score > 0.0:
                 runtimes = result["runtimes"]
+                # for each runtime, multiply the percent of the timeout that was used
                 multipliers = [
                     (self.verifier_config.code_max_execution_time - runtime)
                     / self.verifier_config.code_max_execution_time
