@@ -212,8 +212,6 @@ class Args:
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
     # Algorithm
-    async_steps: int = 1
-    """Number of steps ahead to generate responses. Fully synchronous training is not supported, so async_steps must be greater than 0. The trainer learns from a policy up to async_steps old like Cleanba (https://arxiv.org/abs/2310.00036)"""
     num_epochs: int = 1
     """the number of epochs to train"""
     num_mini_batches: int = 1
@@ -502,24 +500,6 @@ class Args:
             self.max_possible_score += self.verification_reward
         if self.apply_r1_style_format_reward and self.additive_format_reward:
             self.max_possible_score += self.r1_style_format_reward
-
-        if self.active_sampling:
-            assert self.async_steps > 1, (
-                "With active_sampling, you should set async_steps > 1 to account for filtering of the first batch. "
-                "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
-                "prompt will cause the trainer to stall waiting for more data  . "
-            )
-            assert self.filter_zero_std_samples, (
-                "filter_zero_std_samples must be True when active_sampling is True. "
-                "Active sampling requires filtering to work correctly."
-            )
-        if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
-            raise ValueError(
-                "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
-                "as the reward standard deviation will always be 0, causing all samples to be filtered."
-            )
-        if self.async_steps < 1:
-            raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
 
 
 def masked_mean(

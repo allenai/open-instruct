@@ -81,6 +81,8 @@ class StreamingDataLoaderConfig:
                 "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
                 "as the reward standard deviation will always be 0, causing all samples to be filtered."
             )
+        if self.async_steps < 1:
+            raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
 
     def build(
         self,
