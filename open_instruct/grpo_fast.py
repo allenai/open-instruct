@@ -1801,7 +1801,7 @@ def create_model_and_optimizer(
     # Get and set KV cache max concurrency from the first engine (all engines have the same config)
     # fp8 kv cache for now forces v0 engine and breaks this.
     logger.info("[DEBUG] Setting up KV cache configuration...")
-    if vllm_engines and not args.use_fp8_kv_cache:
+    if vllm_engines:
         kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
         expected_batch_size = (
