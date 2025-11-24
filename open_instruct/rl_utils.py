@@ -260,11 +260,7 @@ def masked_mean(
     return (numerator / denom).mean()
 
 
-def masked_group_mean(
-    values: torch.Tensor,
-    mask: torch.Tensor,
-    group_ids: torch.Tensor,
-) -> torch.Tensor:
+def masked_group_mean(values: torch.Tensor, mask: torch.Tensor, group_ids: torch.Tensor) -> torch.Tensor:
     """
     Compute mean of tensor values masked by mask, but averaged per group first.
     1. Filter values and group_ids by mask.

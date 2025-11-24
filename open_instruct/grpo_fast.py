@@ -543,8 +543,6 @@ class Args:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
 
 
-
-
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
     padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
     if pin_memory:
@@ -1322,7 +1320,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     if args.masked_mean_denominator == "group":
                         group_ids = (mb_response_masks[:, 1:] - 1) // args.num_samples_per_prompt_rollout
 
-                        def reduce_fn(v, m, a=None, d=None):
+                        def reduce_fn(v, m, a=None, d=None, group_ids=group_ids):
                             return masked_group_mean(v, m, group_ids)
                     else:
                         reduce_fn = masked_mean
@@ -1363,9 +1361,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     with torch.no_grad():
                         if args.load_ref_policy:
                             # NOTE: in packed implementation, kl calculation are averages over response tokens
-                            kl1_stats[i] = reduce_fn(
-                                kl1, mb_response_masks_bool, loss_axis, stats_denominator
-                            ).float()
+                            kl1_stats[i] = reduce_fn(kl1, mb_response_masks_bool, loss_axis, stats_denominator).float()
                         kl2_stats[i] = reduce_fn(kl2, mb_response_masks_bool, loss_axis, stats_denominator).float()
                         kl3_stats[i] = reduce_fn(kl3, mb_response_masks_bool, loss_axis, stats_denominator).float()
                         kl4_stats[i] = reduce_fn(kl4, mb_response_masks_bool, loss_axis, stats_denominator).float()
