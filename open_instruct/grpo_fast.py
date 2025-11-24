@@ -1855,6 +1855,14 @@ def accumulate_inference_batches(
         all_reward_metrics.append(reward_metrics)
         all_percent_solved.append(percent_solved)
 
+    if len(results) == 0:
+        logger.warning(
+            "[Data Preparation Thread] All prompts were filtered during accumulation. "
+            f"Filtered: {total_filtered_prompts} (zero std: {filtered_prompt_zero}, "
+            f"solved: {filtered_prompt_solved}, nonzero: {filtered_prompt_nonzero})"
+        )
+        return None, None, None, None
+
     # Combine all results into a single GenerationResult
     combined_responses = []
     combined_finish_reasons = []
@@ -2008,6 +2016,9 @@ def data_preparation_thread(
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
                 return
+            if result is None:
+                logger.info("[Data Preparation Thread] All prompts filtered, skipping this training step")
+                continue
 
         getting_response_time = timer.duration
         scores = np.array(batch.scores)
