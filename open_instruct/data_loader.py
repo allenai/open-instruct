@@ -11,14 +11,11 @@ class HFDataLoader(data_loader.DataLoaderBase):
             work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=0
         )
 
-        self._source = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
-        self._rank = rank
-        self._world_size = world_size
+        dataset_with_indices = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
+        self.dataset = dataset_with_indices.shard(num_shards=world_size, index=rank).shuffle(seed=seed)
         self.seed = seed
         self._batch_size = batch_size
         self._exclude_set: set[int] = set()
-
-        self.dataset = self._source.shard(num_shards=world_size, index=rank).shuffle(seed=seed)
         self.effective_size = len(self.dataset) - (len(self.dataset) % batch_size)
         self._current_iter = None
 
@@ -60,10 +57,9 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._current_iter = None
 
     def _apply_exclude_and_shuffle(self, seed: int) -> None:
-        sharded = self._source.shard(num_shards=self._world_size, index=self._rank)
         if self._exclude_set:
-            sharded = sharded.filter(lambda x: x["dataset_index"] not in self._exclude_set)
-        self.dataset = sharded.shuffle(seed=seed)
+            self.dataset = self.dataset.filter(lambda x: x["dataset_index"] not in self._exclude_set)
+        self.dataset = self.dataset.shuffle(seed=seed)
         self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
 
     def reshuffle(self, epoch: int | None = None, **kwargs):
