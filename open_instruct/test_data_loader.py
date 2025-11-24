@@ -102,7 +102,7 @@ class TestHFDataLoader(unittest.TestCase):
         )
         new_loader.load_state_dict(state)
 
-        self.assertEqual(new_loader.epoch_number, loader.epoch_number)
+        self.assertEqual(new_loader._epoch, loader._epoch)
         self.assertEqual(new_loader.batches_processed, loader.batches_processed)
 
     def test_reproducibility_across_runs(self):
@@ -137,24 +137,26 @@ class TestHFDataLoader(unittest.TestCase):
         )
 
         loader.reshuffle(epoch=1)
+        loader_iter = iter(loader)
         first_10 = []
         for _ in range(10):
-            first_10.append(loader.next_item()["dataset_index"])
+            first_10.append(next(loader_iter)["dataset_index"])
 
         state = loader.state_dict()
 
         remaining_original = []
         for _ in range(40):
-            remaining_original.append(loader.next_item()["dataset_index"])
+            remaining_original.append(next(loader_iter)["dataset_index"])
 
         new_loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
         )
         new_loader.load_state_dict(state)
 
+        new_loader_iter = iter(new_loader)
         remaining_restored = []
         for _ in range(40):
-            remaining_restored.append(new_loader.next_item()["dataset_index"])
+            remaining_restored.append(next(new_loader_iter)["dataset_index"])
 
         self.assertEqual(remaining_original, remaining_restored)
 

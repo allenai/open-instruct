@@ -1631,6 +1631,7 @@ def accumulate_inference_batches(
     reward_fn: Callable,
     prompt_dataset: Dataset,
     hf_data_loader: data_loader.HFDataLoader | None = None,
+    hf_data_loader_iter: Iterator[dict[str, Any]] | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
     training_step: int | None = None,
     actor_manager=None,
@@ -1703,11 +1704,11 @@ def accumulate_inference_batches(
 
         # Replenish generation queue with new prompt
         if replenish_prompts:
-            next_example = hf_data_loader.next_item()
+            next_example = next(hf_data_loader_iter)
             add_prompt_to_generator(
                 next_example[INPUT_IDS_PROMPT_KEY],
                 next_example["dataset_index"],
-                hf_data_loader.epoch_number,
+                hf_data_loader._epoch or 0,
                 training_step,
                 param_prompt_Q,
                 generation_config,
@@ -1743,10 +1744,9 @@ def accumulate_inference_batches(
         percent_solved = np.mean(scores).item() / args.max_possible_score
         # Don't resample prompt that was solved at more than no_resample_positive_rate
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
-            hf_data_loader.exclude_index(result.dataset_index)
             total_no_resampled += 1
             logging.debug(
-                f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
+                f"[Data Preparation Thread] Prompt solved at {percent_solved}, total no resampled: {total_no_resampled}"
             )
 
         # Filter out zero std prompts
@@ -1912,6 +1912,7 @@ def data_preparation_thread(
     generation_config,
     resume_training_step: int,
     hf_data_loader: data_loader.HFDataLoader,
+    hf_data_loader_iter: Iterator[dict[str, Any]],
     train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
@@ -1928,6 +1929,7 @@ def data_preparation_thread(
                 tokenizer=tokenizer,
                 reward_fn=reward_fn,
                 hf_data_loader=hf_data_loader,
+                hf_data_loader_iter=hf_data_loader_iter,
                 prompt_dataset=train_dataset,
                 param_prompt_Q=param_prompt_Q,
                 training_step=training_step,
@@ -2918,6 +2920,7 @@ def run_training(
     vllm_engines,
     generation_configs,
     hf_data_loader,
+    hf_data_loader_iter,
     reward_fn,
     resume_training_step,
     episode,
@@ -2969,6 +2972,7 @@ def run_training(
         generation_configs["train"],
         resume_training_step,
         hf_data_loader,
+        hf_data_loader_iter,
         train_dataset,
         actor_manager,
         model_dims,
@@ -2984,11 +2988,11 @@ def run_training(
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps * args.num_unique_prompts_rollout):
-        example = hf_data_loader.next_item()
+        example = next(hf_data_loader_iter)
         add_prompt_to_generator(
             example[INPUT_IDS_PROMPT_KEY],
             example["dataset_index"],
-            hf_data_loader.epoch_number,
+            hf_data_loader._epoch or 0,
             resume_training_step,
             param_prompt_Q,
             generation_configs["train"],
@@ -3040,7 +3044,7 @@ def run_training(
                 add_prompt_to_generator(
                     eval_example[INPUT_IDS_PROMPT_KEY],
                     eval_index,
-                    hf_data_loader.epoch_number,
+                    hf_data_loader._epoch or 0,
                     training_step,
                     param_prompt_Q,
                     generation_configs["eval"],
@@ -3207,6 +3211,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     else:
         hf_data_loader.reshuffle()
 
+    hf_data_loader_iter = iter(hf_data_loader)
+
     # Create additional queues (main queues already created above)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     generate_metrics_Q = Queue(maxsize=args.async_steps)
@@ -3227,6 +3233,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             vllm_engines,
             generation_configs,
             hf_data_loader,
+            hf_data_loader_iter,
             reward_fn,
             resume_training_step,
             episode,
