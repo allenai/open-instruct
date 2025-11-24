@@ -1855,10 +1855,6 @@ def accumulate_inference_batches(
         all_reward_metrics.append(reward_metrics)
         all_percent_solved.append(percent_solved)
 
-    if training_step is not None and training_step % 2 == 0:
-        logger.warning(f"[TEMPORARY TEST CODE] Artificially clearing results for training_step {training_step}")
-        results = []
-
     if len(results) == 0:
         logger.warning(
             "[Data Preparation Thread] All prompts were filtered during accumulation. "
