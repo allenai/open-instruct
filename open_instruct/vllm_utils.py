@@ -135,42 +135,46 @@ async def process_request_async(
     current_prompt = prompt
     current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
     current_sampling_params = sampling_params.clone()
-    final_prompt_token_ids = None
+    prompt_logprobs = None
     iteration = 0
 
     while True:
-        api_response = await actor.openai_client.completions.create(
-            model=actor.model_name,
-            prompt=current_prompt["prompt_token_ids"],
-            temperature=current_sampling_params.temperature,
-            top_p=current_sampling_params.top_p,
-            n=1,
-            max_tokens=current_sampling_params.max_tokens,
-            stop=current_sampling_params.stop if current_sampling_params.stop else None,
-            seed=current_sampling_params.seed,
-            logprobs=current_sampling_params.logprobs if current_sampling_params.logprobs else None,
-            extra_body={"return_token_ids": True},
+        sampling_params_dict = current_sampling_params.model_dump()
+        sampling_params_dict.update(
+            {
+                "model": actor.model_name,
+                "prompt": current_prompt["prompt_token_ids"],
+                "n": 1,
+                "extra_body": {"return_token_ids": True},
+            }
         )
+        if not sampling_params_dict.get("stop"):
+            sampling_params_dict["stop"] = None
+        if not sampling_params_dict.get("logprobs"):
+            sampling_params_dict["logprobs"] = None
+
+        api_response = await actor.openai_client.completions.create(**sampling_params_dict)
 
         iteration += 1
         choice = api_response.choices[0]
 
-        if final_prompt_token_ids is None:
-            final_prompt_token_ids = choice.prompt_token_ids
+        if prompt_logprobs is None and hasattr(choice, "prompt_logprobs"):
+            prompt_logprobs = choice.prompt_logprobs
 
-        token_ids = choice.token_ids
-        accumulated_tokens.extend(token_ids)
+        accumulated_tokens.extend(choice.token_ids)
 
         if choice.logprobs and choice.logprobs.token_logprobs:
             logprobs_dicts = [
                 {token_id: types.SimpleNamespace(logprob=logprob)}
-                for token_id, logprob in zip(token_ids, choice.logprobs.token_logprobs)
+                for token_id, logprob in zip(choice.token_ids, choice.logprobs.token_logprobs)
             ]
             accumulated_logprobs.extend(logprobs_dicts)
         else:
-            accumulated_logprobs.extend([{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in token_ids])
+            accumulated_logprobs.extend(
+                [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in choice.token_ids]
+            )
 
-        masks.extend([1] * len(token_ids))
+        masks.extend([1] * len(choice.token_ids))
 
         output_text = choice.text
         finish_reason = choice.finish_reason
@@ -222,7 +226,6 @@ async def process_request_async(
 
         current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
         current_prompt_token_ids = prompt_and_tool_output
-        final_prompt_token_ids = prompt_and_tool_output
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
 
@@ -258,8 +261,8 @@ async def process_request_async(
             "request_output": vllm.RequestOutput(
                 request_id=sub_request_id,
                 prompt="",
-                prompt_token_ids=final_prompt_token_ids,
-                prompt_logprobs=None,
+                prompt_token_ids=current_prompt_token_ids,
+                prompt_logprobs=prompt_logprobs,
                 outputs=[complete_output],
                 finished=True,
             ),
