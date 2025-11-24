@@ -13,7 +13,6 @@ import torch
 from parameterized import parameterized
 from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
-from vllm import SamplingParams
 
 from open_instruct import grpo_fast, rl_utils, utils
 from open_instruct.dataset_transformation import (
@@ -23,7 +22,7 @@ from open_instruct.dataset_transformation import (
     VERIFIER_SOURCE_KEY,
 )
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.vllm_utils import create_vllm_engines
+from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
 
 class TestGrpoFastBase(unittest.TestCase):
@@ -301,13 +300,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             results_queue=inference_results_Q,
         )
 
-        # Set up generation config
-        generation_config = SamplingParams(
-            temperature=0.0,  # Deterministic generation
-            top_p=1.0,
-            max_tokens=5,
-            seed=42,
-        )
+        generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=5, seed=42)
 
         # Start vLLM engines to process from queues
         [e.process_from_queue.remote() for e in vllm_engines]

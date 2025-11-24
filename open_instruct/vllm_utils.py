@@ -17,6 +17,7 @@
 
 import argparse
 import asyncio
+import dataclasses
 import os
 import queue
 import socket
@@ -65,6 +66,17 @@ NUM_TOOL_WORKERS = 20
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 120
+
+
+@dataclasses.dataclass
+class SamplingConfig:
+    temperature: float = 0.7
+    top_p: float = 1.0
+    max_tokens: int = 256
+    n: int = 1
+    stop: list[str] | None = None
+    seed: int | None = None
+    logprobs: int | None = 1
 
 
 def assert_threaded_actor(instance):
@@ -119,7 +131,7 @@ async def process_request_async(
     sub_request_id: str,
     base_request_id: str,
     prompt: vllm.TokensPrompt,
-    sampling_params: vllm.SamplingParams,
+    sampling_params: SamplingConfig,
 ):
     """Process a single async request with tool support, awaiting tools inline."""
     accumulated_tokens = []
@@ -134,12 +146,12 @@ async def process_request_async(
 
     current_prompt = prompt
     current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
-    current_sampling_params = sampling_params.clone()
+    current_sampling_params = dataclasses.replace(sampling_params)
     prompt_logprobs = None
     iteration = 0
 
     while True:
-        sampling_params_dict = current_sampling_params.model_dump()
+        sampling_params_dict = dataclasses.asdict(current_sampling_params)
         sampling_params_dict.update(
             {
                 "model": actor.model_name,
@@ -226,8 +238,7 @@ async def process_request_async(
 
         current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
         current_prompt_token_ids = prompt_and_tool_output
-        current_sampling_params = sampling_params.clone()
-        current_sampling_params.max_tokens = new_sample_tokens
+        current_sampling_params = dataclasses.replace(sampling_params, max_tokens=new_sample_tokens)
 
     cumulative_logprob = sum(
         list(logprob_dict.values())[0].logprob for logprob_dict in accumulated_logprobs if logprob_dict
@@ -312,7 +323,7 @@ def get_triggered_tool(
     tools: dict[str, Tool],
     max_tool_calls: dict[str, int],
     num_calls: int,
-    sampling_params: vllm.SamplingParams,
+    sampling_params: SamplingConfig,
 ) -> tuple[Tool | None, str | None]:
     """Check if any tool was triggered and return the tool and stop_str if found.
 
@@ -542,8 +553,7 @@ def _create_server_args(model_path: str) -> argparse.Namespace:
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
 
-    sampling_params = request.generation_config.clone()
-    sampling_params.n = 1  # Use n=1 for tool processing
+    sampling_params = dataclasses.replace(request.generation_config, n=1)
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
@@ -559,9 +569,8 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
 
     for j in range(request.generation_config.n):
-        sub_sampling_params = sampling_params.clone()
-        if request.generation_config.seed is not None:
-            sub_sampling_params.seed = request.generation_config.seed + j
+        seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
+        sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
         sub_request_id = f"{request_id}_{j}"
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params), actor.loop

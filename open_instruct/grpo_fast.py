@@ -40,6 +40,7 @@ from open_instruct import utils
 
 # isort: on
 import asyncio
+import dataclasses
 import json
 import logging
 import math
@@ -64,7 +65,6 @@ import torch
 import torch.distributed as dist
 import torch.utils
 import torch.utils.data
-import vllm
 import wandb
 from datasets import Dataset
 from huggingface_hub import HfApi
@@ -131,6 +131,7 @@ from open_instruct.utils import (
     repeat_each,
     sync_gs_bucket,
 )
+from open_instruct.vllm_utils import SamplingConfig
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -1648,7 +1649,7 @@ def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
     pending_queries_map: PendingQueriesMap,
     args: Args,
-    generation_config: vllm.SamplingParams,
+    generation_config: SamplingConfig,
     num_prompts: int,
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
@@ -2368,25 +2369,16 @@ def create_model_and_optimizer(
 
 def create_generation_configs(args: Args):
     """Create generation configs for training and evaluation."""
-    generation_config = vllm.SamplingParams(
+    generation_config = SamplingConfig(
         temperature=args.temperature,
-        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
+        top_p=args.vllm_top_p,
         max_tokens=args.response_length,
-        include_stop_str_in_output=True,
-        skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
         seed=args.seed,
-        logprobs=1,  # Enable logprobs to compare with local calculations
-        # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
-        # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
-        # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
-        # ensures all n completions are returned together in a single output.
-        output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
+        logprobs=1,
     )
-    eval_generation_config = generation_config.clone()
-    eval_generation_config.temperature = 0.0
-    eval_generation_config.n = 1
+    eval_generation_config = dataclasses.replace(generation_config, temperature=0.0, n=1)
     return {"train": generation_config, "eval": eval_generation_config}
 
 
