@@ -241,19 +241,6 @@ class Args:
     """How many training steps to take before updating the reference policy."""
     load_ref_policy: bool = True
     """Whether to load and use a reference policy for KL penalty calculation."""
-    advantage_normalization_type: Literal["standard", "centered"] = "standard"
-    """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
-    divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
-    DR.GRPO https://arxiv.org/pdf/2503.20783)."""
-    mask_truncated_completions: bool = False
-    """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
-
-    active_sampling: bool = False
-    """Whether to continue sampling responses until you get a full batch."""
-    filter_zero_std_samples: bool = True
-    """Whether to filter out prompts with zero reward std (all samples have the same score)."""
-    no_resampling_pass_rate: float | None = None
-    """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
 
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
