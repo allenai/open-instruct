@@ -31,7 +31,7 @@ from concurrent import futures
 from datetime import timedelta
 from typing import Any
 
-import httpx
+import aiohttp
 import openai
 import ray
 import torch
@@ -136,6 +136,7 @@ async def process_request_async(
     """Process a single async request with tool support, awaiting tools inline."""
     accumulated_tokens = []
     accumulated_logprobs = []
+    cumulative_logprob = 0.0
     masks = []
     num_calls = 0
     timeout = False
@@ -160,35 +161,25 @@ async def process_request_async(
         )
 
         iteration += 1
-        choice = api_response.choices[0]
+        output = api_response.choices[0]
 
-        if prompt_logprobs is None and hasattr(choice, "prompt_logprobs"):
-            prompt_logprobs = choice.prompt_logprobs
+        if prompt_logprobs is None and hasattr(output, "prompt_logprobs"):
+            prompt_logprobs = output.prompt_logprobs
 
-        accumulated_tokens.extend(choice.token_ids)
+        accumulated_tokens.extend(output.token_ids)
 
-        if choice.logprobs and choice.logprobs.token_logprobs:
-            logprobs_dicts = [
-                {token_id: types.SimpleNamespace(logprob=logprob)}
-                for token_id, logprob in zip(choice.token_ids, choice.logprobs.token_logprobs)
-            ]
-            accumulated_logprobs.extend(logprobs_dicts)
-        else:
-            accumulated_logprobs.extend(
-                [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in choice.token_ids]
-            )
+        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
+        for token_id, logprob in zip(output.token_ids, output.logprobs.token_logprobs):
+            accumulated_logprobs.append({token_id: types.SimpleNamespace(logprob=logprob)})
+            cumulative_logprob += logprob
 
-        masks.extend([1] * len(choice.token_ids))
-
-        output_text = choice.text
-        finish_reason = choice.finish_reason
-        stop_reason = finish_reason
+        masks.extend([1] * len(output.token_ids))
 
         if not actor.tools or not actor.max_tool_calls:
             break
 
         triggered_tool, stop_str = get_triggered_tool(
-            output_text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
+            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
         )
         if triggered_tool is None:
             break
@@ -196,7 +187,7 @@ async def process_request_async(
         assert actor.executor is not None, f"executor is None for request {sub_request_id}"
 
         loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output_text)
+        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
 
         tool_called = True
         num_calls += 1
@@ -232,18 +223,14 @@ async def process_request_async(
         current_prompt_token_ids = prompt_and_tool_output
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=new_sample_tokens)
 
-    cumulative_logprob = sum(
-        list(logprob_dict.values())[0].logprob for logprob_dict in accumulated_logprobs if logprob_dict
-    )
-
     complete_output = vllm.CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
         text="",
         token_ids=accumulated_tokens,
         cumulative_logprob=cumulative_logprob,
         logprobs=accumulated_logprobs,
-        finish_reason=finish_reason,
-        stop_reason=stop_reason,
+        finish_reason=output.finish_reason,
+        stop_reason=output.finish_reason,
     )
 
     if actor.tools:
@@ -710,14 +697,21 @@ class LLMRayActor:
         start_time = time.time()
         timeout = 60
 
+        async def check_health():
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(
+                    f"http://127.0.0.1:{self.server_port}/health", timeout=aiohttp.ClientTimeout(total=2.0)
+                ) as response,
+            ):
+                return response.status == 200
+
         while time.time() - start_time < timeout:
             try:
-                with httpx.Client() as client:
-                    response = client.get(f"http://127.0.0.1:{self.server_port}/health", timeout=2.0)
-                    if response.status_code == 200:
-                        logger.info("vLLM OpenAI API server is ready")
-                        return
-            except (httpx.ConnectError, httpx.TimeoutException):
+                if asyncio.run(check_health()):
+                    logger.info("vLLM OpenAI API server is ready")
+                    return
+            except aiohttp.ClientError:
                 pass
             time.sleep(0.5)
 
