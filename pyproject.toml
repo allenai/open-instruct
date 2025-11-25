@@ -20,7 +20,7 @@ dependencies = [
     "packaging>=24.2",
     "peft>=0.13.2",
     "tqdm",
-    "ray[default]>=2.44.1,<2.47",
+    "ray[default]>=2.49.2",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.8.0,<2.9",
