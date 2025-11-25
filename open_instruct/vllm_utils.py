@@ -81,7 +81,30 @@ class SamplingConfig:
     stop: list[str] | None = None
     seed: int | None = None
     logprobs: int | None = 1
-    prompt_logprobs: int | None = None
+
+
+@dataclasses.dataclass
+class CompletionOutput:
+    index: int
+    token_ids: list[int]
+    logprobs: list[dict]
+    finish_reason: str
+    cumulative_logprob: float = 0.0
+    mask: list[int] | None = None
+    num_calls: int = 0
+    timeout: bool = False
+    tool_error: str = ""
+    tool_output: str = ""
+    tool_runtime: float = 0.0
+    tool_called: bool = False
+
+
+@dataclasses.dataclass
+class RequestOutput:
+    request_id: str
+    prompt_token_ids: list[int]
+    outputs: list[CompletionOutput]
+    finished: bool = True
 
 
 def assert_threaded_actor(instance):
@@ -153,7 +176,6 @@ async def process_request_async(
     current_prompt = prompt
     current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
     current_sampling_params = sampling_params
-    prompt_logprobs = None
 
     while True:
         api_response = await actor.openai_client.completions.create(
@@ -164,7 +186,6 @@ async def process_request_async(
         )
 
         output = api_response.choices[0]
-        prompt_logprobs = output.prompt_logprobs if prompt_logprobs is None else prompt_logprobs
 
         accumulated_tokens.extend(output.token_ids)
 
@@ -223,16 +244,13 @@ async def process_request_async(
         current_prompt_token_ids = prompt_and_tool_output
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=new_sample_tokens)
 
-    complete_output = vllm.CompletionOutput(
+    complete_output = CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
-        text="",
         token_ids=accumulated_tokens,
         cumulative_logprob=cumulative_logprob,
         logprobs=accumulated_logprobs,
         finish_reason=output.finish_reason,
-        stop_reason=output.finish_reason,
     )
-
     if actor.tools:
         complete_output.mask = masks
         complete_output.num_calls = num_calls
@@ -248,13 +266,10 @@ async def process_request_async(
         {
             "base_request_id": base_request_id,
             "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
-            "request_output": vllm.RequestOutput(
+            "request_output": RequestOutput(
                 request_id=sub_request_id,
-                prompt="",
                 prompt_token_ids=actor.request_metadata[base_request_id]["prompt_token_ids"],
-                prompt_logprobs=prompt_logprobs,
                 outputs=[complete_output],
-                finished=True,
             ),
             "tools": actor.tools,
         }
@@ -330,7 +345,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
 
     Args:
         request_id: The base request ID
-        outs: List of vllm.RequestOutput objects for all sub-requests
+        outs: List of RequestOutput objects for all sub-requests
         current_time: Current timestamp for performance metrics
         tools: Dictionary of available tools (may be None or empty)
         request_metadata: Dictionary containing metadata for all requests
@@ -338,19 +353,15 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
     Returns:
         Tuple of (result, is_eval) where result is a GenerationResult and is_eval is a boolean
     """
-    final_output = vllm.RequestOutput(
+    final_output = RequestOutput(
         request_id=request_id,
-        prompt=outs[0].prompt,
         prompt_token_ids=outs[0].prompt_token_ids,
-        prompt_logprobs=outs[0].prompt_logprobs,
         outputs=[completion for out in outs for completion in out.outputs],
-        finished=outs[0].finished,
     )
 
     total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
-    metadata = request_metadata[request_id]  # Don't pop yet, _poll_tool_futures might need it
+    metadata = request_metadata[request_id]
 
-    # Process the vLLM RequestOutput into GenerationResult format
     response_ids = [list(out.token_ids) for out in final_output.outputs]
     finish_reasons = [out.finish_reason for out in final_output.outputs]
     use_tools = bool(tools)
@@ -358,8 +369,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
     logprobs = []
     for idx, out in enumerate(final_output.outputs):
         assert len(out.token_ids) == len(out.logprobs), (
-            f"vLLM CompletionOutput {idx}: token_ids length ({len(out.token_ids)}) "
-            f"!= logprobs length ({len(out.logprobs)})"
+            f"CompletionOutput {idx}: token_ids length ({len(out.token_ids)}) != logprobs length ({len(out.logprobs)})"
         )
         logprobs.append(
             [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
