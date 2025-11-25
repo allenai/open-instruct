@@ -2684,11 +2684,14 @@ def maybe_evaluate(
     episode,
     eval_pending_queries_map: PendingQueriesMap,
     eval_generation_config,
-    num_eval_prompts: int,
+    eval_dataset: datasets.Dataset,
     model_dims: utils.ModelDims,
     actor_manager=None,
 ):
     """Optionally evaluate the model."""
+    if eval_dataset is None:
+        return
+
     try:
         # timeout 0.01 if this is not the last training step
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
@@ -2700,7 +2703,7 @@ def maybe_evaluate(
             eval_pending_queries_map,
             args,
             eval_generation_config,
-            num_prompts=num_eval_prompts,
+            num_prompts=len(eval_dataset),
             model_dims=model_dims,
             tokenizer=tokenizer,
             reward_fn=reward_fn,
@@ -3156,20 +3159,19 @@ def run_training(
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
         weight_sync_trigger_event.set()
 
-        if eval_dataset is not None:
-            maybe_evaluate(
-                args,
-                training_step,
-                evaluation_inference_results_Q,
-                tokenizer,
-                reward_fn,
-                episode,
-                eval_pending_queries_map,
-                generation_configs["eval"],
-                len(eval_dataset),
-                model_dims,
-                actor_manager,
-            )
+        maybe_evaluate(
+            args,
+            training_step,
+            evaluation_inference_results_Q,
+            tokenizer,
+            reward_fn,
+            episode,
+            eval_pending_queries_map,
+            generation_configs["eval"],
+            eval_dataset,
+            model_dims,
+            actor_manager,
+        )
 
     if resume_training_step > args.num_training_steps:
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
