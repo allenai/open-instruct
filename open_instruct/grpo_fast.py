@@ -77,7 +77,8 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import data_loader, logger_utils, vllm_utils
+from open_instruct import data_loader as data_loader_lib
+from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -1566,10 +1567,8 @@ def accumulate_inference_batches(
     tokenizer: PreTrainedTokenizer,
     reward_fn: Callable,
     prompt_dataset: Dataset,
-    hf_data_loader_iter: Iterator[dict[str, Any]] | None = None,
-    epoch: int = 0,
+    data_loader: Iterator[dict[str, Any]] | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
-    training_step: int | None = None,
     actor_manager=None,
     timeout: float | None = None,
     active_sampling: bool = False,
@@ -1584,11 +1583,9 @@ def accumulate_inference_batches(
         args: Arguments containing vllm_num_engines and batch size info
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
-        hf_data_loader_iter: Iterator over the dataloader
-        epoch: Current epoch number
+        data_loader: Iterator over the dataloader for replenishing prompts
         prompt_dataset: Dataset containing prompts
         param_prompt_Q: Queue containing prompts to send to generator
-        training_step: Current training step
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
         active_sampling: Whether to continue sampling until we have sampled num_prompts prompts with non-zero std
         filter_zero_std_samples: Whether to filter samples with zero reward std
@@ -1603,6 +1600,13 @@ def accumulate_inference_batches(
         Tuple of (combined_result, Batch with queries, ground_truths, datasets, prompt_lengths, response_lengths)
         or (ShutdownSentinel, None, None, None) if shutdown signal received
     """
+    if no_resampling_pass_rate is not None:
+        assert data_loader is not None, "no_resampling requires data_loader"
+
+    if replenish_prompts:
+        assert param_prompt_Q is not None and data_loader is not None and prompt_dataset is not None, (
+            "replenish_prompts requires param_prompt_Q, data_loader, and prompt_dataset"
+        )
     results = []
     all_queries = []
     all_ground_truths = []
@@ -1634,23 +1638,15 @@ def accumulate_inference_batches(
         assert len(result.responses) == generation_config.n, (
             f"Mismatch: individual prompt result has {len(result.responses)} responses "
             f"but expected {generation_config.n} samples per prompt. "
-            f"Dataset index: {result.dataset_index}, Epoch: {result.epoch_number}"
+            f"Prompt ID: {result.prompt_id}"
         )
 
         example = prompt_dataset[result.dataset_index]
 
         # Replenish generation queue with new prompt
         if replenish_prompts:
-            next_example = next(hf_data_loader_iter)
-            add_prompt_to_generator(
-                next_example[INPUT_IDS_PROMPT_KEY],
-                next_example["dataset_index"],
-                epoch,
-                training_step,
-                param_prompt_Q,
-                generation_config,
-                is_eval=False,
-            )
+            next_example = next(data_loader)
+            add_prompt_to_generator(next_example, param_prompt_Q, generation_config, is_eval=False)
 
         # TODO(finbarrtimbers): Move this to LLMRayActor.
         for i in range(len(result.finish_reasons)):
@@ -1797,8 +1793,8 @@ def accumulate_inference_batches(
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=None,
-        epoch_number=results[0].epoch_number,
+        dataset_index=0,
+        prompt_id="combined",
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
     )
@@ -1848,8 +1844,7 @@ def data_preparation_thread(
     num_training_steps: int,
     generation_config,
     resume_training_step: int,
-    hf_data_loader_iter: Iterator[dict[str, Any]],
-    epoch: int,
+    data_loader: Iterator[dict[str, Any]],
     train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
@@ -1865,11 +1860,9 @@ def data_preparation_thread(
                 model_dims=model_dims,
                 tokenizer=tokenizer,
                 reward_fn=reward_fn,
-                hf_data_loader_iter=hf_data_loader_iter,
-                epoch=epoch,
+                data_loader=data_loader,
                 prompt_dataset=train_dataset,
                 param_prompt_Q=param_prompt_Q,
-                training_step=training_step,
                 actor_manager=actor_manager,
                 active_sampling=args.active_sampling,
                 filter_zero_std_samples=args.filter_zero_std_samples,
@@ -2330,21 +2323,25 @@ def create_generation_configs(args: Args):
 
 
 def add_prompt_to_generator(
-    query: list[int],
-    dataset_index: int,
-    epoch_number: int,
-    training_step: int,
-    param_prompt_Q: ray_queue.Queue,
-    generation_config,
-    is_eval: bool,
+    example: dict[str, Any], param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
 ) -> None:
+    """Add a prompt to the generation queue.
+
+    Args:
+        example: A dict containing:
+            - INPUT_IDS_PROMPT_KEY: The tokenized prompt
+            - dataset_index: Index into the original dataset
+            - prompt_id: Unique identifier for this prompt (epoch_datasetIndex)
+        param_prompt_Q: Queue to put the prompt request
+        generation_config: Generation configuration
+        is_eval: Whether this is an evaluation prompt
+    """
     param_prompt_Q.put(
         PromptRequest(
-            prompt=query,
+            prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
-            epoch_number=epoch_number,
-            training_step=training_step,
-            dataset_index=dataset_index,
+            dataset_index=example["dataset_index"],
+            prompt_id=example["prompt_id"],
             is_eval=is_eval,
         )
     )
@@ -2856,7 +2853,7 @@ def run_training(
     policy_group,
     vllm_engines,
     generation_configs,
-    hf_data_loader,
+    data_loader,
     reward_fn,
     resume_training_step,
     episode,
@@ -2877,7 +2874,13 @@ def run_training(
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
-    hf_data_loader_iter = iter(hf_data_loader)
+    data_loader_iter = iter(data_loader)
+
+    eval_data_loader = None
+    if eval_dataset is not None:
+        eval_data_loader = data_loader_lib.HFDataLoader(
+            dataset=eval_dataset, batch_size=1, seed=args.seed, rank=0, world_size=1, work_dir=args.output_dir
+        )
 
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
@@ -2909,8 +2912,7 @@ def run_training(
         args.num_training_steps,
         generation_configs["train"],
         resume_training_step,
-        hf_data_loader_iter,
-        hf_data_loader._epoch or 0,
+        data_loader_iter,
         train_dataset,
         actor_manager,
         model_dims,
@@ -2926,16 +2928,8 @@ def run_training(
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps * args.num_unique_prompts_rollout):
-        example = next(hf_data_loader_iter)
-        add_prompt_to_generator(
-            example[INPUT_IDS_PROMPT_KEY],
-            example["dataset_index"],
-            hf_data_loader._epoch or 0,
-            resume_training_step,
-            param_prompt_Q,
-            generation_configs["train"],
-            is_eval=False,
-        )
+        example = next(data_loader_iter)
+        add_prompt_to_generator(example, param_prompt_Q, generation_configs["train"], is_eval=False)
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
         logger.info(f"Restored num_total_tokens: {num_total_tokens}")
@@ -2975,19 +2969,11 @@ def run_training(
 
         if (
             training_step % args.local_eval_every == 0
-            and eval_dataset is not None
+            and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
-            for eval_index, eval_example in enumerate(eval_dataset):
-                add_prompt_to_generator(
-                    eval_example[INPUT_IDS_PROMPT_KEY],
-                    eval_index,
-                    hf_data_loader._epoch or 0,
-                    training_step,
-                    param_prompt_Q,
-                    generation_configs["eval"],
-                    is_eval=True,
-                )
+            for eval_example in eval_data_loader:
+                add_prompt_to_generator(eval_example, param_prompt_Q, generation_configs["eval"], is_eval=True)
         if collated_data is None:
             continue
 
@@ -3038,8 +3024,8 @@ def run_training(
                 }
 
                 # Save dataloader state
-                if hf_data_loader is not None:
-                    client_state["dataloader_state"] = hf_data_loader.state_dict()
+                if data_loader is not None:
+                    client_state["dataloader_state"] = data_loader.state_dict()
 
                 ray_get_with_progress(
                     [
@@ -3139,15 +3125,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             episode = checkpoint_state["episode"]
             logger.info(f"Restored episode count: {episode}")
 
-    hf_data_loader = data_loader.HFDataLoader(
+    data_loader = data_loader_lib.HFDataLoader(
         dataset=train_dataset, batch_size=1, seed=args.seed, rank=0, world_size=1, work_dir=args.output_dir
     )
 
     if checkpoint_state and "dataloader_state" in checkpoint_state:
-        hf_data_loader.load_state_dict(checkpoint_state["dataloader_state"])
+        data_loader.load_state_dict(checkpoint_state["dataloader_state"])
         logger.info("Restored dataloader state from checkpoint")
-    else:
-        hf_data_loader.reshuffle()
 
     # Create additional queues (main queues already created above)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
@@ -3168,7 +3152,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             policy_group,
             vllm_engines,
             generation_configs,
-            hf_data_loader,
+            data_loader,
             reward_fn,
             resume_training_step,
             episode,
