@@ -159,7 +159,6 @@ async def process_request_async(
         api_response = await actor.openai_client.completions.create(
             model=actor.model_name,
             prompt=current_prompt["prompt_token_ids"],
-            n=1,
             extra_body={"return_token_ids": True},
             **dataclasses.asdict(current_sampling_params),
         )
