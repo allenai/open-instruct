@@ -80,6 +80,7 @@ from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
     INPUT_IDS_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -639,6 +640,7 @@ class PolicyTrainerRayProcess(RayProcess):
         beaker_config: BeakerRuntimeConfig,
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
+        num_verifiers: int,
     ) -> int:
         # ------------------------------------------------------------
         # Monkey patch to load checkpoints with `weights_only=False`
@@ -798,7 +800,11 @@ class PolicyTrainerRayProcess(RayProcess):
                 if hasattr(self, "ref_policy_checkpoint_path")
                 else None,
             )
-        self.local_metrics = utils.MetricsTracker(device=self.device)
+        # 49 base metrics: 16 from step() (KL, loss, ratio, etc.), 22 from streaming_data_loader
+        # (scores, sequence_lengths, etc.), 7 from BatchStatistics, 4 from reward_metrics.
+        # Each verifier adds 2 metrics: objective/{key}_reward and objective/{key}_correct_rate.
+        max_metrics = 49 + 2 * num_verifiers
+        self.local_metrics = utils.MetricsTracker(max_metrics=max_metrics, device=self.device)
         return optimization_steps_done
 
     def forward(
@@ -1848,8 +1854,9 @@ def create_model_and_optimizer(
     logger.info(f"[DEBUG] ModelGroup created with {len(policy_group.models)} policy actors")
 
     logger.info("[DEBUG] Starting model initialization across all ranks...")
+    num_verifiers = len(set(train_dataset[VERIFIER_SOURCE_KEY]))
     inits = [
-        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
+        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer, num_verifiers)
         for model in policy_group.models
     ]
 
