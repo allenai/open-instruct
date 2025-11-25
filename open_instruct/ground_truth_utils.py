@@ -830,38 +830,26 @@ class CodeVerifier(VerifierFunction):
             self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
         return self._session
 
-    async def async_call(
-        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
-    ) -> VerificationResult:
-        """
-        Asynchronously verify code execution against test cases.
-
-        Args:
-            tokenized_prediction: Unused tokenized representation
-            prediction: The model output containing Python code
-            label: List of test cases or JSON string representation of a list
-            query: Unused original query
-
-        Returns:
-            VerificationResult with score as the pass rate of test cases
-        """
-        # Extract Python code from the model output
+    async def _verify_code(self, prediction: str, label: Any, session: aiohttp.ClientSession) -> VerificationResult:
         python_code = self.extract_python_code(prediction)
-
-        # Test data
         payload = {
             "program": python_code,
             "tests": label,
             "max_execution_time": self.verifier_config.code_max_execution_time,
         }
-
         http_timeout = aiohttp.ClientTimeout(
             total=max(30, min(300, self.verifier_config.code_max_execution_time * 10))
         )
 
-        @backoff.on_exception(backoff.expo, aiohttp.ClientError, max_tries=3, max_time=60)
+        @backoff.on_exception(
+            backoff.expo,
+            (aiohttp.ClientError, asyncio.TimeoutError),
+            max_tries=3,
+            max_time=60,
+            giveup=lambda e: isinstance(e, aiohttp.ClientResponseError) and e.status < 500,
+        )
         async def _make_request() -> dict:
-            async with self._get_session().post(
+            async with session.post(
                 self.verifier_config.code_api_url,
                 json=payload,
                 headers={"Content-Type": "application/json"},
@@ -870,22 +858,25 @@ class CodeVerifier(VerifierFunction):
                 response.raise_for_status()
                 return await response.json()
 
+        result = await _make_request()
+        passes = result["results"]
+        pass_rate = sum(passes) / len(passes) if passes else 0.0
+        score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
+        if self.apply_perf_penalty and score > 0.0:
+            runtimes = result["runtimes"]
+            multipliers = [
+                (self.verifier_config.code_max_execution_time - runtime) / self.verifier_config.code_max_execution_time
+                for runtime in runtimes
+            ]
+            penalized_passes = [passes[i] * multipliers[i] for i in range(len(passes))]
+            score = sum(penalized_passes) / len(penalized_passes)
+        return VerificationResult(score=score)
+
+    async def async_call(
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
+    ) -> VerificationResult:
         try:
-            result = await _make_request()
-            passes = result["results"]
-            pass_rate = sum(passes) / len(passes) if passes else 0.0
-            score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
-            if self.apply_perf_penalty and score > 0.0:
-                runtimes = result["runtimes"]
-                # for each runtime, multiply the percent of the timeout that was used
-                multipliers = [
-                    (self.verifier_config.code_max_execution_time - runtime)
-                    / self.verifier_config.code_max_execution_time
-                    for runtime in runtimes
-                ]
-                penalized_passes = [passes[i] * multipliers[i] for i in range(len(passes))]
-                score = sum(penalized_passes) / len(penalized_passes)
-            return VerificationResult(score=score)
+            return await self._verify_code(prediction, label, self._get_session())
         except Exception as e:
             logger.warning(f"Error verifying code sample: {e}")
             return VerificationResult(score=0.0)
@@ -893,19 +884,17 @@ class CodeVerifier(VerifierFunction):
     def __call__(
         self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
     ) -> VerificationResult:
-        """
-        Synchronously verify code execution against test cases.
-        """
+        async def _run_with_fresh_session() -> VerificationResult:
+            connector = aiohttp.TCPConnector(limit=100, limit_per_host=100)
+            timeout = aiohttp.ClientTimeout(total=300)
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                return await self._verify_code(prediction, label, session)
+
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                raise RuntimeError(
-                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
-                )
-            else:
-                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
-        except RuntimeError:
-            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+            return asyncio.run(_run_with_fresh_session())
+        except Exception as e:
+            logger.warning(f"Error verifying code sample: {e}")
+            return VerificationResult(score=0.0)
 
     @classmethod
     def get_config_class(cls) -> type:
