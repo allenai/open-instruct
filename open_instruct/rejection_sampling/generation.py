@@ -112,11 +112,7 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
     )
 
     return [
-        {
-            "outputs": [asdict(out) for out in output.outputs],
-            "prompt": output.prompt,
-            "metrics": output.metrics,
-        }
+        {"outputs": [asdict(out) for out in output.outputs], "prompt": output.prompt, "metrics": output.metrics}
         for output in outputs
     ]
 

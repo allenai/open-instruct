@@ -318,6 +318,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
         request_id=request_id,
         prompt=outs[0].prompt,
         prompt_token_ids=outs[0].prompt_token_ids,
+        prompt_logprobs=None,
         outputs=[completion for out in outs for completion in out.outputs],
         finished=outs[0].finished,
     )
