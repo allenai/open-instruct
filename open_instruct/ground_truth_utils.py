@@ -805,11 +805,12 @@ class CodeVerifier(VerifierFunction):
     The API URL should be provided during initialization.
     """
 
+    _session_cache: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
     def __init__(self, verifier_config: CodeVerifierConfig) -> None:
         super().__init__("code", verifier_config=verifier_config, weight=1.0)
         self.pass_rate_reward_threshold = verifier_config.code_pass_rate_reward_threshold
         self.apply_perf_penalty = verifier_config.code_apply_perf_penalty
-        self._session: aiohttp.ClientSession | None = None
 
     def extract_python_code(self, model_output: str) -> str:
         """Extract the last code block between ``` markers from the model output."""
@@ -824,11 +825,12 @@ class CodeVerifier(VerifierFunction):
         return matches[-1].strip()
 
     def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
+        loop = asyncio.get_running_loop()
+        if loop not in self._session_cache or self._session_cache[loop].closed:
             connector = aiohttp.TCPConnector(limit=100, limit_per_host=100)
             timeout = aiohttp.ClientTimeout(total=300)
-            self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
-        return self._session
+            self._session_cache[loop] = aiohttp.ClientSession(connector=connector, timeout=timeout)
+        return self._session_cache[loop]
 
     async def _verify_code(self, prediction: str, label: Any, session: aiohttp.ClientSession) -> VerificationResult:
         python_code = self.extract_python_code(prediction)
@@ -905,6 +907,14 @@ class CodeVerifier(VerifierFunction):
             type: The VerifierConfig class or its subclass
         """
         return CodeVerifierConfig
+
+    @classmethod
+    async def cleanup_all_sessions(cls) -> None:
+        sessions_to_close = list(cls._session_cache.values())
+        cls._session_cache.clear()
+        for session in sessions_to_close:
+            if not session.closed:
+                await session.close()
 
 
 def build_all_verifiers(args) -> dict[str, VerifierFunction]:
