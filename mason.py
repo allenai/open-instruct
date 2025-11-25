@@ -9,7 +9,9 @@ import string
 import sys
 import time
 
+import backoff
 import beaker
+import requests
 from rich.console import Console
 from rich.text import Text
 
@@ -191,8 +193,8 @@ def get_args():
     )
     parser.add_argument(
         "--timeout",
-        type=int,
-        help="Timeout for the Beaker task in seconds (e.g., 7200 for 2 hours). If not specified, no timeout is set.",
+        type=str,
+        help="Timeout for the Beaker task as a duration string (e.g., '15m', '1h', '2h30m'). If not specified, no timeout is set.",
         default=None,
     )
     # Split up the mason args from the Python args.
@@ -764,6 +766,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         ),
         resources=beaker.BeakerTaskResources(gpu_count=args.gpus, shared_memory=args.shared_memory),
         replicas=args.num_nodes,
+        timeout=args.timeout,
     )
     if args.num_nodes > 1:
         spec.leader_selection = True
@@ -773,9 +776,6 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         spec.host_networking = False
     else:
         spec.host_networking = True
-
-    if args.timeout is not None:
-        spec.timeout = args.timeout
 
     return spec
 
@@ -795,6 +795,9 @@ def main():
             beaker_client = beaker.Beaker.from_env()
         beaker_secrets = [secret.name for secret in beaker_client.secret.list()]
         whoami = beaker_client.user.get().name
+
+        # Increase timeout to 300s for large experiment specs.
+        beaker_client.TIMEOUT = 300
 
     full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
     if is_external_user:
@@ -822,8 +825,20 @@ def main():
         budget=args.budget,
         retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
     )
-    exp = beaker_client.experiment.create(spec=experiment_spec)
-    console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.experiment.id}")
+
+    @backoff.on_exception(
+        backoff.expo,
+        requests.exceptions.Timeout,
+        max_tries=5,
+        # Factor here is the multiplier for the backoff delay, in seconds.
+        factor=5,
+    )
+    def launch_experiment():
+        exp = beaker_client.experiment.create(spec=experiment_spec)
+        console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.experiment.id}")
+        return exp
+
+    launch_experiment()
 
 
 if __name__ == "__main__":
