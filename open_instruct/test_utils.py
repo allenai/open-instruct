@@ -490,7 +490,7 @@ class TestModelDims(unittest.TestCase):
             return mock_model_cls, "Qwen2ForCausalLM"
 
         with (
-            mock.patch("vllm.platforms.current_platform", mock_platform),
+            mock.patch("vllm.platforms._current_platform", mock_platform),
             mock.patch(
                 "vllm.model_executor.models.registry.ModelRegistry.inspect_model_cls", side_effect=mock_inspect_return
             ),
