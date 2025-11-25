@@ -863,6 +863,14 @@ def accumulate_inference_batches(
         all_reward_metrics.append(reward_metrics)
         all_percent_solved.append(percent_solved)
 
+    if len(results) == 0:
+        logging.warning(
+            "[Data Preparation Thread] All prompts were filtered during accumulation. "
+            f"Filtered: {total_filtered_prompts} (zero std: {filtered_prompt_zero}, "
+            f"solved: {filtered_prompt_solved}, nonzero: {filtered_prompt_nonzero})"
+        )
+        return None, None, None, None
+
     combined_responses = []
     combined_finish_reasons = []
     combined_masks = []

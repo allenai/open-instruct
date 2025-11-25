@@ -1074,22 +1074,25 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         num_prompts = 8
         num_samples_per_prompt = 4
 
-        queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
+        queries, ground_truths, datasets_list, raw_queries, indices = self.create_test_data(num_prompts)
+
+        test_dataset = Dataset.from_dict(
+            {
+                INPUT_IDS_PROMPT_KEY: queries,
+                GROUND_TRUTHS_KEY: ground_truths,
+                VERIFIER_SOURCE_KEY: datasets_list,
+                RAW_PROMPT_KEY: raw_queries,
+            }
+        )
 
         inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
-        pending_queries_map = grpo_fast.PendingQueriesMap()
 
         self._ray_queues.append(inference_results_Q)
-
-        for i in range(num_prompts):
-            for _ in range(num_samples_per_prompt):
-                pending_queries_map.insert(i, queries[i], ground_truths[i], datasets[i], raw_queries[i])
 
         for i in range(num_prompts):
             mock_result = self.create_mock_result(i, epoch_number=1, num_samples_per_prompt=num_samples_per_prompt)
             inference_results_Q.put(mock_result)
 
-        mock_args = self.create_mock_args(num_engines=4, num_samples=num_samples_per_prompt)
         mock_generation_config = Mock()
         mock_generation_config.n = num_samples_per_prompt
         mock_model_dims = self.create_mock_model_dims()
@@ -1110,14 +1113,15 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
 
         result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
             inference_results_Q,
-            pending_queries_map,
-            mock_args,
-            generation_config=mock_generation_config,
+            mock_generation_config,
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
             reward_fn=reward_fn_zero_std,
+            dataset=test_dataset,
             filter_zero_std_samples=True,
+            verbose=False,
+            max_possible_score=1.0,
         )
 
         self.assertIsNone(result)
