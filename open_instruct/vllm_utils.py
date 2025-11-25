@@ -132,7 +132,7 @@ def assert_threaded_actor(instance):
         return
 
 
-def _truncate_tool_output_tokens(
+def truncate_tool_output_tokens(
     tool_output_token_ids: list[int],
     current_prompt_token_ids: list[int],
     accumulated_tokens: list[int],
@@ -144,6 +144,7 @@ def _truncate_tool_output_tokens(
     excess = len(prompt_and_tool_output) - max_model_len
     if excess > 0:
         tool_output_token_ids = tool_output_token_ids[:-excess]
+        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
 
     remaining = max_tokens - current_mask_len
     if remaining <= 0:
@@ -221,7 +222,7 @@ async def process_request_async(
             "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
         )
 
-        tool_output_token_ids, excess, prompt_and_tool_output = _truncate_tool_output_tokens(
+        tool_output_token_ids, excess, prompt_and_tool_output = truncate_tool_output_tokens(
             tool_output_token_ids,
             current_prompt_token_ids,
             accumulated_tokens,
@@ -506,14 +507,6 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
         add_request(actor, request)
 
 
-def _create_server_args(model_path: str) -> argparse.Namespace:
-    parser = FlexibleArgumentParser()
-    parser = make_arg_parser(parser)
-    args = parser.parse_args(["--model", model_path])
-    args.disable_fastapi_docs = True
-    return args
-
-
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
 
@@ -633,7 +626,7 @@ class LLMRayActor:
 
             engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
-            args = _create_server_args(engine_client.vllm_config.model_config.model)
+            args = argparse.Namespace(model=engine_client.vllm_config.model_config.model)
             app = build_app(args)
             await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
 
