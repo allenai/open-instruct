@@ -20,6 +20,7 @@ os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
     from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+    import deepspeed.comm as dist
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
@@ -57,6 +58,7 @@ import ray
 import requests
 import torch
 import vllm.config
+import torch.nn.functional as F
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -1364,6 +1366,7 @@ def get_train_ds_config(
     zpg=8,
     grad_accum_dtype=None,
     disable_trace_cache=False,
+    sequence_parallel_size=1,
 ):
     device = "cpu" if offload else "none"
     zero_opt_dict = {
@@ -1386,7 +1389,7 @@ def get_train_ds_config(
         zero_opt_dict["stage3_max_live_parameters"] = 0
         zero_opt_dict["stage3_max_reuse_distance"] = 0
 
-    return {
+    config = {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
         "bf16": {"enabled": bf16},
@@ -1395,6 +1398,11 @@ def get_train_ds_config(
         "wall_clock_breakdown": False,
         "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
     }
+
+    if sequence_parallel_size > 1:
+        config["sequence_parallel_size"] = sequence_parallel_size
+
+    return config
 
 
 def get_eval_ds_config(
@@ -2491,3 +2499,158 @@ def get_beaker_experiment_url() -> str | None:
         return url
     except Exception:
         return None
+
+
+class UlyssesSPSplitter:
+    def __init__(self, sp_rank: int, sp_group, sp_world_size, device, pad_token_id):
+        """
+        Adapted from the UlyssesSPDataLoaderAdapter
+        (https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py#L427)
+        Rather than wrapping a dataloader, we just want to split a given batch into the shards across sp group.
+        """
+        self.sp_rank = sp_rank
+        self.sp_group = sp_group
+        self.sp_world_size = sp_world_size
+        self.device = device
+        self.pad_token_id = pad_token_id
+
+    def split_batch(self, batch):
+        micro_batches = defaultdict(dict)
+
+        # First, find the maximum sequence length across all ranks
+        # Handle both tensor and list cases for getting local sequence length
+        if torch.is_tensor(batch["input_ids"]):
+            # batch["input_ids"] is a tensor of shape [batch_size, seq_len]
+            local_seqlen = torch.tensor([batch["input_ids"].shape[1]], dtype=torch.int64, device=self.device)
+        else:
+            # batch["input_ids"] is a list of tensors - find max length in this rank's data
+            max_local_len = 0
+            for item in batch["input_ids"]:
+                if torch.is_tensor(item):
+                    max_local_len = max(max_local_len, item.shape[-1])
+            local_seqlen = torch.tensor([max_local_len], dtype=torch.int64, device=self.device)
+
+        # Gather sequence lengths from all ranks
+        seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
+        dist.all_gather(seqlens, local_seqlen, group=self.sp_group)
+        seqlens = [x[0].item() for x in seqlens]
+
+        # Use the maximum sequence length for padding
+        max_seqlen = max(seqlens)
+
+        # Ensure max_seqlen is divisible by sp_world_size
+        if max_seqlen % self.sp_world_size != 0:
+            max_seqlen = ((max_seqlen + self.sp_world_size - 1) // self.sp_world_size) * self.sp_world_size
+
+        # Now pad everything to max_seqlen BEFORE any collective operations
+        for k in batch.keys():
+            if torch.is_tensor(batch[k]):
+                # Single tensor case
+                batch[k] = batch[k].to(self.device)
+
+                # Pad the tensor to max_seqlen if needed
+                if batch[k].shape[1] < max_seqlen:
+                    pad_len = max_seqlen - batch[k].shape[1]
+                    if k == "input_ids":
+                        batch[k] = F.pad(batch[k], (0, pad_len), value=self.pad_token_id)
+                    elif k == "attention_mask":
+                        batch[k] = F.pad(batch[k], (0, pad_len), value=0)
+                    else:
+                        batch[k] = F.pad(batch[k], (0, pad_len), value=-100 if k == "labels" else 0)
+            else:
+                # List case - pad each tensor in the list to max_seqlen
+                for i, item in enumerate(batch[k]):
+                    if torch.is_tensor(item):
+                        item = item.to(self.device)
+                        if item.shape[-1] < max_seqlen:
+                            pad_len = max_seqlen - item.shape[-1]
+                            if k == "input_ids":
+                                item = F.pad(item, (0, pad_len), value=self.pad_token_id)
+                            elif k == "attention_mask":
+                                item = F.pad(item, (0, pad_len), value=0)
+                            else:
+                                item = F.pad(item, (0, pad_len), value=-100 if k == "labels" else 0)
+                        batch[k][i] = item  # Update the list in place
+
+        # Now that everything is padded to the same length, do the collective operations
+        for k in batch.keys():
+            if torch.is_tensor(batch[k]):
+                with torch.no_grad():
+                    tensor_list = [
+                        torch.zeros((batch[k].shape[0], max_seqlen), dtype=batch[k].dtype, device=batch[k].device)
+                        for _ in range(self.sp_world_size)
+                    ]
+                    dist.all_gather(tensor_list, batch[k], group=self.sp_group)
+            else:
+                # Now all tensors in the list should have the same shape
+                tensor_list = [None for _ in range(self.sp_world_size)]
+                dist.all_gather_object(tensor_list, batch[k], group=self.sp_group)
+
+            for rank, tensor in enumerate(tensor_list):
+                micro_batches[rank][k] = tensor
+
+        del tensor_list
+        del batch
+
+        batch_shards = []
+        for batch_data in micro_batches.values():
+            # Determine sequence length based on the structure
+            if torch.is_tensor(batch_data["input_ids"]):
+                seq_length = batch_data["input_ids"].shape[1]
+                batch_size = batch_data["input_ids"].shape[0]
+            else:
+                # List of tensors
+                seq_length = batch_data["input_ids"][0].shape[-1]
+                batch_size = len(batch_data["input_ids"])
+
+            if seq_length % self.sp_world_size != 0:
+                raise ValueError(f"batch's seqlen={seq_length} isn't divisible by sp-size={self.sp_world_size}")
+
+            chunk_len = seq_length // self.sp_world_size
+
+            # Handle labels if present
+            if "labels" in batch_data:
+                labels = batch_data.pop("labels")
+                if torch.is_tensor(labels):
+                    labels = F.pad(labels, (0, 1), value=-100)
+                    batch_data["shift_labels"] = labels[..., 1:].contiguous()
+                else:
+                    # Handle list case
+                    shift_labels = []
+                    for label in labels:
+                        padded_label = F.pad(label, (0, 1), value=-100)
+                        shift_labels.append(padded_label[..., 1:].contiguous())
+                    batch_data["shift_labels"] = shift_labels
+                del labels
+
+            # Batch sharding
+            for k in batch_data.keys():
+                if not torch.is_tensor(batch_data[k]) and not isinstance(batch_data[k], list):
+                    continue
+
+                if torch.is_tensor(batch_data[k]):
+                    # Tensor case: shard each item in batch dimension
+                    sharded_items = []
+                    for idx in range(batch_size):
+                        item = batch_data[k][idx]
+                        sharded_item = item[chunk_len * self.sp_rank : chunk_len * (self.sp_rank + 1)].cpu()
+                        sharded_items.append(sharded_item)
+                    batch_data[k] = sharded_items
+                else:
+                    # List case: shard each tensor in the list
+                    sharded_items = []
+                    for item in batch_data[k]:
+                        if torch.is_tensor(item):
+                            # Handle different tensor dimensions appropriately
+                            if item.dim() == 1:
+                                sharded_item = item[chunk_len * self.sp_rank : chunk_len * (self.sp_rank + 1)].cpu()
+                            else:
+                                sharded_item = item[:, chunk_len * self.sp_rank : chunk_len * (self.sp_rank + 1)].cpu()
+                            sharded_items.append(sharded_item)
+                        else:
+                            sharded_items.append(item)
+                    batch_data[k] = sharded_items
+
+            batch_shards.append(batch_data)
+
+        return batch_shards
