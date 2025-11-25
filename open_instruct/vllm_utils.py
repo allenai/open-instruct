@@ -81,6 +81,7 @@ class SamplingConfig:
     stop: list[str] | None = None
     seed: int | None = None
     logprobs: int | None = 1
+    prompt_logprobs: int | None = None
 
 
 def assert_threaded_actor(instance):
@@ -153,7 +154,6 @@ async def process_request_async(
     current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
     current_sampling_params = sampling_params
     prompt_logprobs = None
-    iteration = 0
 
     while True:
         api_response = await actor.openai_client.completions.create(
@@ -164,11 +164,8 @@ async def process_request_async(
             **dataclasses.asdict(current_sampling_params),
         )
 
-        iteration += 1
         output = api_response.choices[0]
-
-        if prompt_logprobs is None and hasattr(output, "prompt_logprobs"):
-            prompt_logprobs = output.prompt_logprobs
+        prompt_logprobs = output.prompt_logprobs if prompt_logprobs is None else prompt_logprobs
 
         accumulated_tokens.extend(output.token_ids)
 
