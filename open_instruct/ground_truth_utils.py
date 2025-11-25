@@ -813,12 +813,14 @@ class CodeVerifier(VerifierFunction):
 
     def extract_python_code(self, model_output: str) -> str:
         """Extract the last code block between ``` markers from the model output."""
+        # Find content between ``` markers
         pattern = r"```(?:python)?(.*?)```"
         matches = re.findall(pattern, model_output, re.DOTALL)
 
         if not matches:
             return model_output
 
+        # Return the last match, stripped of whitespace
         return matches[-1].strip()
 
     def _get_session(self) -> aiohttp.ClientSession:
@@ -843,8 +845,10 @@ class CodeVerifier(VerifierFunction):
         Returns:
             VerificationResult with score as the pass rate of test cases
         """
+        # Extract Python code from the model output
         python_code = self.extract_python_code(prediction)
 
+        # Test data
         payload = {
             "program": python_code,
             "tests": label,
