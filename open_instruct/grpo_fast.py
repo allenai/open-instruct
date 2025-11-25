@@ -37,10 +37,16 @@ with contextlib.suppress(Exception):
     import deepspeed
 
 from open_instruct import streaming_data_loader, utils
-from open_instruct.streaming_data_loader import accumulate_inference_batches, add_prompt_to_generator, collate_fn
+from open_instruct.streaming_data_loader import (
+    PendingQueriesMap,
+    ShufflingIterator,
+    add_prompt_to_generator,
+    collate_fn,
+)
 
 # isort: on
 import asyncio
+import json
 import logging
 import math
 import random
@@ -74,6 +80,7 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
@@ -92,6 +99,7 @@ from open_instruct.ground_truth_utils import (
     soft_format_reward_func,
 )
 from open_instruct.model_utils import (
+    Batch,
     ModelConfig,
     apply_verifiable_reward,
     disable_dropout_in_model,
@@ -103,8 +111,8 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.queue_types import ShutdownSentinel
-from open_instruct.rl_utils import PackedSequences, Timer
+from open_instruct.queue_types import GenerationResult, RequestInfo, ShutdownSentinel, TokenStatistics
+from open_instruct.rl_utils import PackedSequences, Timer, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -112,6 +120,7 @@ from open_instruct.utils import (
     _z3_params_to_fetch,
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
+    combine_reward_metrics,
     download_latest_checkpoint_from_gs,
     get_beaker_whoami,
     get_eval_ds_config,
@@ -125,6 +134,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
+    repeat_each,
     sync_gs_bucket,
 )
 
