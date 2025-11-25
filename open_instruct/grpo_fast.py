@@ -1861,6 +1861,14 @@ def accumulate_inference_batches(
         all_reward_metrics.append(reward_metrics)
         all_percent_solved.append(percent_solved)
 
+    if len(results) == 0:
+        logger.warning(
+            "[Data Preparation Thread] All prompts were filtered during accumulation. "
+            f"Filtered: {total_filtered_prompts} (zero std: {filtered_prompt_zero}, "
+            f"solved: {filtered_prompt_solved}, nonzero: {filtered_prompt_nonzero})"
+        )
+        return None, None, None, None
+
     # Combine all results into a single GenerationResult
     combined_responses = []
     combined_finish_reasons = []
@@ -2014,6 +2022,33 @@ def data_preparation_thread(
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
                 return
+            if result is None:
+                logger.info("[Data Preparation Thread] All prompts filtered, putting empty batch into queue")
+                packed_sequences = PackedSequences(
+                    query_responses=[],
+                    attention_masks=[],
+                    response_masks=[],
+                    original_responses=[],
+                    tool_masks=[],
+                    advantages=[],
+                    position_ids=[],
+                    vllm_logprobs=[],
+                )
+                collated_data = []
+                packed_sequences_Q.put(
+                    {
+                        "packed_sequences": packed_sequences,
+                        "collated_data": collated_data,
+                        "metrics": {},
+                        "responses_count": 0,
+                        "num_new_tokens": 0,
+                        "B": 0,
+                        "prompt_lengths": [],
+                        "response_lengths": [],
+                        "num_filtered_prompts": 0,
+                    }
+                )
+                continue
 
         getting_response_time = timer.duration
         scores = np.array(batch.scores)

@@ -1,16 +1,14 @@
 #!/bin/bash
 
-# OLMo 3 model
-MODEL_NAME_OR_PATH="/weka/oe-training-default/ai2-llm/checkpoints/tylerr/long-context/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_packing_yarn-fullonly_50B-fb13a737/step11921-hf"
+MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
+DATASETS="allenai/Dolci-RLZero-Code-7B 1.0"
 
-DATASETS="saurabh5/rlvr_acecoder_filtered_filtered_olmo_completions_filtered 6656 hamishivi/synthetic2-rlvr-code-compressed_filtered 3328 hamishivi/klear-code-rlvr_filtered 3328"
-
-LOCAL_EVALS="hamishivi/rlvr_acecoder_filtered_filtered 4 hamishivi/klear-code-rlvr_filtered 4"
+LOCAL_EVALS="allenai/Dolci-RLZero-Code-7B 8"
 LOCAL_EVAL_SPLITS="train"
 
 EVALS="codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_lite"
 
-EXP_NAME="grpo_code_from_zero"
+EXP_NAME="olmo3_7b_rlzero_code"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift
@@ -30,9 +28,8 @@ python mason.py \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
     --budget ai2/oe-adapt \
-    -- \
-source configs/beaker_configs/ray_node_setup.sh \&\& \
-python open_instruct/grpo_fast.py \
+    -- source configs/beaker_configs/ray_node_setup.sh \
+\&\& uv run open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
     --async_steps 4 \
@@ -54,8 +51,7 @@ python open_instruct/grpo_fast.py \
     --response_length 16384 \
     --pack_length 18432 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --chat_template_name olmo_thinker \
-    --stop_strings "</answer>" \
+    --chat_template_name olmo_thinker_code_rlzero \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 10000000 \

@@ -9,7 +9,9 @@ import string
 import sys
 import time
 
+import backoff
 import beaker
+import requests
 from rich.console import Console
 from rich.text import Text
 
@@ -794,6 +796,9 @@ def main():
         beaker_secrets = [secret.name for secret in beaker_client.secret.list()]
         whoami = beaker_client.user.get().name
 
+        # Increase timeout to 300s for large experiment specs.
+        beaker_client.TIMEOUT = 300
+
     full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
     if is_external_user:
         console.rule("[bold red]Non-Ai2 User Detected[/bold red]")
@@ -820,8 +825,20 @@ def main():
         budget=args.budget,
         retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
     )
-    exp = beaker_client.experiment.create(spec=experiment_spec)
-    console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.experiment.id}")
+
+    @backoff.on_exception(
+        backoff.expo,
+        requests.exceptions.Timeout,
+        max_tries=5,
+        # Factor here is the multiplier for the backoff delay, in seconds.
+        factor=5,
+    )
+    def launch_experiment():
+        exp = beaker_client.experiment.create(spec=experiment_spec)
+        console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.experiment.id}")
+        return exp
+
+    launch_experiment()
 
 
 if __name__ == "__main__":
