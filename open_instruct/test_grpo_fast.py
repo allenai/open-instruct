@@ -1066,6 +1066,66 @@ class TestShufflingIterator(unittest.TestCase):
             self.assertEqual(batch1, batch3)
 
 
+class TestAccumulateInferenceBatches(TestGrpoFastBase):
+    """Test accumulate_inference_batches function."""
+
+    def test_all_prompts_filtered_returns_none(self):
+        """Test that accumulate_inference_batches returns None when all prompts are filtered."""
+        num_prompts = 8
+        num_samples_per_prompt = 4
+
+        queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
+
+        inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
+        pending_queries_map = grpo_fast.PendingQueriesMap()
+
+        self._ray_queues.append(inference_results_Q)
+
+        for i in range(num_prompts):
+            for _ in range(num_samples_per_prompt):
+                pending_queries_map.insert(i, queries[i], ground_truths[i], datasets[i], raw_queries[i])
+
+        for i in range(num_prompts):
+            mock_result = self.create_mock_result(i, epoch_number=1, num_samples_per_prompt=num_samples_per_prompt)
+            inference_results_Q.put(mock_result)
+
+        mock_args = self.create_mock_args(num_engines=4, num_samples=num_samples_per_prompt)
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_mock_model_dims()
+
+        tokenizer_name = "EleutherAI/pythia-14m"
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+        async def reward_fn_zero_std(
+            responses: list[torch.Tensor],
+            decoded_responses: list[str],
+            ground_truths: list[Any],
+            datasets: list[str],
+            finish_reasons: list[str],
+            infos: list[list[int]],
+            queries: list[str] | None = None,
+        ) -> (list[float], dict[str, Any]):
+            return [0.5] * len(responses), {"time/reward": 0.0}
+
+        result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
+            inference_results_Q,
+            pending_queries_map,
+            mock_args,
+            generation_config=mock_generation_config,
+            num_prompts=num_prompts,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            reward_fn=reward_fn_zero_std,
+            filter_zero_std_samples=True,
+        )
+
+        self.assertIsNone(result)
+        self.assertIsNone(batch)
+        self.assertIsNone(reward_metrics)
+        self.assertIsNone(batch_stats)
+
+
 class TestDataPreparation(TestGrpoFastBase):
     """Test prepare_collated_data_for_workers function."""
 
