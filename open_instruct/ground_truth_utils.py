@@ -805,12 +805,11 @@ class CodeVerifier(VerifierFunction):
     The API URL should be provided during initialization.
     """
 
-    _aiohttp_session: aiohttp.ClientSession | None = None
-
     def __init__(self, verifier_config: CodeVerifierConfig) -> None:
         super().__init__("code", verifier_config=verifier_config, weight=1.0)
         self.pass_rate_reward_threshold = verifier_config.code_pass_rate_reward_threshold
         self.apply_perf_penalty = verifier_config.code_apply_perf_penalty
+        self._session: aiohttp.ClientSession | None = None
 
     def extract_python_code(self, model_output: str) -> str:
         """Extract the last code block between ``` markers from the model output."""
@@ -822,19 +821,12 @@ class CodeVerifier(VerifierFunction):
 
         return matches[-1].strip()
 
-    @classmethod
-    async def _get_aiohttp_session(cls) -> aiohttp.ClientSession:
-        if cls._aiohttp_session is None or cls._aiohttp_session.closed:
+    def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
             connector = aiohttp.TCPConnector(limit=100, limit_per_host=100)
             timeout = aiohttp.ClientTimeout(total=300)
-            cls._aiohttp_session = aiohttp.ClientSession(connector=connector, timeout=timeout)
-        return cls._aiohttp_session
-
-    @classmethod
-    async def close_session(cls) -> None:
-        if cls._aiohttp_session is not None and not cls._aiohttp_session.closed:
-            await cls._aiohttp_session.close()
-            cls._aiohttp_session = None
+            self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+        return self._session
 
     async def async_call(
         self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
@@ -865,8 +857,7 @@ class CodeVerifier(VerifierFunction):
 
         @backoff.on_exception(backoff.expo, aiohttp.ClientError, max_tries=3, max_time=60)
         async def _make_request() -> dict:
-            session = await self._get_aiohttp_session()
-            async with session.post(
+            async with self._get_session().post(
                 self.verifier_config.code_api_url,
                 json=payload,
                 headers={"Content-Type": "application/json"},
