@@ -53,6 +53,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
+from itertools import chain
 from queue import Empty, Full, Queue
 from typing import Any, Literal
 
@@ -496,6 +497,22 @@ def masked_mean(
     numerator = (values * mask).sum(axis=axis)
     denom = mask.sum(axis=axis) if denominator is None else denominator
     return (numerator / denom).mean()
+
+
+def get_num_verifiers(dataset: Dataset) -> int:
+    """Count unique verifiers in the dataset.
+
+    Each example can have one verifier (string) or multiple verifiers (list of strings).
+    This function flattens all verifier sources and returns the count of unique ones.
+
+    Args:
+        dataset: A HuggingFace Dataset containing a VERIFIER_SOURCE_KEY column.
+
+    Returns:
+        The number of unique verifiers in the dataset.
+    """
+    verifier_sources = dataset[VERIFIER_SOURCE_KEY]
+    return len(set(chain.from_iterable(v if isinstance(v, list) else [v] for v in verifier_sources)))
 
 
 @Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker")
@@ -1854,7 +1871,7 @@ def create_model_and_optimizer(
     logger.info(f"[DEBUG] ModelGroup created with {len(policy_group.models)} policy actors")
 
     logger.info("[DEBUG] Starting model initialization across all ranks...")
-    num_verifiers = len(set(train_dataset[VERIFIER_SOURCE_KEY]))
+    num_verifiers = get_num_verifiers(train_dataset)
     inits = [
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer, num_verifiers)
         for model in policy_group.models
