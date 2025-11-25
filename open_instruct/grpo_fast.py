@@ -634,7 +634,6 @@ class PolicyTrainerRayProcess(RayProcess):
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
         self.num_mini_batches = args.num_mini_batches
-        dataset = dataset.shard(num_shards=world_size, index=rank)
         self.dataloader = data_loader_config.build(
             dataset=dataset,
             reward_fn=reward_fn,
