@@ -154,121 +154,6 @@ def _truncate_tool_output_tokens(
     return tool_output_token_ids, excess, prompt_and_tool_output
 
 
-async def process_request_async(actor: "LLMRayActor", sub_request_id: str, sampling_params: SamplingConfig):
-    """Process a single async request with tool support, awaiting tools inline."""
-    accumulated_tokens = []
-    accumulated_logprobs = []
-    cumulative_logprob = 0.0
-    masks = []
-    num_calls = 0
-    timeout = False
-    tool_error = ""
-    tool_output = ""
-    tool_runtime = 0.0
-    tool_called = False
-
-    base_request_id = split_request_id(sub_request_id)["base_id"]
-    current_prompt_token_ids = list(actor.request_metadata[base_request_id]["prompt_token_ids"])
-    current_sampling_params = sampling_params
-
-    while True:
-        api_response = await actor.client.completions.create(
-            model=actor.model_name,
-            prompt=current_prompt_token_ids,
-            extra_body={"return_token_ids": True, "cache_salt": base_request_id},
-            **dataclasses.asdict(current_sampling_params),
-        )
-
-        output = api_response.choices[0]
-
-        accumulated_tokens.extend(output.token_ids)
-
-        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
-        for token_id, logprob in zip(output.token_ids, output.logprobs.token_logprobs):
-            accumulated_logprobs.append({token_id: types.SimpleNamespace(logprob=logprob)})
-            cumulative_logprob += logprob
-
-        masks.extend([1] * len(output.token_ids))
-
-        if not actor.tools or not actor.max_tool_calls:
-            break
-
-        triggered_tool, stop_str = get_triggered_tool(
-            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
-        )
-        if triggered_tool is None:
-            break
-
-        assert actor.executor is not None, f"executor is None for request {sub_request_id}"
-
-        loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
-
-        tool_called = True
-        num_calls += 1
-        timeout = timeout or tool_result.timeout
-        tool_error += "" if tool_result.error is None else tool_result.error
-        tool_output += tool_result.output
-        tool_runtime += tool_result.runtime
-
-        tool_output_token_ids = actor.llm_engine.tokenizer.encode(
-            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
-        )
-
-        tool_output_token_ids, excess, prompt_and_tool_output = _truncate_tool_output_tokens(
-            tool_output_token_ids,
-            current_prompt_token_ids,
-            accumulated_tokens,
-            actor.llm_engine.model_config.max_model_len,
-            sampling_params.max_tokens,
-            len(masks),
-        )
-
-        accumulated_tokens.extend(tool_output_token_ids)
-        accumulated_logprobs.extend(
-            [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids]
-        )
-        masks.extend([0] * len(tool_output_token_ids))
-
-        new_sample_tokens = sampling_params.max_tokens - len(masks)
-        if excess > 0 or new_sample_tokens <= 0:
-            break
-
-        current_prompt_token_ids = prompt_and_tool_output
-        current_sampling_params = dataclasses.replace(sampling_params, max_tokens=new_sample_tokens)
-
-    complete_output = CompletionOutput(
-        index=split_request_id(sub_request_id)["request_index"],
-        token_ids=accumulated_tokens,
-        cumulative_logprob=cumulative_logprob,
-        logprobs=accumulated_logprobs,
-        finish_reason=output.finish_reason,
-    )
-    if actor.tools:
-        complete_output.mask = masks
-        complete_output.num_calls = num_calls
-        complete_output.timeout = timeout
-        complete_output.tool_error = tool_error
-        complete_output.tool_output = tool_output
-        complete_output.tool_runtime = tool_runtime
-        complete_output.tool_called = tool_called
-
-    actor.active_tasks.pop(sub_request_id, None)
-
-    actor.completion_queue.put(
-        {
-            "base_request_id": base_request_id,
-            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
-            "request_output": RequestOutput(
-                request_id=sub_request_id,
-                prompt_token_ids=actor.request_metadata[base_request_id]["prompt_token_ids"],
-                outputs=[complete_output],
-            ),
-            "tools": actor.tools,
-        }
-    )
-
-
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
 # Turns out Ray doesnt necessarily place bundles together,
 # so this function is used to get the bundle indices of a placement group
@@ -520,7 +405,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
         sub_request_id = f"{request_id}_{j}"
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
-            process_request_async(actor, sub_request_id, sub_sampling_params), actor.loop
+            process_request(actor, sub_request_id, sub_sampling_params), actor.loop
         )
 
 
@@ -833,6 +718,121 @@ class LLMRayActor:
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_config)
 
         return int(max_concurrency)
+
+
+async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
+    """Process a single async request with tool support, awaiting tools inline."""
+    accumulated_tokens = []
+    accumulated_logprobs = []
+    cumulative_logprob = 0.0
+    masks = []
+    num_calls = 0
+    timeout = False
+    tool_error = ""
+    tool_output = ""
+    tool_runtime = 0.0
+    tool_called = False
+
+    base_request_id = split_request_id(sub_request_id)["base_id"]
+    current_prompt_token_ids = list(actor.request_metadata[base_request_id]["prompt_token_ids"])
+    current_sampling_params = sampling_params
+
+    while True:
+        api_response = await actor.client.completions.create(
+            model=actor.model_name,
+            prompt=current_prompt_token_ids,
+            extra_body={"return_token_ids": True, "cache_salt": base_request_id},
+            **dataclasses.asdict(current_sampling_params),
+        )
+
+        output = api_response.choices[0]
+
+        accumulated_tokens.extend(output.token_ids)
+
+        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
+        for token_id, logprob in zip(output.token_ids, output.logprobs.token_logprobs):
+            accumulated_logprobs.append({token_id: types.SimpleNamespace(logprob=logprob)})
+            cumulative_logprob += logprob
+
+        masks.extend([1] * len(output.token_ids))
+
+        if not actor.tools or not actor.max_tool_calls:
+            break
+
+        triggered_tool, stop_str = get_triggered_tool(
+            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
+        )
+        if triggered_tool is None:
+            break
+
+        assert actor.executor is not None, f"executor is None for request {sub_request_id}"
+
+        loop = asyncio.get_running_loop()
+        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
+
+        tool_called = True
+        num_calls += 1
+        timeout = timeout or tool_result.timeout
+        tool_error += "" if tool_result.error is None else tool_result.error
+        tool_output += tool_result.output
+        tool_runtime += tool_result.runtime
+
+        tool_output_token_ids = actor.llm_engine.tokenizer.encode(
+            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+        )
+
+        tool_output_token_ids, excess, prompt_and_tool_output = _truncate_tool_output_tokens(
+            tool_output_token_ids,
+            current_prompt_token_ids,
+            accumulated_tokens,
+            actor.llm_engine.model_config.max_model_len,
+            sampling_params.max_tokens,
+            len(masks),
+        )
+
+        accumulated_tokens.extend(tool_output_token_ids)
+        accumulated_logprobs.extend(
+            [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids]
+        )
+        masks.extend([0] * len(tool_output_token_ids))
+
+        new_sample_tokens = sampling_params.max_tokens - len(masks)
+        if excess > 0 or new_sample_tokens <= 0:
+            break
+
+        current_prompt_token_ids = prompt_and_tool_output
+        current_sampling_params = dataclasses.replace(sampling_params, max_tokens=new_sample_tokens)
+
+    complete_output = CompletionOutput(
+        index=split_request_id(sub_request_id)["request_index"],
+        token_ids=accumulated_tokens,
+        cumulative_logprob=cumulative_logprob,
+        logprobs=accumulated_logprobs,
+        finish_reason=output.finish_reason,
+    )
+    if actor.tools:
+        complete_output.mask = masks
+        complete_output.num_calls = num_calls
+        complete_output.timeout = timeout
+        complete_output.tool_error = tool_error
+        complete_output.tool_output = tool_output
+        complete_output.tool_runtime = tool_runtime
+        complete_output.tool_called = tool_called
+
+    actor.active_tasks.pop(sub_request_id, None)
+
+    actor.completion_queue.put(
+        {
+            "base_request_id": base_request_id,
+            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
+            "request_output": RequestOutput(
+                request_id=sub_request_id,
+                prompt_token_ids=actor.request_metadata[base_request_id]["prompt_token_ids"],
+                outputs=[complete_output],
+            ),
+            "tools": actor.tools,
+        }
+    )
 
 
 def get_cuda_arch_list() -> str:
