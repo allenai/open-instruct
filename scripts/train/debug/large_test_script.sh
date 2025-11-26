@@ -13,13 +13,14 @@ uv run python mason.py \
 	--preemptible \
         --num_nodes 2 \
 	--description "Large (multi-node) test script." \
-        --timeout 3600 \
+        --timeout 1h \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --budget ai2/oe-adapt \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
+        --load_ref_policy false \
         --num_samples_per_prompt_rollout 16 \
         --num_unique_prompts_rollout 32 \
         --num_mini_batches 1 \

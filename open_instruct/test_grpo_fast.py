@@ -15,7 +15,13 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct import grpo_fast, model_utils, rl_utils, utils
+from open_instruct import grpo_fast, rl_utils, utils
+from open_instruct.dataset_transformation import (
+    GROUND_TRUTHS_KEY,
+    INPUT_IDS_PROMPT_KEY,
+    RAW_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
+)
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.vllm_utils import create_vllm_engines
 
@@ -220,10 +226,10 @@ class TestGrpoFastBase(unittest.TestCase):
 
         return tokenizer, reward_fn
 
-    def setup_and_split_batch(
+    def setup_and_add_prompts_to_generator(
         self, queries, ground_truths, datasets, raw_queries, indices, num_engines, training_step=1
     ):
-        """Setup queues and split batch - common pattern."""
+        """Setup queues and add prompts to generator - common pattern."""
         # Queue size must be at least as large as the number of queries to avoid blocking
         queue_size = max(len(queries), num_engines * 2)
         param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
@@ -233,27 +239,26 @@ class TestGrpoFastBase(unittest.TestCase):
         # Track queues for cleanup
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
-        batch = model_utils.Batch(
-            queries=queries,
-            ground_truths=ground_truths,
-            datasets=datasets,
-            raw_queries=raw_queries,
-            indices=indices,
-            decoded_responses=None,
-            scores=None,
-        )
-
         mock_generation_config = MagicMock()
         mock_generation_config.n = 4
 
-        # Create mock args with inference_batch_size
-        mock_args = MagicMock()
-        # Calculate inference_batch_size based on number of queries and engines
-        mock_args.inference_batch_size = max(1, len(queries) // num_engines)
-
-        grpo_fast.split_and_insert_batch(
-            batch, 0, training_step, pending_queries_map, param_prompt_Q, mock_generation_config, False
-        )
+        for index in range(len(queries)):
+            example = {
+                INPUT_IDS_PROMPT_KEY: queries[index],
+                GROUND_TRUTHS_KEY: ground_truths[index],
+                VERIFIER_SOURCE_KEY: datasets[index],
+                RAW_PROMPT_KEY: raw_queries[index],
+            }
+            grpo_fast.add_prompt_to_generator(
+                example,
+                indices[index],
+                0,
+                training_step,
+                pending_queries_map,
+                param_prompt_Q,
+                mock_generation_config,
+                False,
+            )
 
         return param_prompt_Q, inference_results_Q, pending_queries_map
 
@@ -340,7 +345,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
+        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
@@ -425,7 +430,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
+        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
@@ -470,12 +475,12 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
+        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
         # For multiple samples, we need to add additional references to the pending_queries_map
-        # The first reference is already added by setup_and_split_batch
+        # The first reference is already added by setup_and_add_prompts_to_generator
         for _ in range(num_samples_per_prompt - 1):
             for idx, query, ground_truth, dataset, raw_query in zip(
                 dataset_indices, queries_next, ground_truths_next, datasets_next, raw_queries_next
@@ -590,7 +595,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         tokenizer, reward_fn = self.create_mock_tokenizer_and_reward_fn()
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_split_batch(
+        param_prompt_Q, inference_results_Q, pending_queries_map = self.setup_and_add_prompts_to_generator(
             queries, ground_truths, datasets, raw_queries, indices, num_engines
         )
 
@@ -742,9 +747,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
     """Test the new streaming accumulation functionality."""
 
     def test_more_engines_than_queries(self):
-        """Test that split_and_insert_batch handles gracefully when engines > queries."""
-        # More engines than queries - should handle gracefully with single-prompt batches
-        num_engines = 8
+        """Test that add_prompt_to_generator handles gracefully when engines > queries."""
         num_queries = 4
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
@@ -754,32 +757,26 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         # Track queue for cleanup
         self._ray_queues.append(param_prompt_Q)
 
-        batch = model_utils.Batch(
-            queries=queries,
-            ground_truths=ground_truths,
-            datasets=datasets,
-            raw_queries=raw_queries,
-            indices=indices,
-            decoded_responses=None,
-            scores=None,
-        )
-
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
 
-        # Create mock args with inference_batch_size
-        mock_args = MagicMock()
-        mock_args.inference_batch_size = max(1, num_queries // num_engines)
-
-        grpo_fast.split_and_insert_batch(
-            batch,
-            epoch_number=0,
-            training_step=1,
-            pending_queries_map=pending_queries_map,
-            param_prompt_Q=param_prompt_Q,
-            generation_config=mock_generation_config,
-            is_eval=False,
-        )
+        for index in range(len(queries)):
+            example = {
+                INPUT_IDS_PROMPT_KEY: queries[index],
+                GROUND_TRUTHS_KEY: ground_truths[index],
+                VERIFIER_SOURCE_KEY: datasets[index],
+                RAW_PROMPT_KEY: raw_queries[index],
+            }
+            grpo_fast.add_prompt_to_generator(
+                example,
+                indices[index],
+                epoch_number=0,
+                training_step=1,
+                pending_queries_map=pending_queries_map,
+                param_prompt_Q=param_prompt_Q,
+                generation_config=mock_generation_config,
+                is_eval=False,
+            )
 
         # Should have 4 batches (one for each query)
         self.assertEqual(
@@ -811,16 +808,6 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         # Track queue for cleanup
         self._ray_queues.append(param_prompt_Q)
 
-        batch = model_utils.Batch(
-            queries=queries,
-            ground_truths=ground_truths,
-            datasets=datasets,
-            raw_queries=raw_queries,
-            indices=indices,
-            decoded_responses=None,
-            scores=None,
-        )
-
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
 
@@ -828,15 +815,23 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         mock_args = MagicMock()
         mock_args.inference_batch_size = max(1, num_queries // num_engines + (1 if num_queries % num_engines else 0))
 
-        grpo_fast.split_and_insert_batch(
-            batch,
-            epoch_number=0,
-            training_step=1,
-            pending_queries_map=pending_queries_map,
-            param_prompt_Q=param_prompt_Q,
-            generation_config=mock_generation_config,
-            is_eval=False,
-        )
+        for index in range(len(queries)):
+            example = {
+                INPUT_IDS_PROMPT_KEY: queries[index],
+                GROUND_TRUTHS_KEY: ground_truths[index],
+                VERIFIER_SOURCE_KEY: datasets[index],
+                RAW_PROMPT_KEY: raw_queries[index],
+            }
+            grpo_fast.add_prompt_to_generator(
+                example,
+                indices[index],
+                epoch_number=0,
+                training_step=1,
+                pending_queries_map=pending_queries_map,
+                param_prompt_Q=param_prompt_Q,
+                generation_config=mock_generation_config,
+                is_eval=False,
+            )
 
         # With single-prompt architecture, verify we have the right number of individual requests
         request_count = 0
@@ -1060,6 +1055,66 @@ class TestShufflingIterator(unittest.TestCase):
             batch1 = next(iter1)
             batch3 = next(iter3)
             self.assertEqual(batch1, batch3)
+
+
+class TestAccumulateInferenceBatches(TestGrpoFastBase):
+    """Test accumulate_inference_batches function."""
+
+    def test_all_prompts_filtered_returns_none(self):
+        """Test that accumulate_inference_batches returns None when all prompts are filtered."""
+        num_prompts = 8
+        num_samples_per_prompt = 4
+
+        queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
+
+        inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
+        pending_queries_map = grpo_fast.PendingQueriesMap()
+
+        self._ray_queues.append(inference_results_Q)
+
+        for i in range(num_prompts):
+            for _ in range(num_samples_per_prompt):
+                pending_queries_map.insert(i, queries[i], ground_truths[i], datasets[i], raw_queries[i])
+
+        for i in range(num_prompts):
+            mock_result = self.create_mock_result(i, epoch_number=1, num_samples_per_prompt=num_samples_per_prompt)
+            inference_results_Q.put(mock_result)
+
+        mock_args = self.create_mock_args(num_engines=4, num_samples=num_samples_per_prompt)
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_mock_model_dims()
+
+        tokenizer_name = "EleutherAI/pythia-14m"
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+        async def reward_fn_zero_std(
+            responses: list[torch.Tensor],
+            decoded_responses: list[str],
+            ground_truths: list[Any],
+            datasets: list[str],
+            finish_reasons: list[str],
+            infos: list[list[int]],
+            queries: list[str] | None = None,
+        ) -> (list[float], dict[str, Any]):
+            return [0.5] * len(responses), {"time/reward": 0.0}
+
+        result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
+            inference_results_Q,
+            pending_queries_map,
+            mock_args,
+            generation_config=mock_generation_config,
+            num_prompts=num_prompts,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            reward_fn=reward_fn_zero_std,
+            filter_zero_std_samples=True,
+        )
+
+        self.assertIsNone(result)
+        self.assertIsNone(batch)
+        self.assertIsNone(reward_metrics)
+        self.assertIsNone(batch_stats)
 
 
 class TestDataPreparation(TestGrpoFastBase):

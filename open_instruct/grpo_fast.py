@@ -66,6 +66,7 @@ import torch.utils
 import torch.utils.data
 import vllm
 import wandb
+from datasets import Dataset
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
@@ -99,6 +100,7 @@ from open_instruct.model_utils import (
     disable_dropout_in_model,
     entropy_from_logits,
     get_olmo3_generation_config,
+    load_ref_policy,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -226,12 +228,9 @@ class Args:
     stop_strings: list[str] | None = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
-    use_fp8_kv_cache: bool = False
-    """Whether to use fp8 kv cache. This is useful for larger models or olmo."""
-
     # Algorithm
     async_steps: int = 1
-    """Number of steps ahead to generate responses. Set to 0 to make the code synchronous. Values greater than 0 learn from a policy up to async_steps old like Cleanba (https://arxiv.org/abs/2310.00036)"""
+    """Number of steps ahead to generate responses. Fully synchronous training is not supported, so async_steps must be greater than 0. The trainer learns from a policy up to async_steps old like Cleanba (https://arxiv.org/abs/2310.00036)"""
     num_epochs: int = 1
     """the number of epochs to train"""
     num_mini_batches: int = 1
@@ -261,6 +260,8 @@ class Args:
     """
     ref_policy_update_freq: int | None = None
     """How many training steps to take before updating the reference policy."""
+    load_ref_policy: bool = True
+    """Whether to load and use a reference policy for KL penalty calculation."""
     advantage_normalization_type: Literal["standard", "centered"] = "standard"
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
@@ -270,6 +271,8 @@ class Args:
 
     active_sampling: bool = False
     """Whether to continue sampling responses until you get a full batch."""
+    filter_zero_std_samples: bool = True
+    """Whether to filter out prompts with zero reward std (all samples have the same score)."""
     no_resampling_pass_rate: float | None = None
     """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
 
@@ -335,8 +338,6 @@ class Args:
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
-    inference_batch_size: int | None = None
-    """inference batch size per vLLM engine. If None, calculated as ceil(num_unique_prompts_rollout / vllm_num_engines) * num_samples_per_prompt_rollout"""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
     vllm_enforce_eager: bool = False
@@ -417,6 +418,10 @@ class Args:
     """multiply the gpus used for each oe-eval task"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+    eval_workspace: str = "ai2/tulu-3-results"
+    """the workspace to launch evaluation jobs on"""
+    send_slack_alerts: bool = False
+    """Whether to send Slack alerts on training failures"""
 
     # Evaluation behavior
     eval_on_step_0: bool = False
@@ -471,9 +476,6 @@ class Args:
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
-        if self.inference_batch_size is None:
-            total_prompts = self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout
-            self.inference_batch_size = max(1, math.ceil(total_prompts / self.vllm_num_engines))
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -510,6 +512,11 @@ class Args:
                 assert self.mask_tool_use, (
                     "Must mask tool use when using vLLM logprobs or truncated importance sampling."
                 )
+        if not self.load_ref_policy and self.beta != 0.0:
+            raise ValueError(
+                "When load_ref_policy=False, beta must be 0.0. "
+                f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
+            )
 
         # Figure out max possible RLVR score
         self.max_possible_score = 0
@@ -524,20 +531,17 @@ class Args:
                 "Otherwise, your generator only generates only one batch worth of prompts and a single filtered "
                 "prompt will cause the trainer to stall waiting for more data  . "
             )
-
-
-def next_batch(dataset_indices: list[int], dataset: datasets.Dataset) -> Batch:
-    """Extract next batch of data based on indices."""
-    data_next = dataset[dataset_indices]
-    return Batch(
-        queries=data_next[INPUT_IDS_PROMPT_KEY],
-        ground_truths=data_next[GROUND_TRUTHS_KEY],
-        datasets=data_next[VERIFIER_SOURCE_KEY],
-        raw_queries=data_next[RAW_PROMPT_KEY],
-        indices=dataset_indices,
-        decoded_responses=None,
-        scores=None,
-    )
+            assert self.filter_zero_std_samples, (
+                "filter_zero_std_samples must be True when active_sampling is True. "
+                "Active sampling requires filtering to work correctly."
+            )
+        if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
+            raise ValueError(
+                "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
+                "as the reward standard deviation will always be 0, causing all samples to be filtered."
+            )
+        if self.async_steps < 1:
+            raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
 
 
 def masked_mean(
@@ -547,31 +551,6 @@ def masked_mean(
     numerator = (values * mask).sum(axis=axis)
     denom = mask.sum(axis=axis) if denominator is None else denominator
     return (numerator / denom).mean()
-
-
-class MetricsTracker:
-    """A simple class to prellocate all metrics in an array
-    so we can do only one allreduce operation to get the metrics mean"""
-
-    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
-        self.metrics = torch.zeros(max_metrics, device=device)
-        self.names2idx = {}
-        self.current_idx = 0
-        self.max_metrics = max_metrics
-
-    def add(self, name: str, value: torch.tensor):
-        if name not in self.names2idx:
-            if self.current_idx >= self.max_metrics:
-                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
-            self.names2idx[name] = self.current_idx
-            self.current_idx += 1
-
-        self.metrics[self.names2idx[name]] = value
-        return self
-
-    def get_metrics_list(self) -> dict[str, float]:
-        metrics_list = self.metrics.tolist()
-        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
@@ -685,7 +664,8 @@ class ShufflingIterator:
     def __iter__(self) -> Iterator[list[int]]:
         return self
 
-    def __next__(self) -> list[int]:
+    def __next__(self) -> list[int] | int:
+        """Return a list of next indices or a single index if batch size is 1"""
         if self.index >= self.effective_size:
             self.index = 0
             self._update_effective_size()
@@ -694,6 +674,8 @@ class ShufflingIterator:
 
         end_index = self.index + self.batch_size
         batch = self.data[self.index : end_index].tolist()
+        if self.batch_size == 1:
+            batch = batch[0]
         self.index = end_index
 
         return batch
@@ -740,7 +722,7 @@ class PolicyTrainerRayProcess(RayProcess):
         beaker_config: BeakerRuntimeConfig,
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
-    ):
+    ) -> int:
         # ------------------------------------------------------------
         # Monkey patch to load checkpoints with `weights_only=False`
         # otherwise it errors out with:
@@ -861,7 +843,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 # Save reference policy path to load later (after ref_policy is initialized)
                 self.ref_policy_checkpoint_path = None
-                if states.get("ref_policy_saved", False):
+                if args.load_ref_policy and states.get("ref_policy_saved", False):
                     ref_policy_dir = os.path.join(args.checkpoint_state_dir, "ref_policy")
                     model_path = os.path.join(ref_policy_dir, "pytorch_model.bin")
                     if os.path.exists(model_path):
@@ -874,43 +856,28 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model.train()
 
         # reference model
-        ds_config = get_eval_ds_config(
-            offload=args.deepspeed_offload_param,
-            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-            # stage 2 is optimizer sharding which doesn't apply to inference
-            stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
-            bf16=True,
-        )
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["gradient_accumulation_steps"] = 1
-        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
-        else:
-            dschf = None
-        logger.info(f"DeepSpeed config: {dschf=}")
+        if args.load_ref_policy:
+            ds_config, self.ref_policy_hf_ds_config = get_eval_ds_config(
+                offload=False,
+                # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+                # stage 2 is optimizer sharding which doesn't apply to inference
+                stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+                bf16=True,
+                per_device_train_batch_size=args.per_device_train_batch_size,
+            )
 
-        self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
-            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
-        )
-        disable_dropout_in_model(self.ref_policy)
-        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
-        self.ref_policy.eval()
-
-        # Load reference policy checkpoint if available
-        if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
-            state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device)
-            if hasattr(self.ref_policy, "module"):
-                # If wrapped by DeepSpeed
-                self.ref_policy.module.load_state_dict(state_dict)
-            else:
-                self.ref_policy.load_state_dict(state_dict)
-            logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
-        self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
+            self.ref_policy: PreTrainedModel = load_ref_policy(
+                model_config=model_config,
+                ds_config=ds_config,
+                deepspeed_stage=args.deepspeed_stage,
+                local_rank=self.local_rank,
+                device=self.device,
+                rank=self.rank,
+                checkpoint_path=self.ref_policy_checkpoint_path
+                if hasattr(self, "ref_policy_checkpoint_path")
+                else None,
+            )
+        self.local_metrics = utils.MetricsTracker(device=self.device)
         return optimization_steps_done
 
     def forward(
@@ -1027,6 +994,8 @@ class PolicyTrainerRayProcess(RayProcess):
         return all_refs
 
     def update_ref_policy(self):
+        if not self.args.load_ref_policy:
+            return
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
             if self.args.deepspeed_stage == 3:
                 with deepspeed.zero.GatheredParameters([param, ref_param], modifier_rank=0):
@@ -1034,6 +1003,55 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+
+    def compute_logprobs(
+        self,
+        model: PreTrainedModel,
+        collated_query_responses: list[torch.Tensor],
+        collated_tool_masks: list[torch.Tensor],
+        collated_attention_masks: list[torch.Tensor],
+        collated_position_ids: list[torch.Tensor],
+        collated_response_masks: list[torch.Tensor],
+        pad_token_id: int,
+        use_grad: bool = False,
+        return_entropy: bool = False,
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor] | None]:
+        collated_logprobs = []
+        collated_entropies = [] if return_entropy else None
+
+        context = contextlib.nullcontext() if use_grad else torch.no_grad()
+        with context:
+            for i in range(len(collated_query_responses)):
+                query_response = collated_query_responses[i]
+                tool_mask = collated_tool_masks[i]
+                attention_mask = collated_attention_masks[i]
+                position_id = collated_position_ids[i]
+                response_mask = collated_response_masks[i]
+
+                logprob, entropy = self.forward(
+                    model,
+                    query_response,
+                    attention_mask,
+                    position_id,
+                    pad_token_id,
+                    self.args.temperature,
+                    return_entropy=return_entropy,
+                )
+
+                if self.args.mask_tool_use and self.args.tool_use:
+                    response_mask = response_mask.bool() & tool_mask.bool()
+                else:
+                    response_mask = response_mask.bool()
+
+                logprob = torch.masked_fill(logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                collated_logprobs.append(logprob)
+
+                if return_entropy:
+                    collated_entropies.append(entropy)
+
+                torch.cuda.empty_cache()
+
+        return collated_logprobs, collated_entropies
 
     def train(
         self,
@@ -1071,70 +1089,60 @@ class PolicyTrainerRayProcess(RayProcess):
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
 
-        # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
-        with Timer("Inference Calculation", noop=self.rank != 0), torch.no_grad():
-            for i in range(len(collated_query_responses)):
-                query_response = collated_query_responses[i]
-                tool_mask = collated_tool_masks[i]
-                attention_mask = collated_attention_masks[i]
-                position_id = collated_position_ids[i]
-                response_mask = collated_response_masks[i]
-                ref_logprob, _ = self.forward(
+        if args.load_ref_policy:
+            with Timer("Inference Calculation", noop=self.rank != 0):
+                collated_ref_logprobs, _ = self.compute_logprobs(
                     self.ref_policy,
-                    query_response,
-                    attention_mask,
-                    position_id,
+                    collated_query_responses,
+                    collated_tool_masks,
+                    collated_attention_masks,
+                    collated_position_ids,
+                    collated_response_masks,
                     pad_token_id,
-                    args.temperature,
+                    use_grad=False,
                     return_entropy=False,
                 )
-                if args.mask_tool_use and args.tool_use:
-                    # mask logprobs for tool tokens
-                    response_mask = response_mask.bool() & tool_mask.bool()
-                else:
-                    response_mask = response_mask.bool()
-                ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                collated_ref_logprobs.append(ref_logprob)
-                torch.cuda.empty_cache()
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
         # from the generator (note that async mode means these are a bit diff!)
         old_logprobs = [None for _ in range(len(collated_query_responses))]
         if num_mini_batches > 1:
-            with Timer("Old logprobs Calculation", noop=self.rank != 0), torch.no_grad():
-                for i in range(len(collated_query_responses)):
-                    query_response = collated_query_responses[i]
-                    tool_mask = collated_tool_masks[i]
-                    attention_mask = collated_attention_masks[i]
-                    position_id = collated_position_ids[i]
-                    response_mask = collated_response_masks[i]
-                    if not args.use_vllm_logprobs:
-                        local_old_logprob, _ = self.forward(
-                            self.model,
-                            query_response,
-                            attention_mask,
-                            position_id,
-                            pad_token_id,
-                            args.temperature,
-                            return_entropy=False,
-                        )
-                    vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
-                    if args.mask_tool_use and args.tool_use:
-                        response_mask = response_mask.bool() & tool_mask.bool()
-                    else:
-                        response_mask = response_mask.bool()
-                    if not args.use_vllm_logprobs:
-                        local_old_logprob = torch.masked_fill(
-                            local_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB
-                        )
-                    vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                    vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
-                    if args.use_vllm_logprobs:
-                        old_logprobs[i] = vllm_old_logprob
-                    else:
-                        old_logprobs[i] = local_old_logprob
-                    torch.cuda.empty_cache()
+            with Timer("Old logprobs Calculation", noop=self.rank != 0):
+                local_old_logprobs = None
+                if not args.use_vllm_logprobs:
+                    local_old_logprobs, _ = self.compute_logprobs(
+                        self.model,
+                        collated_query_responses,
+                        collated_tool_masks,
+                        collated_attention_masks,
+                        collated_position_ids,
+                        collated_response_masks,
+                        pad_token_id,
+                        use_grad=False,
+                        return_entropy=False,
+                    )
+
+                with torch.no_grad():
+                    for i in range(len(collated_query_responses)):
+                        tool_mask = collated_tool_masks[i]
+                        response_mask = collated_response_masks[i]
+
+                        if args.mask_tool_use and args.tool_use:
+                            response_mask = response_mask.bool() & tool_mask.bool()
+                        else:
+                            response_mask = response_mask.bool()
+
+                        vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
+                        vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                        vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
+
+                        if args.use_vllm_logprobs:
+                            old_logprobs[i] = vllm_old_logprob
+                        else:
+                            old_logprobs[i] = local_old_logprobs[i]
+
+                        torch.cuda.empty_cache()
 
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -1151,7 +1159,6 @@ class PolicyTrainerRayProcess(RayProcess):
             entropy_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
-                    mb_ref_logprob = collated_ref_logprobs[i]
                     mb_query_responses = collated_query_responses[i]
                     mb_tool_mask = collated_tool_masks[i]
                     mb_advantages = collated_advantages[i]
@@ -1186,14 +1193,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         max_diff = masked_diff.max()
                         std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
 
-                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_mean", mean_diff.item())
-                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_max", max_diff.item())
-                        self.local_metrics.add("debug/vllm_vs_local_logprob_diff_std", std_diff.item())
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = std_diff.item()
 
                         reverse_kl = torch.exp(mb_vllm_logprobs) * (mb_vllm_logprobs - mb_local_logprobs)
                         masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
                         mean_reverse_kl = masked_reverse_kl.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
-                        self.local_metrics.add("debug/vllm_local_reverse_kl", mean_reverse_kl.item())
+                        self.local_metrics["debug/vllm_local_reverse_kl"] = mean_reverse_kl.item()
 
                     mb_new_logprobs = mb_local_logprobs
 
@@ -1265,30 +1272,35 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
-                    # Here we recalculate kl: we want the KL loss to backpropagate through the model
-                    # We also clamp the KL loss to avoid numerical instability
-                    # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
-                    ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
-                    kl1 = ref_logprobs_diff
-                    kl2 = (ref_logprobs_diff) ** 2 / 2
-                    kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
-                    kl4 = ratio * ref_logprobs_diff
-                    if args.kl_estimator == "kl1":
-                        kl = kl1
-                    elif args.kl_estimator == "kl2":
-                        kl = kl2
-                    elif args.kl_estimator == "kl3":
-                        kl = kl3
-                    elif args.kl_estimator == "kl4":
-                        kl = kl4
-
-                    # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(
-                        pg_loss_max + (args.beta * kl),
-                        mb_response_masks_bool,
-                        args.masked_mean_axis,
-                        args.masked_mean_denominator,
-                    )
+                    if args.load_ref_policy:
+                        mb_ref_logprob = collated_ref_logprobs[i]
+                        # Here we recalculate kl: we want the KL loss to backpropagate through the model
+                        # We also clamp the KL loss to avoid numerical instability
+                        # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
+                        ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
+                        kl1 = ref_logprobs_diff
+                        kl2 = (ref_logprobs_diff) ** 2 / 2
+                        kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
+                        kl4 = ratio * ref_logprobs_diff
+                        if args.kl_estimator == "kl1":
+                            kl = kl1
+                        elif args.kl_estimator == "kl2":
+                            kl = kl2
+                        elif args.kl_estimator == "kl3":
+                            kl = kl3
+                        elif args.kl_estimator == "kl4":
+                            kl = kl4
+                        # grpo change: directly subtract KL in loss (add)
+                        loss = masked_mean(
+                            pg_loss_max + (args.beta * kl),
+                            mb_response_masks_bool,
+                            args.masked_mean_axis,
+                            args.masked_mean_denominator,
+                        )
+                    else:
+                        loss = masked_mean(
+                            pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                        )
                     loss = loss / accumulation_steps
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
@@ -1297,27 +1309,28 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
-                        # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl1_stats[i] = masked_mean(
-                            kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                        ).float()
-                        kl2_stats[i] = masked_mean(
-                            kl2, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                        ).float()
-                        kl3_stats[i] = masked_mean(
-                            kl3, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                        ).float()
-                        kl4_stats[i] = masked_mean(
-                            kl4, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                        ).float()
-                        if args.kl_estimator == "kl1":
-                            kl_loss_stats[i] = kl1_stats[i] * args.beta
-                        elif args.kl_estimator == "kl2":
-                            kl_loss_stats[i] = kl2_stats[i] * args.beta
-                        elif args.kl_estimator == "kl3":
-                            kl_loss_stats[i] = kl3_stats[i] * args.beta
-                        elif args.kl_estimator == "kl4":
-                            kl_loss_stats[i] = kl4_stats[i] * args.beta
+                        if args.load_ref_policy:
+                            # NOTE: in packed implementation, kl calculation are averages over response tokens
+                            kl1_stats[i] = masked_mean(
+                                kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
+                            kl2_stats[i] = masked_mean(
+                                kl2, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
+                            kl3_stats[i] = masked_mean(
+                                kl3, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
+                            kl4_stats[i] = masked_mean(
+                                kl4, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
+                            if args.kl_estimator == "kl1":
+                                kl_loss_stats[i] = kl1_stats[i] * args.beta
+                            elif args.kl_estimator == "kl2":
+                                kl_loss_stats[i] = kl2_stats[i] * args.beta
+                            elif args.kl_estimator == "kl3":
+                                kl_loss_stats[i] = kl3_stats[i] * args.beta
+                            elif args.kl_estimator == "kl4":
+                                kl_loss_stats[i] = kl4_stats[i] * args.beta
                         pg_clipfrac_stats[i] = masked_mean(
                             (pg_losses2 > pg_losses).float(),
                             mb_response_masks_bool,
@@ -1338,19 +1351,20 @@ class PolicyTrainerRayProcess(RayProcess):
                             ).float()
 
             with torch.no_grad():
-                self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
-                self.local_metrics.add("objective/kl2_avg", kl2_stats.mean())
-                self.local_metrics.add("objective/kl3_avg", kl3_stats.mean())
-                self.local_metrics.add("objective/kl4_avg", kl4_stats.mean())
-                self.local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
-                self.local_metrics.add("loss/kl_avg", kl_loss_stats.mean())
-                self.local_metrics.add("loss/total_avg", loss_stats.mean())
-                self.local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
-                self.local_metrics.add("val/ratio", ratio_stats.mean())
-                self.local_metrics.add("val/ratio_var", ratio_stats.var())
+                if args.load_ref_policy:
+                    self.local_metrics["objective/kl_avg"] = kl1_stats.mean()
+                    self.local_metrics["objective/kl2_avg"] = kl2_stats.mean()
+                    self.local_metrics["objective/kl3_avg"] = kl3_stats.mean()
+                    self.local_metrics["objective/kl4_avg"] = kl4_stats.mean()
+                    self.local_metrics["loss/kl_avg"] = kl_loss_stats.mean()
+                self.local_metrics["loss/policy_avg"] = pg_loss_stats.mean()
+                self.local_metrics["loss/total_avg"] = loss_stats.mean()
+                self.local_metrics["policy/clipfrac_avg"] = pg_clipfrac_stats.mean()
+                self.local_metrics["val/ratio"] = ratio_stats.mean()
+                self.local_metrics["val/ratio_var"] = ratio_stats.var()
                 if args.record_entropy:
-                    self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
-                self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
+                    self.local_metrics["policy/entropy_avg"] = entropy_stats.mean()
+                self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
                 return self.local_metrics.get_metrics_list()
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
@@ -1375,7 +1389,7 @@ class PolicyTrainerRayProcess(RayProcess):
         client_state["rank"] = self.rank
 
         # Save reference policy checkpoint (model only, no optimizer)
-        if hasattr(self, "ref_policy") and self.ref_policy is not None:
+        if self.args.load_ref_policy:
             ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
             os.makedirs(ref_policy_dir, exist_ok=True)
 
@@ -1385,7 +1399,6 @@ class PolicyTrainerRayProcess(RayProcess):
             if self.rank == 0:
                 # Only rank 0 saves the model state
                 model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
-
                 # Save the state dict
                 torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
@@ -1469,17 +1482,18 @@ class PolicyTrainerRayProcess(RayProcess):
         args = self.args
         if self.rank == 0:
             ray.remote(launch_ai2_evals_on_weka).options(num_cpus=1).remote(
-                step_dir,
-                leaderboard_name,
-                args.oe_eval_max_length,
-                wandb_url,
-                training_step,
-                args.oe_eval_tasks,
-                args.stop_strings,
-                args.gs_bucket_path,
-                args.eval_priority,
-                args.oe_eval_beaker_image,
-                args.oe_eval_gpu_multiplier,
+                path=step_dir,
+                leaderboard_name=leaderboard_name,
+                oe_eval_max_length=args.oe_eval_max_length,
+                wandb_url=wandb_url,
+                training_step=training_step,
+                oe_eval_tasks=args.oe_eval_tasks,
+                stop_strings=args.stop_strings,
+                gs_bucket_path=args.gs_bucket_path,
+                eval_priority=args.eval_priority,
+                eval_workspace=args.eval_workspace,
+                beaker_image=args.oe_eval_beaker_image,
+                oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
             )
 
 
@@ -1668,6 +1682,7 @@ class BatchStatistics:
     filtered_prompts_nonzero: int
     percent_solved_mean: float
     no_resampled_prompts: int
+    total_prompts: int
 
 
 def accumulate_inference_batches(
@@ -1681,9 +1696,14 @@ def accumulate_inference_batches(
     reward_fn: Callable,
     actor_manager=None,
     timeout: float | None = None,
+    active_sampling: bool = False,
     filter_zero_std_samples: bool = False,
+    replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: ShufflingIterator | None = None,
+    prompt_dataset: Dataset = None,
+    param_prompt_Q: ray_queue.Queue | None = None,
+    training_step: int = None,
 ) -> tuple[GenerationResult, Batch, dict, BatchStatistics]:
     """Accumulate multiple inference results into a single training batch.
 
@@ -1694,10 +1714,13 @@ def accumulate_inference_batches(
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
-        filter_zero_std_samples: Whether to filter samples with zero reward std and continue sampling
+        active_sampling: Whether to continue sampling until we have sampled num_prompts prompts with non-zero std
+        filter_zero_std_samples: Whether to filter samples with zero reward std
+        replenish_prompts: Add a prompt back onto the prompt_Q after receiving a finished result
         no_resampling_pass_rate: Optional rate at which to note samples solved at greater than this rate
             and exclude them from further sampling
         iter_dataloader: Optional, used for no_resampling_pass_rate
+        param_prompt_Q: Queue containing prompts to send to generator, used to replenish used prompts
 
     Raises:
         queue.Empty: If timeout is specified and no data is available within timeout.
@@ -1706,6 +1729,14 @@ def accumulate_inference_batches(
         Tuple of (combined_result, Batch with queries, ground_truths, datasets, prompt_lengths, response_lengths)
         or (ShutdownSentinel, None, None, None) if shutdown signal received
     """
+    if no_resampling_pass_rate is not None:
+        assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
+
+    if replenish_prompts:
+        assert param_prompt_Q is not None and iter_dataloader is not None and prompt_dataset is not None, (
+            "replenish_prompts requires param_prompt_Q and iter_dataloader and prompt_dataset"
+        )
+
     results = []
     all_queries = []
     all_ground_truths = []
@@ -1726,7 +1757,8 @@ def accumulate_inference_batches(
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not args.verbose,
     )
-    while len(results) < num_prompts:
+    num_prompts_sampled = 0
+    while num_prompts_sampled < num_prompts:
         result = inference_results_Q.get(timeout=timeout)
 
         if isinstance(result, ShutdownSentinel):
@@ -1739,7 +1771,21 @@ def accumulate_inference_batches(
             f"Dataset index: {result.dataset_index}, Epoch: {result.epoch_number}"
         )
 
-        query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
+        query, ground_truth, dataset_name, raw_query = pending_queries_map.pop(result.dataset_index)
+
+        # Replenish generation queue with new prompt
+        if replenish_prompts:
+            dataset_index = next(iter_dataloader)
+            add_prompt_to_generator(
+                prompt_dataset[dataset_index],
+                dataset_index,
+                iter_dataloader.epoch_number,
+                training_step,
+                pending_queries_map,
+                param_prompt_Q,
+                generation_config,
+                is_eval=False,
+            )
 
         # TODO(finbarrtimbers): Move this to LLMRayActor.
         for i in range(len(result.finish_reasons)):
@@ -1753,7 +1799,7 @@ def accumulate_inference_batches(
         # TODO(finbarrtimbers): Make PendingQueriesMap.pop return a Batch, and add a Batch.repeat method.
         k_queries = repeat_each([query], generation_config.n)
         k_ground_truths = repeat_each([ground_truth], generation_config.n)
-        k_datasets = repeat_each([dataset], generation_config.n)
+        k_datasets = repeat_each([dataset_name], generation_config.n)
         k_raw_queries = repeat_each([raw_query], generation_config.n)
 
         scores, reward_metrics = asyncio.run(
@@ -1779,6 +1825,11 @@ def accumulate_inference_batches(
 
         # Filter out zero std prompts
         if filter_zero_std_samples and np.std(scores) == 0:
+            # If we're not active sampling, still count this as a sample
+            if not active_sampling:
+                num_prompts_sampled += 1
+                progress_bar.update(1)
+
             total_filtered_prompts += 1
             if scores[0] == 0:
                 filtered_prompt_zero += 1
@@ -1790,6 +1841,9 @@ def accumulate_inference_batches(
                 f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
             )
             continue
+        else:
+            num_prompts_sampled += 1
+            progress_bar.update(1)
 
         results.append(result)
         all_queries.extend(k_queries)
@@ -1800,7 +1854,14 @@ def accumulate_inference_batches(
         all_scores.extend(scores)
         all_reward_metrics.append(reward_metrics)
         all_percent_solved.append(percent_solved)
-        progress_bar.update(1)
+
+    if len(results) == 0:
+        logger.warning(
+            "[Data Preparation Thread] All prompts were filtered during accumulation. "
+            f"Filtered: {total_filtered_prompts} (zero std: {filtered_prompt_zero}, "
+            f"solved: {filtered_prompt_solved}, nonzero: {filtered_prompt_nonzero})"
+        )
+        return None, None, None, None
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1905,6 +1966,7 @@ def accumulate_inference_batches(
         filtered_prompts_nonzero=filtered_prompt_nonzero,
         percent_solved_mean=percent_solved_mean,
         no_resampled_prompts=total_no_resampled,
+        total_prompts=len(results),
     )
     logging.info(
         f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"
@@ -1916,6 +1978,7 @@ def accumulate_inference_batches(
 def data_preparation_thread(
     reward_fn: Callable,
     inference_results_Q: ray_queue.Queue,  # Ray queue
+    param_prompt_Q: ray_queue.Queue,
     packed_sequences_Q: Queue,
     pending_queries_map: dict,
     args: Args,
@@ -1924,6 +1987,7 @@ def data_preparation_thread(
     generation_config,
     resume_training_step: int,
     iter_dataloader: ShufflingIterator,
+    train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
 ):
@@ -1940,13 +2004,45 @@ def data_preparation_thread(
                 tokenizer=tokenizer,
                 reward_fn=reward_fn,
                 actor_manager=actor_manager,
-                filter_zero_std_samples=args.active_sampling,
+                active_sampling=args.active_sampling,
+                filter_zero_std_samples=args.filter_zero_std_samples,
+                replenish_prompts=True,
                 no_resampling_pass_rate=args.no_resampling_pass_rate,
                 iter_dataloader=iter_dataloader,
+                prompt_dataset=train_dataset,
+                param_prompt_Q=param_prompt_Q,
+                training_step=training_step,
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
                 return
+            if result is None:
+                logger.info("[Data Preparation Thread] All prompts filtered, putting empty batch into queue")
+                packed_sequences = PackedSequences(
+                    query_responses=[],
+                    attention_masks=[],
+                    response_masks=[],
+                    original_responses=[],
+                    tool_masks=[],
+                    advantages=[],
+                    position_ids=[],
+                    vllm_logprobs=[],
+                )
+                collated_data = []
+                packed_sequences_Q.put(
+                    {
+                        "packed_sequences": packed_sequences,
+                        "collated_data": collated_data,
+                        "metrics": {},
+                        "responses_count": 0,
+                        "num_new_tokens": 0,
+                        "B": 0,
+                        "prompt_lengths": [],
+                        "response_lengths": [],
+                        "num_filtered_prompts": 0,
+                    }
+                )
+                continue
 
         getting_response_time = timer.duration
         scores = np.array(batch.scores)
@@ -2313,8 +2409,6 @@ def create_model_and_optimizer(
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
-        inference_batch_size=args.inference_batch_size,
-        use_fp8_kv_cache=args.use_fp8_kv_cache,
         inflight_updates=args.inflight_updates,
     )
 
@@ -2323,14 +2417,21 @@ def create_model_and_optimizer(
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     logger.info("======== ✅ all models and vLLM engines initialized =========")
 
-    # Get and set KV cache max concurrency from the first engine (all engines have the same config)
-    # fp8 kv cache for now forces v0 engine and breaks this.
-    if vllm_engines and not args.use_fp8_kv_cache:
-        kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
-        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
-    else:
-        # dummy value
-        ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
+    kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
+    ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
+    expected_batch_size = (
+        args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout // args.vllm_num_engines
+    )
+    if kv_cache_max_concurrency < expected_batch_size:
+        nodes_needed = (
+            args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout // kv_cache_max_concurrency
+        )
+        logger.warning(
+            f"kv_cache_max_concurrency ({kv_cache_max_concurrency}) is lower than "
+            f"num_unique_prompts_rollout * num_samples_per_prompt_rollout // vllm_num_engines ({expected_batch_size}). "
+            f"This means actors will have to run multiple sequential batches, hurting performance. "
+            f"You might want to use more inference nodes ({nodes_needed} nodes to generate the entire batch simultaneously)."
+        )
 
     ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
@@ -2365,8 +2466,9 @@ def create_generation_configs(args: Args):
     return {"train": generation_config, "eval": eval_generation_config}
 
 
-def split_and_insert_batch(
-    batch: Batch,
+def add_prompt_to_generator(
+    example: dict[str, Any],
+    example_index: int,
     epoch_number: int,
     training_step: int,
     pending_queries_map: PendingQueriesMap,
@@ -2375,20 +2477,22 @@ def split_and_insert_batch(
     is_eval: bool,
 ) -> None:
     """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    for idx, query, ground_truth, dataset, raw_query in zip(
-        batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries
-    ):
-        pending_queries_map.insert(idx, query, ground_truth, dataset, raw_query)
-        param_prompt_Q.put(
-            PromptRequest(
-                prompt=query,
-                generation_config=generation_config,
-                epoch_number=epoch_number,
-                training_step=training_step,
-                dataset_index=idx,
-                is_eval=is_eval,
-            )
+    query = example[INPUT_IDS_PROMPT_KEY]
+    ground_truth = example[GROUND_TRUTHS_KEY]
+    dataset_name = example[VERIFIER_SOURCE_KEY]
+    raw_query = example[RAW_PROMPT_KEY]
+    pending_queries_map.insert(example_index, query, ground_truth, dataset_name, raw_query)
+
+    param_prompt_Q.put(
+        PromptRequest(
+            prompt=query,
+            generation_config=generation_config,
+            epoch_number=epoch_number,
+            training_step=training_step,
+            dataset_index=example_index,
+            is_eval=is_eval,
         )
+    )
 
 
 def load_data_from_packing_thread(
@@ -2401,7 +2505,9 @@ def load_data_from_packing_thread(
                 logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
                 return None, {}, num_total_tokens, 0, None, None, 0
             try:
-                packed_data = packed_sequences_Q.get(timeout=30.0)
+                # When running at 32k generation length, it typically takes 900s to generate data,
+                # so you might see this fire a bunch of times. That's normal!
+                packed_data = packed_sequences_Q.get(timeout=300)
                 break
             except Empty:
                 health_check_fn()
@@ -2525,13 +2631,15 @@ def one_training_step(
             desc=f"Running training step {training_step}",
         )
         if (
-            args.ref_policy_update_freq is not None
+            args.load_ref_policy
+            and args.ref_policy_update_freq is not None
             and training_step % args.ref_policy_update_freq == 0
             and args.alpha > 0
         ):
             update_ref_policy_future.extend(
                 [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
             )
+            ray_get_with_progress(update_ref_policy_future, desc=f"Updating reference policy at step {training_step}")
 
     save_time = 0
     if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
@@ -2553,10 +2661,6 @@ def one_training_step(
                         step_dir, leaderboard_name, wandb_url, training_step
                     )
         save_time += timer.duration
-
-    if len(update_ref_policy_future) > 0:
-        with Timer("[Main Thread] 🔃 Updating reference policy"):
-            ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
@@ -2638,9 +2742,9 @@ def maybe_evaluate(
             reward_fn=reward_fn,
             actor_manager=actor_manager,
             timeout=timeout,
+            active_sampling=False,
             filter_zero_std_samples=False,
-            no_resampling_pass_rate=None,
-            iter_dataloader=None,
+            replenish_prompts=False,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -2894,7 +2998,7 @@ def run_training(
     args,
     tokenizer,
     train_dataset,
-    eval_batch,
+    eval_dataset,
     policy_group,
     vllm_engines,
     generation_configs,
@@ -2944,6 +3048,7 @@ def run_training(
         data_preparation_thread,
         reward_fn,
         inference_results_Q,
+        param_prompt_Q,
         packed_sequences_Q,
         pending_queries_map,
         args,
@@ -2952,6 +3057,7 @@ def run_training(
         generation_configs["train"],
         resume_training_step,
         iter_dataloader,
+        train_dataset,
         actor_manager,
         model_dims,
     )
@@ -2965,11 +3071,11 @@ def run_training(
         )
 
     # Send initial data to ensure we have a N-step offset.
-    for _ in range(args.async_steps):
-        dataset_indices = next(iter_dataloader)
-        batch = next_batch(dataset_indices, train_dataset)
-        split_and_insert_batch(
-            batch,
+    for _ in range(args.async_steps * args.num_unique_prompts_rollout):
+        dataset_index = next(iter_dataloader)
+        add_prompt_to_generator(
+            train_dataset[dataset_index],
+            dataset_index,
             iter_dataloader.epoch_number,
             resume_training_step,
             pending_queries_map,
@@ -2983,7 +3089,6 @@ def run_training(
     else:
         num_total_tokens = 0
 
-    num_prompts_to_refill = 0
     training_start_time = time.perf_counter()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
@@ -3015,35 +3120,22 @@ def run_training(
             num_filtered_prompts,
         ) = load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
 
-        num_prompts_to_refill += args.num_unique_prompts_rollout + num_filtered_prompts
-
-        while num_prompts_to_refill >= args.num_unique_prompts_rollout:
-            batch = next_batch(next(iter_dataloader), train_dataset)
-            split_and_insert_batch(
-                batch,
-                iter_dataloader.epoch_number,
-                training_step,
-                pending_queries_map,
-                param_prompt_Q,
-                generation_configs["train"],
-                is_eval=False,
-            )
-            num_prompts_to_refill -= args.num_unique_prompts_rollout
-
         if (
             training_step % args.local_eval_every == 0
-            and eval_batch is not None
+            and eval_dataset is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
-            split_and_insert_batch(
-                eval_batch,
-                iter_dataloader.epoch_number,
-                training_step,
-                eval_pending_queries_map,
-                param_prompt_Q,
-                generation_configs["eval"],
-                is_eval=True,
-            )
+            for eval_index, eval_example in enumerate(eval_dataset):
+                add_prompt_to_generator(
+                    eval_example,
+                    eval_index,
+                    iter_dataloader.epoch_number,
+                    training_step,
+                    eval_pending_queries_map,
+                    param_prompt_Q,
+                    generation_configs["eval"],
+                    is_eval=True,
+                )
         if collated_data is None:
             continue
 
@@ -3079,9 +3171,6 @@ def run_training(
             iter_dataloader,
         )
 
-        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger_event.set()
-
         # Checkpoint after one_training_step (or even if it was skipped)
         # This ensures we checkpoint progress even if the exact checkpoint step has no data
         if (
@@ -3110,6 +3199,9 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
+        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
+        weight_sync_trigger_event.set()
+
         maybe_evaluate(
             args,
             training_step,
@@ -3120,7 +3212,7 @@ def run_training(
             eval_pending_queries_map,
             generation_configs["eval"],
             generate_metrics_Q,
-            len(eval_batch.queries) if eval_batch else 0,
+            len(eval_dataset) if eval_dataset else 0,
             model_dims,
             actor_manager,
         )
@@ -3197,7 +3289,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             logger.info(f"Restored episode count: {episode}")
 
     train_dataset_idxs = np.arange(len(train_dataset))
-    iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
+    iter_dataloader = ShufflingIterator(train_dataset_idxs, 1, seed=args.seed)
 
     if checkpoint_state and "shuffling_iterator_state" in checkpoint_state:
         iter_dataloader.set_state(checkpoint_state["shuffling_iterator_state"])
@@ -3210,11 +3302,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     generate_metrics_Q = Queue(maxsize=args.async_steps)
     weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
 
-    if eval_dataset is None:
-        eval_batch = None
-    else:
-        eval_dataset_indices = list(range(len(eval_dataset)))
-        eval_batch = next_batch(eval_dataset_indices, eval_dataset)
     reward_fn = make_reward_fn(args)
 
     stop_event = threading.Event()
@@ -3225,7 +3312,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             args,
             tokenizer,
             train_dataset,
-            eval_batch,
+            eval_dataset,
             policy_group,
             vllm_engines,
             generation_configs,
@@ -3249,6 +3336,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             model_dims,
             checkpoint_state,
         )
+    except Exception as e:
+        if args.send_slack_alerts:
+            utils.send_slack_alert(e)
+        raise
     finally:
         cleanup_training_resources(
             stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
