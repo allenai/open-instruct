@@ -2453,7 +2453,7 @@ def create_generation_configs(args: Args):
         seed=args.seed,
         logprobs=1,
     )
-    eval_generation_config = dataclasses.replace(generation_config, temperature=0.0, n=1)
+    eval_generation_config = dataclasses.replace(generation_config, n=1)
     return {"train": generation_config, "eval": eval_generation_config}
 
 

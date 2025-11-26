@@ -57,7 +57,6 @@ from vllm.utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
-from open_instruct.actor_manager import find_free_port
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ModelDims, ray_get_with_progress
@@ -493,11 +492,11 @@ class LLMRayActor:
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
 
-        self.server_port = find_free_port()
         init_complete = threading.Event()
         self.loop = None
         self.llm_engine = None
         self.client = None
+        self.server_port = None
 
         async def _init_engine_and_server():
             running_loop = asyncio.get_running_loop()
@@ -510,8 +509,9 @@ class LLMRayActor:
             await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
 
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind(("127.0.0.1", self.server_port))
+            sock.bind(("127.0.0.1", 0))
             sock.listen(1)
+            self.server_port = sock.getsockname()[1]
 
             logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
 
