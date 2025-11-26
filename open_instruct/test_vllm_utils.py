@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import vllm
 
+from open_instruct import vllm_utils
 from open_instruct.queue_types import PromptRequest
-from open_instruct.vllm_utils import make_request_id, process_completed_request
 
 
 class TestVllmUtils3(unittest.TestCase):
@@ -22,7 +22,7 @@ class TestVllmUtils3(unittest.TestCase):
         """
 
         def create_mock_logprobs(token_ids):
-            return [{tid: MagicMock(logprob=-0.1 * tid)} for tid in token_ids]
+            return [-0.1 * tid for tid in token_ids]
 
         mock_request = PromptRequest(
             prompt=[1, 2, 3],
@@ -32,7 +32,7 @@ class TestVllmUtils3(unittest.TestCase):
             epoch_number=0,
             training_step=1,
         )
-        request_id = make_request_id(mock_request)
+        request_id = vllm_utils.make_request_id(mock_request)
 
         mock_output1 = MagicMock(spec=vllm.CompletionOutput)
         mock_output1.token_ids = [1, 2, 3]
@@ -78,7 +78,7 @@ class TestVllmUtils3(unittest.TestCase):
 
         tools = {"</tool>": MagicMock()}
 
-        result, is_eval = process_completed_request(
+        result, is_eval = vllm_utils.process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
             current_time=1001.0,
@@ -111,12 +111,12 @@ class TestVllmUtils3(unittest.TestCase):
         """Test that process_completed_request correctly handles outputs without tool attributes."""
 
         def create_mock_logprobs(token_ids):
-            return [{tid: MagicMock(logprob=-0.1 * tid)} for tid in token_ids]
+            return [-0.1 * tid for tid in token_ids]
 
         mock_request = PromptRequest(
             prompt=[1, 2, 3], generation_config=None, is_eval=True, dataset_index=200, epoch_number=0, training_step=2
         )
-        request_id = make_request_id(mock_request)
+        request_id = vllm_utils.make_request_id(mock_request)
 
         mock_output1 = MagicMock(spec=vllm.CompletionOutput)
         mock_output1.token_ids = [1, 2, 3]
@@ -146,7 +146,7 @@ class TestVllmUtils3(unittest.TestCase):
             }
         }
 
-        result, is_eval = process_completed_request(
+        result, is_eval = vllm_utils.process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
             current_time=2000.5,
