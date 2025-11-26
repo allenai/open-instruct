@@ -179,7 +179,7 @@ async def process_request_async(
     current_sampling_params = sampling_params
 
     while True:
-        api_response = await actor.openai_client.completions.create(
+        api_response = await actor.client.completions.create(
             model=actor.model_name,
             prompt=current_prompt["prompt_token_ids"],
             extra_body={"return_token_ids": True},
@@ -625,8 +625,7 @@ class LLMRayActor:
         init_complete = threading.Event()
         self.loop = None
         self.llm_engine = None
-        self.openai_client = None
-        self.shutdown_task = None
+        self.client = None
 
         async def _init_engine_and_server():
             running_loop = asyncio.get_running_loop()
@@ -644,19 +643,19 @@ class LLMRayActor:
 
             logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
 
-            shutdown_task = asyncio.create_task(
+            asyncio.create_task(
                 serve_http(app, sock=sock, host="127.0.0.1", port=self.server_port, log_level="warning")
             )
 
             await asyncio.sleep(0.1)
 
-            return engine_client, shutdown_task
+            return engine_client
 
         def _run_loop():
             try:
                 self.loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(self.loop)
-                self.llm_engine, self.shutdown_task = self.loop.run_until_complete(_init_engine_and_server())
+                self.llm_engine = self.loop.run_until_complete(_init_engine_and_server())
             except Exception:
                 logger.exception("vLLM engine initialization failed")
                 raise
@@ -676,7 +675,7 @@ class LLMRayActor:
 
     def _init_openai_client(self) -> None:
         base_url = f"http://127.0.0.1:{self.server_port}/v1"
-        self.openai_client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=60.0)
+        self.client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=60.0)
         self.model_name = self.llm_engine.vllm_config.model_config.model
 
         logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
@@ -844,21 +843,6 @@ class LLMRayActor:
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_config)
 
         return int(max_concurrency)
-
-    def shutdown(self) -> None:
-        if self.openai_client is not None:
-            asyncio.run(self.openai_client.close())
-            self.openai_client = None
-
-        if self.shutdown_task is not None and self.loop is not None:
-            asyncio.run_coroutine_threadsafe(self.shutdown_task.cancel(), self.loop)
-            self.shutdown_task = None
-
-        if self.loop is not None and self.loop_thread is not None:
-            self.loop.call_soon_threadsafe(self.loop.stop)
-            self.loop_thread.join(timeout=5)
-            self.loop = None
-            self.loop_thread = None
 
 
 def get_cuda_arch_list() -> str:
