@@ -641,7 +641,7 @@ class PolicyTrainerRayProcess(RayProcess):
             param_prompt_Q=param_prompt_Q,
             tokenizer=tokenizer,
             generation_config=generation_config,
-            dp_rank=self.local_rank,
+            dp_rank=rank,
             fs_local_rank=self.local_rank,
             num_training_steps=args.num_training_steps,
             seed=args.seed,
