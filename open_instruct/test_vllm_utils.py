@@ -63,7 +63,6 @@ class TestVllmUtils3(unittest.TestCase):
         mock_request_output.outputs = [mock_output1, mock_output2]
         mock_request_output.prompt = "test prompt"
         mock_request_output.prompt_token_ids = [1, 2, 3]
-        mock_request_output.prompt_logprobs = None
         mock_request_output.finished = True
 
         request_metadata = {
@@ -134,7 +133,6 @@ class TestVllmUtils3(unittest.TestCase):
         mock_request_output.outputs = [mock_output1, mock_output2]
         mock_request_output.prompt = "test prompt"
         mock_request_output.prompt_token_ids = [1, 2, 3]
-        mock_request_output.prompt_logprobs = None
         mock_request_output.finished = True
 
         request_metadata = {

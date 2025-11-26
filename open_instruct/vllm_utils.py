@@ -152,7 +152,6 @@ def _truncate_tool_output_tokens(
 
     return tool_output_token_ids, excess, prompt_and_tool_output
 
-
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
 # Turns out Ray doesnt necessarily place bundles together,
 # so this function is used to get the bundle indices of a placement group
