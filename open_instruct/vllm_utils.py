@@ -468,8 +468,8 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
         sub_request_id = f"{request_id}_{j}"
-        actor.active_tasks[sub_request_id] = asyncio.create_task(
-            process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params)
+        actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
+            process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params), actor.loop
         )
 
 
@@ -551,6 +551,7 @@ class LLMRayActor:
         self._engine_args.disable_cascade_attn = True
 
     async def initialize(self) -> None:
+        self.loop = asyncio.get_running_loop()
         self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self._engine_args, start_engine_loop=False)
         self.inference_batch_size = await self.get_kv_cache_info()
         self._init_executor()
