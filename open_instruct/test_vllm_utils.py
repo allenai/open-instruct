@@ -22,7 +22,7 @@ class TestVllmUtils3(unittest.TestCase):
         """
 
         def create_mock_logprobs(token_ids):
-            return [{tid: MagicMock(logprob=-0.1 * tid)} for tid in token_ids]
+            return [-0.1 * tid for tid in token_ids]
 
         mock_request = PromptRequest(
             prompt=[1, 2, 3],
@@ -112,7 +112,7 @@ class TestVllmUtils3(unittest.TestCase):
         """Test that process_completed_request correctly handles outputs without tool attributes."""
 
         def create_mock_logprobs(token_ids):
-            return [{tid: MagicMock(logprob=-0.1 * tid)} for tid in token_ids]
+            return [-0.1 * tid for tid in token_ids]
 
         mock_request = PromptRequest(
             prompt=[1, 2, 3], generation_config=None, is_eval=True, dataset_index=200, epoch_number=0, training_step=2

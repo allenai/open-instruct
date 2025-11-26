@@ -24,7 +24,6 @@ import socket
 import sys
 import threading
 import time
-import types
 from collections import defaultdict
 from collections.abc import Awaitable
 from concurrent import futures
@@ -87,7 +86,7 @@ class SamplingConfig:
 class CompletionOutput:
     index: int
     token_ids: list[int]
-    logprobs: list[dict]
+    logprobs: list[float]
     finish_reason: str
     cumulative_logprob: float = 0.0
     mask: list[int] | None = None
@@ -249,9 +248,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
         assert len(out.token_ids) == len(out.logprobs), (
             f"CompletionOutput {idx}: token_ids length ({len(out.token_ids)}) != logprobs length ({len(out.logprobs)})"
         )
-        logprobs.append(
-            [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
-        )
+        logprobs.append(list(out.logprobs))
 
     # Extract attributes based on whether tools are used
     if use_tools:
@@ -750,8 +747,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         accumulated_tokens.extend(output.token_ids)
 
         assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
-        for token_id, logprob in zip(output.token_ids, output.logprobs.token_logprobs):
-            accumulated_logprobs.append({token_id: types.SimpleNamespace(logprob=logprob)})
+        for logprob in output.logprobs.token_logprobs:
+            accumulated_logprobs.append(logprob)
             cumulative_logprob += logprob
 
         masks.extend([1] * len(output.token_ids))
@@ -791,9 +788,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         )
 
         accumulated_tokens.extend(tool_output_token_ids)
-        accumulated_logprobs.extend(
-            [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids]
-        )
+        accumulated_logprobs.extend([0.0] * len(tool_output_token_ids))
         masks.extend([0] * len(tool_output_token_ids))
 
         new_sample_tokens = sampling_params.max_tokens - len(masks)
