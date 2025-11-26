@@ -207,6 +207,9 @@ def get_triggered_tool(
     Returns:
         Tuple of (tool, stop_str) if a tool was triggered, (None, None) otherwise.
     """
+    if not sampling_params.stop:
+        return None, None
+
     for stop_str in sampling_params.stop:
         if stop_str in tools and output_text.endswith(stop_str):
             if num_calls < max_tool_calls.get(stop_str, 0):
@@ -748,7 +751,11 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         api_response = await actor.client.completions.create(
             model=actor.model_name,
             prompt=current_prompt_token_ids,
-            extra_body={"return_token_ids": True, "cache_salt": base_request_id},
+            extra_body={
+                "return_token_ids": True,
+                "cache_salt": base_request_id,
+                "include_stop_str_in_output": bool(actor.tools),
+            },
             **dataclasses.asdict(current_sampling_params),
         )
 
