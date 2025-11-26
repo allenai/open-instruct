@@ -1644,12 +1644,9 @@ def accumulate_inference_batches(
             f"Prompt ID: {result.prompt_id}"
         )
 
-        example = prompt_dataset[result.dataset_index]
-
         # Replenish generation queue with new prompt
         if replenish_prompts:
-            next_example = next(data_loader)
-            add_prompt_to_generator(next_example, param_prompt_Q, generation_config, is_eval=False)
+            add_prompt_to_generator(next(data_loader), param_prompt_Q, generation_config, is_eval=False)
 
         # TODO(finbarrtimbers): Move this to LLMRayActor.
         for i in range(len(result.finish_reasons)):
@@ -1660,6 +1657,7 @@ def accumulate_inference_batches(
 
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
+        example = prompt_dataset[result.dataset_index]
         k_queries = repeat_each([example[INPUT_IDS_PROMPT_KEY]], generation_config.n)
         k_ground_truths = repeat_each([example[GROUND_TRUTHS_KEY]], generation_config.n)
         k_datasets = repeat_each([example[VERIFIER_SOURCE_KEY]], generation_config.n)
