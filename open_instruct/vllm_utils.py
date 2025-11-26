@@ -551,7 +551,7 @@ class LLMRayActor:
         self._engine_args.disable_cascade_attn = True
 
     async def initialize(self) -> None:
-        self.llm_engine = await vllm.AsyncLLMEngine.from_engine_args(self._engine_args, start_engine_loop=False)
+        self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(self._engine_args, start_engine_loop=False)
         self.inference_batch_size = await self.get_kv_cache_info()
         self._init_executor()
 
