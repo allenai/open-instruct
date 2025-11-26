@@ -209,6 +209,28 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(len(prompt_and_tool_output), max_model_len)
         self.assertEqual(prompt_and_tool_output, [1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 100, 101])
 
+    def test_truncate_tool_output_tokens_max_tokens_truncation(self):
+        """Test that prompt_and_tool_output is updated when truncating due to max_tokens."""
+        current_prompt_token_ids = [1, 2, 3]
+        accumulated_tokens = [10, 11]
+        tool_output_token_ids = [100, 101, 102, 103, 104]
+        max_model_len = 100
+        max_tokens = 10
+        current_mask_len = 8
+
+        truncated_tool_ids, excess, prompt_and_tool_output = vllm_utils.truncate_tool_output_tokens(
+            tool_output_token_ids,
+            current_prompt_token_ids,
+            accumulated_tokens,
+            max_model_len,
+            max_tokens,
+            current_mask_len,
+        )
+
+        self.assertEqual(excess, -90)
+        self.assertEqual(truncated_tool_ids, [100, 101])
+        self.assertEqual(prompt_and_tool_output, [1, 2, 3, 10, 11, 100, 101])
+
 
 if __name__ == "__main__":
     unittest.main()

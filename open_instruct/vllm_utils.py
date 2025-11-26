@@ -101,9 +101,12 @@ def truncate_tool_output_tokens(
 
     remaining = max_tokens - current_mask_len
     if remaining <= 0:
+        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens
         return [], excess, prompt_and_tool_output
     elif len(tool_output_token_ids) > remaining:
-        return tool_output_token_ids[:remaining], excess, prompt_and_tool_output
+        tool_output_token_ids = tool_output_token_ids[:remaining]
+        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
+        return tool_output_token_ids, excess, prompt_and_tool_output
 
     return tool_output_token_ids, excess, prompt_and_tool_output
 
