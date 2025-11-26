@@ -37,6 +37,8 @@ class GenerationResult:
     token_statistics: TokenStatistics | None = None
     start_time: float | None = None
     logprobs: list[list[float]] | None = None
+    reward_scores: list[float] | None = None
+    reward_metrics: dict[str, Any] | None = None
 
 
 @dataclass

@@ -48,6 +48,8 @@ from torch.distributed.distributed_c10d import (
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
+from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
+from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ModelDims, ray_get_with_progress
@@ -515,10 +517,13 @@ class LLMRayActor:
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
         inflight_updates: bool,
+        reward_config: RewardConfig | None = None,
+        train_dataset=None,
+        eval_dataset=None,
         **kwargs,
     ):
         assert_threaded_actor(self)
-        self._init_config(tools, max_tool_calls, inflight_updates)
+        self._init_config(tools, max_tool_calls, inflight_updates, reward_config, train_dataset, eval_dataset)
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
@@ -529,7 +534,13 @@ class LLMRayActor:
         self._init_executor()
 
     def _init_config(
-        self, tools: dict[str, Tool] | None, max_tool_calls: dict[str, int] | None, inflight_updates: bool
+        self,
+        tools: dict[str, Tool] | None,
+        max_tool_calls: dict[str, int] | None,
+        inflight_updates: bool,
+        reward_config: RewardConfig | None,
+        train_dataset,
+        eval_dataset,
     ) -> None:
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
@@ -537,6 +548,10 @@ class LLMRayActor:
         self.request_metadata = {}
         self.active_tasks = {}
         self.request_outputs = {}
+        self.reward_config = reward_config
+        self.train_dataset = train_dataset
+        self.eval_dataset = eval_dataset
+        self.reward_fn = reward_config.build() if reward_config else None
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
@@ -647,8 +662,42 @@ class LLMRayActor:
         self.request_outputs.pop(base_request_id)
         self.request_metadata.pop(base_request_id, None)
 
+        if self.reward_fn is not None and result.dataset_index is not None:
+            dataset = self.eval_dataset if is_eval else self.train_dataset
+            if dataset is not None:
+                future = self.executor.submit(self._compute_rewards, result, dataset, is_eval)
+                scores, metrics = future.result()
+                result.reward_scores = scores
+                result.reward_metrics = metrics
+
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
+
+    def _compute_rewards(self, result: GenerationResult, dataset, is_eval: bool) -> tuple[list[float], dict]:
+        """Run reward computation in thread pool to avoid blocking async loop."""
+        example = dataset[result.dataset_index]
+        ground_truth = example[GROUND_TRUTHS_KEY]
+        dataset_name = example[VERIFIER_SOURCE_KEY]
+        raw_query = example[RAW_PROMPT_KEY]
+
+        decoded_responses = [self.llm_engine.tokenizer.decode(r) for r in result.responses]
+
+        k = len(result.responses)
+        k_ground_truths = [ground_truth] * k
+        k_datasets = [dataset_name] * k
+        k_raw_queries = [raw_query] * k
+
+        return asyncio.run(
+            self.reward_fn(
+                result.responses,
+                decoded_responses,
+                k_ground_truths,
+                k_datasets,
+                result.finish_reasons,
+                result.request_info,
+                k_raw_queries,
+            )
+        )
 
     def process_from_queue(self) -> None:
         while True:
@@ -790,6 +839,9 @@ def create_vllm_engines(
     actor_manager=None,
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
+    reward_config: RewardConfig | None = None,
+    train_dataset=None,
+    eval_dataset=None,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -870,6 +922,9 @@ def create_vllm_engines(
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
+                reward_config=reward_config,
+                train_dataset=train_dataset,
+                eval_dataset=eval_dataset,
             )
         )
 
