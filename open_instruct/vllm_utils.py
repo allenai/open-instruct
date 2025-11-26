@@ -370,6 +370,15 @@ def init_process_group(
     return pg
 
 
+async def _check_health(port: int) -> None:
+    async with (
+        aiohttp.ClientSession() as session,
+        session.get(f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=2.0)) as response,
+    ):
+        if response.status != 200:
+            raise RuntimeError(f"vLLM server health check failed with status {response.status}")
+
+
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     while True:
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
@@ -719,6 +728,7 @@ class LLMRayActor:
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool support, awaiting tools inline."""
+    await _check_health(actor.server_port)
     accumulated_tokens = []
     accumulated_logprobs = []
     cumulative_logprob = 0.0
