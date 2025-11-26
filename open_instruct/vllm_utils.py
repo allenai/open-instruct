@@ -626,7 +626,7 @@ class LLMRayActor:
 
             engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
-            args = argparse.Namespace(model=engine_client.vllm_config.model_config.model)
+            args = argparse.Namespace(model=engine_client.vllm_config.model_config.model, disable_fastapi_docs=True)
             app = build_app(args)
             await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
 
