@@ -534,6 +534,14 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         )
 
 
+def _create_server_args(model_path: str) -> argparse.Namespace:
+    parser = FlexibleArgumentParser()
+    parser = make_arg_parser(parser)
+    args = parser.parse_args(["--model", model_path])
+    args.disable_fastapi_docs = True
+    return args
+
+
 class LLMRayActor:
     """Ray actor for LLM generation with optional tool support."""
 
@@ -626,7 +634,7 @@ class LLMRayActor:
 
             engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
-            args = argparse.Namespace(model=engine_client.vllm_config.model_config.model, disable_fastapi_docs=True)
+            args = _create_server_args(engine_client.vllm_config.model_config.model)
             app = build_app(args)
             await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
 
