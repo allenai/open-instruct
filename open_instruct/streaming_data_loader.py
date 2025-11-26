@@ -335,7 +335,8 @@ class StreamingDataLoader(TextDataLoaderBase):
         self.current_epoch = 0
 
         dataset_indices = np.arange(len(dataset))
-        self.iter_dataloader = ShufflingIterator(dataset_indices, 1, seed=seed + dp_rank)
+        dataset_indices = dataset_indices[dp_rank::dp_world_size]
+        self.iter_dataloader = ShufflingIterator(dataset_indices, 1, seed=seed)
 
         self.local_queue = StdQueue(maxsize=config.async_steps)
         self.background_thread = None
