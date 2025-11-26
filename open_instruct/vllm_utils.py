@@ -247,7 +247,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
         assert len(out.token_ids) == len(out.logprobs), (
             f"CompletionOutput {idx}: token_ids length ({len(out.token_ids)}) != logprobs length ({len(out.logprobs)})"
         )
-        logprobs.append(list(out.logprobs))
+        logprobs.append(out.logprobs)
 
     # Extract attributes based on whether tools are used
     if use_tools:
