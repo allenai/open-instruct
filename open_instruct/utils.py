@@ -1103,7 +1103,7 @@ def download_from_hf(model_name_or_path: str, revision: str) -> None:
     return output
 
 
-def download_from_gs_bucket(src_paths: str | list[str], dest_path: str) -> None:
+def download_from_gs_bucket(src_paths: list[str], dest_path: str) -> None:
     os.makedirs(dest_path, exist_ok=True)
     cmd = [
         "gsutil",
@@ -1115,8 +1115,6 @@ def download_from_gs_bucket(src_paths: str | list[str], dest_path: str) -> None:
         "cp",
         "-r",
     ]
-    if not isinstance(src_paths, list):
-        src_paths = [src_paths]
     cmd.extend(src_paths)
     cmd.append(dest_path)
     print(f"Downloading from GS bucket with command: {cmd}")
