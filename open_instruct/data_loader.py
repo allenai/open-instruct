@@ -42,8 +42,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         epoch = self._epoch or 0
         for i in range(self.batches_processed, self.effective_size):
             example = self.dataset[i]
-            example["prompt_id"] = f"{epoch}_{example['dataset_index']}"
-            yield example
+            yield example | {"prompt_id": f"{epoch}_{example['dataset_index']}"}
 
     @property
     def total_batches(self) -> int:
