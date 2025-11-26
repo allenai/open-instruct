@@ -18,12 +18,9 @@
 import asyncio
 import os
 import queue
-import sys
-import threading
 import time
 import types
 from collections import defaultdict
-from collections.abc import Awaitable
 from concurrent import futures
 from datetime import timedelta
 from typing import Any
@@ -58,31 +55,6 @@ NUM_PREFETCH_WORKERS = 2
 NUM_TOOL_WORKERS = 20
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
-
-
-def assert_threaded_actor(instance):
-    """Assert that an instance's class is suitable for use in a threaded (non-async) Ray actor.
-
-    This function performs two checks:
-      1. The class must not define any `async def` methods
-         (including async generators, staticmethods, or classmethods).
-      2. There must not be a running asyncio event loop in the current thread.
-
-    Args:
-        instance: The instance whose class to inspect.
-
-    Raises:
-        AssertionError: If the class defines one or more async methods, or a running asyncio event loop is detected.
-    """
-    try:
-        loop = asyncio.get_running_loop()
-        raise AssertionError(
-            f"{instance.__class__.__name__} must run in a threaded Ray actor (no running event loop). "
-            f"Detected RUNNING loop={loop!r} on thread='{threading.current_thread().name}'. "
-            f"Python={sys.version.split()[0]}."
-        )
-    except RuntimeError:
-        return
 
 
 def _truncate_tool_output_tokens(
@@ -496,8 +468,8 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
         sub_request_id = f"{request_id}_{j}"
-        actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
-            process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params), actor.loop
+        actor.active_tasks[sub_request_id] = asyncio.create_task(
+            process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params)
         )
 
 
@@ -517,16 +489,15 @@ class LLMRayActor:
         inflight_updates: bool,
         **kwargs,
     ):
-        assert_threaded_actor(self)
         self._init_config(tools, max_tool_calls, inflight_updates)
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
-        self._setup_and_start_async_engine(args, bundle_indices, kwargs)
-        self.inference_batch_size = self.get_kv_cache_info()
-        self._init_executor()
+        self._prepare_engine_args(args, bundle_indices, kwargs)
+        self.llm_engine = None
+        self.inference_batch_size = None
 
     def _init_config(
         self, tools: dict[str, Tool] | None, max_tool_calls: dict[str, int] | None, inflight_updates: bool
@@ -568,36 +539,21 @@ class LLMRayActor:
             # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
             os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
-    def _setup_and_start_async_engine(self, args, bundle_indices, kwargs) -> None:
+    def _prepare_engine_args(self, args, bundle_indices, kwargs) -> None:
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             logger.debug(f"creating LLM with bundle_indices={bundle_indices}")
 
-        engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
-        engine_args.disable_log_stats = True
-        engine_args.disable_cascade_attn = True
+        self._engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
+        self._engine_args.disable_log_stats = True
+        self._engine_args.disable_cascade_attn = True
 
-        init_complete = threading.Event()
-        self.loop = None
-        self.llm_engine = None
-
-        async def _init_engine():
-            running_loop = asyncio.get_running_loop()
-            assert running_loop == self.loop, f"Loop mismatch! running={running_loop}, actor.loop={self.loop}"
-            return vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
-
-        def _run_loop():
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-            self.llm_engine = self.loop.run_until_complete(_init_engine())
-            init_complete.set()
-            self.loop.run_forever()
-
-        self.loop_thread = threading.Thread(target=_run_loop, daemon=True)
-        self.loop_thread.start()
-        init_complete.wait()
+    async def initialize(self) -> None:
+        self.llm_engine = await vllm.AsyncLLMEngine.from_engine_args(self._engine_args, start_engine_loop=False)
+        self.inference_batch_size = await self.get_kv_cache_info()
+        self._init_executor()
 
     def get_model_dims(self):
         """Get only the model dimensions without loading weights."""
@@ -655,7 +611,7 @@ class LLMRayActor:
             sub_request = self.completion_queue.get()
             self._accumulate_sub_request(sub_request)
 
-    def init_process_group(
+    async def init_process_group(
         self,
         master_address: str,
         master_port: int,
@@ -666,7 +622,7 @@ class LLMRayActor:
         use_ray: bool = False,
         timeout_minutes: int = 120,
     ) -> None:
-        future = asyncio.run_coroutine_threadsafe(
+        await asyncio.wait_for(
             self.llm_engine.collective_rpc(
                 "init_process_group",
                 args=(
@@ -680,39 +636,31 @@ class LLMRayActor:
                     timeout_minutes,
                 ),
             ),
-            self.loop,
+            timeout=timeout_minutes * 60,
         )
-        return future.result(timeout=timeout_minutes * 60)
 
-    def _run_async(self, coro: Awaitable[Any]) -> Any:
-        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        return future.result()
-
-    def _prepare_weight_update(self, name: str, dtype: str) -> None:
-        # Wait for all active requests to complete.
+    async def _prepare_weight_update(self, name: str, dtype: str) -> None:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
-            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+            await asyncio.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
 
         expected_dtype = str(self.llm_engine.model_config.dtype)
         assert dtype == expected_dtype, f"Mismatched dtype for {name}: received {dtype!r}, expected {expected_dtype!r}"
 
-    def update_weight(self, name: str, dtype: str, shape: tuple[int, ...], empty_cache: bool = False) -> None:
-        self._prepare_weight_update(name, dtype)
-        return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
+    async def update_weight(self, name: str, dtype: str, shape: tuple[int, ...], empty_cache: bool = False) -> None:
+        await self._prepare_weight_update(name, dtype)
+        await self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
-    def update_weight_cuda_ipc(
+    async def update_weight_cuda_ipc(
         self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any], empty_cache: bool = False
     ) -> None:
-        self._prepare_weight_update(name, dtype)
-        return self._run_async(
-            self.llm_engine.collective_rpc(
-                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
-            )
+        await self._prepare_weight_update(name, dtype)
+        await self.llm_engine.collective_rpc(
+            "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
         )
 
-    def reset_prefix_cache(self) -> None:
-        return self._run_async(self.llm_engine.reset_prefix_cache())
+    async def reset_prefix_cache(self) -> None:
+        await self.llm_engine.reset_prefix_cache()
 
     def ready(self) -> bool:
         return True
@@ -725,14 +673,10 @@ class LLMRayActor:
         for task in self.active_tasks.values():
             if task.done():
                 task.result()
-        if not self.loop_thread.is_alive():
-            raise RuntimeError(
-                "vLLM engine loop thread has died. Check logs for errors in EngineCore or async engine."
-            )
 
-    def get_kv_cache_info(self) -> int:
+    async def get_kv_cache_info(self) -> int:
         """Get KV cache max concurrency from the vLLM engine."""
-        kv_cache_specs = self._run_async(self.llm_engine.collective_rpc("get_kv_cache_spec"))
+        kv_cache_specs = await self.llm_engine.collective_rpc("get_kv_cache_spec")
 
         vllm_config = self.llm_engine.vllm_config
         gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
@@ -874,7 +818,7 @@ def create_vllm_engines(
         )
 
     ray_get_with_progress(
-        [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=1200
+        [engine.initialize.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=1200
     )
 
     return vllm_engines
