@@ -132,7 +132,6 @@ from open_instruct.utils import (
     repeat_each,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils import SamplingConfig
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -1690,7 +1689,7 @@ def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
     pending_queries_map: PendingQueriesMap,
     args: Args,
-    generation_config: SamplingConfig,
+    generation_config: vllm_utils.SamplingConfig,
     num_prompts: int,
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
@@ -2445,7 +2444,7 @@ def create_model_and_optimizer(
 
 def create_generation_configs(args: Args):
     """Create generation configs for training and evaluation."""
-    generation_config = SamplingConfig(
+    generation_config = vllm_utils.SamplingConfig(
         temperature=args.temperature,
         top_p=args.vllm_top_p,
         max_tokens=args.response_length,
