@@ -2650,9 +2650,9 @@ def maybe_mask_truncated_completions(
     mask_truncated_completions: bool,
     result: GenerationResult,
     batch: Batch,
-    scores: list(float),
-    advantages: list(float),
-) -> tuple[GenerationResult, Batch, list(float), list(float), int]:
+    scores: list[float],
+    advantages: list[float],
+) -> tuple[GenerationResult, Batch, list[float], list[float], int]:
     """if mask_truncated_completions, remove all samples with finish_reason == 'stop'"""
     num_masked_truncated = 0
     if mask_truncated_completions:
