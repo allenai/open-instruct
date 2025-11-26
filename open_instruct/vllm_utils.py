@@ -154,13 +154,7 @@ def _truncate_tool_output_tokens(
     return tool_output_token_ids, excess, prompt_and_tool_output
 
 
-async def process_request_async(
-    actor: "LLMRayActor",
-    sub_request_id: str,
-    base_request_id: str,
-    prompt: vllm.TokensPrompt,
-    sampling_params: SamplingConfig,
-):
+async def process_request_async(actor: "LLMRayActor", sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool support, awaiting tools inline."""
     accumulated_tokens = []
     accumulated_logprobs = []
@@ -173,15 +167,15 @@ async def process_request_async(
     tool_runtime = 0.0
     tool_called = False
 
-    current_prompt = prompt
-    current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
+    base_request_id = split_request_id(sub_request_id)["base_id"]
+    current_prompt_token_ids = list(actor.request_metadata[base_request_id]["prompt_token_ids"])
     current_sampling_params = sampling_params
 
     while True:
         api_response = await actor.client.completions.create(
             model=actor.model_name,
-            prompt=current_prompt["prompt_token_ids"],
-            extra_body={"return_token_ids": True},
+            prompt=current_prompt_token_ids,
+            extra_body={"return_token_ids": True, "cache_salt": base_request_id},
             **dataclasses.asdict(current_sampling_params),
         )
 
@@ -240,7 +234,6 @@ async def process_request_async(
         if excess > 0 or new_sample_tokens <= 0:
             break
 
-        current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
         current_prompt_token_ids = prompt_and_tool_output
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=new_sample_tokens)
 
@@ -522,14 +515,12 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "start_time": time.perf_counter(),
     }
 
-    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
-
     for j in range(request.generation_config.n):
         seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
         sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
         sub_request_id = f"{request_id}_{j}"
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
-            process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params), actor.loop
+            process_request_async(actor, sub_request_id, sub_sampling_params), actor.loop
         )
 
 
