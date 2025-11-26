@@ -31,7 +31,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         )
 
         dataset_with_indices = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
-        self.dataset = dataset_with_indices.shard(num_shards=world_size, index=rank).shuffle(seed=seed)
+        self._original_dataset = dataset_with_indices.shard(num_shards=world_size, index=rank)
+        self.dataset = self._original_dataset.shuffle(seed=seed)
         self.seed = seed
         self._batch_size = batch_size
         self.effective_size = len(self.dataset) - (len(self.dataset) % batch_size)
@@ -58,7 +59,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._epoch = state["epoch"]
         self.batches_processed = state["batches_processed"]
         if self._epoch is not None:
-            self.dataset = self.dataset.shuffle(seed=self.seed + self._epoch)
+            self.dataset = self._original_dataset.shuffle(seed=self.seed + self._epoch)
             self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
 
     def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
@@ -73,7 +74,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             epoch = 1 if self._epoch is None else self._epoch + 1
         self._epoch = epoch
         self.batches_processed = 0
-        self.dataset = self.dataset.shuffle(seed=self.seed + epoch)
+        self.dataset = self._original_dataset.shuffle(seed=self.seed + epoch)
         self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
 
     def get_mock_batch(self) -> dict[str, Any]:

@@ -2973,7 +2973,7 @@ def run_training(
             and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
-            for eval_example in eval_data_loader:
+            for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(eval_example, param_prompt_Q, generation_configs["eval"], is_eval=True)
         if collated_data is None:
             continue
