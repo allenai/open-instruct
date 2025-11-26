@@ -1583,9 +1583,12 @@ def accumulate_inference_batches(
         args: Arguments containing vllm_num_engines and batch size info
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
-        data_loader: Iterator over the dataloader for replenishing prompts
+        data_loader: Iterator over the dataloader for replenishing prompts. Required when
+            replenish_prompts=True or no_resampling_pass_rate is set. Can be None for
+            evaluation where all prompts are pre-queued.
         prompt_dataset: Dataset containing prompts
-        param_prompt_Q: Queue containing prompts to send to generator
+        param_prompt_Q: Queue containing prompts to send to generator. Required when
+            replenish_prompts=True. Can be None for evaluation where no replenishment is needed.
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
         active_sampling: Whether to continue sampling until we have sampled num_prompts prompts with non-zero std
         filter_zero_std_samples: Whether to filter samples with zero reward std
