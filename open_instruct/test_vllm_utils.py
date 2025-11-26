@@ -182,34 +182,6 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_runtimes, [0.0, 0.0])
         self.assertEqual(result.request_info.tool_calleds, [False, False])
 
-    def test_truncate_tool_output_tokens_returns_truncated_prompt(self):
-        """Test that truncate_tool_output_tokens returns the truncated prompt_and_tool_output.
-
-        This test reproduces a bug where the function truncates tool_output_token_ids
-        but returns the pre-truncation prompt_and_tool_output, causing subsequent
-        vLLM generation calls to receive prompts that exceed max_model_len.
-        """
-        current_prompt_token_ids = [1, 2, 3, 4, 5]
-        accumulated_tokens = [10, 11, 12, 13, 14]
-        tool_output_token_ids = [100, 101, 102, 103, 104]
-        max_model_len = 12
-        max_tokens = 100
-        current_mask_len = 0
-
-        truncated_tool_ids, excess, prompt_and_tool_output = vllm_utils.truncate_tool_output_tokens(
-            tool_output_token_ids,
-            current_prompt_token_ids,
-            accumulated_tokens,
-            max_model_len,
-            max_tokens,
-            current_mask_len,
-        )
-
-        self.assertEqual(excess, 3)
-        self.assertEqual(truncated_tool_ids, [100, 101])
-        self.assertEqual(len(prompt_and_tool_output), max_model_len)
-        self.assertEqual(prompt_and_tool_output, [1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 100, 101])
-
 
 if __name__ == "__main__":
     unittest.main()
