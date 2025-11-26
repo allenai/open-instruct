@@ -3079,7 +3079,8 @@ def run_training(
         ) = load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
 
         if (
-            training_step % args.local_eval_every == 0
+            args.local_eval_every > 0
+            and training_step % args.local_eval_every == 0
             and eval_dataset is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
