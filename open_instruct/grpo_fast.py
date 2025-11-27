@@ -790,7 +790,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_name_or_path=model_config.model_name_or_path,
                 core_attn_implementation="flash_attention_2",
                 sequence_parallel_size=args.sequence_parallel_size,
-                max_length=args.max_token_length,
+                max_length=args.pack_length,
                 micro_batch_size=args.per_device_train_batch_size,
                 seq_length_is_variable=True,
             )
