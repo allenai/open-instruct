@@ -665,8 +665,7 @@ class LLMRayActor:
         if self.reward_fn is not None and result.dataset_index is not None:
             dataset = self.eval_dataset if is_eval else self.train_dataset
             if dataset is not None:
-                future = self.executor.submit(self._compute_rewards, result, dataset, is_eval)
-                scores, metrics = future.result()
+                scores, metrics = self._compute_rewards(result, dataset, is_eval)
                 result.reward_scores = scores
                 result.reward_metrics = metrics
 
@@ -674,7 +673,8 @@ class LLMRayActor:
         results_queue.put(result)
 
     def _compute_rewards(self, result: GenerationResult, dataset, is_eval: bool) -> tuple[list[float], dict]:
-        """Run reward computation in thread pool to avoid blocking async loop."""
+        """Run reward computation."""
+        logger.debug(f"[LLMRayActor] Computing rewards for dataset_index={result.dataset_index}")
         example = dataset[result.dataset_index]
         ground_truth = example[GROUND_TRUTHS_KEY]
         dataset_name = example[VERIFIER_SOURCE_KEY]
@@ -687,17 +687,25 @@ class LLMRayActor:
         k_datasets = [dataset_name] * k
         k_raw_queries = [raw_query] * k
 
-        return asyncio.run(
-            self.reward_fn(
-                result.responses,
-                decoded_responses,
-                k_ground_truths,
-                k_datasets,
-                result.finish_reasons,
-                result.request_info,
-                k_raw_queries,
+        logger.debug(f"[LLMRayActor] Running reward_fn for {k} responses, dataset={dataset_name}")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            scores, metrics = loop.run_until_complete(
+                self.reward_fn(
+                    result.responses,
+                    decoded_responses,
+                    k_ground_truths,
+                    k_datasets,
+                    result.finish_reasons,
+                    result.request_info,
+                    k_raw_queries,
+                )
             )
-        )
+        finally:
+            loop.close()
+        logger.debug(f"[LLMRayActor] Reward computation complete, scores={scores[:3]}...")
+        return scores, metrics
 
     def process_from_queue(self) -> None:
         while True:
