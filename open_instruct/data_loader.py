@@ -14,7 +14,14 @@ class HFDataLoader(data_loader.DataLoaderBase):
     """
 
     def __init__(
-        self, dataset: Dataset, batch_size: int, seed: int, rank: int, world_size: int, work_dir: str
+        self,
+        dataset: Dataset,
+        batch_size: int,
+        seed: int,
+        rank: int,
+        world_size: int,
+        work_dir: str,
+        automatic_reshuffle: bool = False,
     ) -> None:
         """Initialize the HFDataLoader.
 
@@ -25,6 +32,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             rank: The rank of the current process in the distributed setup.
             world_size: Total number of processes in the distributed setup.
             work_dir: Working directory for the data loader (required by DataLoaderBase).
+            automatic_reshuffle: If True, automatically reshuffle at epoch boundaries.
         """
         super().__init__(
             work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=0
@@ -36,44 +44,73 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.seed = seed
         self._batch_size = batch_size
         self.effective_size = len(self.dataset) - (len(self.dataset) % batch_size)
+        self._automatic_reshuffle = automatic_reshuffle
+        self._excluded_indices: set[int] = set()
+        self._epoch = 0
+        self._current_iter: Iterable[dict[str, Any]] | None = None
+
+    def __next__(self) -> dict[str, Any]:
+        if self._current_iter is None:
+            self._current_iter = self._iter_batches()
+        try:
+            return next(self._current_iter)
+        except StopIteration:
+            if self._automatic_reshuffle:
+                self.reshuffle()
+                self._current_iter = self._iter_batches()
+                return next(self._current_iter)
+            raise
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
-        epoch = self._epoch or 0
         for i in range(self.batches_processed, self.effective_size):
             example = self.dataset[i]
-            yield example | {"prompt_id": f"{epoch}_{example['dataset_index']}"}
+            yield example | {"prompt_id": f"{self._epoch}_{example['dataset_index']}"}
 
     @property
     def total_batches(self) -> int:
         """Return the total number of batches in an epoch."""
-        return self.effective_size
+        return self.effective_size // self._batch_size
 
-    def state_dict(self) -> dict[str, float]:
+    def state_dict(self) -> dict[str, Any]:
         """Return a state dictionary for checkpointing."""
-        return {"epoch": self._epoch, "batches_processed": self.batches_processed}
+        return {
+            "epoch": self._epoch,
+            "batches_processed": self.batches_processed,
+            "excluded_indices": list(self._excluded_indices),
+        }
 
-    def load_state_dict(self, state: dict[str, float]) -> None:
+    def load_state_dict(self, state: dict[str, Any]) -> None:
         """Load a state dictionary to restore the data loader's state."""
-        self._epoch = state["epoch"]
+        self._excluded_indices = set(state.get("excluded_indices", []))
+        # Set epoch to one less than target since reshuffle() increments it
+        self._epoch = state["epoch"] - 1
+        self.reshuffle()
+        assert self._epoch == state["epoch"]
         self.batches_processed = state["batches_processed"]
-        if self._epoch is not None:
-            self.dataset = self._original_dataset.shuffle(seed=self.seed + self._epoch)
-            self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
+        self._current_iter = None
 
-    def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
+    def exclude_index(self, index: int) -> None:
+        """Exclude a dataset index from future iterations.
+
+        Args:
+            index: The dataset_index to exclude.
+        """
+        self._excluded_indices.add(index)
+
+    def reshuffle(self, **kwargs: Any) -> None:
         """Reshuffle the dataset for a new epoch.
 
         Args:
-            epoch: The epoch number. If None, increments from the current epoch
-                (or starts at 1 if no epoch has been set).
             **kwargs: Additional keyword arguments (unused, for API compatibility).
         """
-        if epoch is None:
-            epoch = 1 if self._epoch is None else self._epoch + 1
-        self._epoch = epoch
+        self._epoch += 1
         self.batches_processed = 0
-        self.dataset = self._original_dataset.shuffle(seed=self.seed + epoch)
+        shuffled = self._original_dataset.shuffle(seed=self.seed + self._epoch)
+        if self._excluded_indices:
+            self.dataset = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
+        else:
+            self.dataset = shuffled
         self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
 
     def get_mock_batch(self) -> dict[str, Any]:

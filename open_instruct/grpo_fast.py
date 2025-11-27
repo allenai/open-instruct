@@ -50,7 +50,7 @@ import threading
 import time
 from argparse import Namespace
 from collections import defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from queue import Empty, Full, Queue
@@ -276,6 +276,8 @@ class Args:
     """Whether to filter out prompts with zero reward std (all samples have the same score)."""
     no_resampling_pass_rate: float | None = None
     """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
+    automatic_reshuffle: bool = True
+    """Automatically reshuffle the dataset at epoch boundaries."""
 
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
@@ -1567,7 +1569,7 @@ def accumulate_inference_batches(
     tokenizer: PreTrainedTokenizer,
     reward_fn: Callable,
     prompt_dataset: Dataset,
-    data_loader: Iterator[dict[str, Any]] | None = None,
+    data_loader: data_loader_lib.HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
     actor_manager=None,
     timeout: float | None = None,
@@ -1679,6 +1681,7 @@ def accumulate_inference_batches(
         # Don't resample prompt that was solved at more than no_resample_positive_rate
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             total_no_resampled += 1
+            data_loader.exclude_index(result.dataset_index)
             logging.debug(
                 f"[Data Preparation Thread] Prompt solved at {percent_solved}, total no resampled: {total_no_resampled}"
             )
@@ -1845,7 +1848,7 @@ def data_preparation_thread(
     num_training_steps: int,
     generation_config,
     resume_training_step: int,
-    data_loader: Iterator[dict[str, Any]],
+    data_loader: data_loader_lib.HFDataLoader,
     train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
@@ -2875,8 +2878,6 @@ def run_training(
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
-    data_loader_iter = iter(data_loader)
-
     eval_data_loader = None
     if eval_dataset is not None:
         eval_data_loader = data_loader_lib.HFDataLoader(
@@ -2913,7 +2914,7 @@ def run_training(
         args.num_training_steps,
         generation_configs["train"],
         resume_training_step,
-        data_loader_iter,
+        data_loader,
         train_dataset,
         actor_manager,
         model_dims,
@@ -2929,7 +2930,7 @@ def run_training(
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps * args.num_unique_prompts_rollout):
-        example = next(data_loader_iter)
+        example = next(data_loader)
         add_prompt_to_generator(example, param_prompt_Q, generation_configs["train"], is_eval=False)
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
@@ -3127,7 +3128,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             logger.info(f"Restored episode count: {episode}")
 
     data_loader = data_loader_lib.HFDataLoader(
-        dataset=train_dataset, batch_size=1, seed=args.seed, rank=0, world_size=1, work_dir=args.output_dir
+        dataset=train_dataset,
+        batch_size=1,
+        seed=args.seed,
+        rank=0,
+        world_size=1,
+        work_dir=args.output_dir,
+        automatic_reshuffle=args.automatic_reshuffle,
     )
 
     if checkpoint_state and "dataloader_state" in checkpoint_state:
