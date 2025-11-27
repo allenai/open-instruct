@@ -800,6 +800,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
         revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
         use_fast=tc.use_fast,
+        config=config,
     )
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
