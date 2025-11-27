@@ -1141,6 +1141,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "response_masks": collated_response_masks,
                     "tool_masks": collated_tool_masks,
                     "advantages": collated_advantages,
+                    "vllm_logprobs": collated_vllm_logprobs,
                 }
                 # Pad the items in the batch so they are divisible by sp_world_size
                 # where attention mask is 0, we dont end up using anyway.
@@ -1165,6 +1166,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 collated_response_masks = sharded_batches[self.sp_rank]["response_masks"]
                 collated_tool_masks = sharded_batches[self.sp_rank]["tool_masks"]
                 collated_advantages = sharded_batches[self.sp_rank]["advantages"]
+                collated_vllm_logprobs = sharded_batches[self.sp_rank]["vllm_logprobs"]
 
                 collated_query_responses = move_to_device(collated_query_responses, self.ref_policy.device)
                 collated_attention_masks = move_to_device(collated_attention_masks, self.ref_policy.device)
@@ -1172,6 +1174,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 collated_response_masks = move_to_device(collated_response_masks, self.ref_policy.device)
                 collated_tool_masks = move_to_device(collated_tool_masks, self.ref_policy.device)
                 collated_advantages = move_to_device(collated_advantages, self.ref_policy.device)
+                collated_vllm_logprobs = move_to_device(collated_vllm_logprobs, self.ref_policy.device)
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
