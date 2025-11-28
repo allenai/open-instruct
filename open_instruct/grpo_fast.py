@@ -1281,14 +1281,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         max_diff = masked_diff.max()
                         std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
 
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item() if isinstance(mean_diff, torch.Tensor) else mean_diff
                         self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = std_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = std_diff.item() if isinstance(std_diff, torch.Tensor) else std_diff
 
                         reverse_kl = torch.exp(mb_vllm_logprobs) * (mb_vllm_logprobs - mb_local_logprobs)
                         masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
                         mean_reverse_kl = masked_reverse_kl.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
-                        self.local_metrics["debug/vllm_local_reverse_kl"] = mean_reverse_kl.item()
+                        self.local_metrics["debug/vllm_local_reverse_kl"] = mean_reverse_kl.item() if isinstance(mean_reverse_kl, torch.Tensor) else mean_reverse_kl
 
                     mb_new_logprobs = mb_local_logprobs
 
