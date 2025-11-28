@@ -229,9 +229,9 @@ async def process_request_async(
                 request_id=sub_request_id,
                 prompt=request_output.prompt,
                 prompt_token_ids=final_prompt_token_ids,
-                prompt_logprobs=request_output.prompt_logprobs,
                 outputs=[complete_output],
                 finished=True,
+                prompt_logprobs=None,  # not used but required for init.
             ),
             "tools": actor.tools,
         }
@@ -319,7 +319,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
         request_id=request_id,
         prompt=outs[0].prompt,
         prompt_token_ids=outs[0].prompt_token_ids,
-        prompt_logprobs=outs[0].prompt_logprobs,
+        prompt_logprobs=None,
         outputs=[completion for out in outs for completion in out.outputs],
         finished=outs[0].finished,
     )
