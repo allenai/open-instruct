@@ -8,8 +8,7 @@ MODEL_NAMES=(
 )
 
 MODEL_PATHS=(
-    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/OLMo2-7b-flex-base-merged-code-RT/step9537-hf"
-    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/OLMo2-7b-flex-base-merged-math-mixed-RT/step9537-hf"
+    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/OLMo2-7b-flex-base-merged-math-code-RT-supervised-router-optimal/step14750-hf"
 )
 
 # Check that arrays have the same length
