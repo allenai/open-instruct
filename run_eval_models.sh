@@ -3,8 +3,7 @@
 # Define arrays for model names and paths
 PY="/opt/anaconda3/envs/python310/bin/python"
 MODEL_NAMES=(
-    "merged-2x7B-code-RT"
-    "merged-2x7B-math-RT"
+    "Merged-Supervied-Router-Sequence-Optimal"
 )
 
 MODEL_PATHS=(
