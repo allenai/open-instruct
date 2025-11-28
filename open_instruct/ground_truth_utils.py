@@ -19,7 +19,8 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
-import requests
+import aiohttp
+import backoff
 from litellm import acompletion
 
 from open_instruct import logger_utils
@@ -804,8 +805,7 @@ class CodeVerifier(VerifierFunction):
     The API URL should be provided during initialization.
     """
 
-    # Class-level session cache to reuse connections
-    _session_cache = weakref.WeakKeyDictionary()
+    _session_cache: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
     def __init__(self, verifier_config: CodeVerifierConfig) -> None:
         super().__init__("code", verifier_config=verifier_config, weight=1.0)
@@ -824,83 +824,61 @@ class CodeVerifier(VerifierFunction):
         # Return the last match, stripped of whitespace
         return matches[-1].strip()
 
-    # Create a session pool for better performance
-    _session_pool = None
+    def _get_session(self) -> aiohttp.ClientSession:
+        loop = asyncio.get_running_loop()
+        if loop not in self._session_cache or self._session_cache[loop].closed:
+            connector = aiohttp.TCPConnector(limit=100, limit_per_host=100)
+            timeout = aiohttp.ClientTimeout(total=300)
+            self._session_cache[loop] = aiohttp.ClientSession(connector=connector, timeout=timeout)
+        return self._session_cache[loop]
 
-    @classmethod
-    def _get_session(cls):
-        if cls._session_pool is None:
-            cls._session_pool = requests.Session()
-            # Configure connection pooling
-            adapter = requests.adapters.HTTPAdapter(
-                pool_connections=100,
-                pool_maxsize=100,
-                max_retries=requests.adapters.Retry(
-                    total=3, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504]
-                ),
-            )
-            cls._session_pool.mount("http://", adapter)
-            cls._session_pool.mount("https://", adapter)
-        return cls._session_pool
-
-    async def async_call(
-        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
-    ) -> VerificationResult:
-        """
-        Asynchronously verify code execution against test cases.
-
-        Args:
-            tokenized_prediction: Unused tokenized representation
-            prediction: The model output containing Python code
-            label: List of test cases or JSON string representation of a list
-            query: Unused original query
-
-        Returns:
-            VerificationResult with score as the pass rate of test cases
-        """
-        # Extract Python code from the model output
+    async def _verify_code(self, prediction: str, label: Any, session: aiohttp.ClientSession) -> VerificationResult:
         python_code = self.extract_python_code(prediction)
-
-        # Test data
         payload = {
             "program": python_code,
             "tests": label,
             "max_execution_time": self.verifier_config.code_max_execution_time,
         }
+        http_timeout = aiohttp.ClientTimeout(
+            total=max(30, min(300, self.verifier_config.code_max_execution_time * 10))
+        )
 
-        try:
-            # Use connection pooling session
-            session = self._get_session()
-
-            # Calculate timeout
-            http_timeout = max(30, min(300, self.verifier_config.code_max_execution_time * 10))
-
-            # Make request in thread pool to keep it async
-            def make_request():
-                response = session.post(
-                    self.verifier_config.code_api_url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=http_timeout,
-                )
+        @backoff.on_exception(
+            backoff.expo,
+            (aiohttp.ClientError, asyncio.TimeoutError),
+            max_tries=3,
+            max_time=60,
+            giveup=lambda e: isinstance(e, aiohttp.ClientResponseError) and e.status < 500,
+        )
+        async def _make_request() -> dict:
+            async with session.post(
+                self.verifier_config.code_api_url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=http_timeout,
+            ) as response:
                 response.raise_for_status()
-                return response.json()
+                return await response.json()
 
-            result = await asyncio.to_thread(make_request)
-            passes = result["results"]
-            pass_rate = sum(passes) / len(passes) if passes else 0.0
-            score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
-            if self.apply_perf_penalty and score > 0.0:
-                runtimes = result["runtimes"]
-                # for each runtime, multiply the percent of the timeout that was used
-                multipliers = [
-                    (self.verifier_config.code_max_execution_time - runtime)
-                    / self.verifier_config.code_max_execution_time
-                    for runtime in runtimes
-                ]
-                penalized_passes = [passes[i] * multipliers[i] for i in range(len(passes))]
-                score = sum(penalized_passes) / len(penalized_passes)
-            return VerificationResult(score=score)
+        result = await _make_request()
+        passes = result["results"]
+        pass_rate = sum(passes) / len(passes) if passes else 0.0
+        score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
+        if self.apply_perf_penalty and score > 0.0:
+            runtimes = result["runtimes"]
+            multipliers = [
+                (self.verifier_config.code_max_execution_time - runtime) / self.verifier_config.code_max_execution_time
+                for runtime in runtimes
+            ]
+            penalized_passes = [passes[i] * multipliers[i] for i in range(len(passes))]
+            score = sum(penalized_passes) / len(penalized_passes)
+        return VerificationResult(score=score)
+
+    async def async_call(
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
+    ) -> VerificationResult:
+        try:
+            return await self._verify_code(prediction, label, self._get_session())
         except Exception as e:
             logger.warning(f"Error verifying code sample: {e}")
             return VerificationResult(score=0.0)
@@ -908,19 +886,17 @@ class CodeVerifier(VerifierFunction):
     def __call__(
         self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
     ) -> VerificationResult:
-        """
-        Synchronously verify code execution against test cases.
-        """
+        async def _run_with_fresh_session() -> VerificationResult:
+            connector = aiohttp.TCPConnector(limit=100, limit_per_host=100)
+            timeout = aiohttp.ClientTimeout(total=300)
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                return await self._verify_code(prediction, label, session)
+
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                raise RuntimeError(
-                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
-                )
-            else:
-                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
-        except RuntimeError:
-            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+            return asyncio.run(_run_with_fresh_session())
+        except Exception as e:
+            logger.warning(f"Error verifying code sample: {e}")
+            return VerificationResult(score=0.0)
 
     @classmethod
     def get_config_class(cls) -> type:
@@ -931,6 +907,14 @@ class CodeVerifier(VerifierFunction):
             type: The VerifierConfig class or its subclass
         """
         return CodeVerifierConfig
+
+    @classmethod
+    async def cleanup_all_sessions(cls) -> None:
+        sessions_to_close = list(cls._session_cache.values())
+        cls._session_cache.clear()
+        for session in sessions_to_close:
+            if not session.closed:
+                await session.close()
 
 
 def build_all_verifiers(args) -> dict[str, VerifierFunction]:

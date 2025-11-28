@@ -17,3 +17,8 @@ To verify that documentation changes don't alter the generated output:
 2. Switch to main branch and build: `cd /path/to/main && uv run mkdocs build`
 3. Compare the builds: `diff -rq site-branch /path/to/main/site`
 4. If no output, the docs are identical. If differences exist, review with: `diff -r site-branch /path/to/main/site`
+
+
+# Beaker commands
+
+Given an experiment ID, you can get the logs with `beaker experiment logs $EXPERIMENT_ID`.
