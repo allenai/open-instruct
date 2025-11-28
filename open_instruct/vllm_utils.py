@@ -85,7 +85,7 @@ def assert_threaded_actor(instance):
         return
 
 
-def _truncate_tool_output_tokens(
+def truncate_tool_output_tokens(
     tool_output_token_ids: list[int],
     current_prompt_token_ids: list[int],
     accumulated_tokens: list[int],
@@ -97,12 +97,16 @@ def _truncate_tool_output_tokens(
     excess = len(prompt_and_tool_output) - max_model_len
     if excess > 0:
         tool_output_token_ids = tool_output_token_ids[:-excess]
+        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
 
     remaining = max_tokens - current_mask_len
     if remaining <= 0:
+        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens
         return [], excess, prompt_and_tool_output
     elif len(tool_output_token_ids) > remaining:
-        return tool_output_token_ids[:remaining], excess, prompt_and_tool_output
+        tool_output_token_ids = tool_output_token_ids[:remaining]
+        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
+        return tool_output_token_ids, excess, prompt_and_tool_output
 
     return tool_output_token_ids, excess, prompt_and_tool_output
 
@@ -175,7 +179,7 @@ async def process_request_async(
             "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
         )
 
-        tool_output_token_ids, excess, prompt_and_tool_output = _truncate_tool_output_tokens(
+        tool_output_token_ids, excess, prompt_and_tool_output = truncate_tool_output_tokens(
             tool_output_token_ids,
             current_prompt_token_ids,
             accumulated_tokens,
