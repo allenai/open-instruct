@@ -383,6 +383,8 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
         ),
         start_time=metadata["start_time"],
         logprobs=logprobs,
+        queued_training_step=metadata.get("training_step"),
+        generation_started_training_step=metadata.get("generation_started_training_step"),
     )
     return result, metadata["is_eval"]
 
@@ -470,10 +472,13 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
             continue
 
         request = actor.prompt_queue.get()
-        add_request(actor, request)
+        generation_started_training_step = actor._get_current_training_step()
+        add_request(actor, request, generation_started_training_step)
 
 
-def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
+def add_request(
+    actor: "LLMRayActor", request: PromptRequest, generation_started_training_step: int | None = None
+) -> None:
     request_id = make_request_id(request)
 
     sampling_params = request.generation_config.clone()
@@ -488,6 +493,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),
         "start_time": time.perf_counter(),
+        "generation_started_training_step": generation_started_training_step,
     }
 
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
@@ -549,6 +555,14 @@ class LLMRayActor:
         # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
+
+    def _get_current_training_step(self) -> int | None:
+        """Fetch the learner's current training step for staleness accounting."""
+        try:
+            return ray.get(self.actor_manager.get_current_training_step.remote())
+        except Exception as exc:  # pragma: no cover - log and fall back gracefully
+            logger.warning(f"Failed to fetch current training step from ActorManager: {exc}")
+            return None
 
     def _init_executor(self) -> None:
         max_workers = NUM_PREFETCH_WORKERS + (NUM_TOOL_WORKERS if self.tools else 0)
