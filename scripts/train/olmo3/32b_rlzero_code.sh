@@ -82,7 +82,7 @@ python mason.py \
     --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-32b_rlzero-code/ \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
-    --mask_truncated_completions True \
+    --mask_truncated_completions False \
     --oe_eval_gpu_multiplier 4 \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \

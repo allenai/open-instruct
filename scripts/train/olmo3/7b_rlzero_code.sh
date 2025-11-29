@@ -85,7 +85,7 @@ python open_instruct/grpo_fast.py \
     --clip_higher 0.272 \
     --output_dir /output/olmo3-7b-rlzero-code/checkpoints \
     --gs_checkpoint_state_dir gs://ai2-llm/checkpoints/rlzero/olmo3-7b_rlzero-code/ \
-    --mask_truncated_completions True \
+    --mask_truncated_completions False \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
