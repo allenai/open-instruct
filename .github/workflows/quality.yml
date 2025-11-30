@@ -20,5 +20,8 @@ jobs:
           version: "0.8.8"
       - name: Code quality
         run: |
-          uv run ruff format --check --diff open_instruct mason.py
-          uv run ruff check --exit-non-zero-on-fix open_instruct mason.py
+          uv run ruff format --check --diff open_instruct mason.py test_mason.py
+          uv run ruff check --exit-non-zero-on-fix open_instruct mason.py test_mason.py
+      - name: Type check
+        run: |
+          uv run ty check

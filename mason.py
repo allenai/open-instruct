@@ -71,10 +71,10 @@ def build_command_without_args(command, args_to_remove):
     return result
 
 
-def parse_beaker_dataset(dataset_str):
+def parse_beaker_dataset(dataset_str: str) -> dict[str, str]:
     splt = dataset_str.split(":")
     if len(splt) != 2:
-        raise argparse.ArgumentError()
+        raise argparse.ArgumentTypeError(f"Invalid dataset format: {dataset_str}. Expected 'mount_path:beaker_id'")
 
     return {"mount_path": splt[0], "beaker": splt[1]}
 
@@ -500,7 +500,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     "SubprocessResult",
                     (),
                     {"returncode": process.returncode, "stdout": "".join(stdout_data), "stderr": "".join(stderr_data)},
-                )
+                )()
                 stdout = result.stdout
                 # Extract the cached dataset path from stdout if it exists
                 for line in stdout.splitlines():
@@ -586,6 +586,9 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     model_revision = command[idx + 1]
                     break
 
+            if model_name_or_path is None:
+                raise ValueError("--model_name_or_path is required for GCP clusters")
+
             if model_name_or_path.startswith("gs://"):
                 gs_saved_path = model_name_or_path
             else:
@@ -608,7 +611,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     gs_saved_path
                 )  # race condition exists, but it's fine since we are launching mason sequentially
                 if not gs_folder:
-                    upload_to_gs_bucket(path, gs_saved_path)
+                    upload_to_gs_bucket(path, gs_saved_path)  # ty: ignore[invalid-argument-type]
 
             download_path = gs_saved_path.replace("gs://", "/gs/")
             download_path_without_last_folder = download_path.rsplit("/", 1)[0]
@@ -720,7 +723,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
     return full_command
 
 
-def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami: str, resumable: bool):
+def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], whoami: str, resumable: bool):
     # Add a check to ensure that the user is using the correct clusters for multi-node jobs
     if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
         confirmation = False
@@ -797,7 +800,7 @@ def main():
         whoami = beaker_client.user.get().name
 
         # Increase timeout to 300s for large experiment specs.
-        beaker_client.TIMEOUT = 300
+        beaker.Beaker.TIMEOUT = 300
 
     full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
     if is_external_user:
