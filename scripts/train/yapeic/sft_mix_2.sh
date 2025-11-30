@@ -26,8 +26,9 @@ python mason.py \
     --tokenizer_name allenai/Olmo-3-1025-7B \
     --tokenizer_revision main \
     --use_slow_tokenizer False \
-    --dataset_transform_fn sft_tulu_tokenize_and_truncate_v1 sft_tulu_filter_v1 \
+    --dataset_transform_fn sft_messages_none_content_filter_v1 sft_tulu_tokenize_and_truncate_v1 sft_tulu_filter_v1 \
     --dataset_mixer_list yapeichang/v1_fewshot_resources_simple 5000 allenai/Dolci-Instruct-SFT 95000 \
+    --sample_after_transforms \
     --clean_checkpoints_at_end false \
     --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/sft_olmo3-1025-7b_mix_5-95_checkpoints \
     --max_seq_length 8192 \

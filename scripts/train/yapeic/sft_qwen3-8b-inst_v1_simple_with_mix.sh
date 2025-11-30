@@ -1,7 +1,7 @@
 python mason.py \
     --cluster ai2/augusta \
-    --task_name sft_olmo3-1025-7b_mix_0-100 \
-    --description "SFT Olmo-3-1025-7B, mix 0:100" \
+    --task_name sft_qwen3-8b-inst_v1_simple_with_mix \
+    --description "SFT Qwen3-8B, v1 simple template, with general data" \
     --workspace ai2/oe-data \
     --priority normal \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -19,18 +19,18 @@ python mason.py \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --hf_entity yapeichang \
-    --hf_repo_id sft_olmo3-1025-7b_mix_0-100 \
-    --exp_name sft_olmo3-1025-7b_mix_0-100 \
-    --model_name_or_path allenai/Olmo-3-1025-7B \
+    --hf_repo_id sft_qwen3-8b-inst_v1_simple_with_mix \
+    --exp_name sft_qwen3-8b-inst_v1_simple_with_mix \
+    --model_name_or_path Qwen/Qwen3-8B \
     --model_revision main \
-    --tokenizer_name allenai/Olmo-3-1025-7B \
+    --tokenizer_name Qwen/Qwen3-8B \
     --tokenizer_revision main \
     --use_slow_tokenizer False \
-    --dataset_transform_fn sft_messages_none_content_filter_v1 sft_tulu_tokenize_and_truncate_v1 sft_tulu_filter_v1 \
-    --dataset_mixer_list allenai/Dolci-Instruct-SFT 100000 \
+    --dataset_transform_fn sft_messages_none_content_filter_v1 sft_qwen3_tokenize_and_truncate_no_thinking_v1 sft_tulu_filter_v1 \
+    --dataset_mixer_list yapeichang/v1_fewshot_resources_simple 50000 allenai/Dolci-Instruct-SFT 50000 \
     --sample_after_transforms \
     --clean_checkpoints_at_end false \
-    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/sft_olmo3-1025-7b_mix_0-100_checkpoints \
+    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/sft_qwen3-8b-inst_v1_simple_with_mix_checkpoints \
     --max_seq_length 8192 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \
