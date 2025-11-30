@@ -55,6 +55,7 @@ for model_name_or_path in "$@"; do
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env NCCL_CUMEM_ENABLE=0 \
+        --env VLLM_LOGGING_LEVEL=INFO \
         --budget ai2/oe-adapt \
         --gpus 8 \
         --secret HF_TOKEN=finbarrt_HF_TOKEN \
