@@ -142,6 +142,8 @@ class FlatArguments:
     """The hash of the dataset configuration."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
+    sample_after_transforms: bool = False
+    """If True, sample examples after applying transforms instead of before. Ensures exact sample count but slower."""
     dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
@@ -468,7 +470,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.dataset_mixer is not None:
         args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
-        transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+        # Build transform_fn_args dynamically based on the number of transform functions
+        # Tokenize functions need max_seq_length, others get empty dict
+        transform_fn_args = []
+        for fn_name in args.dataset_transform_fn:
+            if "tokenize" in fn_name:
+                transform_fn_args.append({"max_seq_length": args.max_seq_length})
+            else:
+                transform_fn_args.append({})
         train_dataset = get_cached_dataset_tulu(
             dataset_mixer_list=args.dataset_mixer_list,
             dataset_mixer_list_splits=args.dataset_mixer_list_splits,
@@ -481,6 +490,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             hf_entity=args.hf_entity,
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
+            sample_after_transforms=args.sample_after_transforms,
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")

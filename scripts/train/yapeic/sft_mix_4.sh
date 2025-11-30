@@ -1,0 +1,52 @@
+python mason.py \
+    --cluster ai2/augusta \
+    --task_name sft_olmo3-1025-7b_mix_0-100 \
+    --description "SFT Olmo-3-1025-7B, mix 0:100" \
+    --workspace ai2/oe-data \
+    --priority normal \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
+    --preemptible \
+    --num_nodes 1 \
+    --budget ai2/oe-base \
+    --gpus 8 -- \
+    git clone --depth 1 --branch yapeic/exp https://github.com/allenai/open-instruct.git /workspace/open-instruct \&\& \
+    cd /workspace/open-instruct \&\& \
+    accelerate launch \
+    --mixed_precision bf16 \
+    --num_processes 8 \
+    --use_deepspeed \
+    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_multinode_launcher standard \
+    open_instruct/finetune.py \
+    --hf_entity yapeichang \
+    --hf_repo_id sft_olmo3-1025-7b_mix_0-100 \
+    --exp_name sft_olmo3-1025-7b_mix_0-100 \
+    --model_name_or_path allenai/Olmo-3-1025-7B \
+    --model_revision main \
+    --tokenizer_name allenai/Olmo-3-1025-7B \
+    --tokenizer_revision main \
+    --use_slow_tokenizer False \
+    --dataset_transform_fn sft_messages_none_content_filter_v1 sft_tulu_tokenize_and_truncate_v1 sft_tulu_filter_v1 \
+    --dataset_mixer_list allenai/Dolci-Instruct-SFT 100000 \
+    --sample_after_transforms \
+    --clean_checkpoints_at_end false \
+    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/sft_olmo3-1025-7b_mix_0-100_checkpoints \
+    --max_seq_length 65536 \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 8 \
+    --learning_rate 5e-6 \
+    --lr_scheduler_type linear \
+    --warmup_ratio 0.03 \
+    --weight_decay 0.0 \
+    --num_train_epochs 1 \
+    --checkpointing_steps epoch \
+    --keep_last_n_checkpoints 1 \
+    --use_flash_attn \
+    --gradient_checkpointing \
+    --report_to wandb \
+    --wandb_project_name yapeic-exp \
+    --wandb_entity ai2-llm \
+    --with_tracking \
+    --logging_steps 1 \
+    --try_launch_beaker_eval_jobs false \
+    --seed 8

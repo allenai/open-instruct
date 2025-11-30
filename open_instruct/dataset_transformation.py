@@ -1254,6 +1254,14 @@ def sft_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
     return any(x != -100 for x in row[LABELS_KEY])
 
 
+def sft_messages_none_content_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
+    """Filter out rows where any message has None content (before tokenization)."""
+    messages = row.get("messages", [])
+    if not messages:
+        return False
+    return all(msg.get("content") is not None for msg in messages)
+
+
 def preference_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
     # Extract prompt (all messages except the last one)
     prompt = row["chosen"][:-1]
@@ -1504,6 +1512,7 @@ TRANSFORM_FNS = {
     "sft_filter_v1": (sft_filter_v1, "filter"),
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
+    "sft_messages_none_content_filter_v1": (sft_messages_none_content_filter_v1, "filter"),
     "sft_qwen3_tokenize_and_truncate_no_thinking_v1": (sft_qwen3_tokenize_and_truncate_no_thinking_v1, "map"),
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
@@ -1572,6 +1581,7 @@ class DatasetConfig:
     frac_or_num_samples: Optional[Union[int, float]] = None
     original_dataset_size: Optional[int] = None
     is_upsampled: bool = False
+    target_samples_after_transform: Optional[int] = None  # if set, sample this many after transforms
 
     def __post_init__(self):
         # if the file exists locally, use the local file
@@ -1686,6 +1696,31 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     if len(dataset) == 0:
         raise ValueError("No examples left after transformation")
+
+    # Sample after transforms if requested
+    if dc.target_samples_after_transform is not None:
+        target_size = dc.target_samples_after_transform
+        current_size = len(dataset)
+        if target_size <= current_size:
+            # Random sample without replacement
+            rng = np.random.RandomState(dc.dataset_config_seed)
+            indices = rng.choice(current_size, size=target_size, replace=False).tolist()
+            dataset = dataset.select(indices)
+            print(f"Sampled {target_size} examples from {current_size} after transforms")
+        else:
+            # Need to upsample - repeat and random sample extra
+            full_repeats = target_size // current_size
+            extra_samples = target_size % current_size
+            indices = []
+            for _ in range(full_repeats):
+                indices.extend(range(current_size))
+            if extra_samples > 0:
+                rng = np.random.RandomState(dc.dataset_config_seed)
+                extra_indices = rng.choice(current_size, size=extra_samples, replace=False)
+                indices.extend(extra_indices.tolist())
+            dataset = dataset.select(indices)
+            print(f"Upsampled from {current_size} to {target_size} examples after transforms")
+
     return dataset
 
 
@@ -1921,6 +1956,7 @@ def load_dataset_configs(
     transform_fn_args: List[Dict[str, Any]],
     target_columns: Optional[List[str]] = None,
     dataset_config_seed: int = 42,
+    sample_after_transforms: bool = False,
 ) -> List[DatasetConfig]:
     dcs = []
     if len(dataset_mixer_list_splits) == 1:
@@ -1965,8 +2001,13 @@ def load_dataset_configs(
         else:
             new_range = int(frac_or_num_samples)
 
-        print(f"Dataset {dataset_name}: {original_size} -> {new_range} samples (factor: {frac_or_num_samples})")
-        dataset_config.update_range(new_range)
+        if sample_after_transforms:
+            # Store target size but don't sample yet - will sample after transforms
+            dataset_config.target_samples_after_transform = new_range
+            print(f"Dataset {dataset_name}: {original_size} samples (will sample {new_range} after transforms)")
+        else:
+            print(f"Dataset {dataset_name}: {original_size} -> {new_range} samples (factor: {frac_or_num_samples})")
+            dataset_config.update_range(new_range)
         dcs.append(dataset_config)
     return dcs
 
@@ -1986,6 +2027,7 @@ def get_cached_dataset_tulu_with_statistics(
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
     system_prompt_override: Optional[str] = None,
+    sample_after_transforms: bool = False,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     if dataset_config_hash is None:
         dcs = load_dataset_configs(
@@ -1995,6 +2037,7 @@ def get_cached_dataset_tulu_with_statistics(
             transform_fn_args,
             target_columns,
             dataset_config_seed,
+            sample_after_transforms,
         )
         dataset_config_hash = compute_config_hash(dcs, tc)
     else:
@@ -2028,6 +2071,7 @@ def get_cached_dataset_tulu(
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
     system_prompt_override: Optional[str] = None,
+    sample_after_transforms: bool = False,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=dataset_mixer_list,
@@ -2044,4 +2088,5 @@ def get_cached_dataset_tulu(
         drop_dataset_source=True,
         dataset_config_seed=dataset_config_seed,
         system_prompt_override=system_prompt_override,
+        sample_after_transforms=sample_after_transforms,
     )[0]
