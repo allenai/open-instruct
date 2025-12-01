@@ -1145,7 +1145,6 @@ class TestDataPreparation(TestGrpoFastBase):
 
         expected_keys = {
             "collated_query_responses",
-            "collated_tool_masks",
             "collated_attention_masks",
             "collated_position_ids",
             "collated_advantages",
