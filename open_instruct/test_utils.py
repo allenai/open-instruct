@@ -525,14 +525,3 @@ class TestModelDims(unittest.TestCase):
 #             "natolambert/tulu-v2-sft-mixture-science": 7468,  # original data slightly different
 #         }
 #         _ = get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["messages"])
-
-
-@pytest.mark.parametrize("denominator,expected", [(None, None), ("token", "token"), (10.0, 10.0), (5, 5), ("5", 5)])
-def test_get_denominator_valid_inputs(denominator, expected):
-    assert utils.get_denominator(denominator) == expected
-
-
-@pytest.mark.parametrize("denominator", ["not-token", 0, -1.0])
-def test_get_denominator_invalid_inputs(denominator):
-    with pytest.raises(AssertionError):
-        utils.get_denominator(denominator)

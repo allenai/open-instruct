@@ -118,7 +118,6 @@ from open_instruct.utils import (
     combine_reward_metrics,
     download_latest_checkpoint_from_gs,
     get_beaker_whoami,
-    get_denominator,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
     get_train_ds_config,
