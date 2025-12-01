@@ -188,7 +188,7 @@ async def process_request_async(
         accumulated_logprobs.extend(
             [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids]
         )
-        masks.extend([0] * len(tool_output_token_ids))
+        masks.extend([0 if actor.mask_tool_use else 1] * len(tool_output_token_ids))
 
         new_sample_tokens = sampling_params.max_tokens - len(masks)
         if excess > 0 or new_sample_tokens <= 0:
@@ -510,6 +510,7 @@ class LLMRayActor:
         *args,
         tools: dict[str, Tool] | None = None,
         max_tool_calls: dict[str, int] | None = None,
+        mask_tool_use: bool = True,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
         results_queue: ray_queue.Queue,
@@ -519,7 +520,7 @@ class LLMRayActor:
         **kwargs,
     ):
         assert_threaded_actor(self)
-        self._init_config(tools, max_tool_calls, inflight_updates)
+        self._init_config(tools, max_tool_calls, mask_tool_use, inflight_updates)
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
@@ -530,10 +531,15 @@ class LLMRayActor:
         self._init_executor()
 
     def _init_config(
-        self, tools: dict[str, Tool] | None, max_tool_calls: dict[str, int] | None, inflight_updates: bool
+        self,
+        tools: dict[str, Tool] | None,
+        max_tool_calls: dict[str, int] | None,
+        mask_tool_use: bool,
+        inflight_updates: bool,
     ) -> None:
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
+        self.mask_tool_use = mask_tool_use
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
         self.active_tasks = {}
@@ -785,6 +791,7 @@ def create_vllm_engines(
     pg: PlacementGroup | None = None,
     tools: dict[str, Tool] | None = None,
     max_tool_calls: tuple[int, ...] = (5,),
+    mask_tool_use: bool = True,
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
@@ -868,6 +875,7 @@ def create_vllm_engines(
                 actor_manager=actor_manager,
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
+                mask_tool_use=mask_tool_use,
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,

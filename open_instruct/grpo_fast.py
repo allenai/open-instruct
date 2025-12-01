@@ -1027,11 +1027,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     return_entropy=False,
                 )
 
-                if self.args.mask_tool_use and self.args.tool_use:
-                    response_mask_BT = data_BT["response_masks"][i].bool() & data_BT["tool_masks"][i].bool()
-                else:
-                    response_mask_BT = data_BT["response_masks"][i].bool()
-
+                response_mask_BT = data_BT["response_masks"][i].bool() & data_BT["tool_masks"][i].bool()
                 logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:], INVALID_LOGPROB)
                 logprobs_BT.append(logprob_BT)
 
@@ -1083,11 +1079,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 with torch.no_grad():
                     for i in range(len(data_BT["query_responses"])):
-                        if self.args.mask_tool_use and self.args.tool_use:
-                            response_mask_BT = data_BT["response_masks"][i].bool() & data_BT["tool_masks"][i].bool()
-                        else:
-                            response_mask_BT = data_BT["response_masks"][i].bool()
-
+                        response_mask_BT = data_BT["response_masks"][i].bool() & data_BT["tool_masks"][i].bool()
                         vllm_old_logprob_BT = data_BT["vllm_logprobs"][i][:, 1:]
                         vllm_old_logprob_BT = torch.masked_fill(
                             vllm_old_logprob_BT, ~response_mask_BT[:, 1:], INVALID_LOGPROB
@@ -1116,11 +1108,9 @@ class PolicyTrainerRayProcess(RayProcess):
             }
             for epoch_idx in range(self.args.num_epochs):
                 for i in range(num_samples):
-                    response_mask_bool_BT = data_BT["response_masks"][i][:, 1:].bool()
-                    if self.args.mask_tool_use and self.args.tool_use:
-                        response_mask_bool_BT = (
-                            data_BT["response_masks"][i][:, 1:].bool() & data_BT["tool_masks"][i][:, 1:].bool()
-                        )
+                    response_mask_bool_BT = (
+                        data_BT["response_masks"][i][:, 1:].bool() & data_BT["tool_masks"][i][:, 1:].bool()
+                    )
                     local_logprobs_BT, entropy_BT = self.forward(
                         self.model,
                         data_BT["query_responses"][i],
@@ -2356,6 +2346,7 @@ def create_model_and_optimizer(
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
+        mask_tool_use=args.mask_tool_use,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
