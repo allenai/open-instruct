@@ -9,7 +9,8 @@ style:
 	uv run ruff format $(check_dirs)
 
 quality:
-	uv run ruff check --fix $(check_dirs)
+	uv run ruff check -q --fix $(check_dirs)
+	uv run python -m compileall -qq $(check_dirs)
 	uv run ty check
 
 style-check:   ## *fail* if anything needs rewriting
@@ -18,3 +19,4 @@ style-check:   ## *fail* if anything needs rewriting
 quality-check: ## *fail* if any rewrite was needed
 	uv run ruff check --exit-non-zero-on-fix $(check_dirs)
 	uv run ty check
+	uv run python -m compileall -qq $(check_dirs)
