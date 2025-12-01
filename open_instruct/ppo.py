@@ -953,9 +953,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl_stats_4M[:, i] = masked_mean(
-                            kl_4BT, mb_response_masks_bool, args.masked_mean_axis
-                        ).float()
+                        kl_stats_4M[:, i] = masked_mean(kl_4BT, mb_response_masks_bool, args.masked_mean_axis).float()
                         kl_loss_stats[i] = kl_stats_4M[args.kl_estimator, i] * args.beta
                         pg_clipfrac_stats[i] = masked_mean(
                             (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
