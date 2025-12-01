@@ -1070,8 +1070,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 mask &= tool_mask[:, 1:].bool()
 
             count = mask.sum().float()
-            if dist.is_available() and dist.is_initialized():
-                dist.all_reduce(count, op=dist.ReduceOp.SUM)
+            dist.all_reduce(count, op=dist.ReduceOp.SUM)
 
             group_idx = i // accumulation_steps
             key = int(group_idx * accumulation_steps)
