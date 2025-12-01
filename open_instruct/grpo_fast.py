@@ -1059,28 +1059,23 @@ class PolicyTrainerRayProcess(RayProcess):
     ) -> dict[int, float]:
         args = self.args
         device = self.device
-        total_batches = len(collated_response_masks)
 
-        resp = torch.stack(collated_response_masks, dim=0).to(device)
-        masks = resp[:, :, 1:].bool()
-        if args.mask_tool_use and args.tool_use:
-            tools = torch.stack(collated_tool_masks, dim=0).to(device)
-            masks &= tools[:, :, 1:].bool()
-        # sum over bsz and seq len.
-        batch_counts = masks.sum(dim=(1, 2)).to(dtype=torch.float32)
-        if dist.is_available() and dist.is_initialized():
-            dist.all_reduce(batch_counts, op=dist.ReduceOp.SUM)
+        accumulation_counts: dict[int, float] = {}
 
-        # group counts by the batches (called groups here)
-        num_groups = (total_batches + accumulation_steps - 1) // accumulation_steps
-        group_ids = torch.arange(total_batches, device=device) // accumulation_steps
+        for i, response_mask in enumerate(collated_response_masks):
+            response_mask = response_mask.to(device)
+            mask = response_mask[:, 1:].bool()
+            if args.mask_tool_use and args.tool_use:
+                tool_mask = collated_tool_masks[i].to(device)
+                mask &= tool_mask[:, 1:].bool()
 
-        group_counts = torch.zeros(num_groups, device=device, dtype=torch.float32)
-        group_counts.scatter_add_(0, group_ids, batch_counts)
+            count = mask.sum().float()
+            if dist.is_available() and dist.is_initialized():
+                dist.all_reduce(count, op=dist.ReduceOp.SUM)
 
-        accumulation_counts: dict[int, float] = {
-            int(group_idx * accumulation_steps): float(count) for group_idx, count in enumerate(group_counts)
-        }
+            group_idx = i // accumulation_steps
+            key = int(group_idx * accumulation_steps)
+            accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
 
         return accumulation_counts
 
