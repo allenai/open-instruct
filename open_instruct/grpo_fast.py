@@ -458,7 +458,7 @@ class Args:
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
-        if self.loss_denominator is not None and self.loss_denominator != "token":
+        if self.loss_denominator != "token":
             try:
                 self.loss_denominator = float(self.loss_denominator)
             except ValueError:
