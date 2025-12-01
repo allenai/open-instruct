@@ -1337,7 +1337,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
                     else:
                         loss = masked_mean(pg_loss_max, mb_response_masks_bool, loss_axis, loss_denominator)
-                    if args.masked_mean_denominator == "token":
+                    if args.masked_mean_denominator is not None:
                         # rescale loss by world size
                         if dist.is_available() and dist.is_initialized():
                             loss *= dist.get_world_size()
