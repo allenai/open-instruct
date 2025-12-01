@@ -223,7 +223,9 @@ async def process_request_async(
 
     actor.active_tasks.pop(sub_request_id, None)
 
-    logger.info(f"[DEBUG] Putting result in completion_queue for {base_request_id}")
+    logger.info(
+        f"[DEBUG] Putting result in completion_queue for {base_request_id}, queue id={id(actor.completion_queue)}"
+    )
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
@@ -716,8 +718,9 @@ class LLMRayActor:
         return scores, metrics
 
     def process_from_queue(self) -> None:
+        logger.info(f"[DEBUG] process_from_queue started, queue id={id(self.completion_queue)}")
         while True:
-            logger.info("[DEBUG] Waiting for completion_queue...")
+            logger.info(f"[DEBUG] Waiting for completion_queue (size={self.completion_queue.qsize()})...")
             sub_request = self.completion_queue.get()
             logger.info(f"[DEBUG] Got sub_request for {sub_request['base_request_id']}")
             self._accumulate_sub_request(sub_request)
