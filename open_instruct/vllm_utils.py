@@ -234,6 +234,7 @@ async def process_request_async(
                 prompt_logprobs=None,
                 outputs=[complete_output],
                 finished=True,
+                prompt_logprobs=None,  # not used but required for init.
             ),
             "tools": actor.tools,
         }
