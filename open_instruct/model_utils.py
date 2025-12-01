@@ -772,3 +772,48 @@ def exact_div(a, b, custom_error_message=""):
     if a != q * b:
         raise ValueError(f"{custom_error_message}, inexact division: {a} / {b} = {a / b}")
     return q
+
+
+def masked_mean(
+    values: torch.Tensor, mask: torch.Tensor, axis: int | None = None, denominator: float | None = None
+) -> torch.Tensor:
+    """Compute mean of tensor with masked values."""
+    extra_dims = values.ndim - mask.ndim
+    if axis is None:
+        sum_dims = tuple(range(extra_dims, values.ndim))
+    elif axis >= 0:
+        sum_dims = axis + extra_dims
+    else:
+        sum_dims = axis
+    numerator = (values * mask).sum(dim=sum_dims)
+    denom = mask.sum(dim=axis) if denominator is None else denominator
+    result = numerator / denom
+    return result.flatten(extra_dims).mean(-1) if result.ndim > extra_dims else result
+
+
+def estimate_kl(ref_logprobs_diff: torch.Tensor, ratio: torch.Tensor) -> torch.Tensor:
+    """Compute 4 different KL divergence estimators between current and reference policies.
+
+    Args:
+        ref_logprobs_diff: Log probability difference (new_logprobs - ref_logprobs), clamped
+            to [-40, 40] for numerical stability. Shape: [B, T] or similar.
+        ratio: Importance sampling ratio exp(new_logprobs - old_logprobs) between current
+            policy and the policy at the start of the training step. Shape: [B, T] or similar.
+
+    Returns:
+        Tensor of shape [4, B, T] containing 4 KL estimators stacked along dim 0:
+            [0]: linear approximation (ref_logprobs_diff)
+            [1]: quadratic approximation (ref_logprobs_diff^2 / 2)
+            [2]: numerically stable form (expm1(-ref_logprobs_diff) + ref_logprobs_diff)
+            [3]: importance-weighted (ratio * ref_logprobs_diff)
+
+        We tend to prefer [2] as a reasonable default.
+    """
+    return torch.stack(
+        [
+            ref_logprobs_diff,
+            (ref_logprobs_diff) ** 2 / 2,
+            torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff,
+            ratio * ref_logprobs_diff,
+        ]
+    )

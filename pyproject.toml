@@ -82,6 +82,7 @@ dev = [
     "mkdocs-material>=9.6.8",
     "pytest>=8.3.4",
     "ruff>=0.11.13",
+    "ty>=0.0.1a13",
     "parameterized>=0.9.0",
     "rich>=13.7.0",
     "responses>=0.25.8",
@@ -140,3 +141,6 @@ known-first-party = ["open-instruct"]
 case-sensitive = false
 # Disable split-on-trailing-comma to work with skip-magic-trailing-comma
 split-on-trailing-comma = false
+
+[tool.ty.src]
+exclude = ["open_instruct/", "scripts/", "decontamination/", "human_eval/"]

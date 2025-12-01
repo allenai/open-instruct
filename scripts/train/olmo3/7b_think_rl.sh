@@ -24,7 +24,7 @@ python mason.py \
         --learning_rate 1e-6 \
         --per_device_train_batch_size 1 \
         --output_dir /output \
-        --kl_estimator kl3 \
+        --kl_estimator 2 \
         --dataset_mixer_list allenai/Dolci-Think-RL-7B 1.0 \
         --dataset_mixer_list_splits train \
         --dataset_mixer_eval_list allenai/Dolci-Think-RL-7B 8 \
