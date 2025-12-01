@@ -50,14 +50,16 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._current_iter: Iterable[dict[str, Any]] | None = None
 
     def __next__(self) -> dict[str, Any]:
-        self._current_iter |= iter(self)
+        if self._current_iter is None:
+            self._current_iter = iter(self)
         try:
             return next(self._current_iter)
         except StopIteration:
             self._current_iter = None
             if self._automatic_reshuffle:
                 self.reshuffle()
-                assert self.effective_size > 0, "All dataset examples have been excluded. Cannot continue iteration."
+                if self.effective_size == 0:
+                    raise RuntimeError("All dataset examples have been excluded. Cannot continue iteration.") from None
                 self._current_iter = iter(self)
                 return next(self._current_iter)
             self._epoch += 1
