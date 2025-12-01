@@ -10,6 +10,7 @@ style:
 
 quality:
 	uv run ruff check --fix $(check_dirs)
+	uv run python -m compileall open_instruct
 
 style-check:   ## *fail* if anything needs rewriting
 	uv run ruff format --check --diff $(check_dirs)
