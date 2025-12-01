@@ -457,13 +457,7 @@ class Args:
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
-        if self.loss_denominator != "token":
-            try:
-                self.loss_denominator = float(self.loss_denominator)
-            except ValueError:
-                raise ValueError(
-                    f"loss_denominator must be a float value if not 'token', got: {self.loss_denominator}"
-                )
+        self.loss_denominator = utils.get_denominator(self.loss_denominator)
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -1060,6 +1054,7 @@ class PolicyTrainerRayProcess(RayProcess):
         device = self.device
 
         accumulation_counts: dict[int, float] = {}
+        local_counts = []
 
         for i, response_mask in enumerate(collated_response_masks):
             response_mask = response_mask.to(device)
@@ -1068,9 +1063,16 @@ class PolicyTrainerRayProcess(RayProcess):
                 tool_mask = collated_tool_masks[i].to(device)
                 mask &= tool_mask[:, 1:].bool()
 
-            count = mask.sum().float()
-            dist.all_reduce(count, op=dist.ReduceOp.SUM)
+            local_counts.append(mask.sum().float())
 
+        if not local_counts:
+            return accumulation_counts
+
+        # do the all_reduce once to avoid calling each loop
+        counts_tensor = torch.stack(local_counts)
+        dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
+
+        for i, count in enumerate(counts_tensor):
             group_idx = i // accumulation_steps
             key = int(group_idx * accumulation_steps)
             accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
