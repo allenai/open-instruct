@@ -498,6 +498,11 @@ class Args:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{beaker_users}/{checkpoint_dir_name}"
             else:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{checkpoint_dir_name}"
+            # On GCP, all checkpointing must happen on filestore.
+            # TODO(finbarrtimbers): Chanage this so we can checkpoint to GCS.
+            # TODO(finbarrtimbers): Move this logic to mason.py once we refactor config.
+            if not checkpoint_dir_name.startswith("/filestore"):
+                self.checkpoint_state_dir = f"/filestore{self.checkpoint_state_dir}"
 
         if self.checkpoint_state_dir is not None:
             if self.gs_checkpoint_state_dir is not None:
