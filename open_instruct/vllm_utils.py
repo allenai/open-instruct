@@ -231,9 +231,9 @@ async def process_request_async(
                 request_id=sub_request_id,
                 prompt=request_output.prompt,
                 prompt_token_ids=final_prompt_token_ids,
-                prompt_logprobs=None,
                 outputs=[complete_output],
                 finished=True,
+                prompt_logprobs=None,  # not used but required for init.
             ),
             "tools": actor.tools,
         }
@@ -675,37 +675,30 @@ class LLMRayActor:
 
     def _compute_rewards(self, result: GenerationResult, dataset, is_eval: bool) -> tuple[list[float], dict]:
         """Run reward computation."""
-        logger.debug(f"[LLMRayActor] Computing rewards for dataset_index={result.dataset_index}")
         example = dataset[result.dataset_index]
-        ground_truth = example[GROUND_TRUTHS_KEY]
-        dataset_name = example[VERIFIER_SOURCE_KEY]
-        raw_query = example[RAW_PROMPT_KEY]
-
-        decoded_responses = [self.llm_engine.tokenizer.decode(r) for r in result.responses]
+        decoded_responses = self.llm_engine.tokenizer.batch_decode(result.responses)
 
         k = len(result.responses)
-        k_ground_truths = [ground_truth] * k
-        k_datasets = [dataset_name] * k
-        k_raw_queries = [raw_query] * k
+        k_ground_truths = [example[GROUND_TRUTHS_KEY]] * k
+        k_datasets = [example[VERIFIER_SOURCE_KEY]] * k
+        k_raw_queries = [example[RAW_PROMPT_KEY]] * k
 
-        logger.debug(f"[LLMRayActor] Running reward_fn for {k} responses, dataset={dataset_name}")
+        # We need a separate event loop because this is a sync method but reward_fn is async.
+        # We can't use asyncio.run() because it may conflict with Ray's existing event loop.
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        try:
-            scores, metrics = loop.run_until_complete(
-                self.reward_fn(
-                    result.responses,
-                    decoded_responses,
-                    k_ground_truths,
-                    k_datasets,
-                    result.finish_reasons,
-                    result.request_info,
-                    k_raw_queries,
-                )
+        scores, metrics = loop.run_until_complete(
+            self.reward_fn(
+                result.responses,
+                decoded_responses,
+                k_ground_truths,
+                k_datasets,
+                result.finish_reasons,
+                result.request_info,
+                k_raw_queries,
             )
-        finally:
-            loop.close()
-        logger.debug(f"[LLMRayActor] Reward computation complete, scores={scores[:3]}...")
+        )
+        loop.close()
         return scores, metrics
 
     def process_from_queue(self) -> None:

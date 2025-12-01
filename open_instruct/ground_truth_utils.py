@@ -1074,7 +1074,6 @@ class RewardConfig:
 
     def build(self) -> Callable:
         """Build and return the reward function."""
-        reward_fn_mapping = self.verifier_functions
 
         async def reward_fn(
             responses: list,
@@ -1107,7 +1106,7 @@ class RewardConfig:
 
             if self.apply_verifiable_reward:
                 verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
-                    reward_fn_mapping,
+                    self.verifier_functions,
                     responses,
                     decoded_responses,
                     ground_truths,

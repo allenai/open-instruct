@@ -1761,7 +1761,6 @@ def accumulate_inference_batches(
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
         scores = result.reward_scores
-        reward_metrics = result.reward_metrics if result.reward_metrics else {}
 
         percent_solved = np.mean(scores).item() / args.max_possible_score
         # Don't resample prompt that was solved at more than no_resample_positive_rate
@@ -1801,7 +1800,7 @@ def accumulate_inference_batches(
         all_raw_queries.extend(k_raw_queries)
         all_decoded_responses.extend(decoded_responses)
         all_scores.extend(scores)
-        all_reward_metrics.append(reward_metrics)
+        all_reward_metrics.append(result.reward_metrics)
         all_percent_solved.append(percent_solved)
 
     if len(results) == 0:
