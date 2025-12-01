@@ -237,7 +237,7 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --local_mini_batch_size 32 \
     --number_samples_per_prompt 16 \
     --local_rollout_batch_size 4 \
-    --kl_estimator 2 \
+    --kl_estimator kl3 \
     --learning_rate 5e-7 \
     --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
     --dataset_mixer_list_splits train \
@@ -288,7 +288,7 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
 --local_mini_batch_size 32 \
 --number_samples_per_prompt 16 \
 --local_rollout_batch_size 4 \
---kl_estimator 2 \
+--kl_estimator kl3 \
 --learning_rate 5e-7 \
 --dataset_mixer_list allenai/RLVR-MATH 1.0 \
 --dataset_mixer_list_splits train \

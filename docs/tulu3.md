@@ -475,7 +475,7 @@ for learning_rate in 5e-7; do
 for beta in 0.01; do
 for nspp in 16; do
 for m in half-m ; do
-for kl_estimator in 2; do
+for kl_estimator in kl3; do
 local_rollout_batch_size=4
 if [ $m == "half-m" ]; then
     local_mini_batch_size=$(($local_rollout_batch_size * $nspp / 2))
@@ -551,7 +551,7 @@ If you are running on a single node (8 GPUs), consider adjusting the commands as
  for beta in 0.01; do
  for nspp in 16; do
  for m in half-m ; do
- for kl_estimator in 2; do
+ for kl_estimator in kl3; do
 -local_rollout_batch_size=4
 +local_rollout_batch_size=8
  if [ $m == "half-m" ]; then
