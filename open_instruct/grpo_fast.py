@@ -1049,23 +1049,27 @@ class PolicyTrainerRayProcess(RayProcess):
         accumulation_steps: int,
         collated_response_masks: list[torch.Tensor],
         collated_tool_masks: list[torch.Tensor],
-    ) -> dict[int, float | torch.Tensor]:
+    ) -> dict[int, float]:
         accumulation_counts = {}
-        for group_start in range(0, len(collated_response_masks), accumulation_steps):
-            group_end = min(group_start + accumulation_steps, len(collated_response_masks))
-            counts = torch.tensor(0.0, device=self.device, dtype=torch.float32)
+        args = self.args
+        device = self.device
+        total_batches = len(collated_response_masks)
+        # sometimes we have multiple mini-batches per accumulation group
+        # so compute counts for each group.
+        for group_start in range(0, total_batches, accumulation_steps):
+            group_end = min(group_start + accumulation_steps, total_batches)
+            count = 0.0
             for i in range(group_start, group_end):
-                mb_response_masks = collated_response_masks[i]
-                mb_response_masks_bool = mb_response_masks[:, 1:].bool()
-                if self.args.mask_tool_use and self.args.tool_use:
-                    mb_tool_mask = collated_tool_masks[i]
-                    mb_response_masks_bool = mb_response_masks_bool & mb_tool_mask[:, 1:].bool()
-                counts += mb_response_masks_bool.sum().float()
-            # All reduce counts
+                masks = collated_response_masks[i][:, 1:].bool()
+                if args.mask_tool_use and args.tool_use:
+                    masks &= collated_tool_masks[i][:, 1:].bool()
+                count += masks.sum().item()
+            count_tensor = torch.tensor(count, device=device, dtype=torch.float32)
             if dist.is_available() and dist.is_initialized():
                 dist.barrier()
-                dist.all_reduce(counts, op=dist.ReduceOp.SUM, group=None)
-            accumulation_counts[group_start] = counts.item()
+                dist.all_reduce(count_tensor, op=dist.ReduceOp.SUM)
+                count = count_tensor.item()
+            accumulation_counts[group_start] = count
         return accumulation_counts
 
     def train(
@@ -1195,8 +1199,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     loss_denominator = args.masked_mean_denominator
                     loss_axis = None
                     if args.masked_mean_denominator == "token":
-                        group_start = (i // accumulation_steps) * accumulation_steps
-                        loss_denominator = accumulation_token_counts[group_start]
+                        batch_start = (i // accumulation_steps) * accumulation_steps
+                        loss_denominator = accumulation_token_counts[batch_start]
 
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
