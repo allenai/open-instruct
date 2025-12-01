@@ -4,7 +4,7 @@ python open_instruct/grpo_fast.py \
     --num_unique_prompts_rollout 48 \
     --num_samples_per_prompt_rollout 16 \
     --try_launch_beaker_eval_jobs_on_weka \
-    --kl_estimator kl3 \
+    --kl_estimator 2 \
     --learning_rate 5e-7 \
     --dataset_mixer_list saurabh5/the-algorithm-python 1.0 \
     --dataset_mixer_list_splits train \
