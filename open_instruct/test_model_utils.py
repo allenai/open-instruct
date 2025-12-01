@@ -43,14 +43,21 @@ class TestBatchSlicing(unittest.TestCase):
 
 
 class TestMaskedMean(unittest.TestCase):
-    def test_original_behavior(self):
+    def test_original_axis_int(self):
         values = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
         mask = torch.tensor([[1.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
         result = open_instruct.model_utils.masked_mean(values, mask, axis=1)
         expected = ((1.0 + 2.0) / 2 + 4.0 / 1) / 2
         self.assertAlmostEqual(result.item(), expected)
 
-    def test_vectorized_kl(self):
+    def test_original_axis_none(self):
+        values = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        mask = torch.tensor([[1.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
+        result = open_instruct.model_utils.masked_mean(values, mask, axis=None)
+        expected = (1.0 + 2.0 + 4.0) / 3
+        self.assertAlmostEqual(result.item(), expected, places=5)
+
+    def test_vectorized_axis_int(self):
         kl_4BT = torch.tensor(
             [
                 [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
@@ -70,6 +77,28 @@ class TestMaskedMean(unittest.TestCase):
         self.assertAlmostEqual(result[1].item(), expected_1)
         self.assertAlmostEqual(result[2].item(), expected_2)
         self.assertAlmostEqual(result[3].item(), expected_3)
+
+    def test_vectorized_axis_none(self):
+        kl_4BT = torch.tensor(
+            [
+                [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                [[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]],
+                [[100.0, 200.0, 300.0], [400.0, 500.0, 600.0]],
+                [[1000.0, 2000.0, 3000.0], [4000.0, 5000.0, 6000.0]],
+            ]
+        )
+        mask = torch.tensor([[1.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
+        result = open_instruct.model_utils.masked_mean(kl_4BT, mask, axis=None)
+        self.assertEqual(result.shape, (4,))
+        expected = torch.tensor(
+            [
+                (1.0 + 2.0 + 4.0) / 3,
+                (10.0 + 20.0 + 40.0) / 3,
+                (100.0 + 200.0 + 400.0) / 3,
+                (1000.0 + 2000.0 + 4000.0) / 3,
+            ]
+        )
+        self.assertTrue(torch.allclose(result, expected))
 
 
 class TestLogSoftmaxAndGather(unittest.TestCase):

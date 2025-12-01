@@ -772,13 +772,18 @@ def exact_div(a, b, custom_error_message=""):
 def masked_mean(
     values: torch.Tensor, mask: torch.Tensor, axis: int | None = None, denominator: float | None = None
 ) -> torch.Tensor:
-    """Compute mean of tensor with a masked values."""
-    if axis is not None and axis >= 0:
-        axis = axis - mask.ndim
-    numerator = (values * mask).sum(axis=axis)
-    denom = mask.sum(axis=axis) if denominator is None else denominator
+    """Compute mean of tensor with masked values."""
+    extra_dims = values.ndim - mask.ndim
+    if axis is None:
+        sum_dims = tuple(range(extra_dims, values.ndim))
+    elif axis >= 0:
+        sum_dims = axis + extra_dims
+    else:
+        sum_dims = axis
+    numerator = (values * mask).sum(dim=sum_dims)
+    denom = mask.sum(dim=axis) if denominator is None else denominator
     result = numerator / denom
-    return result.flatten(values.ndim - mask.ndim).mean(-1)
+    return result.flatten(extra_dims).mean(-1) if result.ndim > extra_dims else result
 
 
 def estimate_kl(ref_logprobs_diff: torch.Tensor, ratio: torch.Tensor) -> torch.Tensor:
