@@ -1356,17 +1356,23 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl1_stats[i] = masked_mean(
                                 kl1, mb_response_masks_bool, loss_axis, stats_denominator
                             ).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, loss_axis, stats_denominator).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, loss_axis, stats_denominator).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, loss_axis, stats_denominator).float()
-                        if args.kl_estimator == "kl1":
-                            kl_loss_stats[i] = kl1_stats[i] * args.beta
-                        elif args.kl_estimator == "kl2":
-                            kl_loss_stats[i] = kl2_stats[i] * args.beta
-                        elif args.kl_estimator == "kl3":
-                            kl_loss_stats[i] = kl3_stats[i] * args.beta
-                        elif args.kl_estimator == "kl4":
-                            kl_loss_stats[i] = kl4_stats[i] * args.beta
+                            kl2_stats[i] = masked_mean(
+                                kl2, mb_response_masks_bool, loss_axis, stats_denominator
+                            ).float()
+                            kl3_stats[i] = masked_mean(
+                                kl3, mb_response_masks_bool, loss_axis, stats_denominator
+                            ).float()
+                            kl4_stats[i] = masked_mean(
+                                kl4, mb_response_masks_bool, loss_axis, stats_denominator
+                            ).float()
+                            if args.kl_estimator == "kl1":
+                                kl_loss_stats[i] = kl1_stats[i] * args.beta
+                            elif args.kl_estimator == "kl2":
+                                kl_loss_stats[i] = kl2_stats[i] * args.beta
+                            elif args.kl_estimator == "kl3":
+                                kl_loss_stats[i] = kl3_stats[i] * args.beta
+                            elif args.kl_estimator == "kl4":
+                                kl_loss_stats[i] = kl4_stats[i] * args.beta
                     pg_clipfrac_stats[i] = masked_mean(
                         (pg_losses2 > pg_losses).float(), mb_response_masks_bool, loss_axis, stats_denominator
                     )
