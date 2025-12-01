@@ -1802,8 +1802,8 @@ def accumulate_inference_batches(
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=0,
-        prompt_id="combined",
+        dataset_index=None,
+        prompt_id=None,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
     )
@@ -2173,7 +2173,6 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
 
-    eval_dataset = None
     if len(args.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
             dataset_mixer_list=args.dataset_mixer_eval_list,
@@ -2190,6 +2189,8 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
         )
         if args.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
+    else:
+        eval_dataset = None
 
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
 
@@ -2883,18 +2884,6 @@ def run_training(
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
-    eval_data_loader = None
-    if eval_dataset is not None:
-        eval_data_loader = data_loader_lib.HFDataLoader(
-            dataset=eval_dataset,
-            batch_size=1,
-            seed=args.seed,
-            rank=0,
-            world_size=1,
-            work_dir=args.output_dir,
-            automatic_reshuffle=True,
-        )
-
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
     weight_sync_thread_future = executor.submit(
@@ -2949,6 +2938,18 @@ def run_training(
     else:
         num_total_tokens = 0
 
+    if eval_dataset is not None:
+        eval_data_loader = data_loader_lib.HFDataLoader(
+            dataset=eval_dataset,
+            batch_size=1,
+            seed=args.seed,
+            rank=0,
+            world_size=1,
+            work_dir=args.output_dir,
+            automatic_reshuffle=True,
+        )
+    else:
+        eval_data_loader = None
     training_start_time = time.perf_counter()  # Track overall training start time
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
