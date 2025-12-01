@@ -142,5 +142,4 @@ case-sensitive = false
 split-on-trailing-comma = false
 
 [tool.ty.src]
-exclude = ["**", "!mason.py"]
-
+exclude = ["open_instruct/", "scripts/", "decontamination/", "human_eval/"]

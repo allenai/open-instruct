@@ -134,7 +134,7 @@ class TestExperimentSpec(unittest.TestCase):
     def test_experiment_spec(self, name, args_dict):
         args = Namespace(**args_dict)
         full_command = "test command"
-        beaker_secrets = "test-user"
+        beaker_secrets = ["test-user"]
         whoami = "test-user"
         resumable = False
 

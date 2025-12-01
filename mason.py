@@ -476,6 +476,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 stdout_data, stderr_data = [], []
 
                 # Set up select to monitor both stdout and stderr
+                assert process.stdout is not None and process.stderr is not None
                 streams = [process.stdout, process.stderr]
                 while True:
                     # Wait for output on either stream
