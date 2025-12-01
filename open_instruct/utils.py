@@ -2499,7 +2499,7 @@ def get_denominator(masked_mean_denominator: float | str | None) -> float | str 
         return None
 
     if isinstance(masked_mean_denominator, str):
-        if masked_mean_denominator in ["token", "group"]:
+        if masked_mean_denominator == "token":
             return masked_mean_denominator
         # Try to convert numeric strings to float
         try:
