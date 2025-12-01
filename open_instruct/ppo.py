@@ -93,7 +93,6 @@ from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
     disable_dropout_in_model,
-    entropy_from_logits,
     get_olmo3_generation_config,
     load_ref_policy,
     log_softmax_and_gather,
@@ -252,9 +251,6 @@ class Args:
     """the name or path to the value model"""
     value_model_revision: str | None = None
     """the revision of the value model"""
-    record_entropy: bool = False
-    """whether to record the entropy of the policy during training. Uses extra memory."""
-
     # Reward
     # -- r1 style format reward
     apply_r1_style_format_reward: bool = False
@@ -589,8 +585,7 @@ class PolicyTrainerRayProcess(RayProcess):
         position_ids: torch.LongTensor,
         pad_token_id: int,
         temperature: float,
-        return_entropy: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         # Replace pad tokens with 0s so that we don't run into index out of bounds errors
         padding_mask = query_response != pad_token_id
         input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
@@ -605,13 +600,7 @@ class PolicyTrainerRayProcess(RayProcess):
         logits /= temperature + 1e-7
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
 
-        # fow now, entropy is just for monitoring, and we don't pass gradients through it.
-        entropy = None
-        if return_entropy:
-            with torch.no_grad():
-                entropy = entropy_from_logits(logits)
-
-        return logprob, entropy
+        return logprob
 
     def forward_value(
         self,
@@ -761,14 +750,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
-                    ref_logprob, _ = self.forward(
+                    ref_logprob = self.forward(
                         self.ref_policy,
                         query_response,
                         attention_mask,
                         position_id,
                         pad_token_id,
                         args.temperature,
-                        return_entropy=False,
                     )
                     ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
@@ -781,14 +769,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 attention_mask = collated_attention_masks[i]
                 position_id = collated_position_ids[i]
                 response_mask = collated_response_masks[i]
-                old_logprob, _ = self.forward(
+                old_logprob = self.forward(
                     self.model,
                     query_response,
                     attention_mask,
                     position_id,
                     pad_token_id,
                     args.temperature,
-                    return_entropy=False,
                 )
                 old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
                 old_logprobs[i] = old_logprob
@@ -907,7 +894,6 @@ class PolicyTrainerRayProcess(RayProcess):
             pg_loss_stats = torch.zeros(len(collated_query_responses))
             loss_stats = torch.zeros(len(collated_query_responses))
             ratio_stats = torch.zeros(len(collated_query_responses))
-            entropy_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_ref_logprob = collated_ref_logprobs[i]
@@ -917,14 +903,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_response_masks_bool = mb_response_masks[:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
-                    mb_new_logprobs, mb_entropy = self.forward(
+                    mb_new_logprobs = self.forward(
                         self.model,
                         mb_query_responses,
                         mb_attention_mask,
                         mb_position_id,
                         pad_token_id,
                         args.temperature,
-                        return_entropy=args.record_entropy,
                     )
                     mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
 
@@ -990,11 +975,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
                         loss_stats[i] = loss
                         ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
-                        if args.record_entropy:
-                            # Calculate entropy statistics
-                            entropy_stats[i] = masked_mean(
-                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis
-                            ).float()
 
             with torch.no_grad():
                 self.local_metrics["objective/kl_avg"] = kl1_stats.mean()
@@ -1014,9 +994,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics["val/adv_mean"] = adv_mean
                 self.local_metrics["val/adv_abs_mean"] = adv_abs_mean
                 self.local_metrics["val/adv_std"] = adv_std
-                if args.record_entropy:
-                    self.local_metrics["policy/entropy_avg"] = entropy_stats.mean()
-                self.local_metrics["policy/entropy_var"] = entropy_stats.var()
                 metrics_list = self.local_metrics.get_metrics_list()
                 # metrics_list["val/advantages_mean"] = adv.mean()
                 # metrics_list["val/advantages_min"] = adv.min()

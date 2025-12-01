@@ -98,7 +98,6 @@ from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
     disable_dropout_in_model,
-    entropy_from_logits,
     get_olmo3_generation_config,
     load_ref_policy,
     log_softmax_and_gather,
@@ -276,8 +275,6 @@ class Args:
     no_resampling_pass_rate: float | None = None
     """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
 
-    record_entropy: bool = False
-    """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
@@ -888,8 +885,7 @@ class PolicyTrainerRayProcess(RayProcess):
         position_ids: torch.LongTensor,
         pad_token_id: int,
         temperature: float,
-        return_entropy: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         # Replace pad tokens with 0s so that we don't run into index out of bounds errors
         padding_mask = query_response != pad_token_id
         input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
@@ -905,13 +901,7 @@ class PolicyTrainerRayProcess(RayProcess):
         logits /= temperature + 1e-7
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
 
-        # For now, entropy is just for monitoring, and we don't pass gradients through it.
-        entropy = None
-        if return_entropy:
-            with torch.no_grad():
-                entropy = entropy_from_logits(logits)
-
-        return logprob, entropy
+        return logprob
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
@@ -1014,10 +1004,8 @@ class PolicyTrainerRayProcess(RayProcess):
         collated_response_masks: list[torch.Tensor],
         pad_token_id: int,
         use_grad: bool = False,
-        return_entropy: bool = False,
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor] | None]:
+    ) -> list[torch.Tensor]:
         collated_logprobs = []
-        collated_entropies = [] if return_entropy else None
 
         context = contextlib.nullcontext() if use_grad else torch.no_grad()
         with context:
@@ -1028,14 +1016,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 position_id = collated_position_ids[i]
                 response_mask = collated_response_masks[i]
 
-                logprob, entropy = self.forward(
+                logprob = self.forward(
                     model,
                     query_response,
                     attention_mask,
                     position_id,
                     pad_token_id,
                     self.args.temperature,
-                    return_entropy=return_entropy,
                 )
 
                 if self.args.mask_tool_use and self.args.tool_use:
@@ -1046,12 +1033,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 logprob = torch.masked_fill(logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                 collated_logprobs.append(logprob)
 
-                if return_entropy:
-                    collated_entropies.append(entropy)
-
                 torch.cuda.empty_cache()
 
-        return collated_logprobs, collated_entropies
+        return collated_logprobs
 
     def train(
         self,
@@ -1092,7 +1076,7 @@ class PolicyTrainerRayProcess(RayProcess):
         collated_ref_logprobs = []
         if args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
-                collated_ref_logprobs, _ = self.compute_logprobs(
+                collated_ref_logprobs = self.compute_logprobs(
                     self.ref_policy,
                     collated_query_responses,
                     collated_tool_masks,
@@ -1101,7 +1085,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     collated_response_masks,
                     pad_token_id,
                     use_grad=False,
-                    return_entropy=False,
                 )
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
@@ -1111,7 +1094,7 @@ class PolicyTrainerRayProcess(RayProcess):
             with Timer("Old logprobs Calculation", noop=self.rank != 0):
                 local_old_logprobs = None
                 if not args.use_vllm_logprobs:
-                    local_old_logprobs, _ = self.compute_logprobs(
+                    local_old_logprobs = self.compute_logprobs(
                         self.model,
                         collated_query_responses,
                         collated_tool_masks,
@@ -1120,7 +1103,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         collated_response_masks,
                         pad_token_id,
                         use_grad=False,
-                        return_entropy=False,
                     )
 
                 with torch.no_grad():
@@ -1156,7 +1138,6 @@ class PolicyTrainerRayProcess(RayProcess):
             pg_loss_stats = torch.zeros(len(collated_query_responses))
             loss_stats = torch.zeros(len(collated_query_responses))
             ratio_stats = torch.zeros(len(collated_query_responses))
-            entropy_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
@@ -1169,14 +1150,13 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
-                    mb_local_logprobs, mb_entropy = self.forward(
+                    mb_local_logprobs = self.forward(
                         self.model,
                         mb_query_responses,
                         mb_attention_mask,
                         mb_position_id,
                         pad_token_id,
                         args.temperature,
-                        return_entropy=args.record_entropy,
                     )
                     mb_local_logprobs = torch.masked_fill(mb_local_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
                     mb_vllm_logprobs = collated_vllm_logprobs[i][:, 1:]
@@ -1344,12 +1324,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         ratio_stats[i] = masked_mean(
                             ratio, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
                         )
-                        if args.record_entropy:
-                            # Calculate entropy statistics
-                            entropy_stats[i] = masked_mean(
-                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                            ).float()
-
             with torch.no_grad():
                 if args.load_ref_policy:
                     self.local_metrics["objective/kl_avg"] = kl1_stats.mean()
@@ -1362,8 +1336,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics["policy/clipfrac_avg"] = pg_clipfrac_stats.mean()
                 self.local_metrics["val/ratio"] = ratio_stats.mean()
                 self.local_metrics["val/ratio_var"] = ratio_stats.var()
-                if args.record_entropy:
-                    self.local_metrics["policy/entropy_avg"] = entropy_stats.mean()
                 self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
                 return self.local_metrics.get_metrics_list()
 
