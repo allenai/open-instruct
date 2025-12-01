@@ -19,7 +19,4 @@ jobs:
         with:
           version: "0.8.8"
       - name: Code quality
-        run: |
-          uv run ruff format --check --diff open_instruct *mason.py
-          uv run ruff check --exit-non-zero-on-fix open_instruct *mason.py
-          uv run python -m compileall open_instruct *mason.py
+        run: make quality
