@@ -534,7 +534,7 @@ class TestGetDenominator(unittest.TestCase):
 
     @parameterized.expand(
         [
-            ("invalid", "loss_denominator must be a float value if not 'token'"),
+            ("invalid", "could not convert string to float"),
             ("-1", "loss_denominator must be greater than 0"),
             (0, "loss_denominator must be greater than 0"),
             ("0", "loss_denominator must be greater than 0"),
