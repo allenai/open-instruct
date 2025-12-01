@@ -223,6 +223,7 @@ async def process_request_async(
 
     actor.active_tasks.pop(sub_request_id, None)
 
+    logger.info(f"[DEBUG] Putting result in completion_queue for {base_request_id}")
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
@@ -647,6 +648,7 @@ class LLMRayActor:
             self._finalize_completed_request(base_request_id)
 
     def _finalize_completed_request(self, base_request_id: str) -> None:
+        logger.info(f"[DEBUG] _finalize_completed_request called for {base_request_id}")
         outputs = self.request_outputs[base_request_id]["outputs"]
         ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
 
@@ -715,7 +717,9 @@ class LLMRayActor:
 
     def process_from_queue(self) -> None:
         while True:
+            logger.info("[DEBUG] Waiting for completion_queue...")
             sub_request = self.completion_queue.get()
+            logger.info(f"[DEBUG] Got sub_request for {sub_request['base_request_id']}")
             self._accumulate_sub_request(sub_request)
 
     def init_process_group(
