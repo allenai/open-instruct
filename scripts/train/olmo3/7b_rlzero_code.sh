@@ -41,7 +41,7 @@ python mason.py \
     --num_epochs 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
-    --kl_estimator 2 \
+    --kl_estimator kl3 \
     --dataset_mixer_list $DATASETS \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list $LOCAL_EVALS \

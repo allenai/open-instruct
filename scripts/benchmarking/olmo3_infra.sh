@@ -43,6 +43,7 @@ for split_var in mixin_it_up; do
         --learning_rate 1e-6 \
         --per_device_train_batch_size 1 \
         --output_dir /output \
+        --kl_estimator kl3 \
         --dataset_mixer_list ${split_value} \
         --dataset_mixer_list_splits train \
         --dataset_mixer_eval_list hamishivi/omega-combined 8 allenai/IF_multi_constraints_upto5 8 saurabh5/rlvr_acecoder_filtered 8 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2 4 hamishivi/virtuoussy_multi_subject_rlvr 4 \

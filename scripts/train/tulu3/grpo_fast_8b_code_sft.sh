@@ -17,7 +17,7 @@ python mason.py \
     --num_unique_prompts_rollout 48 \
     --num_samples_per_prompt_rollout 16 \
     --try_launch_beaker_eval_jobs_on_weka \
-    --kl_estimator 2 \
+    --kl_estimator kl3 \
     --learning_rate 5e-7 \
     --dataset_mixer_list saurabh5/open-code-reasoning-rlvr 1.0 saurabh5/tulu-3-personas-code-rlvr 1.0 saurabh5/rlvr_acecoder 1.0 saurabh5/the-algorithm-python 1.0 saurabh5/llama-nemotron-rlvr 1.0 \
     --dataset_mixer_list_splits train \

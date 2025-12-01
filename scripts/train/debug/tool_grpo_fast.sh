@@ -62,6 +62,7 @@ uv run python mason.py \
     --push_to_hub false \
     --single_gpu_mode \
     --output_dir /output \
+    --kl_estimator kl3 \
     --non_stop_penalty True \
     --non_stop_penalty_value 0.0 \
     --num_mini_batches 1 \

@@ -11,7 +11,7 @@ python mason.py \
     --beta 0.0 \
     --num_unique_prompts_rollout 256 \
     --num_samples_per_prompt_rollout 64 \
-    --kl_estimator 2 \
+    --kl_estimator kl3 \
     --learning_rate 5e-7 \
     --dataset_mixer_list ai2-adapt-dev/rlvr_open_reasoner_math 1.0 \
     --dataset_mixer_list_splits train \
