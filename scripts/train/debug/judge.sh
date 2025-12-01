@@ -15,7 +15,6 @@ python open_instruct/grpo_fast.py \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen2.5-0.5B \
     --stop_strings "</answer>" \
-    --kl_estimator 2 \
     --apply_verifiable_reward true \
     --apply_r1_style_format_reward true \
     --non_stop_penalty False \
