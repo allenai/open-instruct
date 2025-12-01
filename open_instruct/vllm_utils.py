@@ -228,21 +228,26 @@ async def process_request_async(
     )
     queue_size_before = actor.completion_queue.qsize()
     print(f"[PRINT] BEFORE put for {base_request_id}, qsize={queue_size_before}", flush=True, file=sys.stderr)
-    actor.completion_queue.put(
-        {
-            "base_request_id": base_request_id,
-            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
-            "request_output": vllm.RequestOutput(
-                request_id=sub_request_id,
-                prompt=request_output.prompt,
-                prompt_token_ids=final_prompt_token_ids,
-                outputs=[complete_output],
-                finished=True,
-            ),
-            "tools": actor.tools,
-        }
-    )
-    print(f"[PRINT] AFTER put for {base_request_id}, qsize={actor.completion_queue.qsize()}", flush=True, file=sys.stderr)
+    try:
+        actor.completion_queue.put(
+            {
+                "base_request_id": base_request_id,
+                "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
+                "request_output": vllm.RequestOutput(
+                    request_id=sub_request_id,
+                    prompt=request_output.prompt,
+                    prompt_token_ids=final_prompt_token_ids,
+                    prompt_logprobs=None,
+                    outputs=[complete_output],
+                    finished=True,
+                ),
+                "tools": actor.tools,
+            }
+        )
+        print(f"[PRINT] AFTER put for {base_request_id}, qsize={actor.completion_queue.qsize()}", flush=True, file=sys.stderr)
+    except Exception as e:
+        print(f"[PRINT] EXCEPTION in put: {e}", flush=True, file=sys.stderr)
+        raise
     logger.info(
         f"[DEBUG] After put: queue size before={queue_size_before}, after={actor.completion_queue.qsize()}"
     )
