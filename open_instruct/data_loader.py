@@ -50,16 +50,14 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._current_iter: Iterable[dict[str, Any]] | None = None
 
     def __next__(self) -> dict[str, Any]:
-        if self._current_iter is None:
-            self._current_iter = iter(self)
+        self._current_iter |= iter(self)
         try:
             return next(self._current_iter)
         except StopIteration:
             self._current_iter = None
             if self._automatic_reshuffle:
                 self.reshuffle()
-                if self.effective_size == 0:
-                    raise RuntimeError("All dataset examples have been excluded. Cannot continue iteration.") from None
+                assert self.effective_size > 0, "All dataset examples have been excluded. Cannot continue iteration."
                 self._current_iter = iter(self)
                 return next(self._current_iter)
             self._epoch += 1
@@ -112,10 +110,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._epoch += 1
         self.batches_processed = 0
         shuffled = self._original_dataset.shuffle(seed=self.seed + self._epoch)
-        if self._excluded_indices:
-            self.dataset = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
-        else:
-            self.dataset = shuffled
+        # If this is slow, we can speed it up by making this a boolean mask.
+        self.dataset = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
         self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
 
     def get_mock_batch(self) -> dict[str, Any]:
