@@ -226,6 +226,7 @@ async def process_request_async(
     logger.info(
         f"[DEBUG] Putting result in completion_queue for {base_request_id}, queue id={id(actor.completion_queue)}"
     )
+    queue_size_before = actor.completion_queue.qsize()
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
@@ -239,6 +240,9 @@ async def process_request_async(
             ),
             "tools": actor.tools,
         }
+    )
+    logger.info(
+        f"[DEBUG] After put: queue size before={queue_size_before}, after={actor.completion_queue.qsize()}"
     )
 
 
@@ -720,10 +724,15 @@ class LLMRayActor:
     def process_from_queue(self) -> None:
         logger.info(f"[DEBUG] process_from_queue started, queue id={id(self.completion_queue)}")
         while True:
-            logger.info(f"[DEBUG] Waiting for completion_queue (size={self.completion_queue.qsize()})...")
-            sub_request = self.completion_queue.get()
-            logger.info(f"[DEBUG] Got sub_request for {sub_request['base_request_id']}")
-            self._accumulate_sub_request(sub_request)
+            try:
+                logger.info(f"[DEBUG] Waiting for completion_queue (size={self.completion_queue.qsize()})...")
+                sub_request = self.completion_queue.get(timeout=5.0)
+                logger.info(f"[DEBUG] Got sub_request for {sub_request['base_request_id']}")
+                self._accumulate_sub_request(sub_request)
+            except queue.Empty:
+                logger.info(f"[DEBUG] Queue.get timed out! Queue size={self.completion_queue.qsize()}")
+            except Exception:
+                logger.exception("[DEBUG] Exception in process_from_queue")
 
     def init_process_group(
         self,
