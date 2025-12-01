@@ -2654,3 +2654,16 @@ class UlyssesSPSplitter:
             batch_shards.append(batch_data)
 
         return batch_shards
+
+def get_denominator(loss_denominator: str | float) -> float | str:
+    """
+    Validates and converts the loss_denominator argument.
+    """
+    if loss_denominator == "token":
+        return "token"
+
+    val = float(loss_denominator)
+    if val <= 0:
+        raise ValueError(f"loss_denominator must be greater than 0 if not 'token', got: {loss_denominator}")
+    return val
+
