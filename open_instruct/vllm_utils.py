@@ -56,6 +56,9 @@ from open_instruct.utils import ModelDims, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
 
+_put_counter = 0
+_put_counter_lock = threading.Lock()
+
 NUM_PREFETCH_WORKERS = 2
 NUM_TOOL_WORKERS = 20
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
@@ -227,7 +230,8 @@ async def process_request_async(
         f"[DEBUG] Putting result in completion_queue for {base_request_id}, queue id={id(actor.completion_queue)}"
     )
     queue_size_before = actor.completion_queue.qsize()
-    print(f"[PRINT] BEFORE put for {base_request_id}, qsize={queue_size_before}", flush=True, file=sys.stderr)
+    global _put_counter
+    print(f"[PRINT] BEFORE put for {base_request_id}, qsize={queue_size_before}, put_counter={_put_counter}", flush=True, file=sys.stderr)
     try:
         actor.completion_queue.put(
             {
@@ -244,7 +248,9 @@ async def process_request_async(
                 "tools": actor.tools,
             }
         )
-        print(f"[PRINT] AFTER put for {base_request_id}, qsize={actor.completion_queue.qsize()}", flush=True, file=sys.stderr)
+        with _put_counter_lock:
+            _put_counter += 1
+        print(f"[PRINT] AFTER put for {base_request_id}, qsize={actor.completion_queue.qsize()}, put_counter={_put_counter}", flush=True, file=sys.stderr)
     except Exception as e:
         print(f"[PRINT] EXCEPTION in put: {e}", flush=True, file=sys.stderr)
         raise
@@ -737,7 +743,7 @@ class LLMRayActor:
                 logger.info(f"[DEBUG] Got sub_request for {sub_request['base_request_id']}")
                 self._accumulate_sub_request(sub_request)
             except queue.Empty:
-                logger.info(f"[DEBUG] Queue.get timed out! Queue size={self.completion_queue.qsize()}")
+                logger.info(f"[DEBUG] Queue.get timed out! Queue size={self.completion_queue.qsize()}, put_counter={_put_counter}")
             except Exception:
                 logger.exception("[DEBUG] Exception in process_from_queue")
 
