@@ -694,8 +694,7 @@ class LLMRayActor:
 
     def process_from_queue(self) -> None:
         while True:
-            completion = self.completion_queue.get()
-            accumulate_completions(self, completion)
+            accumulate_completions(self, self.completion_queue.get())
 
     def init_process_group(
         self,
