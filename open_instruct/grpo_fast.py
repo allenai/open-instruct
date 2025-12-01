@@ -2881,7 +2881,13 @@ def run_training(
     eval_data_loader = None
     if eval_dataset is not None:
         eval_data_loader = data_loader_lib.HFDataLoader(
-            dataset=eval_dataset, batch_size=1, seed=args.seed, rank=0, world_size=1, work_dir=args.output_dir
+            dataset=eval_dataset,
+            batch_size=1,
+            seed=args.seed,
+            rank=0,
+            world_size=1,
+            work_dir=args.output_dir,
+            automatic_reshuffle=True,
         )
 
     logger.info("======== ✅ weight sync thread starts =========")

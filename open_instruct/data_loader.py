@@ -51,14 +51,16 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     def __next__(self) -> dict[str, Any]:
         if self._current_iter is None:
-            self._current_iter = self._iter_batches()
+            self._current_iter = iter(self)
         try:
             return next(self._current_iter)
         except StopIteration:
+            self._current_iter = None
             if self._automatic_reshuffle:
                 self.reshuffle()
-                self._current_iter = self._iter_batches()
+                self._current_iter = iter(self)
                 return next(self._current_iter)
+            self.batches_processed = 0
             raise
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:

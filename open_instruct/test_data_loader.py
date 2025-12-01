@@ -160,6 +160,48 @@ class TestHFDataLoader(unittest.TestCase):
 
         self.assertEqual(remaining_original, remaining_restored)
 
+    def test_batches_processed_increments_during_iteration(self):
+        data = {"text": [f"example_{i}" for i in range(20)], "label": list(range(20))}
+        dataset = datasets.Dataset.from_dict(data)
+
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+        )
+
+        self.assertEqual(loader.batches_processed, 0)
+
+        for i, _ in enumerate(loader, start=1):
+            self.assertEqual(loader.batches_processed, i)
+
+        self.assertEqual(loader.batches_processed, 20)
+
+        state = loader.state_dict()
+        self.assertEqual(state["batches_processed"], 20)
+
+    def test_checkpoint_mid_epoch_restores_position(self):
+        data = {"text": [f"example_{i}" for i in range(20)], "label": list(range(20))}
+        dataset = datasets.Dataset.from_dict(data)
+
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+        )
+
+        loader.reshuffle(epoch=1)
+        first_half = []
+        for _ in range(10):
+            first_half.append(next(loader)["dataset_index"])
+
+        state = loader.state_dict()
+        self.assertEqual(state["batches_processed"], 10)
+
+        new_loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+        )
+        new_loader.load_state_dict(state)
+
+        remaining = [batch["dataset_index"] for batch in new_loader]
+        self.assertEqual(len(remaining), 10)
+
 
 if __name__ == "__main__":
     unittest.main()
