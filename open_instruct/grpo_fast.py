@@ -99,9 +99,11 @@ from open_instruct.model_utils import (
     apply_verifiable_reward,
     disable_dropout_in_model,
     entropy_from_logits,
+    estimate_kl,
     get_olmo3_generation_config,
     load_ref_policy,
     log_softmax_and_gather,
+    masked_mean,
     print_rich_single_line_metrics,
     print_rich_table,
     push_folder_to_hub,
@@ -547,15 +549,6 @@ class Args:
             )
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
-
-
-def masked_mean(
-    values: torch.Tensor, mask: torch.Tensor, axis: int | None = None, denominator: float | None = None
-) -> torch.Tensor:
-    """Compute mean of tensor with a masked values."""
-    numerator = (values * mask).sum(axis=axis)
-    denom = mask.sum(axis=axis) if denominator is None else denominator
-    return (numerator / denom).mean()
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
@@ -1225,14 +1218,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         # We also clamp the KL loss to avoid numerical instability
                         # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
                         ref_logprobs_diff_BT = (new_logprobs_BT - ref_logprob_BT).clamp(-40.0, 40.0)
-                        kl_4BT = torch.stack(
-                            [
-                                ref_logprobs_diff_BT,
-                                (ref_logprobs_diff_BT) ** 2 / 2,
-                                torch.expm1(-ref_logprobs_diff_BT) + ref_logprobs_diff_BT,
-                                ratio_BT * ref_logprobs_diff_BT,
-                            ]
-                        )
+                        kl_4BT = estimate_kl(ref_logprobs_diff, ratio)
+                        kl = kl_4BT[args.kl_estimator]
                         # grpo change: directly subtract KL in loss (add)
                         loss = masked_mean(
                             pg_loss_max_BT + self.args.beta * kl_4BT[self.args.kl_estimator],
@@ -1255,14 +1242,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
-                        if self.args.load_ref_policy:
-                            for k in range(4):
-                                loss_stats_B["kl"][k, i] = masked_mean(
-                                    kl_4BT[k],
-                                    response_mask_bool_BT,
-                                    self.args.masked_mean_axis,
-                                    self.args.masked_mean_denominator,
-                                ).float()
+                        if args.load_ref_policy:
+                            # NOTE: in packed implementation, kl calculation are averages over response tokens
+                            kl_stats_4M[:, i] = masked_mean(
+                                kl_4BT, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
+                            ).float()
                             loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
                         loss_stats_B["pg_clipfrac"][i] = masked_mean(
                             (pg_losses2_BT > pg_losses_BT).float(),
@@ -1292,11 +1276,9 @@ class PolicyTrainerRayProcess(RayProcess):
                             ).float()
 
             with torch.no_grad():
-                if self.args.load_ref_policy:
-                    self.local_metrics["objective/kl_avg"] = loss_stats_B["kl"][0].mean()
-                    self.local_metrics["objective/kl2_avg"] = loss_stats_B["kl"][1].mean()
-                    self.local_metrics["objective/kl3_avg"] = loss_stats_B["kl"][2].mean()
-                    self.local_metrics["objective/kl4_avg"] = loss_stats_B["kl"][3].mean()
+                if args.load_ref_policy:
+                    for j in range(4):
+                        self.local_metrics[f"objective/kl{j}_avg"] = kl_stats_4M[j].mean()
                     self.local_metrics["loss/kl_avg"] = loss_stats_B["kl_loss"].mean()
                 self.local_metrics["loss/policy_avg"] = loss_stats_B["pg_loss"].mean()
                 self.local_metrics["loss/total_avg"] = loss_stats_B["loss"].mean()
