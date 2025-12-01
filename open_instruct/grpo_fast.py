@@ -250,7 +250,7 @@ class Args:
     """the KL estimator to use"""
     pack_length: int = 512
     """the length of the pack (you should prob set to the max length of the model)"""
-    loss_denominator: str | float = "token"
+    loss_denominator: str = "token"
     """Optional constant denominator for masked_mean; can be "token" or a float value.
     when "token", the loss is divided by the total number of tokens in the batch (standard LM training).
     when a float value, the loss is divided by this value (ideally, max tokens in batch, per Dr GRPO).
