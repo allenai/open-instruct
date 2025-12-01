@@ -28,6 +28,7 @@ from concurrent import futures
 from datetime import timedelta
 from typing import Any
 
+import datasets
 import ray
 import torch
 import torch.distributed
@@ -544,7 +545,7 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
 
 
 async def compute_rewards(
-    actor: "LLMRayActor", result: GenerationResult, dataset, is_eval: bool
+    actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset, is_eval: bool
 ) -> tuple[list[float], dict]:
     example = dataset[result.dataset_index]
     decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses)
