@@ -103,7 +103,6 @@ from open_instruct.model_utils import (
     get_olmo3_generation_config,
     load_ref_policy,
     log_softmax_and_gather,
-    masked_mean,
     print_rich_single_line_metrics,
     print_rich_table,
     push_folder_to_hub,
