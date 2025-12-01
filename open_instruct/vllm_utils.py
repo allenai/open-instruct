@@ -504,6 +504,68 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         )
 
 
+def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> None:
+    base_request_id = sub_request["base_request_id"]
+    expected_n = sub_request["expected_n"]
+
+    if base_request_id not in actor.request_outputs:
+        actor.request_outputs[base_request_id] = {
+            "outputs": [],
+            "expected_n": expected_n,
+            "tools": sub_request["tools"],
+        }
+
+    actor.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
+
+    if len(actor.request_outputs[base_request_id]["outputs"]) == expected_n:
+        asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
+
+
+async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str) -> None:
+    outputs = actor.request_outputs[base_request_id]["outputs"]
+    ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
+
+    current_time = time.perf_counter()
+    result, is_eval = process_completed_request(
+        base_request_id,
+        ordered_outs,
+        current_time,
+        actor.request_outputs[base_request_id]["tools"],
+        actor.request_metadata,
+    )
+
+    actor.request_outputs.pop(base_request_id)
+    actor.request_metadata.pop(base_request_id, None)
+
+    dataset = actor.eval_dataset if is_eval else actor.train_dataset
+    result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
+    results_queue = actor.eval_results_queue if is_eval else actor.results_queue
+    results_queue.put(result)
+
+
+async def compute_rewards(
+    actor: "LLMRayActor", result: GenerationResult, dataset, is_eval: bool
+) -> tuple[list[float], dict]:
+    example = dataset[result.dataset_index]
+    decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses)
+
+    k = len(result.responses)
+    k_ground_truths = [example[GROUND_TRUTHS_KEY]] * k
+    k_datasets = [example[VERIFIER_SOURCE_KEY]] * k
+    k_raw_queries = [example[RAW_PROMPT_KEY]] * k
+
+    scores, metrics = await actor.reward_fn(
+        result.responses,
+        decoded_responses,
+        k_ground_truths,
+        k_datasets,
+        result.finish_reasons,
+        result.request_info,
+        k_raw_queries,
+    )
+    return scores, metrics
+
+
 class LLMRayActor:
     """Ray actor for LLM generation with optional tool support."""
 
@@ -630,78 +692,10 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
-    def _accumulate_sub_request(self, sub_request: dict) -> None:
-        base_request_id = sub_request["base_request_id"]
-        expected_n = sub_request["expected_n"]
-
-        if base_request_id not in self.request_outputs:
-            self.request_outputs[base_request_id] = {
-                "outputs": [],
-                "expected_n": expected_n,
-                "tools": sub_request["tools"],
-            }
-
-        self.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
-
-        is_complete = len(self.request_outputs[base_request_id]["outputs"]) == expected_n
-        if is_complete:
-            self._finalize_completed_request(base_request_id)
-
-    def _finalize_completed_request(self, base_request_id: str) -> None:
-        outputs = self.request_outputs[base_request_id]["outputs"]
-        ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
-
-        current_time = time.perf_counter()
-        result, is_eval = process_completed_request(
-            base_request_id,
-            ordered_outs,
-            current_time,
-            self.request_outputs[base_request_id]["tools"],
-            self.request_metadata,
-        )
-
-        self.request_outputs.pop(base_request_id)
-        self.request_metadata.pop(base_request_id, None)
-
-        if self.reward_fn is not None and result.dataset_index is not None:
-            dataset = self.eval_dataset if is_eval else self.train_dataset
-            if dataset is not None:
-                result.reward_scores, result.reward_metrics = self._compute_rewards(result, dataset, is_eval)
-        results_queue = self.eval_results_queue if is_eval else self.results_queue
-        results_queue.put(result)
-
-    def _compute_rewards(self, result: GenerationResult, dataset, is_eval: bool) -> tuple[list[float], dict]:
-        """Run reward computation."""
-        example = dataset[result.dataset_index]
-        decoded_responses = self.llm_engine.tokenizer.batch_decode(result.responses)
-
-        k = len(result.responses)
-        k_ground_truths = [example[GROUND_TRUTHS_KEY]] * k
-        k_datasets = [example[VERIFIER_SOURCE_KEY]] * k
-        k_raw_queries = [example[RAW_PROMPT_KEY]] * k
-
-        # We need a separate event loop because this is a sync method but reward_fn is async.
-        # We can't use asyncio.run() because it may conflict with Ray's existing event loop.
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        scores, metrics = loop.run_until_complete(
-            self.reward_fn(
-                result.responses,
-                decoded_responses,
-                k_ground_truths,
-                k_datasets,
-                result.finish_reasons,
-                result.request_info,
-                k_raw_queries,
-            )
-        )
-        loop.close()
-        return scores, metrics
-
     def process_from_queue(self) -> None:
         while True:
-            sub_request = self.completion_queue.get()
-            self._accumulate_sub_request(sub_request)
+            completion = self.completion_queue.get()
+            accumulate_completions(self, completion)
 
     def init_process_group(
         self,
