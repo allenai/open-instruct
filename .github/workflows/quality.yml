@@ -19,4 +19,6 @@ jobs:
         with:
           version: "0.8.8"
       - name: Code quality
-        run: make quality-check
+        run: |
+            make style-check
+            make quality-check
