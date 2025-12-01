@@ -666,10 +666,7 @@ class LLMRayActor:
         if self.reward_fn is not None and result.dataset_index is not None:
             dataset = self.eval_dataset if is_eval else self.train_dataset
             if dataset is not None:
-                scores, metrics = self._compute_rewards(result, dataset, is_eval)
-                result.reward_scores = scores
-                result.reward_metrics = metrics
-
+                result.reward_scores, result.reward_metrics = self._compute_rewards(result, dataset, is_eval)
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
 
