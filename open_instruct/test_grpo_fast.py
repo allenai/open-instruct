@@ -1,5 +1,10 @@
 import gc
+import json
 import os
+
+os.environ["VLLM_BATCH_INVARIANT"] = "1"
+
+import pathlib
 import random
 import threading
 import time
@@ -24,6 +29,8 @@ from open_instruct.dataset_transformation import (
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tools import Tool, ToolOutput
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
+
+TEST_DATA_DIR = pathlib.Path("/Users/finbarrtimbers/Repos/open-instruct3/open_instruct/test_data")
 
 
 class TestGrpoFastBase(unittest.TestCase):
@@ -1249,6 +1256,77 @@ class TestToolInvocation(TestGrpoFastBase):
             "Tool should have been called when model generates text with stop string. "
             "Bug: OpenAI /completions strips stop strings, so endswith(stop_str) never matches.",
         )
+
+    @parameterized.expand([True, False])
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
+    def test_generation_deterministic(self, use_tools):
+        """Test generation produces expected output."""
+        test_data_filename = f"generation_{'with' if use_tools else 'without'}_tools_expected.json"
+        test_data_path = TEST_DATA_DIR / test_data_filename
+
+        tokenizer_name = "Qwen/Qwen3-1.7B"
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+        class RecordingTool(Tool):
+            def __call__(self, prompt: str) -> ToolOutput:
+                return ToolOutput(output="42", called=True, error="", timeout=False, runtime=0.01)
+
+        tools = None
+        max_tool_calls = None
+        if use_tools:
+            tools = {"</code>": RecordingTool(start_str="<code>", end_str="</code>")}
+            max_tool_calls = (5,)
+
+        param_prompt_Q = ray_queue.Queue(maxsize=1)
+        inference_results_Q = ray_queue.Queue(maxsize=1)
+        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
+
+        create_vllm_engines(
+            num_engines=1,
+            tensor_parallel_size=1,
+            enforce_eager=True,
+            tokenizer_name_or_path=tokenizer_name,
+            pretrain=tokenizer_name,
+            revision="main",
+            seed=42,
+            enable_prefix_caching=False,
+            max_model_len=512,
+            vllm_gpu_memory_utilization=0.5,
+            prompt_queue=param_prompt_Q,
+            results_queue=inference_results_Q,
+            tools=tools,
+            max_tool_calls=max_tool_calls,
+        )
+
+        prompt = "Write code to print hello world: <code>" if use_tools else "What is 2 + 2? Answer:"
+        prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
+
+        generation_config = SamplingConfig(
+            temperature=0.0, top_p=1.0, max_tokens=256, seed=42, stop=["</code>"] if use_tools else None
+        )
+
+        param_prompt_Q.put(
+            PromptRequest(prompt=prompt_token_ids, dataset_index=0, generation_config=generation_config)
+        )
+
+        result = inference_results_Q.get(timeout=60)
+        param_prompt_Q.put(None)
+
+        if not test_data_path.exists():
+            test_data = {
+                "model": tokenizer_name,
+                "seed": 42,
+                "temperature": 0.0,
+                "prompt": prompt,
+                "use_tools": use_tools,
+                "expected_token_ids": result.responses[0],
+            }
+            test_data_path.write_text(json.dumps(test_data, indent=2))
+            self.fail(f"Test data generated at {test_data_path}. Re-run test to verify.")
+            return
+
+        expected = json.loads(test_data_path.read_text())
+        self.assertEqual(result.responses[0], expected["expected_token_ids"])
 
 
 if __name__ == "__main__":

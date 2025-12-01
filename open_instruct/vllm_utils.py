@@ -130,28 +130,6 @@ def assert_threaded_actor(instance):
         return
 
 
-def _truncate_tool_output_tokens(
-    tool_output_token_ids: list[int],
-    current_prompt_token_ids: list[int],
-    accumulated_tokens: list[int],
-    max_model_len: int,
-    max_tokens: int,
-    current_mask_len: int,
-) -> tuple[list[int], int, list[int]]:
-    prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
-    excess = len(prompt_and_tool_output) - max_model_len
-    if excess > 0:
-        tool_output_token_ids = tool_output_token_ids[:-excess]
-
-    remaining = max_tokens - current_mask_len
-    if remaining <= 0:
-        return [], excess, prompt_and_tool_output
-    elif len(tool_output_token_ids) > remaining:
-        return tool_output_token_ids[:remaining], excess, prompt_and_tool_output
-
-    return tool_output_token_ids, excess, prompt_and_tool_output
-
-
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
 # Turns out Ray doesnt necessarily place bundles together,
 # so this function is used to get the bundle indices of a placement group
@@ -732,10 +710,10 @@ class LLMRayActor:
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool support, awaiting tools inline."""
     await _check_health(actor.server_port)
-    accumulated_tokens = []
-    accumulated_logprobs = []
+    response_tokens = []
+    response_logprobs = []
+    response_masks = []
     cumulative_logprob = 0.0
-    masks = []
     num_calls = 0
     timeout = False
     tool_error = ""
@@ -744,13 +722,16 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     tool_called = False
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
-    current_prompt_token_ids = list(actor.request_metadata[base_request_id]["prompt_token_ids"])
-    current_sampling_params = sampling_params
+    original_prompt = actor.request_metadata[base_request_id]["prompt_token_ids"]
+    current_prompt = list(original_prompt)
+    max_model_len = actor.llm_engine.model_config.max_model_len
+    current_max_tokens = sampling_params.max_tokens
 
     while True:
+        current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
         api_response = await actor.client.completions.create(
             model=actor.model_name,
-            prompt=current_prompt_token_ids,
+            prompt=current_prompt,
             extra_body={
                 "return_token_ids": True,
                 "cache_salt": base_request_id,
@@ -760,15 +741,17 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         )
 
         output = api_response.choices[0]
+        model_tokens = list(output.token_ids)
 
-        accumulated_tokens.extend(output.token_ids)
+        response_tokens.extend(model_tokens)
+        current_prompt.extend(model_tokens)
 
         assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
         for logprob in output.logprobs.token_logprobs:
-            accumulated_logprobs.append(logprob)
+            response_logprobs.append(logprob)
             cumulative_logprob += logprob
 
-        masks.extend([1] * len(output.token_ids))
+        response_masks.extend([1] * len(model_tokens))
 
         if not actor.tools or not actor.max_tool_calls:
             break
@@ -791,39 +774,33 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         tool_output += tool_result.output
         tool_runtime += tool_result.runtime
 
-        tool_output_token_ids = actor.llm_engine.tokenizer.encode(
+        tool_tokens = actor.llm_engine.tokenizer.encode(
             "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
         )
 
-        tool_output_token_ids, excess, prompt_and_tool_output = _truncate_tool_output_tokens(
-            tool_output_token_ids,
-            current_prompt_token_ids,
-            accumulated_tokens,
-            actor.llm_engine.model_config.max_model_len,
-            sampling_params.max_tokens,
-            len(masks),
-        )
-
-        accumulated_tokens.extend(tool_output_token_ids)
-        accumulated_logprobs.extend([0.0] * len(tool_output_token_ids))
-        masks.extend([0] * len(tool_output_token_ids))
-
-        new_sample_tokens = sampling_params.max_tokens - len(masks)
-        if excess > 0 or new_sample_tokens <= 0:
+        space_for_tool = max_model_len - len(current_prompt) - 1
+        if space_for_tool <= 0:
             break
+        tool_tokens = tool_tokens[:space_for_tool]
 
-        current_prompt_token_ids = prompt_and_tool_output
-        current_sampling_params = dataclasses.replace(sampling_params, max_tokens=new_sample_tokens)
+        response_tokens.extend(tool_tokens)
+        response_logprobs.extend([0.0] * len(tool_tokens))
+        response_masks.extend([0] * len(tool_tokens))
+        current_prompt.extend(tool_tokens)
+
+        current_max_tokens = sampling_params.max_tokens - len(response_masks)
+        if current_max_tokens <= 0:
+            break
 
     complete_output = CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
-        token_ids=accumulated_tokens,
+        token_ids=response_tokens,
         cumulative_logprob=cumulative_logprob,
-        logprobs=accumulated_logprobs,
+        logprobs=response_logprobs,
         finish_reason=output.finish_reason,
     )
     if actor.tools:
-        complete_output.mask = masks
+        complete_output.mask = response_masks
         complete_output.num_calls = num_calls
         complete_output.timeout = timeout
         complete_output.tool_error = tool_error
