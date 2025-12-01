@@ -33,6 +33,11 @@ from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 TEST_DATA_DIR = pathlib.Path("/Users/finbarrtimbers/Repos/open-instruct3/open_instruct/test_data")
 
 
+class RecordingTool(Tool):
+    def __call__(self, prompt: str) -> ToolOutput:
+        return ToolOutput(output="42", called=True, error="", timeout=False, runtime=0.01)
+
+
 class TestGrpoFastBase(unittest.TestCase):
     """Base class with common test utilities."""
 
@@ -1192,90 +1197,12 @@ class TestDataPreparation(TestGrpoFastBase):
                     self.assertTrue(torch.all(row[first_pad_idx:] == pad_token_id))
 
 
-class TestToolInvocation(TestGrpoFastBase):
+class TestGeneration(TestGrpoFastBase):
     """Tests for tool invocation with vLLM."""
 
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
-    def test_tool_triggered_on_stop_string(self):
-        """Test that tools are properly triggered when model generates stop string.
-
-        This test verifies that when a model generates text ending with a tool's
-        stop string (e.g., </code>), the tool is actually invoked.
-
-        The test will FAIL if the OpenAI /completions API strips the stop string
-        from the output, since get_triggered_tool checks output_text.endswith(stop_str).
-        """
-        tokenizer_name = "EleutherAI/pythia-14m"
+    def _setup_engine_and_generate(self, tokenizer_name, prompt, tools=None, max_tool_calls=None, max_tokens=50):
+        """Helper to create vLLM engine and run generation."""
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-
-        call_record = {"called": False, "input_text": None}
-
-        class RecordingTool(Tool):
-            def __call__(self, prompt: str) -> ToolOutput:
-                call_record["called"] = True
-                call_record["input_text"] = prompt
-                return ToolOutput(output="42", called=True, error="", timeout=False, runtime=0.01)
-
-        tools = {"</code>": RecordingTool(start_str="<code>", end_str="</code>")}
-
-        param_prompt_Q = ray_queue.Queue(maxsize=1)
-        inference_results_Q = ray_queue.Queue(maxsize=1)
-        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
-
-        create_vllm_engines(
-            num_engines=1,
-            tensor_parallel_size=1,
-            enforce_eager=True,
-            tokenizer_name_or_path=tokenizer_name,
-            pretrain=tokenizer_name,
-            revision="main",
-            seed=42,
-            enable_prefix_caching=False,
-            max_model_len=512,
-            vllm_gpu_memory_utilization=0.5,
-            prompt_queue=param_prompt_Q,
-            results_queue=inference_results_Q,
-            tools=tools,
-            max_tool_calls=(5,),
-        )
-
-        test_prompt = "Complete this code:\n<code>\nprint('hello')\n</code>"
-        prompt_token_ids = tokenizer.encode(test_prompt, return_tensors="pt").tolist()[0]
-
-        generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=50, seed=42, stop=["</code>"])
-
-        param_prompt_Q.put(
-            PromptRequest(prompt=prompt_token_ids, dataset_index=0, generation_config=generation_config)
-        )
-
-        result = inference_results_Q.get(timeout=60)
-        param_prompt_Q.put(None)
-
-        self.assertTrue(
-            result.request_info.tool_calleds[0],
-            "Tool should have been called when model generates text with stop string. "
-            "Bug: OpenAI /completions strips stop strings, so endswith(stop_str) never matches.",
-        )
-
-    @parameterized.expand([True, False])
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
-    def test_generation_deterministic(self, use_tools):
-        """Test generation produces expected output."""
-        test_data_filename = f"generation_{'with' if use_tools else 'without'}_tools_expected.json"
-        test_data_path = TEST_DATA_DIR / test_data_filename
-
-        tokenizer_name = "Qwen/Qwen3-1.7B"
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-
-        class RecordingTool(Tool):
-            def __call__(self, prompt: str) -> ToolOutput:
-                return ToolOutput(output="42", called=True, error="", timeout=False, runtime=0.01)
-
-        tools = None
-        max_tool_calls = None
-        if use_tools:
-            tools = {"</code>": RecordingTool(start_str="<code>", end_str="</code>")}
-            max_tool_calls = (5,)
 
         param_prompt_Q = ray_queue.Queue(maxsize=1)
         inference_results_Q = ray_queue.Queue(maxsize=1)
@@ -1298,23 +1225,51 @@ class TestToolInvocation(TestGrpoFastBase):
             max_tool_calls=max_tool_calls,
         )
 
-        prompt = "Write code to print hello world: <code>" if use_tools else "What is 2 + 2? Answer:"
         prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
-
-        generation_config = SamplingConfig(
-            temperature=0.0, top_p=1.0, max_tokens=256, seed=42, stop=["</code>"] if use_tools else None
-        )
+        stop = list(tools.keys()) if tools else None
+        generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, stop=stop)
 
         param_prompt_Q.put(
             PromptRequest(prompt=prompt_token_ids, dataset_index=0, generation_config=generation_config)
         )
-
         result = inference_results_Q.get(timeout=60)
         param_prompt_Q.put(None)
 
+        return result
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
+    def test_tool_triggered_on_stop_string(self):
+        """Test that tools are properly triggered when model generates stop string."""
+        tools = {"</code>": RecordingTool(start_str="<code>", end_str="</code>")}
+        prompt = "Complete this code:\n<code>\nprint('hello')\n</code>"
+
+        result = self._setup_engine_and_generate(
+            tokenizer_name="EleutherAI/pythia-14m", prompt=prompt, tools=tools, max_tool_calls=(5,)
+        )
+
+        self.assertTrue(
+            result.request_info.tool_calleds[0],
+            "Tool should have been called when model generates text with stop string.",
+        )
+
+    @parameterized.expand([True, False])
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
+    def test_generation_deterministic(self, use_tools):
+        """Test generation produces expected output."""
+        test_data_filename = f"generation_{'with' if use_tools else 'without'}_tools_expected.json"
+        test_data_path = TEST_DATA_DIR / test_data_filename
+
+        tools = {"</code>": RecordingTool(start_str="<code>", end_str="</code>")} if use_tools else None
+        max_tool_calls = (5,) if use_tools else None
+        prompt = "Write code to print hello world: <code>" if use_tools else "What is 2 + 2? Answer:"
+
+        result = self._setup_engine_and_generate(
+            tokenizer_name="Qwen/Qwen3-1.7B", prompt=prompt, tools=tools, max_tool_calls=max_tool_calls, max_tokens=256
+        )
+
         if not test_data_path.exists():
             test_data = {
-                "model": tokenizer_name,
+                "model": "Qwen/Qwen3-1.7B",
                 "seed": 42,
                 "temperature": 0.0,
                 "prompt": prompt,
