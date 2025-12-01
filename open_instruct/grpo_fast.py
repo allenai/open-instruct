@@ -606,7 +606,6 @@ def prepare_collated_data_for_workers(
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
         collated_query_responses = []
-        collated_tool_masks = []
         collated_attention_masks = []
         collated_position_ids = []
         collated_response_masks = []
@@ -617,18 +616,15 @@ def prepare_collated_data_for_workers(
             collated_query_responses.append(
                 collate_fn([per_device_packed_query_responses[idx] for idx in micro_range], pad_token_id, pin_memory)
             )
-            collated_tool_masks.append(
-                collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0, pin_memory)
-            )
+            tool_mask = collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0, pin_memory)
             collated_attention_masks.append(
                 collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0, pin_memory)
             )
             collated_position_ids.append(
                 collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0, pin_memory)
             )
-            collated_response_masks.append(
-                collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0, pin_memory)
-            )
+            response_mask = collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0, pin_memory)
+            collated_response_masks.append(response_mask.bool() & tool_mask.bool())
             collated_advantages.append(
                 collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0, pin_memory)
             )
@@ -638,7 +634,6 @@ def prepare_collated_data_for_workers(
         collated_data.append(
             {
                 "collated_query_responses": collated_query_responses,
-                "collated_tool_masks": collated_tool_masks,
                 "collated_attention_masks": collated_attention_masks,
                 "collated_position_ids": collated_position_ids,
                 "collated_advantages": collated_advantages,
@@ -1013,7 +1008,6 @@ class PolicyTrainerRayProcess(RayProcess):
         self,
         model: PreTrainedModel,
         collated_query_responses: list[torch.Tensor],
-        collated_tool_masks: list[torch.Tensor],
         collated_attention_masks: list[torch.Tensor],
         collated_position_ids: list[torch.Tensor],
         collated_response_masks: list[torch.Tensor],
@@ -1028,7 +1022,6 @@ class PolicyTrainerRayProcess(RayProcess):
         with context:
             for i in range(len(collated_query_responses)):
                 query_response = collated_query_responses[i]
-                tool_mask = collated_tool_masks[i]
                 attention_mask = collated_attention_masks[i]
                 position_id = collated_position_ids[i]
                 response_mask = collated_response_masks[i]
@@ -1043,11 +1036,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     return_entropy=return_entropy,
                 )
 
-                if self.args.mask_tool_use and self.args.tool_use:
-                    response_mask = response_mask.bool() & tool_mask.bool()
-                else:
-                    response_mask = response_mask.bool()
-
                 logprob = torch.masked_fill(logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                 collated_logprobs.append(logprob)
 
@@ -1061,7 +1049,6 @@ class PolicyTrainerRayProcess(RayProcess):
     def train(
         self,
         collated_query_responses,
-        collated_tool_masks,
         collated_attention_masks,
         collated_position_ids,
         collated_advantages,
@@ -1072,7 +1059,6 @@ class PolicyTrainerRayProcess(RayProcess):
     ):
         args = self.args
         to_device_inplace(collated_query_responses, self.device)
-        to_device_inplace(collated_tool_masks, self.device)
         to_device_inplace(collated_attention_masks, self.device)
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
@@ -1083,7 +1069,6 @@ class PolicyTrainerRayProcess(RayProcess):
         leftover = len(collated_query_responses) % accumulation_steps
         if leftover > 0:
             collated_query_responses = collated_query_responses[0:-leftover]
-            collated_tool_masks = collated_tool_masks[0:-leftover]
             collated_attention_masks = collated_attention_masks[0:-leftover]
             collated_position_ids = collated_position_ids[0:-leftover]
             collated_advantages = collated_advantages[0:-leftover]
@@ -1100,7 +1085,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 collated_ref_logprobs, _ = self.compute_logprobs(
                     self.ref_policy,
                     collated_query_responses,
-                    collated_tool_masks,
                     collated_attention_masks,
                     collated_position_ids,
                     collated_response_masks,
@@ -1119,7 +1103,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_old_logprobs, _ = self.compute_logprobs(
                         self.model,
                         collated_query_responses,
-                        collated_tool_masks,
                         collated_attention_masks,
                         collated_position_ids,
                         collated_response_masks,
@@ -1130,14 +1113,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 with torch.no_grad():
                     for i in range(len(collated_query_responses)):
-                        tool_mask = collated_tool_masks[i]
                         response_mask = collated_response_masks[i]
-
-                        if args.mask_tool_use and args.tool_use:
-                            response_mask = response_mask.bool() & tool_mask.bool()
-                        else:
-                            response_mask = response_mask.bool()
-
                         vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
                         vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                         vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
@@ -1165,13 +1141,8 @@ class PolicyTrainerRayProcess(RayProcess):
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
-                    mb_tool_mask = collated_tool_masks[i]
                     mb_advantages = collated_advantages[i]
-                    mb_response_masks = collated_response_masks[i]
-                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()
-                    # if masking snippets, do it here.
-                    if args.mask_tool_use and args.tool_use:
-                        mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
+                    mb_response_masks_bool = collated_response_masks[i][:, 1:]
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_local_logprobs, mb_entropy = self.forward(
@@ -2410,6 +2381,7 @@ def create_model_and_optimizer(
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
+        mask_tool_use=args.mask_tool_use,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
