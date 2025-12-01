@@ -269,6 +269,8 @@ class Args:
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
+    loss_fn: Literal["dapo", "cispo"] = "dapo"
+    """Whether to use DAPO or CISPO loss function."""
 
     active_sampling: bool = False
     """Whether to continue sampling responses until you get a full batch."""
@@ -1261,10 +1263,15 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
                     ratio = torch.exp(logprobs_diff)
-                    pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(
-                        ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher
-                    )
+                    if args.loss_fn == "dapo":
+                        pg_losses = -mb_advantages[:, 1:] * ratio
+                        pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(
+                            ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher
+                        )
+                    elif args.loss_fn == "cispo":
+                        # cispo: directly clip ratio, no lower bound.
+                        pg_losses = -mb_advantages[:, 1:] * torch.clamp(ratio, max=1.0 + args.clip_higher)
+                        pg_losses2 = pg_losses
 
                     # Apply truncated importance sampling if enabled
                     if args.truncated_importance_sampling_ratio_cap > 0 and mb_vllm_logprobs is not None:
