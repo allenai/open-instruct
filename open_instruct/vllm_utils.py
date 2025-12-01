@@ -227,6 +227,7 @@ async def process_request_async(
         f"[DEBUG] Putting result in completion_queue for {base_request_id}, queue id={id(actor.completion_queue)}"
     )
     queue_size_before = actor.completion_queue.qsize()
+    print(f"[PRINT] BEFORE put for {base_request_id}, qsize={queue_size_before}", flush=True, file=sys.stderr)
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
@@ -241,6 +242,7 @@ async def process_request_async(
             "tools": actor.tools,
         }
     )
+    print(f"[PRINT] AFTER put for {base_request_id}, qsize={actor.completion_queue.qsize()}", flush=True, file=sys.stderr)
     logger.info(
         f"[DEBUG] After put: queue size before={queue_size_before}, after={actor.completion_queue.qsize()}"
     )
