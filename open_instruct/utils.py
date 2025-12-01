@@ -2500,10 +2500,7 @@ def get_denominator(loss_denominator: str | float) -> float | str:
     if loss_denominator == "token":
         return "token"
 
-    try:
-        val = float(loss_denominator)
-    except ValueError:
-        raise ValueError(f"loss_denominator must be a float value if not 'token', got: {loss_denominator}") from None
+    val = float(loss_denominator)
     if val <= 0:
         raise ValueError(f"loss_denominator must be greater than 0 if not 'token', got: {loss_denominator}")
     return val
