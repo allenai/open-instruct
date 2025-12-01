@@ -1373,17 +1373,19 @@ class PolicyTrainerRayProcess(RayProcess):
                                 kl_loss_stats[i] = kl3_stats[i] * args.beta
                             elif args.kl_estimator == "kl4":
                                 kl_loss_stats[i] = kl4_stats[i] * args.beta
-                    pg_clipfrac_stats[i] = masked_mean(
-                        (pg_losses2 > pg_losses).float(), mb_response_masks_bool, loss_axis, stats_denominator
-                    )
-                    pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, loss_axis, stats_denominator)
-                    loss_stats[i] = loss
-                    ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, loss_axis, stats_denominator)
-                    if args.record_entropy:
-                        # Calculate entropy statistics
-                        entropy_stats[i] = masked_mean(
-                            mb_entropy, mb_response_masks_bool, loss_axis, stats_denominator
-                        ).float()
+                        pg_clipfrac_stats[i] = masked_mean(
+                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, loss_axis, stats_denominator
+                        )
+                        pg_loss_stats[i] = masked_mean(
+                            pg_loss_max, mb_response_masks_bool, loss_axis, stats_denominator
+                        )
+                        loss_stats[i] = loss
+                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, loss_axis, stats_denominator)
+                        if args.record_entropy:
+                            # Calculate entropy statistics
+                            entropy_stats[i] = masked_mean(
+                                mb_entropy, mb_response_masks_bool, loss_axis, stats_denominator
+                            ).float()
 
             with torch.no_grad():
                 if args.load_ref_policy:
