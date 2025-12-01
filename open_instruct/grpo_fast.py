@@ -100,6 +100,7 @@ from open_instruct.model_utils import (
     apply_verifiable_reward,
     disable_dropout_in_model,
     entropy_from_logits,
+    estimate_kl,
     get_olmo3_generation_config,
     load_ref_policy,
     log_softmax_and_gather,
@@ -108,7 +109,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.rl_utils import PackedSequences, Timer, pack_sequences
+from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -246,14 +247,15 @@ class Args:
     """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
     inflight_updates: bool = False
     """Enable immediate stopping of request processing when should_stop is set, allowing for quick pausing and resumption"""
-    kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
+    kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     pack_length: int = 512
     """the length of the pack (you should prob set to the max length of the model)"""
-    masked_mean_axis: int | None = None
-    """the axis to compute the mean of the masked values"""
-    masked_mean_denominator: float | None = None
-    """Optional constant denominator for masked_mean; if set, divides by this instead of mask.sum"""
+    loss_denominator: str = "token"
+    """Optional constant denominator for masked_mean; can be "token" or a float value.
+    when "token", the loss is divided by the total number of tokens in the batch (standard LM training).
+    when a float value, the loss is divided by this value (ideally, max tokens in batch, per Dr GRPO).
+    """
     alpha: float = 0.6
     """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
     reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
@@ -459,10 +461,7 @@ class Args:
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
-        if self.masked_mean_denominator is not None:
-            assert self.masked_mean_denominator > 0, (
-                f"masked_mean_denominator (={self.masked_mean_denominator}) must be greater than 0!"
-            )
+        self.loss_denominator = utils.get_denominator(self.loss_denominator)
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
@@ -502,7 +501,7 @@ class Args:
             else:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{checkpoint_dir_name}"
             # On GCP, all checkpointing must happen on filestore.
-            # TODO(finbarrtimbers): Chanage this so we can checkpoint to GCS.
+            # TODO(finbarrtimbers): Change this so we can checkpoint to GCS.
             # TODO(finbarrtimbers): Move this logic to mason.py once we refactor config.
             if not checkpoint_dir_name.startswith("/filestore"):
                 self.checkpoint_state_dir = f"/filestore{self.checkpoint_state_dir}"
@@ -550,15 +549,6 @@ class Args:
             )
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
-
-
-def masked_mean(
-    values: torch.Tensor, mask: torch.Tensor, axis: int | None = None, denominator: float | None = None
-) -> torch.Tensor:
-    """Compute mean of tensor with a masked values."""
-    numerator = (values * mask).sum(axis=axis)
-    denom = mask.sum(axis=axis) if denominator is None else denominator
-    return (numerator / denom).mean()
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
@@ -997,6 +987,42 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return collated_logprobs, collated_entropies
 
+    def calculate_token_counts(
+        self,
+        accumulation_steps: int,
+        collated_response_masks: list[torch.Tensor],
+        collated_tool_masks: list[torch.Tensor],
+    ) -> dict[int, float]:
+        """
+        Compute the number of training tokens in each batch for this set of responses.
+        Return a dictionary of batch indices to the number of training tokens in that batch.
+        """
+        accumulation_counts: dict[int, float] = {}
+        local_counts = []
+
+        for i, response_mask in enumerate(collated_response_masks):
+            response_mask = response_mask.to(self.device)
+            mask = response_mask[:, 1:].bool()
+            if self.args.mask_tool_use and self.args.tool_use:
+                tool_mask = collated_tool_masks[i].to(self.device)
+                mask &= tool_mask[:, 1:].bool()
+
+            local_counts.append(mask.sum().float())
+
+        if not local_counts:
+            return accumulation_counts
+
+        # do the all_reduce once to avoid calling each loop
+        counts_tensor = torch.stack(local_counts)
+        dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
+
+        for i, count in enumerate(counts_tensor):
+            group_idx = i // accumulation_steps
+            key = int(group_idx * accumulation_steps)
+            accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
+
+        return accumulation_counts
+
     def train(
         self,
         collated_query_responses,
@@ -1091,10 +1117,7 @@ class PolicyTrainerRayProcess(RayProcess):
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            kl1_stats = torch.zeros(len(collated_query_responses))
-            kl2_stats = torch.zeros(len(collated_query_responses))
-            kl3_stats = torch.zeros(len(collated_query_responses))
-            kl4_stats = torch.zeros(len(collated_query_responses))
+            kl_stats_4M = torch.zeros(4, len(collated_query_responses))
             kl_loss_stats = torch.zeros(len(collated_query_responses))
             pg_clipfrac_stats = torch.zeros(len(collated_query_responses))
             pg_loss_stats = torch.zeros(len(collated_query_responses))
@@ -1102,6 +1125,18 @@ class PolicyTrainerRayProcess(RayProcess):
             ratio_stats = torch.zeros(len(collated_query_responses))
             entropy_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
+                # Pre-compute total tokens for each accumulation group if using "token" normalization
+                # This ensures all minibatches in an accumulation group are normalized by the same total
+                if args.loss_denominator == "token":
+                    accumulation_token_counts = self.calculate_token_counts(
+                        accumulation_steps, collated_response_masks, collated_tool_masks
+                    )
+                else:
+                    accumulation_token_counts = {
+                        int(group_idx * accumulation_steps): args.loss_denominator
+                        for group_idx in range((len(collated_query_responses) // accumulation_steps) + 1)
+                    }
+
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
                     mb_tool_mask = collated_tool_masks[i]
@@ -1111,6 +1146,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     # if masking snippets, do it here.
                     if args.mask_tool_use and args.tool_use:
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
+
+                    # retrieve the loss denominator for the current batch
+                    batch_start = (i // accumulation_steps) * accumulation_steps
+                    loss_denominator = accumulation_token_counts[batch_start]
+
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_local_logprobs, mb_entropy = self.forward(
@@ -1222,30 +1262,19 @@ class PolicyTrainerRayProcess(RayProcess):
                         # We also clamp the KL loss to avoid numerical instability
                         # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
                         ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
-                        kl1 = ref_logprobs_diff
-                        kl2 = (ref_logprobs_diff) ** 2 / 2
-                        kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
-                        kl4 = ratio * ref_logprobs_diff
-                        if args.kl_estimator == "kl1":
-                            kl = kl1
-                        elif args.kl_estimator == "kl2":
-                            kl = kl2
-                        elif args.kl_estimator == "kl3":
-                            kl = kl3
-                        elif args.kl_estimator == "kl4":
-                            kl = kl4
+                        kl_4BT = estimate_kl(ref_logprobs_diff, ratio)
+                        kl = kl_4BT[args.kl_estimator]
                         # grpo change: directly subtract KL in loss (add)
                         loss = masked_mean(
-                            pg_loss_max + (args.beta * kl),
-                            mb_response_masks_bool,
-                            args.masked_mean_axis,
-                            args.masked_mean_denominator,
+                            pg_loss_max + (args.beta * kl), mb_response_masks_bool, None, loss_denominator
                         )
                     else:
-                        loss = masked_mean(
-                            pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                        )
-                    loss = loss / accumulation_steps
+                        loss = masked_mean(pg_loss_max, mb_response_masks_bool, None, loss_denominator)
+
+                    # we already took world size into account via the tokens
+                    if dist.is_available() and dist.is_initialized():
+                        loss *= dist.get_world_size()
+
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
                     self.model.backward(loss)
@@ -1255,51 +1284,20 @@ class PolicyTrainerRayProcess(RayProcess):
                     with torch.no_grad():
                         if args.load_ref_policy:
                             # NOTE: in packed implementation, kl calculation are averages over response tokens
-                            kl1_stats[i] = masked_mean(
-                                kl1, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                            ).float()
-                            kl2_stats[i] = masked_mean(
-                                kl2, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                            ).float()
-                            kl3_stats[i] = masked_mean(
-                                kl3, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                            ).float()
-                            kl4_stats[i] = masked_mean(
-                                kl4, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                            ).float()
-                            if args.kl_estimator == "kl1":
-                                kl_loss_stats[i] = kl1_stats[i] * args.beta
-                            elif args.kl_estimator == "kl2":
-                                kl_loss_stats[i] = kl2_stats[i] * args.beta
-                            elif args.kl_estimator == "kl3":
-                                kl_loss_stats[i] = kl3_stats[i] * args.beta
-                            elif args.kl_estimator == "kl4":
-                                kl_loss_stats[i] = kl4_stats[i] * args.beta
-                        pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(),
-                            mb_response_masks_bool,
-                            args.masked_mean_axis,
-                            args.masked_mean_denominator,
-                        )
-                        pg_loss_stats[i] = masked_mean(
-                            pg_loss_max, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                        )
+                            kl_stats_4M[:, i] = masked_mean(kl_4BT, mb_response_masks_bool).float()
+                            kl_loss_stats[i] = kl_stats_4M[args.kl_estimator, i] * args.beta
+                        pg_clipfrac_stats[i] = masked_mean((pg_losses2 > pg_losses).float(), mb_response_masks_bool)
+                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool)
                         loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(
-                            ratio, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                        )
+                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool)
                         if args.record_entropy:
                             # Calculate entropy statistics
-                            entropy_stats[i] = masked_mean(
-                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis, args.masked_mean_denominator
-                            ).float()
+                            entropy_stats[i] = masked_mean(mb_entropy, mb_response_masks_bool).float()
 
             with torch.no_grad():
                 if args.load_ref_policy:
-                    self.local_metrics["objective/kl_avg"] = kl1_stats.mean()
-                    self.local_metrics["objective/kl2_avg"] = kl2_stats.mean()
-                    self.local_metrics["objective/kl3_avg"] = kl3_stats.mean()
-                    self.local_metrics["objective/kl4_avg"] = kl4_stats.mean()
+                    for j in range(4):
+                        self.local_metrics[f"objective/kl{j}_avg"] = kl_stats_4M[j].mean()
                     self.local_metrics["loss/kl_avg"] = kl_loss_stats.mean()
                 self.local_metrics["loss/policy_avg"] = pg_loss_stats.mean()
                 self.local_metrics["loss/total_avg"] = loss_stats.mean()
