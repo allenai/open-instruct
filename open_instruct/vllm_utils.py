@@ -665,9 +665,15 @@ class LLMRayActor:
         if self.reward_fn is not None and result.dataset_index is not None:
             dataset = self.eval_dataset if is_eval else self.train_dataset
             if dataset is not None:
-                scores, metrics = self._compute_rewards(result, dataset, is_eval)
-                result.reward_scores = scores
-                result.reward_metrics = metrics
+                logger.info(f"[DEBUG] About to compute rewards for index={result.dataset_index}")
+                try:
+                    scores, metrics = self._compute_rewards(result, dataset, is_eval)
+                    logger.info(f"[DEBUG] Rewards computed successfully: {scores[:3] if scores else 'empty'}")
+                    result.reward_scores = scores
+                    result.reward_metrics = metrics
+                except Exception:
+                    logger.exception("[DEBUG] EXCEPTION in _compute_rewards")
+                    raise
 
         results_queue = self.eval_results_queue if is_eval else self.results_queue
         results_queue.put(result)
