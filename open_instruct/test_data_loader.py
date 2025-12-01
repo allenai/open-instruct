@@ -202,6 +202,55 @@ class TestHFDataLoader(unittest.TestCase):
         remaining = [batch["dataset_index"] for batch in new_loader]
         self.assertEqual(len(remaining), 10)
 
+    def test_infinite_loop_all_excluded(self):
+        data = {"text": [f"example_{i}" for i in range(10)], "label": list(range(10))}
+        dataset = datasets.Dataset.from_dict(data)
+
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            automatic_reshuffle=True,
+        )
+
+        for batch in loader:
+            loader.exclude_index(batch["dataset_index"])
+
+        with self.assertRaises(RuntimeError) as context:
+            next(loader)
+
+        self.assertIn("All dataset examples have been excluded", str(context.exception))
+
+    def test_unique_prompt_ids_across_iterations(self):
+        data = {"text": [f"example_{i}" for i in range(10)], "label": list(range(10))}
+        dataset = datasets.Dataset.from_dict(data)
+
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            automatic_reshuffle=False,
+        )
+
+        all_prompt_ids = []
+
+        first_pass = list(loader)
+        all_prompt_ids.extend([batch["prompt_id"] for batch in first_pass])
+
+        with self.assertRaises(StopIteration):
+            next(loader)
+
+        second_pass = list(loader)
+        all_prompt_ids.extend([batch["prompt_id"] for batch in second_pass])
+
+        self.assertEqual(len(all_prompt_ids), len(set(all_prompt_ids)))
+
 
 if __name__ == "__main__":
     unittest.main()

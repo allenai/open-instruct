@@ -58,8 +58,11 @@ class HFDataLoader(data_loader.DataLoaderBase):
             self._current_iter = None
             if self._automatic_reshuffle:
                 self.reshuffle()
+                if self.effective_size == 0:
+                    raise RuntimeError("All dataset examples have been excluded. Cannot continue iteration.") from None
                 self._current_iter = iter(self)
                 return next(self._current_iter)
+            self._epoch += 1
             self.batches_processed = 0
             raise
 
