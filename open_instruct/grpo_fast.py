@@ -502,7 +502,7 @@ class Args:
             # TODO(finbarrtimbers): Chanage this so we can checkpoint to GCS.
             # TODO(finbarrtimbers): Move this logic to mason.py once we refactor config.
             if not checkpoint_dir_name.startswith("/filestore"):
-                self.checkpoint_state_dir = f"/filestore{self.checkpoint_state_dir}"ss
+                self.checkpoint_state_dir = f"/filestore{self.checkpoint_state_dir}"
 
         if self.checkpoint_state_dir is not None:
             if self.gs_checkpoint_state_dir is not None:
