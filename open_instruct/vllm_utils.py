@@ -561,6 +561,8 @@ class LLMRayActor:
         return ModelDims.from_vllm_config(self.llm_engine.vllm_config)
 
     def _should_stop(self) -> bool:
+        if self.actor_manager is None:
+            return self._should_stop_value
         if (time.perf_counter() - self._last_should_stop_update) > SHOULD_STOP_TIMEOUT_S:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=SHOULD_STOP_TIMEOUT_S)
@@ -915,7 +917,12 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                    env_vars={
+                        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
+                        "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
+                        "VLLM_ALLOW_INSECURE_SERIALIZATION": "1",
+                    },
+                    excludes=[".venv", ".git"],
                 ),
             )
             .remote(

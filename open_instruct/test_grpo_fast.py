@@ -86,8 +86,12 @@ class TestGrpoFastBase(unittest.TestCase):
 
         utils.check_runtime_leaks()
 
-        # Initialize Ray for this test
-        ray.init(include_dashboard=False)
+        # Ensure any previous Ray instance is cleaned up
+        if ray.is_initialized():
+            ray.shutdown()
+
+        # Initialize Ray with runtime_env that excludes .venv and .git
+        ray.init(include_dashboard=False, runtime_env={"excludes": [".venv", ".git"]})
 
     def _cleanup_ray_queues(self):
         """Clean up all Ray queues created during the test."""
