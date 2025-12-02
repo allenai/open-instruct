@@ -198,11 +198,10 @@ async def process_request_async(
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
 
-    response_token_ids = tokens[prompt_len:]
     complete_output = vllm.CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
         text="",
-        token_ids=response_token_ids,
+        token_ids=tokens[prompt_len:],
         cumulative_logprob=output.cumulative_logprob,
         logprobs=logprobs,
         finish_reason=output.finish_reason,
