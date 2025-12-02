@@ -50,15 +50,14 @@ class GetSuccessfulTestsFastTests(BaseCodeTestCase):
             "TIGER-Lab/AceCode-87K", split="train", num_proc=open_instruct_utils.max_num_processes()
         )
 
-        # Choose the same sample index used in the original snippet.
         i = 1
-        program = ds[i]["inferences"][-1]["completion"]  # type: ignore[index]
-        tests = code_utils.decode_tests(ds[i]["test_cases"])  # type: ignore[index]
+        row = ds[i]  # type: ignore[index]
+        assert isinstance(row, dict)
+        program = str(row["inferences"][-1]["completion"])
+        tests = code_utils.decode_tests(row["test_cases"])
+        expected_passes = int(len(tests) * row["inferences"][-1]["pass_rate"])
 
-        # The dataset also stores a pass-rate; we can use it to sanity-check.
-        expected_passes = int(len(tests) * ds[i]["inferences"][-1]["pass_rate"])  # type: ignore[index]
-
-        result, _ = code_utils.get_successful_tests_fast(program=program, tests=tests)  # type: ignore[arg-type]
+        result, _ = code_utils.get_successful_tests_fast(program=program, tests=tests)
         self.assertEqual(sum(result), expected_passes)
 
     def test_add_function_example(self):

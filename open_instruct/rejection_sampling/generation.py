@@ -86,7 +86,7 @@ async def generate_with_openai(model_name: str, data_list: list, args: Args, gen
         top_p=gen_args.top_p,
     )
     processor = LLMProcessor(config)
-    results = await processor.process_batch(data_list, args, config)  # type: ignore[arg-type]
+    results = await processor.process_batch(data_list, args, config)
     return results
 
 
@@ -102,7 +102,8 @@ def generate_with_vllm(
     )
 
     # filter out prompts which are beyond the model's max token length
-    max_model_len = llm.llm_engine.scheduler_config.max_model_len  # type: ignore[union-attr]
+    assert llm.llm_engine.scheduler_config is not None
+    max_model_len = llm.llm_engine.scheduler_config.max_model_len
     prompt_token_ids_len = len(prompt_token_ids)
     prompt_token_ids = [item for item in prompt_token_ids if len(item) < max_model_len]
     if len(prompt_token_ids) != prompt_token_ids_len:
@@ -139,14 +140,13 @@ def format_conversation(messages: list) -> str:
 
 
 def main(args: Args, dataset_config: DatasetConfig, gen_args: GenerationArgs):
+    assert args.dataset_splits is not None, "dataset_splits must be provided"
     dataset = combine_dataset(
-        args.dataset_mixer_list,
-        splits=args.dataset_splits,  # type: ignore[arg-type]
-        columns_to_keep=[dataset_config.sft_messages_key],
+        args.dataset_mixer_list, splits=args.dataset_splits, columns_to_keep=[dataset_config.sft_messages_key]
     )
     if args.dataset_end_idx is None:
         args.dataset_end_idx = len(dataset)
-    dataset = dataset.select(range(args.dataset_start_idx, args.dataset_end_idx))  # type: ignore[union-attr]
+    dataset = dataset.select(range(args.dataset_start_idx, args.dataset_end_idx))
     pprint([dataset_config, args, gen_args])
 
     if "gpt-3.5" in args.model_name_or_path or "gpt-4" in args.model_name_or_path:

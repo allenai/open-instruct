@@ -57,7 +57,7 @@ import ray
 import requests
 import torch
 import vllm.config
-from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
+from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
@@ -524,7 +524,7 @@ def combine_dataset(
     shuffle: bool = False,
     save_data_dir: str | None = None,
     keep_ids: bool = False,
-) -> DatasetDict:
+) -> Dataset:
     """
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
 

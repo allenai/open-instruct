@@ -57,8 +57,11 @@ class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
         hidden_states = transformer_outputs[0]
         logits = self.score(hidden_states)
 
-        assert inputs_embeds is not None or input_ids is not None
-        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]  # type: ignore[union-attr]
+        if input_ids is not None:
+            batch_size = input_ids.shape[0]
+        else:
+            assert inputs_embeds is not None
+            batch_size = inputs_embeds.shape[0]
 
         if self.config.pad_token_id is None and batch_size != 1:
             raise ValueError("Cannot handle batch sizes > 1 if no padding token is defined.")
@@ -166,8 +169,11 @@ class OlmoeForSequenceClassification(OlmoePreTrainedModel):
         hidden_states = transformer_outputs[0]
         logits = self.score(hidden_states)
 
-        assert inputs_embeds is not None or input_ids is not None
-        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]  # type: ignore[union-attr]
+        if input_ids is not None:
+            batch_size = input_ids.shape[0]
+        else:
+            assert inputs_embeds is not None
+            batch_size = inputs_embeds.shape[0]
 
         if self.config.pad_token_id is None and batch_size != 1:
             raise ValueError("Cannot handle batch sizes > 1 if no padding token is defined.")

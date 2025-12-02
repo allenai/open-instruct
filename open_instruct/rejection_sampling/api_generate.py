@@ -3,6 +3,7 @@
 import asyncio
 import re
 from dataclasses import dataclass
+from typing import Protocol
 
 import numpy as np
 from openai import AsyncOpenAI
@@ -27,6 +28,11 @@ class LLMGenerationConfig:
             self.max_parallel_requests = 13
 
 
+class ArgsProtocol(Protocol):
+    mode: str
+    skill: str
+
+
 @dataclass
 class Args:
     output_path: str | None = None
@@ -41,7 +47,7 @@ class LLMProcessor:
         self.async_client = AsyncOpenAI()
 
     async def process_text(
-        self, data: dict, i: int, limiter: asyncio.Semaphore, args: Args, gen_args: LLMGenerationConfig
+        self, data: dict, i: int, limiter: asyncio.Semaphore, args: ArgsProtocol, gen_args: LLMGenerationConfig
     ):
         if args.mode == "generation":
             template = get_generation_template(args.skill)
@@ -88,7 +94,7 @@ class LLMProcessor:
 
         return response
 
-    async def process_batch(self, data_list: list[dict], args: Args, gen_args: LLMGenerationConfig):
+    async def process_batch(self, data_list: list[dict], args: ArgsProtocol, gen_args: LLMGenerationConfig):
         assert self.config.max_parallel_requests is not None
         limiter = asyncio.Semaphore(self.config.max_parallel_requests)
         tasks = [self.process_text(data, i, limiter, args, gen_args) for i, data in enumerate(data_list)]
