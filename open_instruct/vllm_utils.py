@@ -548,7 +548,7 @@ async def compute_rewards(
     actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset, is_eval: bool
 ) -> tuple[list[float], dict]:
     example = dataset[result.dataset_index]
-    decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses)
+    decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
     k = len(result.responses)
     k_ground_truths = [example[GROUND_TRUTHS_KEY]] * k
