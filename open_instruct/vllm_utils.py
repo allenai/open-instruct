@@ -604,6 +604,8 @@ class LLMRayActor:
         return ModelDims.from_vllm_config(self.llm_engine.vllm_config)
 
     def _should_stop(self) -> bool:
+        if self.actor_manager is None:
+            return False
         if (time.perf_counter() - self._last_should_stop_update) > SHOULD_STOP_TIMEOUT_S:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=SHOULD_STOP_TIMEOUT_S)
