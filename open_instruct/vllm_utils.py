@@ -856,7 +856,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
         response_tokens.extend(tool_tokens)
         response_logprobs.extend([0.0] * len(tool_tokens))
-        response_masks.extend([0] * len(tool_tokens))
+        response_masks.extend([0 if actor.mask_tool_use else 1] * len(tool_tokens))
         current_prompt.extend(tool_tokens)
 
         current_max_tokens = sampling_params.max_tokens - len(response_masks)
