@@ -1274,22 +1274,25 @@ class TestGeneration(TestGrpoFastBase):
         test_data_filename = f"generation_{'with' if use_tools else 'without'}_tools_expected.json"
         test_data_path = TEST_DATA_DIR / test_data_filename
 
+        tokenizer_name = "Qwen/Qwen3-1.7B"
         tools = {"</code>": RecordingTool(start_str="<code>", end_str="</code>")} if use_tools else None
         max_tool_calls = (5,) if use_tools else None
         prompt = "Write code to print hello world: <code>" if use_tools else "What is 2 + 2? Answer:"
 
         result = self._setup_engine_and_generate(
-            tokenizer_name="Qwen/Qwen3-1.7B", prompt=prompt, tools=tools, max_tool_calls=max_tool_calls, max_tokens=256
+            tokenizer_name=tokenizer_name, prompt=prompt, tools=tools, max_tool_calls=max_tool_calls, max_tokens=256
         )
 
         if not test_data_path.exists():
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
             test_data = {
-                "model": "Qwen/Qwen3-1.7B",
+                "model": tokenizer_name,
                 "seed": 42,
                 "temperature": 0.0,
                 "prompt": prompt,
                 "use_tools": use_tools,
                 "expected_token_ids": result.responses[0],
+                "expected_text": tokenizer.decode(result.responses[0]),
             }
             test_data_path.write_text(json.dumps(test_data, indent=2))
             self.fail(f"Test data generated at {test_data_path}. Re-run test to verify.")

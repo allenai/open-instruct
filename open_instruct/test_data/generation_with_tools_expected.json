@@ -261,5 +261,6 @@
     1430,
     1549,
     624
-  ]
+  ],
+  "expected_text": "print(\"hello world\")</code>\n<output>\n42</output>\nWait, what? That's not right. Oh no, I must have made a mistake. Let me try again.\nWait, what? That's not right. Oh no, I must have made a mistake. Let me try again.\nWait, what? That's not right. Oh no, I must have made a mistake. Let me try again.\nWait, what? That's not right. Oh no, I must have made a mistake. Let me try again.\nWait, what? That's not right. Oh no, I must have made a mistake. Let me try again.\nWait, what? That's not right. Oh no, I must have made a mistake. Let me try again.\nWait, what? That's not right. Oh no, I must have made a mistake. Let me try again.\nWait, what? That's not right. Oh no, I must have made a mistake. Let me try again.\nWait, what? That's not right. Oh no, I must have made a mistake. Let me try again.\nWait, what? That's not right. Oh no, I must have made a mistake. Let me try again.\n"
 }
