@@ -3,9 +3,32 @@ import unittest
 from unittest.mock import MagicMock
 
 import vllm
+from parameterized import parameterized
 
 from open_instruct import vllm_utils
 from open_instruct.queue_types import PromptRequest
+
+
+class TestTruncateToolOutputTokens(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("no_truncation", [1, 2, 3, 4, 5], 10, 5, 100, 50, [1, 2, 3, 4, 5], 0),
+            ("truncate_max_model_len", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 95, 5, 100, 50, [1, 2, 3, 4, 5], 5),
+            ("truncate_max_tokens", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 10, 47, 100, 50, [1, 2, 3], 0),
+            ("truncate_both_limits", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 95, 47, 100, 50, [1, 2, 3], 5),
+            ("no_space_for_model", [1, 2, 3], 100, 5, 100, 50, [], 3),
+            ("no_remaining_response", [1, 2, 3], 10, 50, 100, 50, [], 0),
+            ("empty_input", [], 10, 5, 100, 50, [], 0),
+        ]
+    )
+    def test_truncate_tool_output_tokens(
+        self, name, tokens, prompt_len, response_len, max_model_len, max_tokens, expected_tokens, expected_excess
+    ):
+        result, excess = vllm_utils.truncate_tool_output_tokens(
+            tokens, prompt_len, response_len, max_model_len, max_tokens
+        )
+        self.assertEqual(result, expected_tokens)
+        self.assertEqual(excess, expected_excess)
 
 
 class TestVllmUtils3(unittest.TestCase):

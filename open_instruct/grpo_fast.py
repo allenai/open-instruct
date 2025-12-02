@@ -2313,8 +2313,6 @@ def create_generation_configs(args: Args):
         stop=args.stop_strings,
         seed=args.seed,
         logprobs=1,
-        skip_special_tokens=False,
-        include_stop_str_in_output=True,
     )
     eval_generation_config = dataclasses.replace(generation_config, n=1)
     return {"train": generation_config, "eval": eval_generation_config}

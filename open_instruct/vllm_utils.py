@@ -79,8 +79,6 @@ class SamplingConfig:
     stop: list[str] | None = None
     seed: int | None = None
     logprobs: int | None = 1
-    include_stop_str_in_output: bool = False
-    skip_special_tokens: bool = True
 
 
 @dataclasses.dataclass
@@ -130,6 +128,35 @@ def assert_threaded_actor(instance):
         )
     except RuntimeError:
         return
+
+
+def truncate_tool_output_tokens(
+    tool_output_token_ids: list[int],
+    current_prompt_len: int,
+    current_response_len: int,
+    max_model_len: int,
+    max_tokens: int,
+) -> tuple[list[int], int]:
+    """Truncate tool output tokens to fit within max_model_len and max_tokens.
+
+    Args:
+        tool_output_token_ids: Token IDs from the tool output to potentially truncate.
+        current_prompt_len: Number of tokens in the current prompt (original + accumulated).
+        current_response_len: Number of tokens in the response so far (for max_tokens check).
+        max_model_len: Maximum total sequence length the model can handle.
+        max_tokens: Maximum number of response tokens allowed.
+
+    Returns:
+        A tuple of (truncated_tokens, excess) where excess is the number of tokens
+        that exceeded max_model_len (0 if no truncation due to max_model_len).
+    """
+    total_len = current_prompt_len + len(tool_output_token_ids)
+    excess = max(0, total_len - max_model_len)
+    if excess > 0:
+        tool_output_token_ids = tool_output_token_ids[:-excess] if excess < len(tool_output_token_ids) else []
+
+    remaining = max(0, max_tokens - current_response_len)
+    return tool_output_token_ids[:remaining], excess
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -806,7 +833,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             extra_body={
                 "return_token_ids": True,
                 "cache_salt": base_request_id,
-                "include_stop_str_in_output": bool(actor.tools),
+                "include_stop_str_in_output": True,
+                "skip_special_tokens": False,
             },
             **dataclasses.asdict(current_sampling_params),
         )
@@ -849,10 +877,13 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
         )
 
-        space_for_tool = max_model_len - len(current_prompt) - 1
-        if space_for_tool <= 0:
-            break
-        tool_tokens = tool_tokens[:space_for_tool]
+        tool_tokens, excess = truncate_tool_output_tokens(
+            tool_tokens,
+            current_prompt_len=len(current_prompt),
+            current_response_len=len(response_masks),
+            max_model_len=max_model_len,
+            max_tokens=sampling_params.max_tokens,
+        )
 
         response_tokens.extend(tool_tokens)
         response_logprobs.extend([0.0] * len(tool_tokens))
@@ -860,7 +891,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         current_prompt.extend(tool_tokens)
 
         current_max_tokens = sampling_params.max_tokens - len(response_masks)
-        if current_max_tokens <= 0:
+        if excess > 0 or current_max_tokens <= 0:
             break
 
     complete_output = CompletionOutput(
