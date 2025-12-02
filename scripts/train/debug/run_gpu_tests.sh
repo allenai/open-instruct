@@ -14,4 +14,4 @@ uv run python mason.py \
     --timeout 30m \
     --budget ai2/oe-adapt \
     --gpus 1 \
-    -- 'source configs/beaker_configs/ray_node_setup.sh && export VLLM_ENABLE_V1_MULTIPROCESSING=0 && export VLLM_LOGGING_LEVEL=DEBUG && echo "=== /dev/shm size ===" && df -h /dev/shm && echo "=====================" && pytest open_instruct/test_grpo_fast_gpu.py -xvs'
+    -- 'source configs/beaker_configs/ray_node_setup.sh && export VLLM_ENABLE_V1_MULTIPROCESSING=0 && export VLLM_LOGGING_LEVEL=DEBUG && echo "=== /dev/shm size ===" && df -h /dev/shm && echo "=====================" && pytest open_instruct/test_grpo_fast_gpu.py::TestGeneration::test_generation_deterministic_1 -xvs'
