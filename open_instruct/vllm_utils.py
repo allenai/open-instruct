@@ -118,15 +118,13 @@ def truncate_tool_output_tokens(
 
 
 async def process_request_async(
-    actor: "LLMRayActor",
-    sub_request_id: str,
-    base_request_id: str,
-    prompt: vllm.TokensPrompt,
-    sampling_params: vllm.SamplingParams,
+    actor: "LLMRayActor", sub_request_id: str, base_request_id: str, sampling_params: vllm.SamplingParams
 ):
     """Process a single async request with tool support, awaiting tools inline."""
-    accumulated_tokens = []
-    accumulated_logprobs = []
+    original_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
+    original_prompt_len = len(original_prompt_token_ids)
+    current_token_ids = list(original_prompt_token_ids)
+    logprobs = []
     masks = []
     num_calls = 0
     timeout = False
@@ -134,14 +132,11 @@ async def process_request_async(
     tool_output = ""
     tool_runtime = 0.0
     tool_called = False
-
-    current_prompt = prompt
-    current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
     current_sampling_params = sampling_params.clone()
-    final_prompt_token_ids = None
     iteration = 0
 
     while True:
+        current_prompt = vllm.TokensPrompt(prompt_token_ids=current_token_ids, cache_salt=base_request_id)
         iteration_request_id = f"{sub_request_id}_iter{iteration}"
         outputs = [
             o
@@ -153,11 +148,8 @@ async def process_request_async(
         iteration += 1
         output = request_output.outputs[0]
 
-        if final_prompt_token_ids is None:
-            final_prompt_token_ids = request_output.prompt_token_ids
-
-        accumulated_tokens.extend(output.token_ids)
-        accumulated_logprobs.extend(output.logprobs)
+        current_token_ids.extend(output.token_ids)
+        logprobs.extend(output.logprobs)
         masks.extend([1] * len(output.token_ids))
 
         if not actor.tools or not actor.max_tool_calls:
@@ -187,35 +179,30 @@ async def process_request_async(
 
         tool_output_token_ids, excess = truncate_tool_output_tokens(
             tool_output_token_ids,
-            current_prompt_len=len(current_prompt_token_ids) + len(accumulated_tokens),
+            current_prompt_len=len(current_token_ids),
             current_response_len=len(masks),
             max_model_len=actor.llm_engine.model_config.max_model_len,
             max_tokens=sampling_params.max_tokens,
         )
 
-        accumulated_tokens.extend(tool_output_token_ids)
-        accumulated_logprobs.extend(
-            [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids]
-        )
+        current_token_ids.extend(tool_output_token_ids)
+        logprobs.extend([{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids])
         masks.extend([0] * len(tool_output_token_ids))
 
         new_sample_tokens = sampling_params.max_tokens - len(masks)
         if excess > 0 or new_sample_tokens <= 0:
             break
 
-        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens
-        current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
-        current_prompt_token_ids = prompt_and_tool_output
-        final_prompt_token_ids = prompt_and_tool_output
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
 
+    response_token_ids = current_token_ids[original_prompt_len:]
     complete_output = vllm.CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
         text="",
-        token_ids=accumulated_tokens,
+        token_ids=response_token_ids,
         cumulative_logprob=output.cumulative_logprob,
-        logprobs=accumulated_logprobs,
+        logprobs=logprobs,
         finish_reason=output.finish_reason,
         stop_reason=output.stop_reason,
     )
@@ -238,7 +225,7 @@ async def process_request_async(
             "request_output": vllm.RequestOutput(
                 request_id=sub_request_id,
                 prompt=request_output.prompt,
-                prompt_token_ids=final_prompt_token_ids,
+                prompt_token_ids=current_token_ids,
                 outputs=[complete_output],
                 finished=True,
                 prompt_logprobs=None,  # not used but required for init.
@@ -499,15 +486,13 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "start_time": time.perf_counter(),
     }
 
-    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
-
     for j in range(request.generation_config.n):
         sub_sampling_params = sampling_params.clone()
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
         sub_request_id = f"{request_id}_{j}"
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
-            process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params), actor.loop
+            process_request_async(actor, sub_request_id, request_id, sub_sampling_params), actor.loop
         )
 
 
