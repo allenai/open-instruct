@@ -57,7 +57,7 @@ class TestGeneration(TestGrpoFastBase):
         param_prompt_Q.qsize()
         inference_results_Q.qsize()
 
-        vllm_engines = create_vllm_engines(
+        create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
             enforce_eager=True,
@@ -73,8 +73,6 @@ class TestGeneration(TestGrpoFastBase):
             tools=tools,
             max_tool_calls=max_tool_calls,
         )
-
-        [e.process_from_queue.remote() for e in vllm_engines]
 
         prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
         stop = list(tools.keys()) if tools else None
