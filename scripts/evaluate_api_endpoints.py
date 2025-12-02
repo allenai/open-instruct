@@ -55,9 +55,13 @@ def main():
     parser.add_argument(
         "--provider",
         type=str,
-        required=True,
-        choices=["cirrascale", "modal"],
+        choices=["cirrascale", "modal", "parasail"],
         help="Provider of the model API endpoint. Currently supported: cirrascale, modal.",
+    )
+    parser.add_argument(
+        "--api_key_secret",
+        type=str,
+        help="Secret name for the API key if not using one of the providers above.",
     )
     parser.add_argument(
         "--max_length",
@@ -117,6 +121,8 @@ def main():
             "process_output": "r1_style",
         }
         command_list = [
+            "uv",
+            "run",
             "python",
             "oe-eval-internal/oe_eval/launch.py",
             f"--task {benchmark}",
@@ -125,10 +131,17 @@ def main():
             "--model-type litellm",
             f"--model-args '{json.dumps(model_args)}'"
         ]
-        
+        api_key_secret = None
+        if args.provider:
+            api_key_secret = f"{args.provider}_api_key"
+        elif args.api_key_secret:
+            api_key_secret = args.api_key_secret
+        else:
+            raise ValueError("Either --provider or --api_key_secret must be specified.")
+
         gantry_args = {
             "env-secret": "OPENAI_API_KEY=openai_api_key",
-            "env-secret#1": "LITELLM_API_KEY=cirrascale_api_key" if args.provider == "cirrascale" else "LITELLM_API_KEY=modal_api_key"
+            "env-secret#1": f"LITELLM_API_KEY={api_key_secret}"
         }
         command_list.append(
             f"--gantry-args '{json.dumps(gantry_args)}'"
