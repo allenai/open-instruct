@@ -278,9 +278,6 @@ class Args:
     """Whether to filter out prompts with zero reward std (all samples have the same score)."""
     no_resampling_pass_rate: float | None = None
     """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
-    automatic_reshuffle: bool = True
-    """Automatically reshuffle the dataset at epoch boundaries."""
-
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
@@ -2944,7 +2941,7 @@ def run_training(
             rank=0,
             world_size=1,
             work_dir=args.output_dir,
-            automatic_reshuffle=True,
+            automatic_reshuffle=False,
         )
     else:
         eval_data_loader = None
@@ -3144,7 +3141,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         rank=0,
         world_size=1,
         work_dir=args.output_dir,
-        automatic_reshuffle=args.automatic_reshuffle,
+        automatic_reshuffle=True,
     )
 
     if checkpoint_state and "dataloader_state" in checkpoint_state:
