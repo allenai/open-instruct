@@ -956,12 +956,16 @@ class PolicyTrainerRayProcess(RayProcess):
         local_counts = [mask[:, 1:].sum().float() for mask in data_BT["response_masks"]]
         if not local_counts:
             return accumulation_counts
+
+        # do the all_reduce once to avoid caling each loop
         counts_tensor = torch.stack(local_counts)
         dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
+
         for i, count in enumerate(counts_tensor):
             group_idx = i // accumulation_steps
             key = int(group_idx * accumulation_steps)
             accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
+
         return accumulation_counts
 
     def train(self, data_BT: dict[str, list[torch.Tensor]], pad_token_id: int) -> dict[str, float]:
