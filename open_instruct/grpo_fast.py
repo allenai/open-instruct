@@ -1652,12 +1652,6 @@ def accumulate_inference_batches(
 
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
-        prompt_data = prompt_dataset[result.dataset_index]
-        k_queries = repeat_each([prompt_data[INPUT_IDS_PROMPT_KEY]], generation_config.n)
-        k_ground_truths = repeat_each([prompt_data[GROUND_TRUTHS_KEY]], generation_config.n)
-        k_datasets = repeat_each([prompt_data[VERIFIER_SOURCE_KEY]], generation_config.n)
-        k_raw_queries = repeat_each([prompt_data[RAW_PROMPT_KEY]], generation_config.n)
-
         percent_solved = np.mean(result.reward_scores).item() / args.max_possible_score
         # Don't resample prompt that was solved at more than no_resample_positive_rate
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
@@ -1690,10 +1684,11 @@ def accumulate_inference_batches(
             progress_bar.update(1)
 
         results.append(result)
-        all_queries.extend(k_queries)
-        all_ground_truths.extend(k_ground_truths)
-        all_datasets.extend(k_datasets)
-        all_raw_queries.extend(k_raw_queries)
+        prompt_data = prompt_dataset[result.dataset_index]
+        all_queries.extend(repeat_each([prompt_data[INPUT_IDS_PROMPT_KEY]], generation_config.n))
+        all_ground_truths.extend(repeat_each([prompt_data[GROUND_TRUTHS_KEY]], generation_config.n))
+        all_datasets.extend(repeat_each([prompt_data[VERIFIER_SOURCE_KEY]], generation_config.n))
+        all_raw_queries.extend(repeat_each([prompt_data[RAW_PROMPT_KEY]], generation_config.n))
         all_decoded_responses.extend(decoded_responses)
         all_scores.extend(result.reward_scores)
         all_reward_metrics.append(result.reward_metrics)
