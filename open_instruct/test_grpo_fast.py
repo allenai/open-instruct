@@ -186,9 +186,11 @@ class TestGrpoFastBase(unittest.TestCase):
         """Create a mock GenerationResult from a PromptRequest."""
         return self.create_mock_result(request.dataset_index, request.prompt_id, num_samples_per_prompt)
 
-    def create_mock_result(self, dataset_index: int, prompt_id: str, num_samples_per_prompt=1):
+    def create_mock_result(self, dataset_index: int, prompt_id: str, num_samples_per_prompt=1, reward_scores=None):
         """Create a mock GenerationResult."""
         total_responses = num_samples_per_prompt
+        if reward_scores is None:
+            reward_scores = [i / max(total_responses, 1) for i in range(total_responses)]
 
         return GenerationResult(
             responses=[[1, 2, 3] for _ in range(total_responses)],
@@ -209,6 +211,8 @@ class TestGrpoFastBase(unittest.TestCase):
                 num_prompt_tokens=10, num_response_tokens=3 * total_responses, generation_time=0.1
             ),
             logprobs=[[0.0, 0.0, 0.0] for _ in range(total_responses)],
+            reward_scores=reward_scores,
+            reward_metrics={"time/reward": 0.0},
         )
 
     def create_mock_tokenizer_and_reward_fn(self):
@@ -613,7 +617,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
-            reward_fn=reward_fn,
             prompt_dataset=mock_dataset,
         )
 
@@ -660,7 +663,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     num_prompts=num_prompts,
                     model_dims=mock_model_dims,
                     tokenizer=tokenizer,
-                    reward_fn=reward_fn,
                     prompt_dataset=mock_dataset,
                 )
                 completed.set()
@@ -833,7 +835,10 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
 
         for i in range(num_prompts):
-            mock_result = self.create_mock_result(i, f"0_{i}", num_samples_per_prompt=num_samples_per_prompt)
+            constant_scores = [0.5] * num_samples_per_prompt
+            mock_result = self.create_mock_result(
+                i, f"0_{i}", num_samples_per_prompt=num_samples_per_prompt, reward_scores=constant_scores
+            )
             inference_results_Q.put(mock_result)
 
         mock_args = self.create_mock_args(num_engines=4, num_samples=num_samples_per_prompt)
@@ -844,17 +849,6 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         tokenizer_name = "EleutherAI/pythia-14m"
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-        async def reward_fn_zero_std(
-            responses: list[torch.Tensor],
-            decoded_responses: list[str],
-            ground_truths: list[Any],
-            datasets: list[str],
-            finish_reasons: list[str],
-            infos: list[list[int]],
-            queries: list[str] | None = None,
-        ) -> (list[float], dict[str, Any]):
-            return [0.5] * len(responses), {"time/reward": 0.0}
-
         result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
             inference_results_Q,
             mock_args,
@@ -862,7 +856,6 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
-            reward_fn=reward_fn_zero_std,
             prompt_dataset=mock_dataset,
             filter_zero_std_samples=True,
         )
