@@ -79,6 +79,8 @@ class SamplingConfig:
     stop: list[str] | None = None
     seed: int | None = None
     logprobs: int | None = 1
+    include_stop_str_in_output: bool = False
+    skip_special_tokens: bool = True
 
 
 @dataclasses.dataclass
