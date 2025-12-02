@@ -136,7 +136,7 @@ class Instruction:
 class ResponseLanguageChecker(Instruction):
     """Check the language of the entire response."""
 
-    def build_description(self, *, language=None):
+    def build_description(self, *, language=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -188,7 +188,7 @@ class ResponseLanguageChecker(Instruction):
 class NumberOfSentences(Instruction):
     """Check the number of sentences."""
 
-    def build_description(self, *, num_sentences=None, relation=None):
+    def build_description(self, *, num_sentences=None, relation=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -253,7 +253,7 @@ class NumberOfSentences(Instruction):
 class PlaceholderChecker(Instruction):
     """Check the placeholders in template writing."""
 
-    def build_description(self, *, num_placeholders=None):
+    def build_description(self, *, num_placeholders=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -292,13 +292,14 @@ class PlaceholderChecker(Instruction):
         """
         placeholders = re.findall(r"\[.*?\]", value)
         num_placeholders = len(placeholders)
+        assert self._num_placeholders is not None
         return num_placeholders >= self._num_placeholders
 
 
 class BulletListChecker(Instruction):
     """Checks the bullet list in the prompt."""
 
-    def build_description(self, *, num_bullets=None):
+    def build_description(self, *, num_bullets=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -347,7 +348,7 @@ class BulletListChecker(Instruction):
 class ConstrainedResponseChecker(Instruction):
     """Checks the constrained response."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         # A sequence of string(s) representing the options of the expected response.
         self._constrained_responses = _CONSTRAINED_RESPONSE_OPTIONS
@@ -379,7 +380,7 @@ class ConstrainedResponseChecker(Instruction):
 class ConstrainedStartChecker(Instruction):
     """Checks the response start."""
 
-    def build_description(self, *, starter=None):
+    def build_description(self, *, starter=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -415,6 +416,7 @@ class ConstrainedStartChecker(Instruction):
           True if the response starts with the given phrase or keyword that is
           contained in `instruction_args`; otherwise, False.
         """
+        assert self._starter is not None
         response_pattern = r"^\s*" + self._starter + r".*$"
         response_with_constrained_start = re.search(response_pattern, value, flags=re.MULTILINE)
         return bool(response_with_constrained_start)
@@ -423,7 +425,7 @@ class ConstrainedStartChecker(Instruction):
 class HighlightSectionChecker(Instruction):
     """Checks the highlighted section."""
 
-    def build_description(self, *, num_highlights=None):
+    def build_description(self, *, num_highlights=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -473,13 +475,14 @@ class HighlightSectionChecker(Instruction):
             if highlight.removeprefix("**").removesuffix("**").strip():
                 num_highlights += 1
 
+        assert self._num_highlights is not None
         return num_highlights >= self._num_highlights
 
 
 class SectionChecker(Instruction):
     """Checks the sections."""
 
-    def build_description(self, *, section_spliter=None, num_sections=None):
+    def build_description(self, *, section_spliter=None, num_sections=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -530,6 +533,8 @@ class SectionChecker(Instruction):
           True if the number of sections in the response is greater than or equal to
           the minimum number of sections; otherwise, False.
         """
+        assert self._section_spliter is not None
+        assert self._num_sections is not None
         section_splitter_patten = r"\s?" + self._section_spliter + r"\s?\d+\s?"
         sections = re.split(section_splitter_patten, value)
         num_sections = len(sections) - 1
@@ -539,7 +544,7 @@ class SectionChecker(Instruction):
 class ParagraphChecker(Instruction):
     """Checks the paragraphs."""
 
-    def build_description(self, *, num_paragraphs=None):
+    def build_description(self, *, num_paragraphs=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -593,7 +598,7 @@ class ParagraphChecker(Instruction):
 class PostscriptChecker(Instruction):
     """Checks the postscript."""
 
-    def build_description(self, *, postscript_marker=None):
+    def build_description(self, *, postscript_marker=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -634,6 +639,7 @@ class PostscriptChecker(Instruction):
           True if the response contains a postscript section starting with
           the keyword containing in the `instruction_args`; otherwise False.
         """
+        assert self._postscript_marker is not None
         value = value.lower()
         if self._postscript_marker == "P.P.S":
             postscript_pattern = r"\s*p\.\s?p\.\s?s.*$"
@@ -648,7 +654,7 @@ class PostscriptChecker(Instruction):
 class RephraseChecker(Instruction):
     """Checks the repharse."""
 
-    def build_description(self, *, original_message):
+    def build_description(self, *, original_message=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -711,7 +717,7 @@ class RephraseChecker(Instruction):
 class KeywordChecker(Instruction):
     """Check the exisitence of certain keywords."""
 
-    def build_description(self, *, keywords=None):
+    def build_description(self, *, keywords=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -748,7 +754,7 @@ class KeywordChecker(Instruction):
 class KeywordFrequencyChecker(Instruction):
     """Check the keyword frequency."""
 
-    def build_description(self, *, keyword=None, frequency=None, relation=None):
+    def build_description(self, *, keyword=None, frequency=None, relation=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -800,6 +806,7 @@ class KeywordFrequencyChecker(Instruction):
 
     def check_following(self, value):
         """Checks if the response contain the keyword with required frequency."""
+        assert self._frequency is not None
         actual_occurrences = len(re.findall(self._keyword, value, flags=re.IGNORECASE))
 
         if self._comparison_relation == _COMPARISON_RELATION[0]:
@@ -811,7 +818,7 @@ class KeywordFrequencyChecker(Instruction):
 class NumberOfWords(Instruction):
     """Checks the number of words."""
 
-    def build_description(self, *, num_words=None, relation=None):
+    def build_description(self, *, num_words=None, relation=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -865,7 +872,7 @@ class NumberOfWords(Instruction):
 class JsonFormat(Instruction):
     """Check the Json format."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         self._description_pattern = (
             "Entire output should be wrapped in JSON format. You can use markdown ticks such as ```."
         )
@@ -899,7 +906,7 @@ class JsonFormat(Instruction):
 class ParagraphFirstWordCheck(Instruction):
     """Check the paragraph and the first word of the nth paragraph."""
 
-    def build_description(self, num_paragraphs=None, nth_paragraph=None, first_word=None):
+    def build_description(self, num_paragraphs=None, nth_paragraph=None, first_word=None, **kwargs):
         r"""Build the instruction description.
 
         Args:
@@ -970,6 +977,7 @@ class ParagraphFirstWordCheck(Instruction):
                 num_paragraphs -= 1
 
         # check that index doesn't go out of bounds
+        assert self._nth_paragraph is not None
         if self._nth_paragraph <= num_paragraphs:
             paragraph = paragraphs[self._nth_paragraph - 1].strip()
             if not paragraph:
@@ -998,7 +1006,7 @@ class ParagraphFirstWordCheck(Instruction):
 class KeySentenceChecker(Instruction):
     """Check the existence of certain key sentences."""
 
-    def build_description(self, key_sentences=None, num_sentences=None):
+    def build_description(self, key_sentences=None, num_sentences=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1048,7 +1056,7 @@ class KeySentenceChecker(Instruction):
 class ForbiddenWords(Instruction):
     """Checks that specified words are not used in response."""
 
-    def build_description(self, forbidden_words=None):
+    def build_description(self, forbidden_words=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1084,7 +1092,7 @@ class ForbiddenWords(Instruction):
 class RephraseParagraph(Instruction):
     """Checks that the paragraph is rephrased."""
 
-    def build_description(self, *, original_paragraph, low, high):
+    def build_description(self, *, original_paragraph=None, low=None, high=None, **kwargs):
         """Builds the instruction description.
 
         Args:
@@ -1122,6 +1130,9 @@ class RephraseParagraph(Instruction):
         return ["original_paragraph", "low", "high"]
 
     def check_following(self, value):
+        assert self._original_paragraph is not None
+        assert self._low is not None
+        assert self._high is not None
         val_words = re.findall(r"\w+", value.lower())
         original_words = re.findall(r"\w+", self._original_paragraph.lower())
         similar_words = 0
@@ -1138,7 +1149,7 @@ class RephraseParagraph(Instruction):
 class TwoResponsesChecker(Instruction):
     """Check that two responses were given."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = (
             "Give two different responses. Responses and only responses should"
@@ -1177,7 +1188,7 @@ class TwoResponsesChecker(Instruction):
 class RepeatPromptThenAnswer(Instruction):
     """Checks that Prompt is first repeated then answered."""
 
-    def build_description(self, *, prompt_to_repeat=None):
+    def build_description(self, *, prompt_to_repeat=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1212,7 +1223,7 @@ class RepeatPromptThenAnswer(Instruction):
 class EndChecker(Instruction):
     """Checks that the prompt ends with a given phrase."""
 
-    def build_description(self, *, end_phrase=None):
+    def build_description(self, *, end_phrase=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1238,6 +1249,7 @@ class EndChecker(Instruction):
 
     def check_following(self, value):
         """Checks if the response ends with the expected phrase."""
+        assert self._end_phrase is not None
         value = value.strip().strip('"').lower()
         self._end_phrase = self._end_phrase.strip().lower()
         return value.endswith(self._end_phrase)
@@ -1246,7 +1258,7 @@ class EndChecker(Instruction):
 class TitleChecker(Instruction):
     """Checks the response for a title."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = (
             "Your answer must contain a title, wrapped in double angular brackets, such as <<poem of joy>>."
@@ -1272,7 +1284,7 @@ class TitleChecker(Instruction):
 class LetterFrequencyChecker(Instruction):
     """Checks letter frequency."""
 
-    def build_description(self, *, letter=None, let_frequency=None, let_relation=None):
+    def build_description(self, *, letter=None, let_frequency=None, let_relation=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1326,6 +1338,7 @@ class LetterFrequencyChecker(Instruction):
 
     def check_following(self, value):
         """Checks that the response contains the letter at the right frequency."""
+        assert self._frequency is not None
         value = value.lower()
         letters = collections.Counter(value)
 
@@ -1338,7 +1351,7 @@ class LetterFrequencyChecker(Instruction):
 class CapitalLettersEnglishChecker(Instruction):
     """Checks that the response is in english and is in all capital letters."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = "Your entire response should be in English, and in all capital letters."
         return self._description_pattern
@@ -1365,7 +1378,7 @@ class CapitalLettersEnglishChecker(Instruction):
 class LowercaseLettersEnglishChecker(Instruction):
     """Checks that the response is in english and is in all lowercase letters."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = (
             "Your entire response should be in English, and in all lowercase letters. No capital letters are allowed."
@@ -1394,7 +1407,7 @@ class LowercaseLettersEnglishChecker(Instruction):
 class CommaChecker(Instruction):
     """Checks the response for no commas."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = "In your entire response, refrain from the use of any commas."
         return self._description_pattern
@@ -1414,7 +1427,7 @@ class CommaChecker(Instruction):
 class CapitalWordFrequencyChecker(Instruction):
     """Checks frequency of words with all capital letters."""
 
-    def build_description(self, capital_frequency=None, capital_relation=None):
+    def build_description(self, capital_frequency=None, capital_relation=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1455,6 +1468,7 @@ class CapitalWordFrequencyChecker(Instruction):
 
     def check_following(self, value):
         """Checks the frequency of words with all capital letters."""
+        assert self._frequency is not None
         # Hyphenated words will count as one word
         words = instructions_util.nltk.word_tokenize(value)
         capital_words = [word for word in words if word.isupper()]
@@ -1470,7 +1484,7 @@ class CapitalWordFrequencyChecker(Instruction):
 class QuotationChecker(Instruction):
     """Checks response is wrapped with double quotation marks."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = "Wrap your entire response with double quotation marks."
         return self._description_pattern
@@ -1492,7 +1506,7 @@ class QuotationChecker(Instruction):
 class RepeatPhraseChecker(Instruction):
     "Repeat the phrase {phrase} exactly {small_n} times, transforming it slightly each time by replacing only one word in the center of the phrase."
 
-    def build_description(self, phrase=None, small_n=None):
+    def build_description(self, phrase=None, small_n=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1555,7 +1569,7 @@ class RepeatPhraseChecker(Instruction):
 class CopyChecker(Instruction):
     """Checks that Prompt is first repeated then answered."""
 
-    def build_description(self, prompt_to_repeat=None):
+    def build_description(self, prompt_to_repeat=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1585,7 +1599,7 @@ class CopyChecker(Instruction):
 class CopySpanIdxChecker(Instruction):
     """{prompt_to_repeat}. Copy the span of words that lies between (and including) index {n_start} and {n_end}, the indices are character indices!"""
 
-    def build_description(self, prompt_to_repeat=None, n_start=None, n_end=None):
+    def build_description(self, prompt_to_repeat=None, n_start=None, n_end=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1628,7 +1642,7 @@ class CopySpanIdxChecker(Instruction):
 class SentenceHyphenChecker(Instruction):
     """All sentences must be connected using hyphens, with no spaces between them."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = "All sentences must be connected using hyphens, with no spaces between them."
         return self._description_pattern
@@ -1655,7 +1669,7 @@ class SentenceHyphenChecker(Instruction):
 class AdjacentLetterChecker(Instruction):
     """No two adjacent words can start with consecutive letters of the alphabet."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = "No two adjacent words can start with consecutive letters of the alphabet."
         return self._description_pattern
@@ -1683,7 +1697,7 @@ class AdjacentLetterChecker(Instruction):
 class SquareBracketChecker(Instruction):
     """Enclose every word in your response within square brackets."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = "Enclose every word in your response within square brackets."
         return self._description_pattern
@@ -1704,7 +1718,7 @@ class SquareBracketChecker(Instruction):
 class KeywordFrequencyOnceChecker(Instruction):
     """Check the keyword frequency."""
 
-    def build_description(self, *, keyword=None):
+    def build_description(self, *, keyword=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1749,7 +1763,7 @@ class KeywordFrequencyOnceChecker(Instruction):
 class KeywordFrequencyCheckerDifferent(Instruction):
     """Check the keyword frequency."""
 
-    def build_description(self, *, keyword=None, frequency=None, relation=None):
+    def build_description(self, *, keyword=None, frequency=None, relation=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1799,6 +1813,7 @@ class KeywordFrequencyCheckerDifferent(Instruction):
 
     def check_following(self, value):
         """Checks if the response contain the keyword with required frequency."""
+        assert self._frequency is not None
         actual_occurrences = len(re.findall(self._keyword, value, flags=re.IGNORECASE))
 
         if self._comparison_relation == _COMPARISON_RELATION[0]:
@@ -1810,7 +1825,7 @@ class KeywordFrequencyCheckerDifferent(Instruction):
 class ExcludeWordHarderChecker(Instruction):
     """Checks that specified words are not used in response."""
 
-    def build_description(self, keyword=None, instruction=None):
+    def build_description(self, keyword=None, instruction=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1821,6 +1836,7 @@ class ExcludeWordHarderChecker(Instruction):
           A string representing the instruction description.
         """
         if not keyword:
+            assert instruction is not None
             self._keyword = random.choice(instruction.split())
         else:
             self._keyword = keyword.strip()
@@ -1845,7 +1861,7 @@ class ExcludeWordHarderChecker(Instruction):
 class ParagraphBasicChecker(Instruction):
     """Checks the paragraphs."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1895,7 +1911,7 @@ class ParagraphBasicChecker(Instruction):
 class ParagraphBasicChecker2(Instruction):
     """Checks the paragraphs."""
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1943,7 +1959,7 @@ class ParagraphBasicChecker2(Instruction):
 class FirstWordSentChecker(Instruction):
     """The first word of each sentence should be the word {first_word}."""
 
-    def build_description(self, first_word=None):
+    def build_description(self, first_word=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -1997,7 +2013,7 @@ class FirstWordSentChecker(Instruction):
 class FirstWordAnswerChecker(Instruction):
     """The first word of each sentence should be the word {first_word}."""
 
-    def build_description(self, first_word=None):
+    def build_description(self, first_word=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -2042,7 +2058,7 @@ class FirstWordAnswerChecker(Instruction):
 class LastWordSentChecker(Instruction):
     """The last word of each sentence should be the word {last_word}."""
 
-    def build_description(self, last_word=None):
+    def build_description(self, last_word=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -2100,7 +2116,7 @@ class LastWordSentChecker(Instruction):
 class LastWordAnswerChecker(Instruction):
     """The last word of your response should be the word {last_word}."""
 
-    def build_description(self, last_word=None):
+    def build_description(self, last_word=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -2145,7 +2161,7 @@ class LastWordAnswerChecker(Instruction):
 class BiGramWrappingChecker(Instruction):
     "Wrap every word bigram in double angular brackets, such as <<I am>> <<at home>> <<with my>> <<cute dog>>."
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = (
             "Wrap every word bigram in double angular brackets, such as <<I am>> <<at home>> <<with my>> <<cute dog>>."
@@ -2171,7 +2187,7 @@ class BiGramWrappingChecker(Instruction):
 class CopyingSimpleChecker(Instruction):
     "Repeat the request without change (do not say anything before repeating the request; the request you need to repeat does not include this sentence) and do not answer the actual request!"
 
-    def build_description(self, prompt_to_repeat=None):
+    def build_description(self, prompt_to_repeat=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -2201,7 +2217,7 @@ class CopyingSimpleChecker(Instruction):
 class CopyingMultipleChecker(Instruction):
     "Repeat the request without change {N} times, separated by 6 asterisk symbols (do not say anything before repeating the request; the request you need to repeat does not include this sentence) and do not answer the actual request!"
 
-    def build_description(self, prompt_to_repeat=None, N=None):
+    def build_description(self, prompt_to_repeat=None, N=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -2239,7 +2255,7 @@ class CopyingMultipleChecker(Instruction):
 class PunctuationDotChecker(Instruction):
     "In your entire response, refrain from the use of . (i.e. dots) as punctuation and in general."
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = (
             "In your entire response, refrain from the use of . (i.e. dots) as punctuation and in general."
@@ -2261,7 +2277,7 @@ class PunctuationDotChecker(Instruction):
 class PunctuationExclamationChecker(Instruction):
     "In your entire response, refrain from the use of ! (i.e. exclamation marks) as punctuation and in general."
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = "In your entire response, refrain from the use of ! (i.e. exclamation marks) as punctuation and in general."
         return self._description_pattern
@@ -2281,7 +2297,7 @@ class PunctuationExclamationChecker(Instruction):
 class LowercaseCountingChecker(Instruction):
     "In your response, all lowercase words should appear at most {N} times."
 
-    def build_description(self, N=None):
+    def build_description(self, N=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -2313,7 +2329,7 @@ class LowercaseCountingChecker(Instruction):
 class LetterCountingChecker(Instruction):
     "Answer with {relation} {N} letters."
 
-    def build_description(self, N=None, relation=None):
+    def build_description(self, N=None, relation=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -2352,7 +2368,7 @@ class LetterCountingChecker(Instruction):
 class CountingCompositionChecker(Instruction):
     "Write 3 paragraphs, delimited by the markdown divider: * * *, with exactly {n_sent} sentences each, with exactly {n_words} words in each sentence."
 
-    def build_description(self, n_sent=None, n_words=None):
+    def build_description(self, n_sent=None, n_words=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -2418,7 +2434,7 @@ class CountingCompositionChecker(Instruction):
 class CountUniqueChecker(Instruction):
     "Only use unique words in your response, no word should be repeated!"
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = "Only use unique words in your response, no word should be repeated!"
         return self._description_pattern
@@ -2440,7 +2456,7 @@ class CountUniqueChecker(Instruction):
 class CountIncrementWordChecker(Instruction):
     "Include keyword {keyword1} once in your response, keyword {keyword2} twice in your response."
 
-    def build_description(self, keyword1=None, keyword2=None):
+    def build_description(self, keyword1=None, keyword2=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -2492,7 +2508,7 @@ class CountIncrementWordChecker(Instruction):
 class PalindromeBasicChecker(Instruction):
     "Include a palindrome in your response."
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = "Include a palindrome in your response."
         return self._description_pattern
@@ -2520,7 +2536,7 @@ class PalindromeBasicChecker(Instruction):
 class KeywordSpecificPositionChecker(Instruction):
     "Include keyword {keyword1} in the {n}-th sentence, as the {m}-th word of that sentence."
 
-    def build_description(self, keyword=None, n=None, m=None):
+    def build_description(self, keyword=None, n=None, m=None, **kwargs):
         """Build the instruction description.
 
         Args:
@@ -2583,7 +2599,7 @@ class KeywordSpecificPositionChecker(Instruction):
 class StartEndChecker(Instruction):
     "Start and end your response with the same word (do not write anything after the last word, not even punctuation)."
 
-    def build_description(self):
+    def build_description(self, **kwargs):
         """Build the instruction description."""
         self._description_pattern = "Start and end your response with the same word (do not write anything after the last word, not even punctuation)."
         return self._description_pattern

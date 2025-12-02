@@ -42,7 +42,7 @@ NUM_CPUS_FOR_DATASET_MAP = 4
 @dataclass
 class Args:
     dataset_mixer_list: list[str]
-    dataset_splits: list[str] = None
+    dataset_splits: list[str] | None = None
     dataset_start_idx: int = 0
     dataset_end_idx: int | None = None
 
@@ -78,13 +78,21 @@ def save_jsonl(save_filename: str, table: dict[str, list]):
 
 
 async def generate_with_openai(model_name: str, data_list: list, args: Args, gen_args: GenerationArgs):
-    config = LLMGenerationConfig(model=model_name, num_completions=gen_args.num_completions)
+    config = LLMGenerationConfig(
+        model=model_name,
+        num_completions=gen_args.num_completions,
+        temperature=gen_args.temperature,
+        response_length=gen_args.response_length,
+        top_p=gen_args.top_p,
+    )
     processor = LLMProcessor(config)
-    results = await processor.process_batch(data_list, args, gen_args)
+    results = await processor.process_batch(data_list, args, config)  # type: ignore[arg-type]
     return results
 
 
-def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: list[int], gen_args: GenerationArgs):
+def generate_with_vllm(
+    model_name_or_path: str, revision: str, prompt_token_ids: list[list[int]], gen_args: GenerationArgs
+):
     llm = LLM(
         model=model_name_or_path,
         revision=revision,
@@ -94,14 +102,14 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
     )
 
     # filter out prompts which are beyond the model's max token length
-    max_model_len = llm.llm_engine.scheduler_config.max_model_len
+    max_model_len = llm.llm_engine.scheduler_config.max_model_len  # type: ignore[union-attr]
     prompt_token_ids_len = len(prompt_token_ids)
     prompt_token_ids = [item for item in prompt_token_ids if len(item) < max_model_len]
     if len(prompt_token_ids) != prompt_token_ids_len:
         print(f"Filtered out {prompt_token_ids_len - len(prompt_token_ids)} prompts which exceeds max token length")
 
-    outputs = llm.generate(
-        prompt_token_ids=prompt_token_ids,
+    outputs = llm.generate(  # type: ignore[call-arg, unknown-argument]
+        prompt_token_ids=prompt_token_ids,  # type: ignore[unknown-argument]
         sampling_params=SamplingParams(
             n=gen_args.num_completions,
             temperature=gen_args.temperature,
@@ -132,11 +140,13 @@ def format_conversation(messages: list) -> str:
 
 def main(args: Args, dataset_config: DatasetConfig, gen_args: GenerationArgs):
     dataset = combine_dataset(
-        args.dataset_mixer_list, splits=args.dataset_splits, columns_to_keep=[dataset_config.sft_messages_key]
+        args.dataset_mixer_list,
+        splits=args.dataset_splits,  # type: ignore[arg-type]
+        columns_to_keep=[dataset_config.sft_messages_key],
     )
     if args.dataset_end_idx is None:
         args.dataset_end_idx = len(dataset)
-    dataset = dataset.select(range(args.dataset_start_idx, args.dataset_end_idx))
+    dataset = dataset.select(range(args.dataset_start_idx, args.dataset_end_idx))  # type: ignore[union-attr]
     pprint([dataset_config, args, gen_args])
 
     if "gpt-3.5" in args.model_name_or_path or "gpt-4" in args.model_name_or_path:
@@ -225,5 +235,5 @@ gen_args:
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((Args, DatasetConfig, GenerationArgs))
-    main(*parser.parse())
+    parser = ArgumentParserPlus((Args, DatasetConfig, GenerationArgs))  # type: ignore[arg-type]
+    main(*parser.parse())  # type: ignore[arg-type]

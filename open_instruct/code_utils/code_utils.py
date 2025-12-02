@@ -338,8 +338,8 @@ def reliability_guard(maximum_memory_bytes: int | None = None):
 
     import builtins
 
-    builtins.exit = None
-    builtins.quit = None
+    builtins.exit = None  # type: ignore[assignment]
+    builtins.quit = None  # type: ignore[assignment]
     # builtins.open = None
     # builtins.print = lambda *args, **kwargs: None
 
@@ -351,38 +351,38 @@ def reliability_guard(maximum_memory_bytes: int | None = None):
 
     # os.environ["OMP_NUM_THREADS"] = "1"
     # os.kill = None
-    os.system = None
-    os.putenv = None
-    os.remove = None
-    os.removedirs = None
-    os.rmdir = None
-    os.fchdir = None
-    os.setuid = None
+    os.system = None  # type: ignore[assignment]
+    os.putenv = None  # type: ignore[assignment]
+    os.remove = None  # type: ignore[assignment]
+    os.removedirs = None  # type: ignore[assignment]
+    os.rmdir = None  # type: ignore[assignment]
+    os.fchdir = None  # type: ignore[assignment]
+    os.setuid = None  # type: ignore[assignment]
     # os.fork = None
-    os.forkpty = None
-    os.killpg = None
-    os.rename = None
-    os.renames = None
-    os.truncate = None
-    os.replace = None
-    os.unlink = None
-    os.fchmod = None
-    os.fchown = None
-    os.chmod = None
-    os.chown = None
-    os.chroot = None
-    os.fchdir = None
-    os.lchflags = None
-    os.lchmod = None
-    os.lchown = None
-    os.getcwd = None
-    os.chdir = None
+    os.forkpty = None  # type: ignore[assignment]
+    os.killpg = None  # type: ignore[assignment]
+    os.rename = None  # type: ignore[assignment]
+    os.renames = None  # type: ignore[assignment]
+    os.truncate = None  # type: ignore[assignment]
+    os.replace = None  # type: ignore[assignment]
+    os.unlink = None  # type: ignore[assignment]
+    os.fchmod = None  # type: ignore[assignment]
+    os.fchown = None  # type: ignore[assignment]
+    os.chmod = None  # type: ignore[assignment]
+    os.chown = None  # type: ignore[assignment]
+    os.chroot = None  # type: ignore[assignment]
+    os.fchdir = None  # type: ignore[assignment]
+    os.lchflags = None  # type: ignore[assignment]
+    os.lchmod = None  # type: ignore[assignment]
+    os.lchown = None  # type: ignore[assignment]
+    os.getcwd = None  # type: ignore[assignment]
+    os.chdir = None  # type: ignore[assignment]
 
     import shutil
 
-    shutil.rmtree = None
-    shutil.move = None
-    shutil.chown = None
+    shutil.rmtree = None  # type: ignore[assignment]
+    shutil.move = None  # type: ignore[assignment]
+    shutil.chown = None  # type: ignore[assignment]
 
     import subprocess
 
@@ -390,8 +390,8 @@ def reliability_guard(maximum_memory_bytes: int | None = None):
 
     # __builtins__['help'] = None
 
-    sys.modules["ipdb"] = None
-    sys.modules["joblib"] = None
-    sys.modules["resource"] = None
-    sys.modules["psutil"] = None
-    sys.modules["tkinter"] = None
+    sys.modules["ipdb"] = None  # type: ignore[assignment]
+    sys.modules["joblib"] = None  # type: ignore[assignment]
+    sys.modules["resource"] = None  # type: ignore[assignment]
+    sys.modules["psutil"] = None  # type: ignore[assignment]
+    sys.modules["tkinter"] = None  # type: ignore[assignment]

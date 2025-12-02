@@ -147,6 +147,7 @@ def main(args: Args):
     )
 
     if args.batch:
+        assert args.azure_endpoint is not None
         client = AzureOpenAI(api_key=args.api_key, api_version=args.api_version, azure_endpoint=args.azure_endpoint)
         with open(args.input_file, "rb") as input_file:
             file = client.files.create(file=input_file, purpose="batch")
@@ -156,7 +157,7 @@ def main(args: Args):
 
         # Submit a batch job with the file
         batch_response = client.batches.create(
-            input_file_id=file_id, endpoint="/chat/completions", completion_window="24h"
+            input_file_id=file_id, endpoint="/v1/chat/completions", completion_window="24h"
         )
 
         # Save batch ID for later use
@@ -172,6 +173,8 @@ def main(args: Args):
             print(f"{datetime.datetime.now()} Batch Id: {batch_id},  Status: {status}")
 
         if batch_response.status == "failed":
+            assert batch_response.errors is not None
+            assert batch_response.errors.data is not None
             for error in batch_response.errors.data:
                 print(f"Error code {error.code} Message {error.message}")
 
@@ -188,6 +191,7 @@ def main(args: Args):
                     outfile.write(raw_response + "\n")
             console.print(f"[bold green]Output saved to {args.output_file}[/bold green]")
     else:
+        assert args.azure_endpoint is not None
         client = AsyncAzureOpenAI(
             api_key=args.api_key, api_version=args.api_version, azure_endpoint=args.azure_endpoint
         )
@@ -232,5 +236,5 @@ def main(args: Args):
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser(Args)
-    main(*parser.parse_args_into_dataclasses())
+    parser = HfArgumentParser(Args)  # type: ignore[arg-type]
+    main(*parser.parse_args_into_dataclasses())  # type: ignore[arg-type]

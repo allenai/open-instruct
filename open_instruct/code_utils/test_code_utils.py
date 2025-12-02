@@ -52,13 +52,13 @@ class GetSuccessfulTestsFastTests(BaseCodeTestCase):
 
         # Choose the same sample index used in the original snippet.
         i = 1
-        program = ds[i]["inferences"][-1]["completion"]
-        tests = code_utils.decode_tests(ds[i]["test_cases"])
+        program = ds[i]["inferences"][-1]["completion"]  # type: ignore[index]
+        tests = code_utils.decode_tests(ds[i]["test_cases"])  # type: ignore[index]
 
         # The dataset also stores a pass-rate; we can use it to sanity-check.
-        expected_passes = int(len(tests) * ds[i]["inferences"][-1]["pass_rate"])
+        expected_passes = int(len(tests) * ds[i]["inferences"][-1]["pass_rate"])  # type: ignore[index]
 
-        result, _ = code_utils.get_successful_tests_fast(program=program, tests=tests)
+        result, _ = code_utils.get_successful_tests_fast(program=program, tests=tests)  # type: ignore[arg-type]
         self.assertEqual(sum(result), expected_passes)
 
     def test_add_function_example(self):

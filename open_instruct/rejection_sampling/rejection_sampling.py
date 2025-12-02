@@ -77,9 +77,7 @@ def save_jsonl(save_filename: str, table: dict[str, list]):
             outfile.write("\n")
 
 
-def process_shard(
-    rank: int, model_name_or_path: str, args: Args, shard: list[str]
-) -> tuple[torch.Tensor, torch.Tensor]:
+def process_shard(rank: int, model_name_or_path: str, args: Args, shard: list[dict]) -> torch.Tensor:
     """
     This function processes a shard (subset) of data using a specified model. It tokenizes the data,
     runs it through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
@@ -121,7 +119,7 @@ def process_shard(
     return scores
 
 
-def process_shard_api(model_name_or_path: str, args: Args, shard: list[str]) -> tuple[torch.Tensor, torch.Tensor]:
+def process_shard_api(model_name_or_path: str, args: Args, shard: list[dict]) -> torch.Tensor:
     """
     This function processes a shard (subset) of data using api-based models.
     It feeds data through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
@@ -151,7 +149,7 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: list[str]) -> 
         {"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses)
     ]
     model_responses_scores = asyncio.run(
-        generate_with_openai(model_name_or_path, data_list_model_responses, args, gen_args)
+        generate_with_openai(model_name_or_path, data_list_model_responses, args, gen_args)  # type: ignore[arg-type]
     )
 
     return torch.Tensor(model_responses_scores)
@@ -184,7 +182,7 @@ def batch_processing_scores(
             data = ds[sorted_indices[i : i + current_batch_size]]
             try:
                 print(f"processing: {i}:{i + current_batch_size}/{len(ds)}")
-                input_ids = data_collator(data)["input_ids"].to(device)
+                input_ids = data_collator(data)["input_ids"].to(device)  # type: ignore[arg-type]
                 _, score, _ = get_reward(model, input_ids, tokenizer.pad_token_id, 0)
                 # score = (batch_size, )
                 scores.extend(score.cpu().tolist())  # convert the tensor score to a list
@@ -201,7 +199,7 @@ def batch_processing_scores(
     return torch.tensor(scores)
 
 
-def majority_vote(offsets_per_model: dict[str, torch.tensor]) -> torch.tensor:
+def majority_vote(offsets_per_model: dict[str, torch.Tensor]) -> torch.Tensor:
     """
     offsets_per_model: offsets returned by each model. each tensor is of shape (n_prompts,) indicating best/worst completion offset per prompt
     """
@@ -386,6 +384,6 @@ args:
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser((Args,))
+    parser = HfArgumentParser((Args,))  # type: ignore[arg-type]
     args = parser.parse_args_into_dataclasses()[0]
-    main(args)
+    main(args)  # type: ignore[arg-type]

@@ -214,6 +214,7 @@ async def execute_code(req: CodeRequest):  # noqa: D401
     loop = asyncio.get_running_loop()
     fut = loop.run_in_executor(process_pool, _run_user_code, req.code, req.timeout)
 
+    assert req.timeout is not None
     try:
         result = await asyncio.wait_for(fut, timeout=req.timeout + 1)
     except asyncio.TimeoutError:
@@ -229,14 +230,18 @@ async def execute_code(req: CodeRequest):  # noqa: D401
         "📤 Responding success=%s latency=%.1f ms output_len=%s error=%s, output=\n%s",
         result["success"],
         latency_ms,
-        len(result["output"] or ""),
+        len(str(result["output"] or "")),
         bool(result["error"]),
         result["output"],
     )
     if result["error"] is not None:
         logger.debug("Error: %s", result["error"])
 
-    return CodeResponse(**result)
+    return CodeResponse(
+        output=str(result["output"]) if result["output"] else "",
+        error=str(result["error"]) if result["error"] else None,
+        success=bool(result["success"]),
+    )
 
 
 @app.get("/")

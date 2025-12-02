@@ -59,7 +59,7 @@ class Capturing(list):
         self._stdout = sys.stdout
         sys.stdout = self._stringio = StringIO()
         # Make closing the StringIO a no-op
-        self._stringio.close = lambda x: 1
+        self._stringio.close = lambda x: 1  # type: ignore[method-assign]
         return self
 
     def __exit__(self, *args):
@@ -132,6 +132,7 @@ def make_function(code: str) -> str:
             body=all_other_stmts,
             decorator_list=[],
             lineno=-1,
+            type_params=[],
         )
         main_code = (
             import_string

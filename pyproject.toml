@@ -143,4 +143,13 @@ case-sensitive = false
 split-on-trailing-comma = false
 
 [tool.ty.src]
-exclude = ["open_instruct/", "scripts/", "decontamination/", "human_eval/"]
+include = [
+    "open_instruct/code_utils/",
+    "open_instruct/experimental/",
+    "open_instruct/IFEvalG/",
+    "open_instruct/olmo_adapter/",
+    "open_instruct/rejection_sampling/",
+    "open_instruct/search_utils/",
+    "open_instruct/tool_utils/",
+]
+exclude = ["scripts/", "decontamination/", "human_eval/"]

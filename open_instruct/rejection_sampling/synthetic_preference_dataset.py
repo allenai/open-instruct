@@ -163,6 +163,7 @@ def main(args: Args):
     print(f"{len(all_comparison_pairs)=}")
 
     async def get_judgement_all(model: str, all_comparison_pairs: list[list[dict[str, str]]]):
+        assert args.max_parallel_requests is not None
         limiter = asyncio.Semaphore(args.max_parallel_requests)
         tasks = []
         for comparison_pair in all_comparison_pairs:
@@ -219,6 +220,6 @@ args:
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser((Args,))
+    parser = HfArgumentParser((Args,))  # type: ignore[arg-type]
     args = parser.parse_args_into_dataclasses()[0]
-    main(args)
+    main(args)  # type: ignore[arg-type]

@@ -9,7 +9,7 @@ from transformers.models.olmoe.modeling_olmoe import OlmoeConfig, OlmoeModel, Ol
 class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
     def __init__(self, config: Olmo2Config):
         super().__init__(config)
-        self.num_labels = config.num_labels
+        self.num_labels = config.num_labels  # type: ignore[misc]
         self.model = Olmo2Model(config)
         self.score = nn.Linear(config.hidden_size, self.num_labels, bias=False)
 
@@ -57,7 +57,8 @@ class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
         hidden_states = transformer_outputs[0]
         logits = self.score(hidden_states)
 
-        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
+        assert inputs_embeds is not None or input_ids is not None
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]  # type: ignore[union-attr]
 
         if self.config.pad_token_id is None and batch_size != 1:
             raise ValueError("Cannot handle batch sizes > 1 if no padding token is defined.")
@@ -76,11 +77,11 @@ class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
 
         loss = None
         if labels is not None:
-            labels = labels.to(logits.device)
+            labels_device = labels.to(logits.device)
             if self.config.problem_type is None:
                 if self.num_labels == 1:
                     self.config.problem_type = "regression"
-                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                elif self.num_labels > 1 and (labels_device.dtype == torch.long or labels_device.dtype == torch.int):
                     self.config.problem_type = "single_label_classification"
                 else:
                     self.config.problem_type = "multi_label_classification"
@@ -88,15 +89,15 @@ class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
             if self.config.problem_type == "regression":
                 loss_fct = MSELoss()
                 if self.num_labels == 1:
-                    loss = loss_fct(pooled_logits.squeeze(), labels.squeeze())
+                    loss = loss_fct(pooled_logits.squeeze(), labels_device.squeeze())
                 else:
-                    loss = loss_fct(pooled_logits, labels)
+                    loss = loss_fct(pooled_logits, labels_device)
             elif self.config.problem_type == "single_label_classification":
                 loss_fct = CrossEntropyLoss()
-                loss = loss_fct(pooled_logits.view(-1, self.num_labels), labels.view(-1))
+                loss = loss_fct(pooled_logits.view(-1, self.num_labels), labels_device.view(-1))
             elif self.config.problem_type == "multi_label_classification":
                 loss_fct = BCEWithLogitsLoss()
-                loss = loss_fct(pooled_logits, labels)
+                loss = loss_fct(pooled_logits, labels_device)
         if not return_dict:
             output = (pooled_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
@@ -113,7 +114,7 @@ class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
 class OlmoeForSequenceClassification(OlmoePreTrainedModel):
     def __init__(self, config: OlmoeConfig):
         super().__init__(config)
-        self.num_labels = config.num_labels
+        self.num_labels = config.num_labels  # type: ignore[misc]
         self.model = OlmoeModel(config)
         self.score = nn.Linear(config.hidden_size, self.num_labels, bias=False)
 
@@ -165,7 +166,8 @@ class OlmoeForSequenceClassification(OlmoePreTrainedModel):
         hidden_states = transformer_outputs[0]
         logits = self.score(hidden_states)
 
-        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
+        assert inputs_embeds is not None or input_ids is not None
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]  # type: ignore[union-attr]
 
         if self.config.pad_token_id is None and batch_size != 1:
             raise ValueError("Cannot handle batch sizes > 1 if no padding token is defined.")
@@ -184,11 +186,11 @@ class OlmoeForSequenceClassification(OlmoePreTrainedModel):
 
         loss = None
         if labels is not None:
-            labels = labels.to(logits.device)
+            labels_device = labels.to(logits.device)
             if self.config.problem_type is None:
                 if self.num_labels == 1:
                     self.config.problem_type = "regression"
-                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                elif self.num_labels > 1 and (labels_device.dtype == torch.long or labels_device.dtype == torch.int):
                     self.config.problem_type = "single_label_classification"
                 else:
                     self.config.problem_type = "multi_label_classification"
@@ -196,15 +198,15 @@ class OlmoeForSequenceClassification(OlmoePreTrainedModel):
             if self.config.problem_type == "regression":
                 loss_fct = MSELoss()
                 if self.num_labels == 1:
-                    loss = loss_fct(pooled_logits.squeeze(), labels.squeeze())
+                    loss = loss_fct(pooled_logits.squeeze(), labels_device.squeeze())
                 else:
-                    loss = loss_fct(pooled_logits, labels)
+                    loss = loss_fct(pooled_logits, labels_device)
             elif self.config.problem_type == "single_label_classification":
                 loss_fct = CrossEntropyLoss()
-                loss = loss_fct(pooled_logits.view(-1, self.num_labels), labels.view(-1))
+                loss = loss_fct(pooled_logits.view(-1, self.num_labels), labels_device.view(-1))
             elif self.config.problem_type == "multi_label_classification":
                 loss_fct = BCEWithLogitsLoss()
-                loss = loss_fct(pooled_logits, labels)
+                loss = loss_fct(pooled_logits, labels_device)
         if not return_dict:
             output = (pooled_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output

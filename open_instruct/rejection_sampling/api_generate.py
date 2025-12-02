@@ -16,6 +16,9 @@ class LLMGenerationConfig:
     num_completions: int = 64
     model: str = "gpt-3.5-turbo-0125"
     max_parallel_requests: int | None = None
+    temperature: float = 1.0
+    response_length: int = 2048
+    top_p: float = 1.0
 
     def __post_init__(self):
         if "gpt-3.5" in self.model:
@@ -28,6 +31,8 @@ class LLMGenerationConfig:
 class Args:
     output_path: str | None = None
     num_trials: int = 1
+    mode: str = "generation"
+    skill: str = "default"
 
 
 class LLMProcessor:
@@ -35,7 +40,9 @@ class LLMProcessor:
         self.config = config
         self.async_client = AsyncOpenAI()
 
-    async def process_text(self, data: dict, i: int, limiter: asyncio.Semaphore, args: Args, gen_args: Args):
+    async def process_text(
+        self, data: dict, i: int, limiter: asyncio.Semaphore, args: Args, gen_args: LLMGenerationConfig
+    ):
         if args.mode == "generation":
             template = get_generation_template(args.skill)
             text = template.format(prompt=data)
@@ -81,7 +88,8 @@ class LLMProcessor:
 
         return response
 
-    async def process_batch(self, data_list: list[dict], args: Args, gen_args: Args):
+    async def process_batch(self, data_list: list[dict], args: Args, gen_args: LLMGenerationConfig):
+        assert self.config.max_parallel_requests is not None
         limiter = asyncio.Semaphore(self.config.max_parallel_requests)
         tasks = [self.process_text(data, i, limiter, args, gen_args) for i, data in enumerate(data_list)]
         # Use tqdm to track progress
