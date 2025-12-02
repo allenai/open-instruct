@@ -612,7 +612,7 @@ def prepare_collated_data_for_workers(
                 collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0, pin_memory)
             )
             collated_response_masks.append(
-                collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], False, pin_memory)
+                collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0, pin_memory)
             )
             collated_advantages.append(
                 collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0, pin_memory)
