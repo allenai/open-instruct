@@ -587,7 +587,9 @@ class LLMRayActor:
         **kwargs,
     ):
         assert_threaded_actor(self)
-        self._init_config(tools, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset)
+        self._init_config(
+            tools, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
+        )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
