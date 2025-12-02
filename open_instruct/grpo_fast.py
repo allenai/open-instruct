@@ -972,10 +972,7 @@ class PolicyTrainerRayProcess(RayProcess):
         return collated_logprobs, collated_entropies
 
     def calculate_token_counts(
-        self,
-        accumulation_steps: int,
-        collated_response_masks: list[torch.Tensor],
-        collated_tool_masks: list[torch.Tensor],
+        self, accumulation_steps: int, collated_response_masks: list[torch.Tensor]
     ) -> dict[int, float]:
         """
         Compute the number of training tokens in each batch for this set of responses.
@@ -984,13 +981,9 @@ class PolicyTrainerRayProcess(RayProcess):
         accumulation_counts: dict[int, float] = {}
         local_counts = []
 
-        for i, response_mask in enumerate(collated_response_masks):
+        for response_mask in collated_response_masks:
             response_mask = response_mask.to(self.device)
             mask = response_mask[:, 1:].bool()
-            if self.args.mask_tool_use and self.args.tool_use:
-                tool_mask = collated_tool_masks[i].to(self.device)
-                mask &= tool_mask[:, 1:].bool()
-
             local_counts.append(mask.sum().float())
 
         if not local_counts:
@@ -1101,7 +1094,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 # This ensures all minibatches in an accumulation group are normalized by the same total
                 if args.loss_denominator == "token":
                     accumulation_token_counts = self.calculate_token_counts(
-                        accumulation_steps, collated_response_masks, collated_tool_masks
+                        accumulation_steps, collated_response_masks
                     )
                 else:
                     accumulation_token_counts = {
