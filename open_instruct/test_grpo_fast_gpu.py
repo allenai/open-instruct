@@ -1,4 +1,5 @@
 import json
+import os
 import pathlib
 import unittest
 
@@ -10,15 +11,12 @@ from vllm import SamplingParams
 
 from open_instruct.queue_types import PromptRequest
 from open_instruct.test_grpo_fast import TestGrpoFastBase
-from open_instruct.tool_utils.tools import Tool, ToolOutput
+from open_instruct.tool_utils.tools import PythonCodeTool
 from open_instruct.vllm_utils import create_vllm_engines
 
 TEST_DATA_DIR = pathlib.Path(__file__).parent / "test_data"
 
-
-class RecordingTool(Tool):
-    def __call__(self, prompt: str) -> ToolOutput:
-        return ToolOutput(output="42", called=True, error="", timeout=False, runtime=0.01)
+DEFAULT_CODE_TOOL_ENDPOINT = "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute"
 
 
 class TestGeneration(TestGrpoFastBase):
@@ -69,7 +67,8 @@ class TestGeneration(TestGrpoFastBase):
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_tool_triggered_on_stop_string(self):
         """Test that tools are properly triggered when model generates stop string."""
-        tools = {"</code>": RecordingTool(start_str="<code>", end_str="</code>")}
+        code_endpoint = os.environ.get("CODE_TOOL_API_ENDPOINT", DEFAULT_CODE_TOOL_ENDPOINT)
+        tools = {"</code>": PythonCodeTool(api_endpoint=code_endpoint, start_str="<code>", end_str="</code>")}
         prompt = "Write code to print hello world: <code>"
 
         result = self._setup_engine_and_generate(
@@ -89,7 +88,12 @@ class TestGeneration(TestGrpoFastBase):
         test_data_path = TEST_DATA_DIR / test_data_filename
 
         tokenizer_name = "Qwen/Qwen3-1.7B"
-        tools = {"</code>": RecordingTool(start_str="<code>", end_str="</code>")} if use_tools else None
+        code_endpoint = os.environ.get("CODE_TOOL_API_ENDPOINT", DEFAULT_CODE_TOOL_ENDPOINT)
+        tools = (
+            {"</code>": PythonCodeTool(api_endpoint=code_endpoint, start_str="<code>", end_str="</code>")}
+            if use_tools
+            else None
+        )
         max_tool_calls = (5,) if use_tools else None
         prompt = "Write code to print hello world: <code>" if use_tools else "What is 2 + 2? Answer:"
 
