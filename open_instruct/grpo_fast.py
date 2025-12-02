@@ -957,7 +957,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if not local_counts:
             return accumulation_counts
 
-        # do the all_reduce once to avoid caling each loop
+        # do the all_reduce once to avoid calling each loop
         counts_tensor = torch.stack(local_counts)
         dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
 
