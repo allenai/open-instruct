@@ -941,7 +941,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     return_entropy=False,
                 )
 
-                response_mask_BT = data_BT["response_masks"][i].bool() & data_BT["tool_masks"][i].bool()
+                response_mask_BT = data_BT["response_masks"][i]
                 logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:], INVALID_LOGPROB)
                 logprobs_BT.append(logprob_BT)
 
@@ -953,12 +953,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self, accumulation_steps: int, data_BT: dict[str, list[torch.Tensor]]
     ) -> dict[int, float]:
         accumulation_counts: dict[int, float] = {}
-        local_counts = []
-        for i, response_mask in enumerate(data_BT["response_masks"]):
-            response_mask = response_mask.to(self.device)
-            tool_mask = data_BT["tool_masks"][i].to(self.device)
-            mask = response_mask[:, 1:].bool() & tool_mask[:, 1:].bool()
-            local_counts.append(mask.sum().float())
+        local_counts = [mask[:, 1:].sum().float() for mask in data_BT["response_masks"]]
         if not local_counts:
             return accumulation_counts
         counts_tensor = torch.stack(local_counts)
@@ -987,6 +982,7 @@ class PolicyTrainerRayProcess(RayProcess):
         """
         for tensors in data_BT.values():
             to_device_inplace(tensors, self.device)
+        data_BT["response_masks"] = [mask.bool() for mask in data_BT["response_masks"]]
         num_samples = len(data_BT["query_responses"])
         accumulation_steps = max(math.ceil(num_samples / self.args.num_mini_batches - 0.5), 1)
         leftover = num_samples % accumulation_steps
@@ -1013,10 +1009,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 with torch.no_grad():
                     for i in range(len(data_BT["query_responses"])):
-                        response_mask_BT = data_BT["response_masks"][i].bool() & data_BT["tool_masks"][i].bool()
                         vllm_old_logprob_BT = data_BT["vllm_logprobs"][i][:, 1:]
                         vllm_old_logprob_BT = torch.masked_fill(
-                            vllm_old_logprob_BT, ~response_mask_BT[:, 1:], INVALID_LOGPROB
+                            vllm_old_logprob_BT, ~data_BT["response_masks"][i][:, 1:], INVALID_LOGPROB
                         )
                         vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=INVALID_LOGPROB)
 
@@ -1052,9 +1047,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     }
 
                 for i in range(num_samples):
-                    response_mask_bool_BT = (
-                        data_BT["response_masks"][i][:, 1:].bool() & data_BT["tool_masks"][i][:, 1:].bool()
-                    )
+                    response_mask_BT = data_BT["response_masks"][i][:, 1:]
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
@@ -1067,14 +1060,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.args.temperature,
                         return_entropy=self.args.record_entropy,
                     )
-                    local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_bool_BT, INVALID_LOGPROB)
+                    local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
                     vllm_logprobs_BT = data_BT["vllm_logprobs"][i][:, 1:]
-                    vllm_logprobs_BT = torch.masked_fill(vllm_logprobs_BT, ~response_mask_bool_BT, INVALID_LOGPROB)
+                    vllm_logprobs_BT = torch.masked_fill(vllm_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
                     vllm_logprobs_BT = torch.nan_to_num(vllm_logprobs_BT, nan=INVALID_LOGPROB)
 
                     # Compare vLLM logprobs with local logprobs
                     with torch.no_grad():
-                        valid_mask_BT = response_mask_bool_BT & ~torch.isnan(vllm_logprobs_BT)
+                        valid_mask_BT = response_mask_BT & ~torch.isnan(vllm_logprobs_BT)
                         logprob_diff_BT = (local_logprobs_BT - vllm_logprobs_BT).abs()
                         masked_diff_BT = torch.masked_fill(logprob_diff_BT, ~valid_mask_BT, 0.0)
                         mean_diff = masked_diff_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
@@ -1107,10 +1100,10 @@ class PolicyTrainerRayProcess(RayProcess):
                             old_logprob_BT = old_logprobs_BT[i]
 
                     old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
-                    assert torch.all(old_logprobs_mask_BT == response_mask_bool_BT), (
+                    assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
                         f"Old logprobs mask should match response mask. "
                         f"old_mask sum={old_logprobs_mask_BT.sum()}, "
-                        f"response_mask sum={response_mask_bool_BT.sum()}"
+                        f"response_mask sum={response_mask_BT.sum()}"
                     )
 
                     # Calculate the policy's loss
@@ -1126,18 +1119,18 @@ class PolicyTrainerRayProcess(RayProcess):
                         old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
                         vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
 
-                        assert torch.all(old_logprobs_mask_BT == response_mask_bool_BT), (
+                        assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
                             f"Old logprobs mask should match response mask. "
                             f"old_mask sum={old_logprobs_mask_BT.sum()}, "
-                            f"response_mask sum={response_mask_bool_BT.sum()}"
+                            f"response_mask sum={response_mask_BT.sum()}"
                         )
-                        assert torch.all(vllm_logprobs_mask_BT == response_mask_bool_BT), (
+                        assert torch.all(vllm_logprobs_mask_BT == response_mask_BT), (
                             f"vLLM logprobs mask should match response mask. "
                             f"vllm_mask sum={vllm_logprobs_mask_BT.sum()}, "
-                            f"response_mask sum={response_mask_bool_BT.sum()}"
+                            f"response_mask sum={response_mask_BT.sum()}"
                         )
 
-                        valid_mask_BT = response_mask_bool_BT
+                        valid_mask_BT = response_mask_BT
 
                         # Initialize importance ratio to 1.0 (no effect) for all positions
                         tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
@@ -1176,12 +1169,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         # grpo change: directly subtract KL in loss (add)
                         loss = masked_mean(
                             pg_loss_max_BT + self.args.beta * kl_4BT[self.args.kl_estimator],
-                            response_mask_bool_BT,
+                            response_mask_BT,
                             None,
                             loss_denominator,
                         )
                     else:
-                        loss = masked_mean(pg_loss_max_BT, response_mask_bool_BT, None, loss_denominator)
+                        loss = masked_mean(pg_loss_max_BT, response_mask_BT, None, loss_denominator)
                     loss = loss / accumulation_steps
 
                     # we already took world size into account via the tokens
@@ -1197,16 +1190,16 @@ class PolicyTrainerRayProcess(RayProcess):
                     with torch.no_grad():
                         if args.load_ref_policy:
                             # NOTE: in packed implementation, kl calculation are averages over response tokens
-                            loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_bool_BT).float()
+                            loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
                             loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
                         loss_stats_B["pg_clipfrac"][i] = masked_mean(
-                            (pg_losses2_BT > pg_losses_BT).float(), response_mask_bool_BT
+                            (pg_losses2_BT > pg_losses_BT).float(), response_mask_BT
                         )
-                        loss_stats_B["pg_loss"][i] = masked_mean(pg_loss_max_BT, response_mask_bool_BT)
+                        loss_stats_B["pg_loss"][i] = masked_mean(pg_loss_max_BT, response_mask_BT)
                         loss_stats_B["loss"][i] = loss
-                        loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_bool_BT)
+                        loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
                         if self.args.record_entropy:
-                            loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_bool_BT).float()
+                            loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
 
             with torch.no_grad():
                 if args.load_ref_policy:

@@ -892,12 +892,12 @@ class TestDataPreparation(TestGrpoFastBase):
         self.assertEqual(len(result), world_size)
 
         expected_keys = {
-            "collated_query_responses",
-            "collated_attention_masks",
-            "collated_position_ids",
-            "collated_advantages",
-            "collated_response_masks",
-            "collated_vllm_logprobs",
+            "query_responses",
+            "attention_masks",
+            "position_ids",
+            "advantages",
+            "response_masks",
+            "vllm_logprobs",
         }
 
         expected_samples_per_worker = batch_size // world_size
@@ -910,10 +910,10 @@ class TestDataPreparation(TestGrpoFastBase):
             self.assertIsInstance(worker_data, dict)
             self.assertEqual(set(worker_data.keys()), expected_keys)
 
-            total_samples = sum(len(batch) for batch in worker_data["collated_query_responses"])
+            total_samples = sum(len(batch) for batch in worker_data["query_responses"])
             self.assertEqual(total_samples, expected_samples_per_worker)
 
-            num_microbatches = len(worker_data["collated_query_responses"])
+            num_microbatches = len(worker_data["query_responses"])
             self.assertEqual(num_microbatches, expected_num_microbatches)
 
             for value in worker_data.values():
@@ -929,7 +929,7 @@ class TestDataPreparation(TestGrpoFastBase):
             if not variable_length:
                 continue
 
-            for batch in worker_data["collated_query_responses"]:
+            for batch in worker_data["query_responses"]:
                 for row in batch:
                     padding_mask = row == pad_token_id
                     if not padding_mask.any():
