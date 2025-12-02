@@ -80,7 +80,8 @@ class TestGrpoFastBase(unittest.TestCase):
         env_vars = dict(os.environ)
         env_vars["NCCL_CUMEM_ENABLE"] = "0"
         env_vars["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
-        ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": env_vars})
+        if not ray.is_initialized():
+            ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": env_vars})
 
     def _cleanup_ray_queues(self):
         """Clean up all Ray queues created during the test."""
