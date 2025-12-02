@@ -573,7 +573,7 @@ def prepare_collated_data_for_workers(
 
     Args:
         packed_sequences: Packed training sequences containing query responses,
-            tool masks, attention masks, position IDs, advantages, response masks,
+            attention masks, position IDs, advantages, response masks,
             and vllm logprobs.
         world_size: Number of distributed workers.
         per_device_train_batch_size: Batch size for each device's micro-batch.
@@ -582,14 +582,13 @@ def prepare_collated_data_for_workers(
 
     Returns:
         List of dictionaries, one per worker, each containing collated tensors
-        for query_responses, tool_masks, attention_masks, position_ids,
+        for query_responses, attention_masks, position_ids,
         advantages, response_masks, and vllm_logprobs.
     """
     B = len(packed_sequences.query_responses) // world_size  # essentially doing `drop_last=True`, which is fine.
     collated_data = []
     for i in range(world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
-        per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
         per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
         per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
         per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
@@ -609,15 +608,16 @@ def prepare_collated_data_for_workers(
             collated_query_responses.append(
                 collate_fn([per_device_packed_query_responses[idx] for idx in micro_range], pad_token_id, pin_memory)
             )
-            tool_mask = collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0, pin_memory)
             collated_attention_masks.append(
                 collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0, pin_memory)
             )
             collated_position_ids.append(
                 collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0, pin_memory)
             )
-            response_mask = collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0, pin_memory)
-            collated_response_masks.append(response_mask.bool() & tool_mask.bool())
+            response_mask = collate_fn(
+                [per_device_packed_response_masks[idx] for idx in micro_range], False, pin_memory
+            )
+            collated_response_masks.append(response_mask)
             collated_advantages.append(
                 collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0, pin_memory)
             )
@@ -1961,7 +1961,6 @@ def data_preparation_thread(
                     attention_masks=[],
                     response_masks=[],
                     original_responses=[],
-                    tool_masks=[],
                     advantages=[],
                     position_ids=[],
                     vllm_logprobs=[],
@@ -2030,6 +2029,7 @@ def data_preparation_thread(
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
+                mask_tool_use=args.mask_tool_use,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
@@ -2053,15 +2053,13 @@ def data_preparation_thread(
                     )
                     # construct "dummy" sequences for padding out the world size
                     dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
-                    dummy_tool_mask = torch.zeros_like(dummy_qr)
                     dummy_attention = torch.tensor([1, 1], dtype=torch.long)
                     dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-                    dummy_response_mask = torch.zeros_like(dummy_qr)
+                    dummy_response_mask = torch.zeros_like(dummy_qr, dtype=torch.bool)
                     dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
                     # pad out the world size
                     for _ in range(shortfall):
                         packed_sequences.query_responses.append(dummy_qr)
-                        packed_sequences.tool_masks.append(dummy_tool_mask)
                         packed_sequences.attention_masks.append(dummy_attention)
                         packed_sequences.position_ids.append(dummy_position_ids)
                         packed_sequences.response_masks.append(dummy_response_mask)
