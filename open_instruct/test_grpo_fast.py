@@ -1,10 +1,5 @@
 import gc
-import json
 import os
-
-os.environ["VLLM_BATCH_INVARIANT"] = "1"
-
-import pathlib
 import random
 import threading
 import time
@@ -18,6 +13,7 @@ from datasets import Dataset
 from parameterized import parameterized
 from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
+from vllm import SamplingParams
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_fast, rl_utils, utils
@@ -28,15 +24,7 @@ from open_instruct.dataset_transformation import (
     VERIFIER_SOURCE_KEY,
 )
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.tool_utils.tools import Tool, ToolOutput
-from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
-
-TEST_DATA_DIR = pathlib.Path(__file__).parent / "test_data"
-
-
-class RecordingTool(Tool):
-    def __call__(self, prompt: str) -> ToolOutput:
-        return ToolOutput(output="42", called=True, error="", timeout=False, runtime=0.01)
+from open_instruct.vllm_utils import create_vllm_engines
 
 
 class TestGrpoFastBase(unittest.TestCase):
@@ -87,15 +75,7 @@ class TestGrpoFastBase(unittest.TestCase):
 
         utils.check_runtime_leaks()
 
-        # Ensure any previous Ray instance is cleaned up
-        if ray.is_initialized():
-            ray.shutdown()
-
-        # Initialize Ray without runtime_env.
-        # The LLMRayActor sets its own runtime_env in create_vllm_engines.
-        # Setting runtime_env here would cause ALL actors (including _QueueActor
-        # for Ray queues) to go through package installation, slowing down queue
-        # initialization significantly.
+        # Initialize Ray for this test
         ray.init(include_dashboard=False)
 
     def _cleanup_ray_queues(self):
@@ -206,9 +186,11 @@ class TestGrpoFastBase(unittest.TestCase):
         """Create a mock GenerationResult from a PromptRequest."""
         return self.create_mock_result(request.dataset_index, request.prompt_id, num_samples_per_prompt)
 
-    def create_mock_result(self, dataset_index: int, prompt_id: str, num_samples_per_prompt=1):
+    def create_mock_result(self, dataset_index: int, prompt_id: str, num_samples_per_prompt=1, reward_scores=None):
         """Create a mock GenerationResult."""
         total_responses = num_samples_per_prompt
+        if reward_scores is None:
+            reward_scores = [i / max(total_responses, 1) for i in range(total_responses)]
 
         return GenerationResult(
             responses=[[1, 2, 3] for _ in range(total_responses)],
@@ -229,6 +211,8 @@ class TestGrpoFastBase(unittest.TestCase):
                 num_prompt_tokens=10, num_response_tokens=3 * total_responses, generation_time=0.1
             ),
             logprobs=[[0.0, 0.0, 0.0] for _ in range(total_responses)],
+            reward_scores=reward_scores,
+            reward_metrics={"time/reward": 0.0},
         )
 
     def create_mock_tokenizer_and_reward_fn(self):
@@ -323,7 +307,13 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
             results_queue=inference_results_Q,
         )
 
-        generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=5, seed=42)
+        # Set up generation config
+        generation_config = SamplingParams(
+            temperature=0.0,  # Deterministic generation
+            top_p=1.0,
+            max_tokens=5,
+            seed=42,
+        )
 
         # Start vLLM engines to process from queues
         [e.process_from_queue.remote() for e in vllm_engines]
@@ -627,7 +617,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
-            reward_fn=reward_fn,
             prompt_dataset=mock_dataset,
         )
 
@@ -674,7 +663,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     num_prompts=num_prompts,
                     model_dims=mock_model_dims,
                     tokenizer=tokenizer,
-                    reward_fn=reward_fn,
                     prompt_dataset=mock_dataset,
                 )
                 completed.set()
@@ -847,7 +835,10 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
 
         for i in range(num_prompts):
-            mock_result = self.create_mock_result(i, f"0_{i}", num_samples_per_prompt=num_samples_per_prompt)
+            constant_scores = [0.5] * num_samples_per_prompt
+            mock_result = self.create_mock_result(
+                i, f"0_{i}", num_samples_per_prompt=num_samples_per_prompt, reward_scores=constant_scores
+            )
             inference_results_Q.put(mock_result)
 
         mock_args = self.create_mock_args(num_engines=4, num_samples=num_samples_per_prompt)
@@ -858,17 +849,6 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         tokenizer_name = "EleutherAI/pythia-14m"
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-        async def reward_fn_zero_std(
-            responses: list[torch.Tensor],
-            decoded_responses: list[str],
-            ground_truths: list[Any],
-            datasets: list[str],
-            finish_reasons: list[str],
-            infos: list[list[int]],
-            queries: list[str] | None = None,
-        ) -> (list[float], dict[str, Any]):
-            return [0.5] * len(responses), {"time/reward": 0.0}
-
         result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
             inference_results_Q,
             mock_args,
@@ -876,7 +856,6 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
-            reward_fn=reward_fn_zero_std,
             prompt_dataset=mock_dataset,
             filter_zero_std_samples=True,
         )
@@ -959,103 +938,6 @@ class TestDataPreparation(TestGrpoFastBase):
                         continue
                     first_pad_idx = padding_mask.nonzero(as_tuple=True)[0][0].item()
                     self.assertTrue(torch.all(row[first_pad_idx:] == pad_token_id))
-
-
-class TestGeneration(TestGrpoFastBase):
-    """Tests for tool invocation with vLLM."""
-
-    def _setup_engine_and_generate(self, tokenizer_name, prompt, tools=None, max_tool_calls=None, max_tokens=50):
-        """Helper to create vLLM engine and run generation."""
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-
-        param_prompt_Q = ray_queue.Queue(maxsize=1)
-        inference_results_Q = ray_queue.Queue(maxsize=1)
-        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
-
-        # Warm up queue actors before creating vLLM engines.
-        # Ray Queue actors may take time to initialize (package installation).
-        param_prompt_Q.qsize()
-        inference_results_Q.qsize()
-
-        vllm_engines = create_vllm_engines(
-            num_engines=1,
-            tensor_parallel_size=1,
-            enforce_eager=True,
-            tokenizer_name_or_path=tokenizer_name,
-            pretrain=tokenizer_name,
-            revision="main",
-            seed=42,
-            enable_prefix_caching=False,
-            max_model_len=512,
-            vllm_gpu_memory_utilization=0.5,
-            prompt_queue=param_prompt_Q,
-            results_queue=inference_results_Q,
-            tools=tools,
-            max_tool_calls=max_tool_calls,
-        )
-
-        [e.process_from_queue.remote() for e in vllm_engines]
-
-        prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
-        stop = list(tools.keys()) if tools else None
-        generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, stop=stop)
-
-        param_prompt_Q.put(
-            PromptRequest(prompt=prompt_token_ids, dataset_index=0, generation_config=generation_config)
-        )
-        result = inference_results_Q.get(timeout=60)
-        param_prompt_Q.put(None)
-
-        return result
-
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
-    def test_tool_triggered_on_stop_string(self):
-        """Test that tools are properly triggered when model generates stop string."""
-        tools = {"</code>": RecordingTool(start_str="<code>", end_str="</code>")}
-        prompt = "Write code to print hello world: <code>"
-
-        result = self._setup_engine_and_generate(
-            tokenizer_name="Qwen/Qwen3-1.7B", prompt=prompt, tools=tools, max_tool_calls=(5,), max_tokens=256
-        )
-
-        self.assertTrue(
-            result.request_info.tool_calleds[0],
-            "Tool should have been called when model generates text with stop string.",
-        )
-
-    @parameterized.expand([True, False])
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
-    def test_generation_deterministic(self, use_tools):
-        """Test generation produces expected output."""
-        test_data_filename = f"generation_{'with' if use_tools else 'without'}_tools_expected.json"
-        test_data_path = TEST_DATA_DIR / test_data_filename
-
-        tokenizer_name = "Qwen/Qwen3-1.7B"
-        tools = {"</code>": RecordingTool(start_str="<code>", end_str="</code>")} if use_tools else None
-        max_tool_calls = (5,) if use_tools else None
-        prompt = "Write code to print hello world: <code>" if use_tools else "What is 2 + 2? Answer:"
-
-        result = self._setup_engine_and_generate(
-            tokenizer_name=tokenizer_name, prompt=prompt, tools=tools, max_tool_calls=max_tool_calls, max_tokens=256
-        )
-
-        if not test_data_path.exists():
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-            test_data = {
-                "model": tokenizer_name,
-                "seed": 42,
-                "temperature": 0.0,
-                "prompt": prompt,
-                "use_tools": use_tools,
-                "expected_token_ids": result.responses[0],
-                "expected_text": tokenizer.decode(result.responses[0]),
-            }
-            test_data_path.write_text(json.dumps(test_data, indent=2))
-            self.fail(f"Test data generated at {test_data_path}. Re-run test to verify.")
-            return
-
-        expected = json.loads(test_data_path.read_text())
-        self.assertEqual(result.responses[0], expected["expected_token_ids"])
 
 
 if __name__ == "__main__":
