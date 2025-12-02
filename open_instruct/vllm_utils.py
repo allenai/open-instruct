@@ -90,28 +90,31 @@ def assert_threaded_actor(instance):
 
 def truncate_tool_output_tokens(
     tool_output_token_ids: list[int],
-    current_prompt_token_ids: list[int],
-    accumulated_tokens: list[int],
+    current_prompt_len: int,
+    current_response_len: int,
     max_model_len: int,
     max_tokens: int,
-    current_mask_len: int,
-) -> tuple[list[int], int, list[int]]:
-    prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
-    excess = len(prompt_and_tool_output) - max_model_len
+) -> tuple[list[int], int]:
+    """Truncate tool output tokens to fit within max_model_len and max_tokens.
+
+    Args:
+        tool_output_token_ids: Token IDs from the tool output to potentially truncate.
+        current_prompt_len: Number of tokens in the current prompt (original + accumulated).
+        current_response_len: Number of tokens in the response so far (for max_tokens check).
+        max_model_len: Maximum total sequence length the model can handle.
+        max_tokens: Maximum number of response tokens allowed.
+
+    Returns:
+        A tuple of (truncated_tokens, excess) where excess is the number of tokens
+        that exceeded max_model_len (0 if no truncation due to max_model_len).
+    """
+    total_len = current_prompt_len + len(tool_output_token_ids)
+    excess = max(0, total_len - max_model_len)
     if excess > 0:
-        tool_output_token_ids = tool_output_token_ids[:-excess]
-        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
+        tool_output_token_ids = tool_output_token_ids[:-excess] if excess < len(tool_output_token_ids) else []
 
-    remaining = max_tokens - current_mask_len
-    if remaining <= 0:
-        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens
-        return [], excess, prompt_and_tool_output
-    elif len(tool_output_token_ids) > remaining:
-        tool_output_token_ids = tool_output_token_ids[:remaining]
-        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
-        return tool_output_token_ids, excess, prompt_and_tool_output
-
-    return tool_output_token_ids, excess, prompt_and_tool_output
+    remaining = max(0, max_tokens - current_response_len)
+    return tool_output_token_ids[:remaining], excess
 
 
 async def process_request_async(
@@ -182,13 +185,12 @@ async def process_request_async(
             "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
         )
 
-        tool_output_token_ids, excess, prompt_and_tool_output = truncate_tool_output_tokens(
+        tool_output_token_ids, excess = truncate_tool_output_tokens(
             tool_output_token_ids,
-            current_prompt_token_ids,
-            accumulated_tokens,
-            actor.llm_engine.model_config.max_model_len,
-            sampling_params.max_tokens,
-            len(masks),
+            current_prompt_len=len(current_prompt_token_ids) + len(accumulated_tokens),
+            current_response_len=len(masks),
+            max_model_len=actor.llm_engine.model_config.max_model_len,
+            max_tokens=sampling_params.max_tokens,
         )
 
         accumulated_tokens.extend(tool_output_token_ids)
@@ -201,6 +203,7 @@ async def process_request_async(
         if excess > 0 or new_sample_tokens <= 0:
             break
 
+        prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens
         current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
         current_prompt_token_ids = prompt_and_tool_output
         final_prompt_token_ids = prompt_and_tool_output

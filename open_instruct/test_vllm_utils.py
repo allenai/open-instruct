@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import MagicMock
 
 import vllm
+from parameterized import parameterized
 
 from open_instruct import vllm_utils
 from open_instruct.queue_types import PromptRequest
@@ -174,55 +175,25 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_runtimes, [0.0, 0.0])
         self.assertEqual(result.request_info.tool_calleds, [False, False])
 
-    def test_truncate_tool_output_tokens_returns_truncated_prompt(self):
-        """Test that truncate_tool_output_tokens returns the truncated prompt_and_tool_output.
-
-        This test reproduces a bug where the function truncates tool_output_token_ids
-        but returns the pre-truncation prompt_and_tool_output, causing subsequent
-        vLLM generation calls to receive prompts that exceed max_model_len.
-        """
-        current_prompt_token_ids = [1, 2, 3, 4, 5]
-        accumulated_tokens = [10, 11, 12, 13, 14]
-        tool_output_token_ids = [100, 101, 102, 103, 104]
-        max_model_len = 12
-        max_tokens = 100
-        current_mask_len = 0
-
-        truncated_tool_ids, excess, prompt_and_tool_output = vllm_utils.truncate_tool_output_tokens(
-            tool_output_token_ids,
-            current_prompt_token_ids,
-            accumulated_tokens,
-            max_model_len,
-            max_tokens,
-            current_mask_len,
+    @parameterized.expand(
+        [
+            ("no_truncation", [1, 2, 3, 4, 5], 10, 5, 100, 50, [1, 2, 3, 4, 5], 0),
+            ("truncate_max_model_len", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 95, 5, 100, 50, [1, 2, 3, 4, 5], 5),
+            ("truncate_max_tokens", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 10, 47, 100, 50, [1, 2, 3], 0),
+            ("truncate_both_limits", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 95, 47, 100, 50, [1, 2, 3], 5),
+            ("no_space_for_model", [1, 2, 3], 100, 5, 100, 50, [], 3),
+            ("no_remaining_response", [1, 2, 3], 10, 50, 100, 50, [], 0),
+            ("empty_input", [], 10, 5, 100, 50, [], 0),
+        ]
+    )
+    def test_truncate_tool_output_tokens(
+        self, name, tokens, prompt_len, response_len, max_model_len, max_tokens, expected_tokens, expected_excess
+    ):
+        result, excess = vllm_utils.truncate_tool_output_tokens(
+            tokens, prompt_len, response_len, max_model_len, max_tokens
         )
-
-        self.assertEqual(excess, 3)
-        self.assertEqual(truncated_tool_ids, [100, 101])
-        self.assertEqual(len(prompt_and_tool_output), max_model_len)
-        self.assertEqual(prompt_and_tool_output, [1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 100, 101])
-
-    def test_truncate_tool_output_tokens_max_tokens_truncation(self):
-        """Test that prompt_and_tool_output is updated when truncating due to max_tokens."""
-        current_prompt_token_ids = [1, 2, 3]
-        accumulated_tokens = [10, 11]
-        tool_output_token_ids = [100, 101, 102, 103, 104]
-        max_model_len = 100
-        max_tokens = 10
-        current_mask_len = 8
-
-        truncated_tool_ids, excess, prompt_and_tool_output = vllm_utils.truncate_tool_output_tokens(
-            tool_output_token_ids,
-            current_prompt_token_ids,
-            accumulated_tokens,
-            max_model_len,
-            max_tokens,
-            current_mask_len,
-        )
-
-        self.assertEqual(excess, -90)
-        self.assertEqual(truncated_tool_ids, [100, 101])
-        self.assertEqual(prompt_and_tool_output, [1, 2, 3, 10, 11, 100, 101])
+        self.assertEqual(result, expected_tokens)
+        self.assertEqual(excess, expected_excess)
 
 
 if __name__ == "__main__":
