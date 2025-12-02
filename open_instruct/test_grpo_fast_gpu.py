@@ -97,8 +97,9 @@ class TestGeneration(TestGrpoFastBase):
         )
         print(f"[TEST] PromptRequest created: {request.prompt_id}", flush=True)
         param_prompt_Q.put(request, block=True)
-        print(f"[TEST] put() returned", flush=True)
+        print("[TEST] put() returned", flush=True)
         import time as _time
+
         _time.sleep(1)
         print(f"[TEST] Queue size after put (after 1s sleep): {param_prompt_Q.qsize()}", flush=True)
         print("[TEST] Request put in queue, waiting for result...", flush=True)
