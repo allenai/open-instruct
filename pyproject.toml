@@ -84,6 +84,7 @@ dev = [
     "parameterized>=0.9.0",
     "rich>=13.7.0",
     "responses>=0.25.8",
+    "pytest-repeat>=0.9.4",
 ]
 
 [tool.pytest.ini_options]

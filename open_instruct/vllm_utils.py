@@ -362,7 +362,6 @@ async def _check_health(port: int) -> None:
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     """Worker thread that fetches requests from the prompt queue."""
-    logger.info("_prefetch_worker started")
     while True:
         should_stop = actor._should_stop()
         active_count = len(actor.active_tasks)
@@ -384,17 +383,13 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
             time.sleep(0.1)
             continue
 
-        logger.info(f"_prefetch_worker got request: {request}")
         if request is None:
-            logger.info("_prefetch_worker got None, stopping")
             break
         add_request(actor, request)
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
-    logger.info(f"add_request called with request_id={request_id}")
-
     sampling_params = dataclasses.replace(request.generation_config, n=1)
 
     actor.request_metadata[request_id] = {
@@ -412,11 +407,9 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
         sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
         sub_request_id = f"{request_id}_{j}"
-        logger.info(f"Scheduling process_request for sub_request_id={sub_request_id}")
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request(actor, sub_request_id, sub_sampling_params), actor.loop
         )
-    logger.info(f"add_request completed, {len(actor.active_tasks)} active tasks")
 
 
 def _create_server_args(model_path: str) -> argparse.Namespace:
@@ -503,14 +496,10 @@ class LLMRayActor:
         """Fix a Ray Queue that lost its actor reference during serialization."""
         if q is None:
             return None
-        import sys
-
-        print(f"FIX_QUEUE: q.actor = {q.actor}, actor_handle = {actor_handle}", flush=True, file=sys.stderr)
         # Check if the queue's actor matches the provided actor handle.
         # During Ray serialization, the Queue object might have a stale or different actor.
         if actor_handle is not None:
             if q.actor is None or q.actor != actor_handle:
-                print(f"FIX_QUEUE: Replacing Queue actor: {q.actor} -> {actor_handle}", flush=True, file=sys.stderr)
                 q.actor = actor_handle
         elif q.actor is None:
             logger.warning("Queue actor is None after serialization and no actor handle provided")
@@ -530,22 +519,12 @@ class LLMRayActor:
         (especially when using runtime_env with package installation). This method
         makes calls to each queue to block until the actors are ready.
         """
-        logger.info("Warming up Ray Queue actors...")
-        logger.info(f"ACTOR: prompt_queue = {self.prompt_queue}")
-        logger.info(f"ACTOR: prompt_queue type = {type(self.prompt_queue)}")
-        if self.prompt_queue:
-            logger.info(f"ACTOR: hasattr actor = {hasattr(self.prompt_queue, 'actor')}")
-            logger.info(f"ACTOR: getattr actor = {getattr(self.prompt_queue, 'actor', 'MISSING')}")
-            logger.info(f"ACTOR: dir = {[x for x in dir(self.prompt_queue) if not x.startswith('_')]}")
         queues = [self.prompt_queue, self.results_queue]
         if self.eval_results_queue is not None:
             queues.append(self.eval_results_queue)
-        for i, q in enumerate(queues):
+        for q in queues:
             if q is not None:
-                logger.info(f"Warming up queue {i}...")
-                size = q.qsize()
-                logger.info(f"Queue {i} ready (size={size})")
-        logger.info("All Ray Queue actors are ready")
+                q.qsize()
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
@@ -696,16 +675,11 @@ class LLMRayActor:
         self.request_metadata.pop(base_request_id, None)
 
         results_queue = self.eval_results_queue if is_eval else self.results_queue
-        logger.info(f"Putting result on results_queue for base_request_id={base_request_id}")
         results_queue.put(result)
-        logger.info(f"Result put on results_queue for base_request_id={base_request_id}")
 
     def process_from_queue(self) -> None:
-        logger.info("process_from_queue started")
         while True:
-            logger.debug("process_from_queue waiting for item from completion_queue")
             sub_request = self.completion_queue.get()
-            logger.info(f"process_from_queue got sub_request: {sub_request.get('base_request_id', 'unknown')}")
             self._accumulate_sub_request(sub_request)
 
     def init_process_group(
@@ -805,13 +779,7 @@ class LLMRayActor:
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool support, awaiting tools inline."""
-    logger.info(f"process_request started for sub_request_id={sub_request_id}")
-    try:
-        await _check_health(actor.server_port)
-        logger.info(f"Health check passed for sub_request_id={sub_request_id}")
-    except Exception as e:
-        logger.error(f"Health check failed for sub_request_id={sub_request_id}: {e}")
-        raise
+    await _check_health(actor.server_port)
     response_tokens = []
     response_logprobs = []
     response_masks = []
@@ -912,7 +880,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     actor.active_tasks.pop(sub_request_id, None)
 
-    logger.info(f"process_request completed for sub_request_id={sub_request_id}, putting on completion_queue")
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
@@ -925,7 +892,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             "tools": actor.tools,
         }
     )
-    logger.info(f"process_request put on completion_queue for sub_request_id={sub_request_id}")
 
 
 def get_cuda_arch_list() -> str:

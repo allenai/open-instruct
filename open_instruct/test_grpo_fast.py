@@ -30,7 +30,7 @@ from open_instruct.queue_types import GenerationResult, PromptRequest, RequestIn
 from open_instruct.tool_utils.tools import Tool, ToolOutput
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
-TEST_DATA_DIR = pathlib.Path("/Users/finbarrtimbers/Repos/open-instruct3/open_instruct/test_data")
+TEST_DATA_DIR = pathlib.Path(__file__).parent / "test_data"
 
 
 class RecordingTool(Tool):
