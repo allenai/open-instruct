@@ -142,4 +142,4 @@ case-sensitive = false
 split-on-trailing-comma = false
 
 [tool.ty.src]
-exclude = ["open_instruct/", "scripts/", "decontamination/", "human_eval/"]
+exclude = ["open_instruct/", "scripts/", "decontamination/", "human_eval/", "!open_instruct/vllm_utils.py"]

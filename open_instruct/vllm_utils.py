@@ -29,6 +29,7 @@ from datetime import timedelta
 from typing import Any
 
 import ray
+import ray.runtime_env
 import torch
 import torch.distributed
 import vllm
@@ -115,7 +116,8 @@ async def process_request_async(
     sampling_params: vllm.SamplingParams,
 ):
     """Process a single async request with tool support, awaiting tools inline."""
-    accumulated_tokens = []
+    assert sampling_params.max_tokens is not None, "max_tokens must be set"
+    accumulated_tokens: list[int] = []
     accumulated_logprobs = []
     masks = []
     num_calls = 0
@@ -211,13 +213,13 @@ async def process_request_async(
     )
 
     if actor.tools:
-        complete_output.mask = masks
-        complete_output.num_calls = num_calls
-        complete_output.timeout = timeout
-        complete_output.tool_error = tool_error
-        complete_output.tool_output = tool_output
-        complete_output.tool_runtime = tool_runtime
-        complete_output.tool_called = tool_called
+        setattr(complete_output, "mask", masks)
+        setattr(complete_output, "num_calls", num_calls)
+        setattr(complete_output, "timeout", timeout)
+        setattr(complete_output, "tool_error", tool_error)
+        setattr(complete_output, "tool_output", tool_output)
+        setattr(complete_output, "tool_runtime", tool_runtime)
+        setattr(complete_output, "tool_called", tool_called)
 
     actor.active_tasks.pop(sub_request_id, None)
 
@@ -411,7 +413,7 @@ def ray_noset_visible_devices(env_vars=os.environ):
 # Copy from pytorch to allow creating multiple main groups.
 # https://github.com/pytorch/pytorch/blob/main/torch/distributed/distributed_c10d.py
 def init_process_group(
-    backend: str | Backend = None,
+    backend: str | Backend | None = None,
     init_method: str | None = None,
     timeout: timedelta | None = None,
     world_size: int = -1,
@@ -435,12 +437,14 @@ def init_process_group(
 
     # backward compatible API
     if store is None:
+        assert init_method is not None
         rendezvous_iterator = rendezvous(init_method, rank, world_size, timeout=timeout)
         store, rank, world_size = next(rendezvous_iterator)
         store.set_timeout(timeout)
 
         # Use a PrefixStore to avoid accidental overrides of keys used by
         # different systems (e.g. RPC) in case the store is multi-tenant.
+        assert group_name is not None
         store = PrefixStore(group_name, store)
 
     # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6.0
@@ -504,6 +508,9 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
 
 class LLMRayActor:
     """Ray actor for LLM generation with optional tool support."""
+
+    llm_engine: vllm.AsyncLLMEngine
+    loop: asyncio.AbstractEventLoop
 
     def __init__(
         self,
@@ -581,20 +588,17 @@ class LLMRayActor:
         engine_args.disable_cascade_attn = True
 
         init_complete = threading.Event()
-        self.loop = None
-        self.llm_engine = None
 
-        async def _init_engine():
-            running_loop = asyncio.get_running_loop()
-            assert running_loop == self.loop, f"Loop mismatch! running={running_loop}, actor.loop={self.loop}"
+        async def _init_engine() -> vllm.AsyncLLMEngine:
             return vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
         def _run_loop():
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-            self.llm_engine = self.loop.run_until_complete(_init_engine())
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self.loop = loop
+            self.llm_engine = loop.run_until_complete(_init_engine())
             init_complete.set()
-            self.loop.run_forever()
+            loop.run_forever()
 
         self.loop_thread = threading.Thread(target=_run_loop, daemon=True)
         self.loop_thread.start()
@@ -822,6 +826,7 @@ def create_vllm_engines(
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
+    assert pg is not None, "placement_group must be provided for hybrid engine or created for non-hybrid"
     # ensure we use bundles on the same node where possible if tp>1.
     bundle_indices_list = get_bundle_indices_list(pg)
 
