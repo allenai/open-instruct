@@ -361,17 +361,39 @@ async def _check_health(port: int) -> None:
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
+    """Worker thread that fetches requests from the prompt queue."""
+    logger.info("_prefetch_worker started")
     while True:
-        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
+        should_stop = actor._should_stop()
+        active_count = len(actor.active_tasks)
+        batch_size = actor.inference_batch_size
+        if should_stop or active_count >= batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        request = actor.prompt_queue.get()
+        try:
+            # Use non-blocking get with a short sleep for polling.
+            # This avoids issues with ray.get/ray.wait blocking when called
+            # from a ThreadPoolExecutor thread inside a Ray actor.
+            request = actor.prompt_queue.get_nowait()
+        except ray_queue.Empty:
+            time.sleep(0.1)
+            continue
+        except Exception as e:
+            logger.warning(f"_prefetch_worker exception: {type(e).__name__}: {e}")
+            time.sleep(0.1)
+            continue
+
+        logger.info(f"_prefetch_worker got request: {request}")
+        if request is None:
+            logger.info("_prefetch_worker got None, stopping")
+            break
         add_request(actor, request)
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
+    logger.info(f"add_request called with request_id={request_id}")
 
     sampling_params = dataclasses.replace(request.generation_config, n=1)
 
@@ -390,9 +412,11 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
         sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
         sub_request_id = f"{request_id}_{j}"
+        logger.info(f"Scheduling process_request for sub_request_id={sub_request_id}")
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request(actor, sub_request_id, sub_sampling_params), actor.loop
         )
+    logger.info(f"add_request completed, {len(actor.active_tasks)} active tasks")
 
 
 def _create_server_args(model_path: str) -> argparse.Namespace:
@@ -417,11 +441,22 @@ class LLMRayActor:
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
         inflight_updates: bool,
+        prompt_queue_actor: ray.actor.ActorHandle = None,
+        results_queue_actor: ray.actor.ActorHandle = None,
+        eval_results_queue_actor: ray.actor.ActorHandle = None,
         **kwargs,
     ):
         assert_threaded_actor(self)
         self._init_config(tools, max_tool_calls, inflight_updates)
-        self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+        self._init_queues(
+            prompt_queue,
+            results_queue,
+            eval_results_queue,
+            actor_manager,
+            prompt_queue_actor,
+            results_queue_actor,
+            eval_results_queue_actor,
+        )
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -441,22 +476,76 @@ class LLMRayActor:
         self.active_tasks = {}
         self.request_outputs = {}
 
-    def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
+    def _init_queues(
+        self,
+        prompt_queue,
+        results_queue,
+        eval_results_queue,
+        actor_manager,
+        prompt_queue_actor,
+        results_queue_actor,
+        eval_results_queue_actor,
+    ) -> None:
         self.completion_queue = queue.Queue()
-        self.prompt_queue = prompt_queue
-        self.results_queue = results_queue
-        self.eval_results_queue = eval_results_queue
+        # Fix Ray Queue serialization issue: when Queue is serialized to a remote actor,
+        # the internal actor handle is lost. We need to restore it using the separately
+        # passed actor handles.
+        self.prompt_queue = self._fix_queue(prompt_queue, prompt_queue_actor)
+        self.results_queue = self._fix_queue(results_queue, results_queue_actor)
+        self.eval_results_queue = self._fix_queue(eval_results_queue, eval_results_queue_actor)
         self.actor_manager = actor_manager
 
         # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
 
+    def _fix_queue(self, q, actor_handle):
+        """Fix a Ray Queue that lost its actor reference during serialization."""
+        if q is None:
+            return None
+        import sys
+
+        print(f"FIX_QUEUE: q.actor = {q.actor}, actor_handle = {actor_handle}", flush=True, file=sys.stderr)
+        # Check if the queue's actor matches the provided actor handle.
+        # During Ray serialization, the Queue object might have a stale or different actor.
+        if actor_handle is not None:
+            if q.actor is None or q.actor != actor_handle:
+                print(f"FIX_QUEUE: Replacing Queue actor: {q.actor} -> {actor_handle}", flush=True, file=sys.stderr)
+                q.actor = actor_handle
+        elif q.actor is None:
+            logger.warning("Queue actor is None after serialization and no actor handle provided")
+        return q
+
     def _init_executor(self) -> None:
+        self._warmup_queues()
         max_workers = NUM_PREFETCH_WORKERS + (NUM_TOOL_WORKERS if self.tools else 0)
         self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
         self._prefetch_future = self.executor.submit(_prefetch_worker, self)
         self._process_future = self.executor.submit(self.process_from_queue)
+
+    def _warmup_queues(self) -> None:
+        """Ensure Ray Queue actors are ready before starting workers.
+
+        Ray Queues use internal _QueueActor instances that may take time to initialize
+        (especially when using runtime_env with package installation). This method
+        makes calls to each queue to block until the actors are ready.
+        """
+        logger.info("Warming up Ray Queue actors...")
+        logger.info(f"ACTOR: prompt_queue = {self.prompt_queue}")
+        logger.info(f"ACTOR: prompt_queue type = {type(self.prompt_queue)}")
+        if self.prompt_queue:
+            logger.info(f"ACTOR: hasattr actor = {hasattr(self.prompt_queue, 'actor')}")
+            logger.info(f"ACTOR: getattr actor = {getattr(self.prompt_queue, 'actor', 'MISSING')}")
+            logger.info(f"ACTOR: dir = {[x for x in dir(self.prompt_queue) if not x.startswith('_')]}")
+        queues = [self.prompt_queue, self.results_queue]
+        if self.eval_results_queue is not None:
+            queues.append(self.eval_results_queue)
+        for i, q in enumerate(queues):
+            if q is not None:
+                logger.info(f"Warming up queue {i}...")
+                size = q.qsize()
+                logger.info(f"Queue {i} ready (size={size})")
+        logger.info("All Ray Queue actors are ready")
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
@@ -607,11 +696,16 @@ class LLMRayActor:
         self.request_metadata.pop(base_request_id, None)
 
         results_queue = self.eval_results_queue if is_eval else self.results_queue
+        logger.info(f"Putting result on results_queue for base_request_id={base_request_id}")
         results_queue.put(result)
+        logger.info(f"Result put on results_queue for base_request_id={base_request_id}")
 
     def process_from_queue(self) -> None:
+        logger.info("process_from_queue started")
         while True:
+            logger.debug("process_from_queue waiting for item from completion_queue")
             sub_request = self.completion_queue.get()
+            logger.info(f"process_from_queue got sub_request: {sub_request.get('base_request_id', 'unknown')}")
             self._accumulate_sub_request(sub_request)
 
     def init_process_group(
@@ -711,7 +805,13 @@ class LLMRayActor:
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool support, awaiting tools inline."""
-    await _check_health(actor.server_port)
+    logger.info(f"process_request started for sub_request_id={sub_request_id}")
+    try:
+        await _check_health(actor.server_port)
+        logger.info(f"Health check passed for sub_request_id={sub_request_id}")
+    except Exception as e:
+        logger.error(f"Health check failed for sub_request_id={sub_request_id}: {e}")
+        raise
     response_tokens = []
     response_logprobs = []
     response_masks = []
@@ -812,6 +912,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     actor.active_tasks.pop(sub_request_id, None)
 
+    logger.info(f"process_request completed for sub_request_id={sub_request_id}, putting on completion_queue")
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
@@ -824,6 +925,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             "tools": actor.tools,
         }
     )
+    logger.info(f"process_request put on completion_queue for sub_request_id={sub_request_id}")
 
 
 def get_cuda_arch_list() -> str:
@@ -891,6 +993,13 @@ def create_vllm_engines(
 
     logger.info(f"num_gpus: {num_gpus}")
 
+    # Extract actor handles from queues before passing to remote actors.
+    # Ray Queue serialization loses the internal actor reference, so we pass
+    # the actor handles separately and restore them inside the remote actor.
+    prompt_queue_actor = prompt_queue.actor if prompt_queue is not None else None
+    results_queue_actor = results_queue.actor if results_queue is not None else None
+    eval_results_queue_actor = eval_results_queue.actor if eval_results_queue is not None else None
+
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
         bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
@@ -951,6 +1060,9 @@ def create_vllm_engines(
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
+                prompt_queue_actor=prompt_queue_actor,
+                results_queue_actor=results_queue_actor,
+                eval_results_queue_actor=eval_results_queue_actor,
             )
         )
 

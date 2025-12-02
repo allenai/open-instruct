@@ -90,8 +90,12 @@ class TestGrpoFastBase(unittest.TestCase):
         if ray.is_initialized():
             ray.shutdown()
 
-        # Initialize Ray with runtime_env that excludes .venv and .git
-        ray.init(include_dashboard=False, runtime_env={"excludes": [".venv", ".git"]})
+        # Initialize Ray without runtime_env.
+        # The LLMRayActor sets its own runtime_env in create_vllm_engines.
+        # Setting runtime_env here would cause ALL actors (including _QueueActor
+        # for Ray queues) to go through package installation, slowing down queue
+        # initialization significantly.
+        ray.init(include_dashboard=False)
 
     def _cleanup_ray_queues(self):
         """Clean up all Ray queues created during the test."""
@@ -1212,7 +1216,12 @@ class TestGeneration(TestGrpoFastBase):
         inference_results_Q = ray_queue.Queue(maxsize=1)
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
-        create_vllm_engines(
+        # Warm up queue actors before creating vLLM engines.
+        # Ray Queue actors may take time to initialize (package installation).
+        param_prompt_Q.qsize()
+        inference_results_Q.qsize()
+
+        vllm_engines = create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
             enforce_eager=True,
@@ -1228,6 +1237,8 @@ class TestGeneration(TestGrpoFastBase):
             tools=tools,
             max_tool_calls=max_tool_calls,
         )
+
+        [e.process_from_queue.remote() for e in vllm_engines]
 
         prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
         stop = list(tools.keys()) if tools else None
@@ -1245,10 +1256,10 @@ class TestGeneration(TestGrpoFastBase):
     def test_tool_triggered_on_stop_string(self):
         """Test that tools are properly triggered when model generates stop string."""
         tools = {"</code>": RecordingTool(start_str="<code>", end_str="</code>")}
-        prompt = "Complete this code:\n<code>\nprint('hello')\n</code>"
+        prompt = "Write code to print hello world: <code>"
 
         result = self._setup_engine_and_generate(
-            tokenizer_name="EleutherAI/pythia-14m", prompt=prompt, tools=tools, max_tool_calls=(5,)
+            tokenizer_name="Qwen/Qwen3-1.7B", prompt=prompt, tools=tools, max_tool_calls=(5,), max_tokens=256
         )
 
         self.assertTrue(
