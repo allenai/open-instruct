@@ -8,9 +8,7 @@ To run on Beaker:
     BEAKER_IMAGE="${BEAKER_USER}/open-instruct-integration-test"
 
     uv run python mason.py \\
-        --cluster ai2/jupiter \\
         --cluster ai2/saturn \\
-        --cluster ai2/ceres \\
         --image "$BEAKER_IMAGE" \\
         --description "GPU test: test_grpo_fast_gpu.py" \\
         --pure_docker_mode \\
@@ -29,7 +27,6 @@ import os
 import pathlib
 import unittest
 
-import ray
 import torch
 from parameterized import parameterized
 from ray.util import queue as ray_queue
@@ -46,12 +43,6 @@ TEST_DATA_DIR = pathlib.Path(__file__).parent / "test_data"
 DEFAULT_CODE_TOOL_ENDPOINT = "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute"
 
 
-@ray.remote
-class MockActorManager:
-    def should_stop(self):
-        return False
-
-
 class TestGeneration(TestGrpoFastBase):
     """Tests for tool invocation with vLLM."""
 
@@ -65,8 +56,6 @@ class TestGeneration(TestGrpoFastBase):
 
         param_prompt_Q.qsize()
         inference_results_Q.qsize()
-
-        actor_manager = MockActorManager.remote()
 
         vllm_engines = create_vllm_engines(
             num_engines=1,
@@ -83,7 +72,6 @@ class TestGeneration(TestGrpoFastBase):
             results_queue=inference_results_Q,
             tools=tools,
             max_tool_calls=max_tool_calls,
-            actor_manager=actor_manager,
         )
 
         [e.process_from_queue.remote() for e in vllm_engines]
@@ -97,7 +85,7 @@ class TestGeneration(TestGrpoFastBase):
                 prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
             )
         )
-        result = inference_results_Q.get(timeout=60)
+        result = inference_results_Q.get(timeout=120)
         param_prompt_Q.put(None)
 
         return result
