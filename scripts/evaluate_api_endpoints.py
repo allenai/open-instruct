@@ -11,7 +11,6 @@ BENCHMARKS = [
     ("popqa::hamish_zs_reasoning_deepseek", 1760),
 
     # Reasoning
-    #("agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek", None),
     ("agi_eval_lsat-ar:0shot_cot::hamish_zs_reasoning_deepseek", None),
     ("agi_eval_lsat-lr:0shot_cot::hamish_zs_reasoning_deepseek", None),
     ("agi_eval_lsat-rc:0shot_cot::hamish_zs_reasoning_deepseek", None),
