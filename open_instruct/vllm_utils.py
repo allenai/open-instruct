@@ -380,6 +380,7 @@ def init_process_group(
     return pg
 
 
+@backoff.on_exception(backoff.constant, (aiohttp.ClientError, RuntimeError), max_time=60, interval=0.5)
 async def _check_health(port: int) -> None:
     async with (
         aiohttp.ClientSession() as session,
@@ -571,11 +572,7 @@ class LLMRayActor:
 
         logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
 
-        @backoff.on_exception(backoff.constant, (aiohttp.ClientError, RuntimeError), max_time=60, interval=0.5)
-        async def check_health():
-            await _check_health(self.server_port)
-
-        asyncio.run(check_health())
+        asyncio.run(_check_health(self.server_port))
         logger.info("vLLM OpenAI API server is ready")
 
     def get_model_dims(self):
