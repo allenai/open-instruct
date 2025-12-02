@@ -836,7 +836,8 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
 
         for i in range(num_prompts):
             constant_scores = [0.5] * num_samples_per_prompt
-            mock_result = self.create_mock_result(i, f"0_{i}", num_samples_per_prompt=num_samples_per_prompt, reward_scores=constant_scores
+            mock_result = self.create_mock_result(
+                i, f"0_{i}", num_samples_per_prompt=num_samples_per_prompt, reward_scores=constant_scores
             )
             inference_results_Q.put(mock_result)
 

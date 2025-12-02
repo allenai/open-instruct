@@ -1652,6 +1652,12 @@ def accumulate_inference_batches(
 
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
+        prompt_data = prompt_dataset[result.dataset_index]
+        k_queries = repeat_each([prompt_data[INPUT_IDS_PROMPT_KEY]], generation_config.n)
+        k_ground_truths = repeat_each([prompt_data[GROUND_TRUTHS_KEY]], generation_config.n)
+        k_datasets = repeat_each([prompt_data[VERIFIER_SOURCE_KEY]], generation_config.n)
+        k_raw_queries = repeat_each([prompt_data[RAW_PROMPT_KEY]], generation_config.n)
+
         percent_solved = np.mean(result.reward_scores).item() / args.max_possible_score
         # Don't resample prompt that was solved at more than no_resample_positive_rate
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
@@ -1662,16 +1668,16 @@ def accumulate_inference_batches(
             )
 
         # Filter out zero std prompts
-        if filter_zero_std_samples and np.std(scores) == 0:
+        if filter_zero_std_samples and np.std(result.reward_scores) == 0:
             # If we're not active sampling, still count this as a sample
             if not active_sampling:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
 
             total_filtered_prompts += 1
-            if scores[0] == 0:
+            if result.reward_scores[0] == 0:
                 filtered_prompt_zero += 1
-            elif scores[0] == args.max_possible_score:
+            elif result.reward_scores[0] == args.max_possible_score:
                 filtered_prompt_solved += 1
             else:
                 filtered_prompt_nonzero += 1
@@ -1689,7 +1695,7 @@ def accumulate_inference_batches(
         all_datasets.extend(k_datasets)
         all_raw_queries.extend(k_raw_queries)
         all_decoded_responses.extend(decoded_responses)
-        all_scores.extend(scores)
+        all_scores.extend(result.reward_scores)
         all_reward_metrics.append(result.reward_metrics)
         all_percent_solved.append(percent_solved)
 
