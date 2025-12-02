@@ -49,7 +49,6 @@ import socket
 import threading
 import time
 from argparse import Namespace
-from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
@@ -89,15 +88,10 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.ground_truth_utils import (
-    build_all_verifiers,
-    cleanup_all_llm_judge_clients,
-    soft_format_reward_func,
-)
+from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     Batch,
     ModelConfig,
-    apply_verifiable_reward,
     disable_dropout_in_model,
     entropy_from_logits,
     estimate_kl,
@@ -1529,7 +1523,6 @@ def accumulate_inference_batches(
     num_prompts: int,
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
-    reward_fn: Callable,
     prompt_dataset: Dataset,
     data_loader: data_loader_lib.HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
@@ -1621,25 +1614,7 @@ def accumulate_inference_batches(
 
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
-        example = prompt_dataset[result.dataset_index]
-        k_queries = repeat_each([example[INPUT_IDS_PROMPT_KEY]], generation_config.n)
-        k_ground_truths = repeat_each([example[GROUND_TRUTHS_KEY]], generation_config.n)
-        k_datasets = repeat_each([example[VERIFIER_SOURCE_KEY]], generation_config.n)
-        k_raw_queries = repeat_each([example[RAW_PROMPT_KEY]], generation_config.n)
-
-        scores, reward_metrics = asyncio.run(
-            reward_fn(
-                result.responses,
-                decoded_responses,
-                k_ground_truths,
-                k_datasets,
-                result.finish_reasons,
-                result.request_info,
-                k_raw_queries,
-            )
-        )
-
-        percent_solved = np.mean(scores).item() / args.max_possible_score
+        percent_solved = np.mean(result.reward_scores).item() / args.max_possible_score
         # Don't resample prompt that was solved at more than no_resample_positive_rate
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             total_no_resampled += 1
@@ -1649,16 +1624,16 @@ def accumulate_inference_batches(
             )
 
         # Filter out zero std prompts
-        if filter_zero_std_samples and np.std(scores) == 0:
+        if filter_zero_std_samples and np.std(result.reward_scores) == 0:
             # If we're not active sampling, still count this as a sample
             if not active_sampling:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
 
             total_filtered_prompts += 1
-            if scores[0] == 0:
+            if result.reward_scores[0] == 0:
                 filtered_prompt_zero += 1
-            elif scores[0] == args.max_possible_score:
+            elif result.reward_scores[0] == args.max_possible_score:
                 filtered_prompt_solved += 1
             else:
                 filtered_prompt_nonzero += 1
@@ -1671,13 +1646,14 @@ def accumulate_inference_batches(
             progress_bar.update(1)
 
         results.append(result)
-        all_queries.extend(k_queries)
-        all_ground_truths.extend(k_ground_truths)
-        all_datasets.extend(k_datasets)
-        all_raw_queries.extend(k_raw_queries)
+        prompt_data = prompt_dataset[result.dataset_index]
+        all_queries.extend(repeat_each([prompt_data[INPUT_IDS_PROMPT_KEY]], generation_config.n))
+        all_ground_truths.extend(repeat_each([prompt_data[GROUND_TRUTHS_KEY]], generation_config.n))
+        all_datasets.extend(repeat_each([prompt_data[VERIFIER_SOURCE_KEY]], generation_config.n))
+        all_raw_queries.extend(repeat_each([prompt_data[RAW_PROMPT_KEY]], generation_config.n))
         all_decoded_responses.extend(decoded_responses)
-        all_scores.extend(scores)
-        all_reward_metrics.append(reward_metrics)
+        all_scores.extend(result.reward_scores)
+        all_reward_metrics.append(result.reward_metrics)
         all_percent_solved.append(percent_solved)
 
     if len(results) == 0:
@@ -1793,15 +1769,10 @@ def accumulate_inference_batches(
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
     )
-    logging.info(
-        f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"
-    )
-
     return combined_result, batch, combined_reward_metrics, batch_stats
 
 
 def data_preparation_thread(
-    reward_fn: Callable,
     inference_results_Q: ray_queue.Queue,
     param_prompt_Q: ray_queue.Queue,
     packed_sequences_Q: Queue,
@@ -1825,7 +1796,6 @@ def data_preparation_thread(
                 num_prompts=args.num_unique_prompts_rollout,
                 model_dims=model_dims,
                 tokenizer=tokenizer,
-                reward_fn=reward_fn,
                 data_loader=data_loader,
                 prompt_dataset=train_dataset,
                 param_prompt_Q=param_prompt_Q,
@@ -2162,6 +2132,9 @@ def create_model_and_optimizer(
     inference_results_Q: ray_queue.Queue,
     param_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
+    reward_config: RewardConfig,
+    train_dataset,
+    eval_dataset,
 ) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
@@ -2232,6 +2205,9 @@ def create_model_and_optimizer(
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
         inflight_updates=args.inflight_updates,
+        reward_config=reward_config,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
     )
 
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
@@ -2532,7 +2508,6 @@ def maybe_evaluate(
     training_step: int,
     evaluation_inference_results_Q: ray_queue.Queue,
     tokenizer,
-    reward_fn,
     episode,
     eval_dataset: Dataset,
     eval_generation_config,
@@ -2555,7 +2530,6 @@ def maybe_evaluate(
             num_prompts=num_eval_prompts,
             model_dims=model_dims,
             tokenizer=tokenizer,
-            reward_fn=reward_fn,
             prompt_dataset=eval_dataset,
             actor_manager=actor_manager,
             timeout=timeout,
@@ -2658,103 +2632,6 @@ def make_tokenizer(tc: TokenizerConfig, model_config: ModelConfig):
     return tc.tokenizer
 
 
-def make_reward_fn(args: Args) -> Callable:
-    """Create a reward function based on the provided arguments."""
-    reward_fn_mapping = build_all_verifiers(args)
-
-    async def reward_fn(
-        responses: list[torch.Tensor],
-        decoded_responses: list[str],
-        ground_truths: list[Any],
-        datasets: list[str],
-        finish_reasons: list[str],
-        infos: list[list[int]],
-        queries: list[str] | None = None,
-    ) -> (list[float], dict[str, Any]):
-        timeouts = infos.timeouts
-        tool_errors = infos.tool_errors
-        tool_outputs = infos.tool_outputs
-        tool_calleds = infos.tool_calleds
-        good_outputs = [
-            len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
-            for i in range(len(tool_outputs))
-        ]
-        scores = [0] * len(decoded_responses)
-        metrics = {}
-
-        reward_time = 0
-        if args.apply_r1_style_format_reward:
-            with Timer(
-                "[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward", noop=True
-            ) as timer:
-                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
-                if len(format_scores) != len(scores):
-                    raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
-                for i in range(len(format_scores)):
-                    scores[i] = format_scores[i] + scores[i]
-                metrics["val/format_scores"] = np.array(format_scores).mean()
-
-            reward_time += timer.duration
-
-        if args.apply_verifiable_reward:
-            with Timer(
-                "[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward", noop=True
-            ) as timer:
-                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
-                    reward_fn_mapping,
-                    responses,
-                    decoded_responses,
-                    ground_truths,
-                    datasets,
-                    reward_mult=args.verification_reward,
-                    queries=queries,
-                )
-                if len(verifiable_rewards) != len(scores):
-                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
-                # slightly complex combo of good outputs and additive format reward
-                for i in range(len(verifiable_rewards)):
-                    if not args.only_reward_good_outputs or (good_outputs[i] and args.only_reward_good_outputs):
-                        if args.apply_r1_style_format_reward and args.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] + scores[i]
-                        elif args.apply_r1_style_format_reward and not args.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
-                        else:
-                            scores[i] = verifiable_rewards[i]
-                np_verifiable_rewards = np.array(verifiable_rewards)
-                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
-                # reshuffle around per_func rewards
-                per_func_lists = defaultdict(list)
-                for reward_dict in per_func_rewards:
-                    for key, value in reward_dict.items():
-                        per_func_lists[key].append(value)
-                # log per function rewards
-                for key, value in per_func_lists.items():
-                    np_value = np.array(value)
-                    metrics[f"objective/{key}_reward"] = np_value.mean()
-                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
-
-            reward_time += timer.duration
-
-        # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
-        if args.non_stop_penalty:
-            with Timer(
-                "[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty", noop=True
-            ) as timer:
-                assert len(finish_reasons) == len(scores)
-                for i in range(len(finish_reasons)):
-                    if finish_reasons[i] != "stop":
-                        scores[i] = args.non_stop_penalty_value
-
-            reward_time += timer.duration
-
-        metrics["time/reward"] = reward_time
-
-        return scores, metrics
-
-    return reward_fn
-
-
 def cleanup_judge_clients():
     """Cleans up all LLM judge clients."""
     asyncio.run(cleanup_all_llm_judge_clients())
@@ -2820,7 +2697,6 @@ def run_training(
     vllm_engines,
     generation_configs,
     data_loader,
-    reward_fn,
     resume_training_step,
     episode,
     wandb_url,
@@ -2861,7 +2737,6 @@ def run_training(
     logger.info("======== ✅ data preparation thread starts =========")
     packing_future = executor.submit(
         data_preparation_thread,
-        reward_fn,
         inference_results_Q,
         param_prompt_Q,
         packed_sequences_Q,
@@ -3014,7 +2889,6 @@ def run_training(
             training_step,
             evaluation_inference_results_Q,
             tokenizer,
-            reward_fn,
             episode,
             eval_dataset,
             generation_configs["eval"],
@@ -3065,6 +2939,18 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
+    reward_config = RewardConfig(
+        apply_r1_style_format_reward=args.apply_r1_style_format_reward,
+        r1_style_format_reward=args.r1_style_format_reward,
+        apply_verifiable_reward=args.apply_verifiable_reward,
+        verification_reward=args.verification_reward,
+        non_stop_penalty=args.non_stop_penalty,
+        non_stop_penalty_value=args.non_stop_penalty_value,
+        only_reward_good_outputs=args.only_reward_good_outputs,
+        additive_format_reward=args.additive_format_reward,
+        verifier_functions=build_all_verifiers(args),
+    )
+
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
         create_model_and_optimizer(
             args,
@@ -3076,6 +2962,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             inference_results_Q,
             param_prompt_Q,
             evaluation_inference_results_Q,
+            reward_config,
+            train_dataset,
+            eval_dataset,
         )
     )
 
@@ -3114,8 +3003,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     generate_metrics_Q = Queue(maxsize=args.async_steps)
     weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
 
-    reward_fn = make_reward_fn(args)
-
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
 
@@ -3129,7 +3016,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             vllm_engines,
             generation_configs,
             data_loader,
-            reward_fn,
             resume_training_step,
             episode,
             wandb_url,

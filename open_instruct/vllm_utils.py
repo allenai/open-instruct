@@ -28,6 +28,7 @@ from concurrent import futures
 from datetime import timedelta
 from typing import Any
 
+import datasets
 import ray
 import torch
 import torch.distributed
@@ -48,6 +49,8 @@ from torch.distributed.distributed_c10d import (
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
+from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
+from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ModelDims, ray_get_with_progress
@@ -501,6 +504,68 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         )
 
 
+def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> None:
+    base_request_id = sub_request["base_request_id"]
+    expected_n = sub_request["expected_n"]
+
+    if base_request_id not in actor.request_outputs:
+        actor.request_outputs[base_request_id] = {
+            "outputs": [],
+            "expected_n": expected_n,
+            "tools": sub_request["tools"],
+        }
+
+    actor.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
+
+    if len(actor.request_outputs[base_request_id]["outputs"]) == expected_n:
+        asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
+
+
+async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str) -> None:
+    outputs = actor.request_outputs[base_request_id]["outputs"]
+    ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
+
+    current_time = time.perf_counter()
+    result, is_eval = process_completed_request(
+        base_request_id,
+        ordered_outs,
+        current_time,
+        actor.request_outputs[base_request_id]["tools"],
+        actor.request_metadata,
+    )
+
+    actor.request_outputs.pop(base_request_id)
+    actor.request_metadata.pop(base_request_id, None)
+
+    dataset = actor.eval_dataset if is_eval else actor.train_dataset
+    result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
+    results_queue = actor.eval_results_queue if is_eval else actor.results_queue
+    results_queue.put(result)
+
+
+async def compute_rewards(
+    actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset, is_eval: bool
+) -> tuple[list[float], dict]:
+    example = dataset[result.dataset_index]
+    decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+
+    k = len(result.responses)
+    k_ground_truths = [example[GROUND_TRUTHS_KEY]] * k
+    k_datasets = [example[VERIFIER_SOURCE_KEY]] * k
+    k_raw_queries = [example[RAW_PROMPT_KEY]] * k
+
+    scores, metrics = await actor.reward_fn(
+        result.responses,
+        decoded_responses,
+        k_ground_truths,
+        k_datasets,
+        result.finish_reasons,
+        result.request_info,
+        k_raw_queries,
+    )
+    return scores, metrics
+
+
 class LLMRayActor:
     """Ray actor for LLM generation with optional tool support."""
 
@@ -516,10 +581,13 @@ class LLMRayActor:
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
         inflight_updates: bool,
+        reward_config: RewardConfig | None = None,
+        train_dataset=None,
+        eval_dataset=None,
         **kwargs,
     ):
         assert_threaded_actor(self)
-        self._init_config(tools, max_tool_calls, mask_tool_use, inflight_updates)
+        self._init_config(tools, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset)
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
@@ -535,6 +603,9 @@ class LLMRayActor:
         max_tool_calls: dict[str, int] | None,
         mask_tool_use: bool,
         inflight_updates: bool,
+        reward_config: RewardConfig | None,
+        train_dataset,
+        eval_dataset,
     ) -> None:
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
@@ -543,6 +614,10 @@ class LLMRayActor:
         self.request_metadata = {}
         self.active_tasks = {}
         self.request_outputs = {}
+        self.reward_config = reward_config
+        self.train_dataset = train_dataset
+        self.eval_dataset = eval_dataset
+        self.reward_fn = reward_config.build() if reward_config else None
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
@@ -620,46 +695,9 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
-    def _accumulate_sub_request(self, sub_request: dict) -> None:
-        base_request_id = sub_request["base_request_id"]
-        expected_n = sub_request["expected_n"]
-
-        if base_request_id not in self.request_outputs:
-            self.request_outputs[base_request_id] = {
-                "outputs": [],
-                "expected_n": expected_n,
-                "tools": sub_request["tools"],
-            }
-
-        self.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
-
-        is_complete = len(self.request_outputs[base_request_id]["outputs"]) == expected_n
-        if is_complete:
-            self._finalize_completed_request(base_request_id)
-
-    def _finalize_completed_request(self, base_request_id: str) -> None:
-        outputs = self.request_outputs[base_request_id]["outputs"]
-        ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
-
-        current_time = time.perf_counter()
-        result, is_eval = process_completed_request(
-            base_request_id,
-            ordered_outs,
-            current_time,
-            self.request_outputs[base_request_id]["tools"],
-            self.request_metadata,
-        )
-
-        self.request_outputs.pop(base_request_id)
-        self.request_metadata.pop(base_request_id, None)
-
-        results_queue = self.eval_results_queue if is_eval else self.results_queue
-        results_queue.put(result)
-
     def process_from_queue(self) -> None:
         while True:
-            sub_request = self.completion_queue.get()
-            self._accumulate_sub_request(sub_request)
+            accumulate_completions(self, self.completion_queue.get())
 
     def init_process_group(
         self,
@@ -797,6 +835,9 @@ def create_vllm_engines(
     actor_manager=None,
     use_fp8_kv_cache=False,
     inflight_updates: bool = False,
+    reward_config: RewardConfig | None = None,
+    train_dataset=None,
+    eval_dataset=None,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -878,6 +919,9 @@ def create_vllm_engines(
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
+                reward_config=reward_config,
+                train_dataset=train_dataset,
+                eval_dataset=eval_dataset,
             )
         )
 
