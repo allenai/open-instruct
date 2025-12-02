@@ -50,7 +50,6 @@ import socket
 import threading
 import time
 from argparse import Namespace
-from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
@@ -89,15 +88,10 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.ground_truth_utils import (
-    build_all_verifiers,
-    cleanup_all_llm_judge_clients,
-    soft_format_reward_func,
-)
+from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     Batch,
     ModelConfig,
-    apply_verifiable_reward,
     disable_dropout_in_model,
     entropy_from_logits,
     estimate_kl,
@@ -570,7 +564,7 @@ def prepare_collated_data_for_workers(
 
     Args:
         packed_sequences: Packed training sequences containing query responses,
-            tool masks, attention masks, position IDs, advantages, response masks,
+            attention masks, position IDs, advantages, response masks,
             and vllm logprobs.
         world_size: Number of distributed workers.
         per_device_train_batch_size: Batch size for each device's micro-batch.
@@ -579,14 +573,13 @@ def prepare_collated_data_for_workers(
 
     Returns:
         List of dictionaries, one per worker, each containing collated tensors
-        for query_responses, tool_masks, attention_masks, position_ids,
+        for query_responses, attention_masks, position_ids,
         advantages, response_masks, and vllm_logprobs.
     """
     B = len(packed_sequences.query_responses) // world_size  # essentially doing `drop_last=True`, which is fine.
     collated_data = []
     for i in range(world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
-        per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
         per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
         per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
         per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
@@ -596,7 +589,6 @@ def prepare_collated_data_for_workers(
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
         collated_query_responses = []
-        collated_tool_masks = []
         collated_attention_masks = []
         collated_position_ids = []
         collated_response_masks = []
@@ -606,9 +598,6 @@ def prepare_collated_data_for_workers(
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
                 collate_fn([per_device_packed_query_responses[idx] for idx in micro_range], pad_token_id, pin_memory)
-            )
-            collated_tool_masks.append(
-                collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0, pin_memory)
             )
             collated_attention_masks.append(
                 collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0, pin_memory)
@@ -628,7 +617,6 @@ def prepare_collated_data_for_workers(
         collated_data.append(
             {
                 "collated_query_responses": collated_query_responses,
-                "collated_tool_masks": collated_tool_masks,
                 "collated_attention_masks": collated_attention_masks,
                 "collated_position_ids": collated_position_ids,
                 "collated_advantages": collated_advantages,
@@ -939,7 +927,6 @@ class PolicyTrainerRayProcess(RayProcess):
         self,
         model: PreTrainedModel,
         collated_query_responses: list[torch.Tensor],
-        collated_tool_masks: list[torch.Tensor],
         collated_attention_masks: list[torch.Tensor],
         collated_position_ids: list[torch.Tensor],
         collated_response_masks: list[torch.Tensor],
@@ -954,7 +941,6 @@ class PolicyTrainerRayProcess(RayProcess):
         with context:
             for i in range(len(collated_query_responses)):
                 query_response = collated_query_responses[i]
-                tool_mask = collated_tool_masks[i]
                 attention_mask = collated_attention_masks[i]
                 position_id = collated_position_ids[i]
                 response_mask = collated_response_masks[i]
@@ -969,11 +955,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     return_entropy=return_entropy,
                 )
 
-                if self.args.mask_tool_use and self.args.tool_use:
-                    response_mask = response_mask.bool() & tool_mask.bool()
-                else:
-                    response_mask = response_mask.bool()
-
                 logprob = torch.masked_fill(logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                 collated_logprobs.append(logprob)
 
@@ -985,10 +966,7 @@ class PolicyTrainerRayProcess(RayProcess):
         return collated_logprobs, collated_entropies
 
     def calculate_token_counts(
-        self,
-        accumulation_steps: int,
-        collated_response_masks: list[torch.Tensor],
-        collated_tool_masks: list[torch.Tensor],
+        self, accumulation_steps: int, collated_response_masks: list[torch.Tensor]
     ) -> dict[int, float]:
         """
         Compute the number of training tokens in each batch for this set of responses.
@@ -997,13 +975,9 @@ class PolicyTrainerRayProcess(RayProcess):
         accumulation_counts: dict[int, float] = {}
         local_counts = []
 
-        for i, response_mask in enumerate(collated_response_masks):
+        for response_mask in collated_response_masks:
             response_mask = response_mask.to(self.device)
             mask = response_mask[:, 1:].bool()
-            if self.args.mask_tool_use and self.args.tool_use:
-                tool_mask = collated_tool_masks[i].to(self.device)
-                mask &= tool_mask[:, 1:].bool()
-
             local_counts.append(mask.sum().float())
 
         if not local_counts:
@@ -1023,7 +997,6 @@ class PolicyTrainerRayProcess(RayProcess):
     def train(
         self,
         collated_query_responses,
-        collated_tool_masks,
         collated_attention_masks,
         collated_position_ids,
         collated_advantages,
@@ -1034,18 +1007,17 @@ class PolicyTrainerRayProcess(RayProcess):
     ):
         args = self.args
         to_device_inplace(collated_query_responses, self.device)
-        to_device_inplace(collated_tool_masks, self.device)
         to_device_inplace(collated_attention_masks, self.device)
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
+        collated_response_masks = [mask.bool() for mask in collated_response_masks]
         to_device_inplace(collated_vllm_logprobs, self.device)
         # accumulation steps should always be at least 1
         accumulation_steps = max(math.ceil(len(collated_query_responses) / num_mini_batches - 0.5), 1)
         leftover = len(collated_query_responses) % accumulation_steps
         if leftover > 0:
             collated_query_responses = collated_query_responses[0:-leftover]
-            collated_tool_masks = collated_tool_masks[0:-leftover]
             collated_attention_masks = collated_attention_masks[0:-leftover]
             collated_position_ids = collated_position_ids[0:-leftover]
             collated_advantages = collated_advantages[0:-leftover]
@@ -1062,7 +1034,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 collated_ref_logprobs, _ = self.compute_logprobs(
                     self.ref_policy,
                     collated_query_responses,
-                    collated_tool_masks,
                     collated_attention_masks,
                     collated_position_ids,
                     collated_response_masks,
@@ -1081,7 +1052,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_old_logprobs, _ = self.compute_logprobs(
                         self.model,
                         collated_query_responses,
-                        collated_tool_masks,
                         collated_attention_masks,
                         collated_position_ids,
                         collated_response_masks,
@@ -1092,14 +1062,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 with torch.no_grad():
                     for i in range(len(collated_query_responses)):
-                        tool_mask = collated_tool_masks[i]
                         response_mask = collated_response_masks[i]
-
-                        if args.mask_tool_use and args.tool_use:
-                            response_mask = response_mask.bool() & tool_mask.bool()
-                        else:
-                            response_mask = response_mask.bool()
-
                         vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
                         vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                         vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
@@ -1126,7 +1089,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 # This ensures all minibatches in an accumulation group are normalized by the same total
                 if args.loss_denominator == "token":
                     accumulation_token_counts = self.calculate_token_counts(
-                        accumulation_steps, collated_response_masks, collated_tool_masks
+                        accumulation_steps, collated_response_masks
                     )
                 else:
                     accumulation_token_counts = {
@@ -1136,18 +1099,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
-                    mb_tool_mask = collated_tool_masks[i]
                     mb_advantages = collated_advantages[i]
-                    mb_response_masks = collated_response_masks[i]
-                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()
-                    # if masking snippets, do it here.
-                    if args.mask_tool_use and args.tool_use:
-                        mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
-
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
-
+                    mb_response_masks_bool = collated_response_masks[i][:, 1:]
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_local_logprobs, mb_entropy = self.forward(
@@ -1567,7 +1523,6 @@ def accumulate_inference_batches(
     num_prompts: int,
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
-    reward_fn: Callable,
     prompt_dataset: Dataset,
     data_loader: data_loader_lib.HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
@@ -1659,25 +1614,7 @@ def accumulate_inference_batches(
 
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
-        example = prompt_dataset[result.dataset_index]
-        k_queries = repeat_each([example[INPUT_IDS_PROMPT_KEY]], generation_config.n)
-        k_ground_truths = repeat_each([example[GROUND_TRUTHS_KEY]], generation_config.n)
-        k_datasets = repeat_each([example[VERIFIER_SOURCE_KEY]], generation_config.n)
-        k_raw_queries = repeat_each([example[RAW_PROMPT_KEY]], generation_config.n)
-
-        scores, reward_metrics = asyncio.run(
-            reward_fn(
-                result.responses,
-                decoded_responses,
-                k_ground_truths,
-                k_datasets,
-                result.finish_reasons,
-                result.request_info,
-                k_raw_queries,
-            )
-        )
-
-        percent_solved = np.mean(scores).item() / args.max_possible_score
+        percent_solved = np.mean(result.reward_scores).item() / args.max_possible_score
         # Don't resample prompt that was solved at more than no_resample_positive_rate
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             total_no_resampled += 1
@@ -1687,16 +1624,16 @@ def accumulate_inference_batches(
             )
 
         # Filter out zero std prompts
-        if filter_zero_std_samples and np.std(scores) == 0:
+        if filter_zero_std_samples and np.std(result.reward_scores) == 0:
             # If we're not active sampling, still count this as a sample
             if not active_sampling:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
 
             total_filtered_prompts += 1
-            if scores[0] == 0:
+            if result.reward_scores[0] == 0:
                 filtered_prompt_zero += 1
-            elif scores[0] == args.max_possible_score:
+            elif result.reward_scores[0] == args.max_possible_score:
                 filtered_prompt_solved += 1
             else:
                 filtered_prompt_nonzero += 1
@@ -1709,13 +1646,14 @@ def accumulate_inference_batches(
             progress_bar.update(1)
 
         results.append(result)
-        all_queries.extend(k_queries)
-        all_ground_truths.extend(k_ground_truths)
-        all_datasets.extend(k_datasets)
-        all_raw_queries.extend(k_raw_queries)
+        prompt_data = prompt_dataset[result.dataset_index]
+        all_queries.extend(repeat_each([prompt_data[INPUT_IDS_PROMPT_KEY]], generation_config.n))
+        all_ground_truths.extend(repeat_each([prompt_data[GROUND_TRUTHS_KEY]], generation_config.n))
+        all_datasets.extend(repeat_each([prompt_data[VERIFIER_SOURCE_KEY]], generation_config.n))
+        all_raw_queries.extend(repeat_each([prompt_data[RAW_PROMPT_KEY]], generation_config.n))
         all_decoded_responses.extend(decoded_responses)
-        all_scores.extend(scores)
-        all_reward_metrics.append(reward_metrics)
+        all_scores.extend(result.reward_scores)
+        all_reward_metrics.append(result.reward_metrics)
         all_percent_solved.append(percent_solved)
 
     if len(results) == 0:
@@ -1831,15 +1769,10 @@ def accumulate_inference_batches(
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
     )
-    logging.info(
-        f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"
-    )
-
     return combined_result, batch, combined_reward_metrics, batch_stats
 
 
 def data_preparation_thread(
-    reward_fn: Callable,
     inference_results_Q: ray_queue.Queue,
     param_prompt_Q: ray_queue.Queue,
     packed_sequences_Q: Queue,
@@ -1863,7 +1796,6 @@ def data_preparation_thread(
                 num_prompts=args.num_unique_prompts_rollout,
                 model_dims=model_dims,
                 tokenizer=tokenizer,
-                reward_fn=reward_fn,
                 data_loader=data_loader,
                 prompt_dataset=train_dataset,
                 param_prompt_Q=param_prompt_Q,
@@ -1883,7 +1815,6 @@ def data_preparation_thread(
                     attention_masks=[],
                     response_masks=[],
                     original_responses=[],
-                    tool_masks=[],
                     advantages=[],
                     position_ids=[],
                     vllm_logprobs=[],
@@ -1952,6 +1883,7 @@ def data_preparation_thread(
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
+                mask_tool_use=args.mask_tool_use,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
@@ -1975,7 +1907,6 @@ def data_preparation_thread(
                     )
                     # construct "dummy" sequences for padding out the world size
                     dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
-                    dummy_tool_mask = torch.zeros_like(dummy_qr)
                     dummy_attention = torch.tensor([1, 1], dtype=torch.long)
                     dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
                     dummy_response_mask = torch.zeros_like(dummy_qr)
@@ -1983,7 +1914,6 @@ def data_preparation_thread(
                     # pad out the world size
                     for _ in range(shortfall):
                         packed_sequences.query_responses.append(dummy_qr)
-                        packed_sequences.tool_masks.append(dummy_tool_mask)
                         packed_sequences.attention_masks.append(dummy_attention)
                         packed_sequences.position_ids.append(dummy_position_ids)
                         packed_sequences.response_masks.append(dummy_response_mask)
@@ -2202,6 +2132,9 @@ def create_model_and_optimizer(
     inference_results_Q: ray_queue.Queue,
     param_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
+    reward_config: RewardConfig,
+    train_dataset,
+    eval_dataset,
 ) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
@@ -2266,11 +2199,15 @@ def create_model_and_optimizer(
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
+        mask_tool_use=args.mask_tool_use,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
         inflight_updates=args.inflight_updates,
+        reward_config=reward_config,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
     )
 
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
@@ -2562,7 +2499,6 @@ def maybe_evaluate(
     training_step: int,
     evaluation_inference_results_Q: ray_queue.Queue,
     tokenizer,
-    reward_fn,
     episode,
     eval_dataset: Dataset,
     eval_generation_config,
@@ -2585,7 +2521,6 @@ def maybe_evaluate(
             num_prompts=num_eval_prompts,
             model_dims=model_dims,
             tokenizer=tokenizer,
-            reward_fn=reward_fn,
             prompt_dataset=eval_dataset,
             actor_manager=actor_manager,
             timeout=timeout,
@@ -2688,103 +2623,6 @@ def make_tokenizer(tc: TokenizerConfig, model_config: ModelConfig):
     return tc.tokenizer
 
 
-def make_reward_fn(args: Args) -> Callable:
-    """Create a reward function based on the provided arguments."""
-    reward_fn_mapping = build_all_verifiers(args)
-
-    async def reward_fn(
-        responses: list[torch.Tensor],
-        decoded_responses: list[str],
-        ground_truths: list[Any],
-        datasets: list[str],
-        finish_reasons: list[str],
-        infos: list[list[int]],
-        queries: list[str] | None = None,
-    ) -> (list[float], dict[str, Any]):
-        timeouts = infos.timeouts
-        tool_errors = infos.tool_errors
-        tool_outputs = infos.tool_outputs
-        tool_calleds = infos.tool_calleds
-        good_outputs = [
-            len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
-            for i in range(len(tool_outputs))
-        ]
-        scores = [0] * len(decoded_responses)
-        metrics = {}
-
-        reward_time = 0
-        if args.apply_r1_style_format_reward:
-            with Timer(
-                "[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward", noop=True
-            ) as timer:
-                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
-                if len(format_scores) != len(scores):
-                    raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
-                for i in range(len(format_scores)):
-                    scores[i] = format_scores[i] + scores[i]
-                metrics["val/format_scores"] = np.array(format_scores).mean()
-
-            reward_time += timer.duration
-
-        if args.apply_verifiable_reward:
-            with Timer(
-                "[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward", noop=True
-            ) as timer:
-                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
-                    reward_fn_mapping,
-                    responses,
-                    decoded_responses,
-                    ground_truths,
-                    datasets,
-                    reward_mult=args.verification_reward,
-                    queries=queries,
-                )
-                if len(verifiable_rewards) != len(scores):
-                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
-                # slightly complex combo of good outputs and additive format reward
-                for i in range(len(verifiable_rewards)):
-                    if not args.only_reward_good_outputs or (good_outputs[i] and args.only_reward_good_outputs):
-                        if args.apply_r1_style_format_reward and args.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] + scores[i]
-                        elif args.apply_r1_style_format_reward and not args.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
-                        else:
-                            scores[i] = verifiable_rewards[i]
-                np_verifiable_rewards = np.array(verifiable_rewards)
-                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
-                # reshuffle around per_func rewards
-                per_func_lists = defaultdict(list)
-                for reward_dict in per_func_rewards:
-                    for key, value in reward_dict.items():
-                        per_func_lists[key].append(value)
-                # log per function rewards
-                for key, value in per_func_lists.items():
-                    np_value = np.array(value)
-                    metrics[f"objective/{key}_reward"] = np_value.mean()
-                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
-
-            reward_time += timer.duration
-
-        # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
-        if args.non_stop_penalty:
-            with Timer(
-                "[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty", noop=True
-            ) as timer:
-                assert len(finish_reasons) == len(scores)
-                for i in range(len(finish_reasons)):
-                    if finish_reasons[i] != "stop":
-                        scores[i] = args.non_stop_penalty_value
-
-            reward_time += timer.duration
-
-        metrics["time/reward"] = reward_time
-
-        return scores, metrics
-
-    return reward_fn
-
-
 def cleanup_judge_clients():
     """Cleans up all LLM judge clients."""
     asyncio.run(cleanup_all_llm_judge_clients())
@@ -2850,7 +2688,6 @@ def run_training(
     vllm_engines,
     generation_configs,
     data_loader,
-    reward_fn,
     resume_training_step,
     episode,
     wandb_url,
@@ -2891,7 +2728,6 @@ def run_training(
     logger.info("======== ✅ data preparation thread starts =========")
     packing_future = executor.submit(
         data_preparation_thread,
-        reward_fn,
         inference_results_Q,
         param_prompt_Q,
         packed_sequences_Q,
@@ -3044,7 +2880,6 @@ def run_training(
             training_step,
             evaluation_inference_results_Q,
             tokenizer,
-            reward_fn,
             episode,
             eval_dataset,
             generation_configs["eval"],
@@ -3095,6 +2930,18 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
+    reward_config = RewardConfig(
+        apply_r1_style_format_reward=args.apply_r1_style_format_reward,
+        r1_style_format_reward=args.r1_style_format_reward,
+        apply_verifiable_reward=args.apply_verifiable_reward,
+        verification_reward=args.verification_reward,
+        non_stop_penalty=args.non_stop_penalty,
+        non_stop_penalty_value=args.non_stop_penalty_value,
+        only_reward_good_outputs=args.only_reward_good_outputs,
+        additive_format_reward=args.additive_format_reward,
+        verifier_functions=build_all_verifiers(args),
+    )
+
     policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
         create_model_and_optimizer(
             args,
@@ -3106,6 +2953,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             inference_results_Q,
             param_prompt_Q,
             evaluation_inference_results_Q,
+            reward_config,
+            train_dataset,
+            eval_dataset,
         )
     )
 
@@ -3144,8 +2994,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     generate_metrics_Q = Queue(maxsize=args.async_steps)
     weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
 
-    reward_fn = make_reward_fn(args)
-
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
 
@@ -3159,7 +3007,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             vllm_engines,
             generation_configs,
             data_loader,
-            reward_fn,
             resume_training_step,
             episode,
             wandb_url,
