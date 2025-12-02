@@ -32,8 +32,8 @@ class GenerationResult:
     finish_reasons: list[str]
     masks: list[list[int]]
     request_info: RequestInfo
-    dataset_index: int | None = None
-    epoch_number: int | None = None
+    dataset_index: int | None
+    prompt_id: str | None
     token_statistics: TokenStatistics | None = None
     start_time: float | None = None
     logprobs: list[list[float]] | None = None
@@ -50,8 +50,6 @@ class PromptRequest:
 
     prompt: list[int]
     generation_config: Any
-    epoch_number: int | None = None
-    training_step: int | None = None
-    dataset_index: int | None = None
+    dataset_index: int
+    prompt_id: str
     is_eval: bool = False
-    start_time: float | None = None
