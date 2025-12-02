@@ -23,6 +23,7 @@ To run on Beaker:
 """
 
 import json
+import logging
 import os
 import pathlib
 import unittest
@@ -37,6 +38,9 @@ from open_instruct.queue_types import PromptRequest
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.tool_utils.tools import PythonCodeTool
 from open_instruct.vllm_utils import create_vllm_engines
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 TEST_DATA_DIR = pathlib.Path(__file__).parent / "test_data"
 
@@ -78,12 +82,15 @@ class TestGeneration(TestGrpoFastBase):
         stop = list(tools.keys()) if tools else None
         generation_config = SamplingParams(temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, stop=stop)
 
+        logger.info("Putting request in queue...")
         param_prompt_Q.put(
             PromptRequest(
                 prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
             )
         )
+        logger.info("Request put in queue, waiting for result...")
         result = inference_results_Q.get(timeout=120)
+        logger.info("Got result!")
         param_prompt_Q.put(None)
 
         return result

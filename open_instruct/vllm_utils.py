@@ -464,12 +464,20 @@ def init_process_group(
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
+    logger.info(f"_prefetch_worker started, batch_size={actor.inference_batch_size}")
     while True:
-        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
+        should_stop = actor._should_stop()
+        active_count = len(actor.active_tasks)
+        if should_stop or active_count >= actor.inference_batch_size:
+            logger.debug(
+                f"_prefetch_worker sleeping: should_stop={should_stop}, active={active_count}, max={actor.inference_batch_size}"
+            )
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
+        logger.info("_prefetch_worker waiting for request...")
         request = actor.prompt_queue.get()
+        logger.info(f"_prefetch_worker got request: {type(request)}")
         add_request(actor, request)
 
 
