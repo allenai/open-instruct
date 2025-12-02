@@ -76,7 +76,8 @@ class TestGrpoFastBase(unittest.TestCase):
         utils.check_runtime_leaks()
 
         # Initialize Ray for this test
-        ray.init(include_dashboard=False)
+        # Match production (grpo_fast.py:3096) - use runtime_env with env_vars
+        ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     def _cleanup_ray_queues(self):
         """Clean up all Ray queues created during the test."""

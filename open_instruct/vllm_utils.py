@@ -464,7 +464,9 @@ def init_process_group(
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
-    logger.info(f"_prefetch_worker started, batch_size={actor.inference_batch_size}")
+    print(f"[WORKER] _prefetch_worker started, batch_size={actor.inference_batch_size}", flush=True)
+    print(f"[WORKER] prompt_queue id: {id(actor.prompt_queue)}", flush=True)
+    print(f"[WORKER] prompt_queue actor: {actor.prompt_queue.actor}", flush=True)
     while True:
         should_stop = actor._should_stop()
         active_count = len(actor.active_tasks)
@@ -475,9 +477,9 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        logger.info("_prefetch_worker waiting for request...")
+        print(f"[WORKER] waiting for request (queue size: {actor.prompt_queue.qsize()})...", flush=True)
         request = actor.prompt_queue.get()
-        logger.info(f"_prefetch_worker got request: {type(request)}")
+        print(f"[WORKER] got request: {type(request)}", flush=True)
         add_request(actor, request)
 
 
