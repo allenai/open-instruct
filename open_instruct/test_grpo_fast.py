@@ -77,10 +77,8 @@ class TestGrpoFastBase(unittest.TestCase):
 
         # Initialize Ray for this test
         # Match production (grpo_fast.py:3096) - use runtime_env with env_vars
-        # Force V0 engine to avoid V1's multiprocessing EngineCore issues in Ray
         env_vars = dict(os.environ)
         env_vars["NCCL_CUMEM_ENABLE"] = "0"
-        env_vars["VLLM_USE_V1"] = "0"
         env_vars["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
         ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": env_vars})
 
