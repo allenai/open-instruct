@@ -32,8 +32,8 @@ from typing import Any
 
 import aiohttp
 import backoff
-import openai
 import datasets
+import openai
 import ray
 import torch
 import torch.distributed
@@ -432,6 +432,7 @@ def _create_server_args(model_path: str) -> argparse.Namespace:
     args = parser.parse_args(["--model", model_path])
     args.disable_fastapi_docs = True
     return args
+
 
 def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> None:
     base_request_id = sub_request["base_request_id"]
