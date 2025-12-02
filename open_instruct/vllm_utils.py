@@ -390,30 +390,12 @@ async def _check_health(port: int) -> None:
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
-    """Worker thread that fetches requests from the prompt queue."""
     while True:
-        should_stop = actor._should_stop()
-        active_count = len(actor.active_tasks)
-        batch_size = actor.inference_batch_size
-        if should_stop or active_count >= batch_size:
+        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        try:
-            # Use non-blocking get with a short sleep for polling.
-            # This avoids issues with ray.get/ray.wait blocking when called
-            # from a ThreadPoolExecutor thread inside a Ray actor.
-            request = actor.prompt_queue.get_nowait()
-        except ray_queue.Empty:
-            time.sleep(0.1)
-            continue
-        except Exception as e:
-            logger.warning(f"_prefetch_worker exception: {type(e).__name__}: {e}")
-            time.sleep(0.1)
-            continue
-
-        if request is None:
-            break
+        request = actor.prompt_queue.get()
         add_request(actor, request)
 
 
@@ -462,22 +444,11 @@ class LLMRayActor:
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
         inflight_updates: bool,
-        prompt_queue_actor: ray.actor.ActorHandle = None,
-        results_queue_actor: ray.actor.ActorHandle = None,
-        eval_results_queue_actor: ray.actor.ActorHandle = None,
         **kwargs,
     ):
         assert_threaded_actor(self)
         self._init_config(tools, max_tool_calls, inflight_updates)
-        self._init_queues(
-            prompt_queue,
-            results_queue,
-            eval_results_queue,
-            actor_manager,
-            prompt_queue_actor,
-            results_queue_actor,
-            eval_results_queue_actor,
-        )
+        self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -497,62 +468,22 @@ class LLMRayActor:
         self.active_tasks = {}
         self.request_outputs = {}
 
-    def _init_queues(
-        self,
-        prompt_queue,
-        results_queue,
-        eval_results_queue,
-        actor_manager,
-        prompt_queue_actor,
-        results_queue_actor,
-        eval_results_queue_actor,
-    ) -> None:
+    def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
-        # Fix Ray Queue serialization issue: when Queue is serialized to a remote actor,
-        # the internal actor handle is lost. We need to restore it using the separately
-        # passed actor handles.
-        self.prompt_queue = self._fix_queue(prompt_queue, prompt_queue_actor)
-        self.results_queue = self._fix_queue(results_queue, results_queue_actor)
-        self.eval_results_queue = self._fix_queue(eval_results_queue, eval_results_queue_actor)
+        self.prompt_queue = prompt_queue
+        self.results_queue = results_queue
+        self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
 
         # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
 
-    def _fix_queue(self, q, actor_handle):
-        """Fix a Ray Queue that lost its actor reference during serialization."""
-        if q is None:
-            return None
-        # Check if the queue's actor matches the provided actor handle.
-        # During Ray serialization, the Queue object might have a stale or different actor.
-        if actor_handle is not None:
-            if q.actor is None or q.actor != actor_handle:
-                q.actor = actor_handle
-        elif q.actor is None:
-            logger.warning("Queue actor is None after serialization and no actor handle provided")
-        return q
-
     def _init_executor(self) -> None:
-        self._warmup_queues()
         max_workers = NUM_PREFETCH_WORKERS + (NUM_TOOL_WORKERS if self.tools else 0)
         self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
         self._prefetch_future = self.executor.submit(_prefetch_worker, self)
         self._process_future = self.executor.submit(self.process_from_queue)
-
-    def _warmup_queues(self) -> None:
-        """Ensure Ray Queue actors are ready before starting workers.
-
-        Ray Queues use internal _QueueActor instances that may take time to initialize
-        (especially when using runtime_env with package installation). This method
-        makes calls to each queue to block until the actors are ready.
-        """
-        queues = [self.prompt_queue, self.results_queue]
-        if self.eval_results_queue is not None:
-            queues.append(self.eval_results_queue)
-        for q in queues:
-            if q is not None:
-                q.qsize()
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
@@ -594,6 +525,9 @@ class LLMRayActor:
             app = build_app(args)
             await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
 
+            # Create a socket and bind to port 0 to let the OS assign an available port.
+            # We pass the socket to serve_http to avoid race conditions where another
+            # process could claim the port between bind() and server startup.
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.bind(("127.0.0.1", 0))
             sock.listen(1)
@@ -605,6 +539,7 @@ class LLMRayActor:
                 serve_http(app, sock=sock, host="127.0.0.1", port=self.server_port, log_level="warning")
             )
 
+            # Yield control to allow the server task to start before returning.
             await asyncio.sleep(0.1)
 
             return engine_client
@@ -614,10 +549,8 @@ class LLMRayActor:
                 self.loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(self.loop)
                 self.llm_engine = self.loop.run_until_complete(_init_engine_and_server())
-            except Exception:
-                logger.exception("vLLM engine initialization failed")
-                raise
             finally:
+                # Signal completion to the waiting main thread even if init failed.
                 init_complete.set()
             self.loop.run_forever()
 
@@ -638,16 +571,9 @@ class LLMRayActor:
 
         logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
 
-        @backoff.on_exception(backoff.constant, aiohttp.ClientError, max_time=60, interval=0.5)
+        @backoff.on_exception(backoff.constant, (aiohttp.ClientError, RuntimeError), max_time=60, interval=0.5)
         async def check_health():
-            async with (
-                aiohttp.ClientSession() as session,
-                session.get(
-                    f"http://127.0.0.1:{self.server_port}/health", timeout=aiohttp.ClientTimeout(total=2.0)
-                ) as response,
-            ):
-                if response.status != 200:
-                    raise aiohttp.ClientError(f"Health check failed with status {response.status}")
+            await _check_health(self.server_port)
 
         asyncio.run(check_health())
         logger.info("vLLM OpenAI API server is ready")
@@ -991,13 +917,6 @@ def create_vllm_engines(
 
     logger.info(f"num_gpus: {num_gpus}")
 
-    # Extract actor handles from queues before passing to remote actors.
-    # Ray Queue serialization loses the internal actor reference, so we pass
-    # the actor handles separately and restore them inside the remote actor.
-    prompt_queue_actor = prompt_queue.actor if prompt_queue is not None else None
-    results_queue_actor = results_queue.actor if results_queue is not None else None
-    eval_results_queue_actor = eval_results_queue.actor if eval_results_queue is not None else None
-
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
         bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
@@ -1024,12 +943,7 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={
-                        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
-                        "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
-                        "VLLM_ALLOW_INSECURE_SERIALIZATION": "1",
-                    },
-                    excludes=[".venv", ".git"],
+                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
                 ),
             )
             .remote(
@@ -1058,9 +972,6 @@ def create_vllm_engines(
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
-                prompt_queue_actor=prompt_queue_actor,
-                results_queue_actor=results_queue_actor,
-                eval_results_queue_actor=eval_results_queue_actor,
             )
         )
 
