@@ -174,7 +174,7 @@ class TestGrpoFastBase(unittest.TestCase):
         return rl_utils.PackedSequences(
             query_responses=[torch.full((length,), i, dtype=torch.long) for i, length in enumerate(lengths)],
             attention_masks=[torch.ones(length, dtype=torch.long) for length in lengths],
-            response_masks=[torch.ones(length, dtype=torch.bool) for length in lengths],
+            response_masks=[torch.ones(length, dtype=torch.long) for length in lengths],
             original_responses=[[i] * seq_length for i in range(batch_size)],
             advantages=[torch.randn(length) for length in lengths],
             position_ids=[torch.arange(length, dtype=torch.long) for length in lengths],

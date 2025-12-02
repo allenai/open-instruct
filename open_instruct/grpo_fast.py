@@ -1112,16 +1112,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
                     mb_advantages = collated_advantages[i]
-                    mb_response_masks = collated_response_masks[i]
-                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()
-                    # if masking snippets, do it here.
-                    if args.mask_tool_use and args.tool_use:
-                        mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
-
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
-
+                    mb_response_masks_bool = collated_response_masks[i][:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_local_logprobs, mb_entropy = self.forward(

@@ -187,7 +187,7 @@ def pack_sequences(
         query_responses=[torch.tensor(t) for t in query_responses],
         attention_masks=attention_masks_list,
         position_ids=[reset_position_ids(t.unsqueeze(0)).squeeze(0) for t in attention_masks_list],
-        response_masks=[torch.tensor(t, dtype=torch.bool) for t in response_masks],
+        response_masks=[torch.tensor(t, dtype=torch.long) for t in response_masks],
         original_responses=responses,
         num_actions=[torch.tensor(t) for t in num_actions],
         packed_seq_lens=[torch.tensor(t) for t in packed_seq_lens],
