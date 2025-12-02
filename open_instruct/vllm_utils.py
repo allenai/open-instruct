@@ -200,6 +200,12 @@ async def process_request_async(
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
 
+    if output.finish_reason == "stop" and len(accumulated_tokens) == 0:
+        eos_token_id = actor.llm_engine.tokenizer.eos_token_id
+        accumulated_tokens.append(eos_token_id)
+        masks.append(1)
+        accumulated_logprobs.append({eos_token_id: types.SimpleNamespace(logprob=float("nan"))})
+
     complete_output = vllm.CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
         text="",

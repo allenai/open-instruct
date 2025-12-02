@@ -1790,13 +1790,6 @@ def accumulate_inference_batches(
                 is_eval=False,
             )
 
-        # TODO(finbarrtimbers): Move this to LLMRayActor.
-        for i in range(len(result.finish_reasons)):
-            if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
-                result.responses[i].append(tokenizer.eos_token_id)
-                result.masks[i].append(1)
-                result.logprobs[i].append(float("nan"))
-
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
         # TODO(finbarrtimbers): Make PendingQueriesMap.pop return a Batch, and add a Batch.repeat method.
