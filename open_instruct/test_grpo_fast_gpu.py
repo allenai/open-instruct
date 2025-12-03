@@ -70,6 +70,15 @@ class TestGeneration(TestGrpoFastBase):
         print(f"[TEST] Got: {result1}, qsize after get={param_prompt_Q.qsize()}", flush=True)
         print("[TEST] Queue basic test PASSED!", flush=True)
 
+        prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
+        stop = list(tools.keys()) if tools else None
+        generation_config = SamplingParams(temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, stop=stop)
+        request = PromptRequest(
+            prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
+        )
+        print(f"[TEST] Pre-queuing request {request.prompt_id} before engine creation...", flush=True)
+        param_prompt_Q.put(request, block=True)
+
         print("[TEST] Starting create_vllm_engines...", flush=True)
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
         ray.get(pg.ready())
@@ -93,23 +102,7 @@ class TestGeneration(TestGrpoFastBase):
             max_tool_calls=max_tool_calls,
         )
 
-        prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
-        stop = list(tools.keys()) if tools else None
-        generation_config = SamplingParams(temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, stop=stop)
-
-        print(f"[TEST] Queue size before put: {param_prompt_Q.qsize()}", flush=True)
-        print("[TEST] Putting real request...", flush=True)
-        request = PromptRequest(
-            prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
-        )
-        print(f"[TEST] PromptRequest created: {request.prompt_id}", flush=True)
-        param_prompt_Q.put(request, block=True)
-        print("[TEST] put() returned", flush=True)
-        import time as _time
-
-        _time.sleep(1)
-        print(f"[TEST] Queue size after put (after 1s sleep): {param_prompt_Q.qsize()}", flush=True)
-        print("[TEST] Request put in queue, waiting for result...", flush=True)
+        print("[TEST] Engine created, waiting for result...", flush=True)
         result = inference_results_Q.get(timeout=120)
         print("[TEST] Got result!", flush=True)
         param_prompt_Q.put(None)

@@ -466,6 +466,7 @@ def init_process_group(
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     import sys
     import traceback
+
     def log(msg):
         sys.stderr.write(f"[WORKER] {msg}\n")
         sys.stderr.flush()
@@ -494,9 +495,9 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
             poll_count += 1
 
             if qsize == 0:
-                log(f"poll #{poll_count-1} - queue empty, sleeping 0.1s")
+                log(f"poll #{poll_count - 1} - queue empty, sleeping 0.1s")
                 time.sleep(0.1)
-                log(f"poll #{poll_count-1} - woke up from sleep")
+                log(f"poll #{poll_count - 1} - woke up from sleep")
                 continue
 
             log(f"queue has items, calling get() (queue size: {qsize})...")
