@@ -115,6 +115,14 @@ async def process_request_async(
     sampling_params: vllm.SamplingParams,
 ):
     """Process a single async request with tool support, awaiting tools inline."""
+    import sys
+
+    def log(msg):
+        sys.stderr.write(f"[PROCESS_REQUEST] {msg}\n")
+        sys.stderr.flush()
+
+    log(f"process_request_async started for sub_request_id={sub_request_id}")
+
     accumulated_tokens = []
     accumulated_logprobs = []
     masks = []
@@ -133,11 +141,14 @@ async def process_request_async(
 
     while True:
         iteration_request_id = f"{sub_request_id}_iter{iteration}"
+        log(f"starting iteration {iteration}, request_id={iteration_request_id}")
+        log("calling actor.llm_engine.generate()...")
         outputs = [
             o
             async for o in actor.llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
             if o.finished
         ]
+        log(f"generate() completed, got {len(outputs)} outputs")
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
         request_output = outputs[0]
         iteration += 1
@@ -221,6 +232,7 @@ async def process_request_async(
 
     actor.active_tasks.pop(sub_request_id, None)
 
+    log(f"putting result to completion_queue for sub_request_id={sub_request_id}")
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
@@ -236,6 +248,7 @@ async def process_request_async(
             "tools": actor.tools,
         }
     )
+    log(f"process_request_async completed for sub_request_id={sub_request_id}")
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -519,7 +532,15 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
+    import sys
+
+    def log(msg):
+        sys.stderr.write(f"[ADD_REQUEST] {msg}\n")
+        sys.stderr.flush()
+
+    log(f"add_request called with request.prompt_id={request.prompt_id}")
     request_id = make_request_id(request)
+    log(f"request_id={request_id}")
 
     sampling_params = request.generation_config.clone()
     sampling_params.n = 1  # Use n=1 for tool processing
@@ -536,14 +557,18 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
 
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
 
+    log(f"scheduling {request.generation_config.n} sub-requests on actor.loop")
     for j in range(request.generation_config.n):
         sub_sampling_params = sampling_params.clone()
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
         sub_request_id = f"{request_id}_{j}"
+        log(f"scheduling sub_request_id={sub_request_id}")
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params), actor.loop
         )
+        log(f"scheduled sub_request_id={sub_request_id}, future={actor.active_tasks[sub_request_id]}")
+    log(f"add_request completed, {len(actor.active_tasks)} active tasks")
 
 
 class LLMRayActor:
