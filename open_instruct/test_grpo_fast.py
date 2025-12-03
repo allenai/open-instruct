@@ -278,9 +278,7 @@ class TestGrpoFastBase(unittest.TestCase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(
-                example, example["dataset_index"], 0, 0, param_prompt_Q, mock_generation_config, False
-            )
+            grpo_fast.add_prompt_to_generator(example, 0, 0, param_prompt_Q, mock_generation_config, False)
 
         return param_prompt_Q, inference_results_Q, mock_dataset
 
@@ -711,9 +709,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(
-                example, example["dataset_index"], 0, 0, param_prompt_Q, mock_generation_config, False
-            )
+            grpo_fast.add_prompt_to_generator(example, 0, 0, param_prompt_Q, mock_generation_config, False)
 
         self.assertEqual(
             param_prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries"
@@ -746,9 +742,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(
-                example, example["dataset_index"], 0, 0, param_prompt_Q, mock_generation_config, False
-            )
+            grpo_fast.add_prompt_to_generator(example, 0, 0, param_prompt_Q, mock_generation_config, False)
 
         request_count = 0
         while not param_prompt_Q.empty():

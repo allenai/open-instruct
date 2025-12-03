@@ -36,8 +36,9 @@ os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
 
-from open_instruct import streaming_data_loader, utils
-from open_instruct.streaming_data_loader import accumulate_inference_batches, add_prompt_to_generator, collate_fn
+from open_instruct import data_loader as data_loader_lib
+from open_instruct import utils
+from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator, collate_fn
 
 # isort: on
 import asyncio
@@ -74,7 +75,6 @@ from rich.pretty import pprint
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import data_loader as data_loader_lib
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
@@ -591,7 +591,7 @@ class PolicyTrainerRayProcess(RayProcess):
         master_addr: str | None,
         master_port: int | None,
         args: Args,
-        data_loader_config: streaming_data_loader.StreamingDataLoaderConfig,
+        data_loader_config: data_loader_lib.StreamingDataLoaderConfig,
         dataset: Dataset,
         inference_results_Q: ray_queue.Queue,
         param_prompt_Q: ray_queue.Queue,
@@ -791,7 +791,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 if hasattr(self, "ref_policy_checkpoint_path")
                 else None,
             )
-        # 49 base metrics: 16 from step() (KL, loss, ratio, etc.), 22 from streaming_data_loader
+        # 49 base metrics: 16 from step() (KL, loss, ratio, etc.), 22 from data_loader_lib
         # (scores, sequence_lengths, etc.), 7 from BatchStatistics, 4 from reward_metrics.
         # Each verifier adds 2 metrics: objective/{key}_reward and objective/{key}_correct_rate.
         max_metrics = 49 + 2 * num_verifiers
@@ -1429,7 +1429,7 @@ class ModelGroup:
         num_gpus_per_node: list[int],
         single_gpu_mode: bool,
         args: Args,
-        data_loader_config: streaming_data_loader.StreamingDataLoaderConfig,
+        data_loader_config: data_loader_lib.StreamingDataLoaderConfig,
         dataset: Dataset,
         inference_results_Q: ray_queue.Queue,
         param_prompt_Q: ray_queue.Queue,
@@ -1575,7 +1575,7 @@ def calculate_utilization_metrics(
     return utilization_metrics
 
 
-def setup_runtime_variables(args: Args, streaming_config: streaming_data_loader.StreamingDataLoaderConfig) -> Args:
+def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig) -> Args:
     """Set up runtime variables for the experiment."""
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
@@ -1636,7 +1636,7 @@ def setup_datasets(
     args: Args,
     tc: TokenizerConfig,
     tokenizer: PreTrainedTokenizer,
-    streaming_config: streaming_data_loader.StreamingDataLoaderConfig,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
 ):
     """Set up training and evaluation datasets."""
     system_prompt_override = None
@@ -1700,7 +1700,7 @@ def create_model_and_optimizer(
     inference_results_Q: ray_queue.Queue,
     param_prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
-    data_loader_config: streaming_data_loader.StreamingDataLoaderConfig,
+    data_loader_config: data_loader_lib.StreamingDataLoaderConfig,
     train_dataset: Dataset,
     eval_dataset,
     reward_config: RewardConfig,
@@ -1853,7 +1853,7 @@ def create_model_and_optimizer(
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager, model_dims
 
 
-def create_generation_configs(args: Args, streaming_config: streaming_data_loader.StreamingDataLoaderConfig):
+def create_generation_configs(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig):
     """Create generation configs for training and evaluation."""
     generation_config = vllm.SamplingParams(
         temperature=args.temperature,
@@ -1940,7 +1940,7 @@ def weight_sync_thread(
 
 def one_training_step(
     args: Args,
-    streaming_config: streaming_data_loader.StreamingDataLoaderConfig,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
     data_thread_metrics: dict[str, Any],
@@ -2349,9 +2349,9 @@ def run_training(
             and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
-            for eval_idx, eval_example in enumerate(iter(eval_data_loader)):
+            for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(
-                    eval_example, eval_idx, 0, training_step, param_prompt_Q, generation_configs["eval"], is_eval=True
+                    eval_example, 0, training_step, param_prompt_Q, generation_configs["eval"], is_eval=True
                 )
 
         episode += args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
@@ -2437,7 +2437,7 @@ def main(
     args: Args,
     tc: TokenizerConfig,
     model_config: ModelConfig,
-    streaming_config: streaming_data_loader.StreamingDataLoaderConfig,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config)
@@ -2584,11 +2584,11 @@ def main(
 if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig, streaming_data_loader.StreamingDataLoaderConfig))
+    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig, data_loader_lib.StreamingDataLoaderConfig))
     args, tokenizer_config, model_config, streaming_config = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
-    assert isinstance(streaming_config, streaming_data_loader.StreamingDataLoaderConfig)
+    assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
 
     main(args, tokenizer_config, model_config, streaming_config)
