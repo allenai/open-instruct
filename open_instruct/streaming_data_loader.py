@@ -511,7 +511,7 @@ class StreamingDataLoader(TextDataLoaderBase):
 
     def _prepare_collated_data_for_self(self, packed_sequences: PackedSequences) -> dict[str, list[torch.Tensor]]:
         per_device_packed_query_responses = packed_sequences.query_responses
-        per_device_packed_tool_masks = packed_sequences.tool_masks
+        per_device_packed_tool_masks = getattr(packed_sequences, "tool_masks", None)
         per_device_packed_attention_masks = packed_sequences.attention_masks
         per_device_packed_position_ids = packed_sequences.position_ids
         per_device_packed_advantages = packed_sequences.advantages
@@ -520,7 +520,7 @@ class StreamingDataLoader(TextDataLoaderBase):
 
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
         collated_query_responses = []
-        collated_tool_masks = []
+        collated_tool_masks = [] if per_device_packed_tool_masks is not None else None
         collated_attention_masks = []
         collated_position_ids = []
         collated_response_masks = []
@@ -533,7 +533,10 @@ class StreamingDataLoader(TextDataLoaderBase):
                     [per_device_packed_query_responses[idx] for idx in micro_range], self.tokenizer.pad_token_id, True
                 )
             )
-            collated_tool_masks.append(collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0, True))
+            if per_device_packed_tool_masks is not None:
+                collated_tool_masks.append(
+                    collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0, True)
+                )
             collated_attention_masks.append(
                 collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0, True)
             )
@@ -548,15 +551,17 @@ class StreamingDataLoader(TextDataLoaderBase):
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, True)
             )
 
-        return {
+        result = {
             "collated_query_responses": collated_query_responses,
-            "collated_tool_masks": collated_tool_masks,
             "collated_attention_masks": collated_attention_masks,
             "collated_position_ids": collated_position_ids,
             "collated_advantages": collated_advantages,
             "collated_response_masks": collated_response_masks,
             "collated_vllm_logprobs": collated_vllm_logprobs,
         }
+        if collated_tool_masks is not None:
+            result["collated_tool_masks"] = collated_tool_masks
+        return result
 
     def shutdown(self):
         self.shutdown_requested = True
