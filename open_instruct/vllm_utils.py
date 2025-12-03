@@ -488,15 +488,16 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
                 time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
                 continue
 
-            log(f"poll #{poll_count} - calling get(block=True, timeout=1.0)")
+            log(f"poll #{poll_count} - calling get_nowait()")
             poll_count += 1
             request = None
             try:
-                request = actor.prompt_queue.get(block=True, timeout=1.0)
+                request = actor.prompt_queue.get_nowait()
             except ray_queue.Empty:
+                time.sleep(0.1)
                 continue
             except Exception as e:
-                log(f"get() raised exception: {e}")
+                log(f"get_nowait() raised exception: {e}")
                 traceback.print_exc()
                 raise
 
