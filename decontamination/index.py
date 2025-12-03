@@ -2,7 +2,7 @@ import argparse
 import os
 
 import yaml
-from datasets import load_dataset
+from datasets import Dataset, load_dataset
 from elasticsearch import Elasticsearch, helpers
 from tqdm import tqdm
 
@@ -47,7 +47,7 @@ def create_vector_index(es, index_name):
 
 
 def read_dataset(dataset_name, split, messages_field, query_filter, query_field):
-    dataset = load_dataset(dataset_name, split=split, num_proc=open_instruct_utils.max_num_processes())
+    dataset: Dataset = load_dataset(dataset_name, split=split, num_proc=open_instruct_utils.max_num_processes())  # type: ignore[assignment]
     data_to_index = []
 
     query_filter_key, query_filter_value = query_filter.split(":")
@@ -122,6 +122,7 @@ def index_dataset_vectors(data_to_index, es, index_name, model_name, max_batch_t
                 model._modules[module_key] = torch.nn.DataParallel(module)
 
         # Indexing
+        idx = index_size
         print("Indexing data (you can stop it by pressing Ctrl+C once):")
         with tqdm(total=len(data_to_index) - idx) as pbar:
             while idx < len(data_to_index):

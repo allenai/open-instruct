@@ -94,8 +94,11 @@ from open_instruct.model_utils import (
     apply_verifiable_reward,
     disable_dropout_in_model,
     entropy_from_logits,
+    estimate_kl,
     get_olmo3_generation_config,
+    load_ref_policy,
     log_softmax_and_gather,
+    masked_mean,
     print_rich_single_line_metrics,
     print_rich_table,
     push_folder_to_hub,
@@ -234,7 +237,7 @@ class Args:
     """the discount factor"""
     lam: float = 1.0
     """the lambda value for GAE"""
-    kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
+    kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     pack_length: int = 512
     """the length of the pack (you should prob set to the max length of the model)"""
@@ -385,14 +388,6 @@ class Args:
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
-
-
-def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: int | None = None) -> torch.Tensor:
-    """Compute mean of tensor with a masked values."""
-    if axis is not None:
-        return ((values * mask).sum(axis=axis) / mask.sum(axis=axis)).mean()
-    else:
-        return (values * mask).sum() / mask.sum()
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
@@ -558,31 +553,21 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.value_model.train()
 
-        # reference model
-        ds_config = get_eval_ds_config(
+        ds_config, self.ref_policy_hf_ds_config = get_eval_ds_config(
             offload=False,
-            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-            # stage 2 is optimizer sharding which doesn't apply to inference
             stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
             bf16=True,
+            per_device_train_batch_size=args.per_device_train_batch_size,
         )
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["gradient_accumulation_steps"] = 1
-        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
-        else:
-            dschf = None
-        print(f"{dschf=}")
-        self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
+
+        self.ref_policy: PreTrainedModel = load_ref_policy(
+            model_config=model_config,
+            ds_config=ds_config,
+            deepspeed_stage=args.deepspeed_stage,
+            local_rank=self.local_rank,
+            device=self.device,
+            rank=self.rank,
         )
-        disable_dropout_in_model(self.ref_policy)
-        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
-        self.ref_policy.eval()
         self.local_metrics = utils.MetricsTracker(device=self.device)
 
         self.offload_to_cpu(self.model)
@@ -907,10 +892,7 @@ class PolicyTrainerRayProcess(RayProcess):
         with Timer("[Training Processes] Policy Loss calculation", noop=self.rank != 0):
             local_step = 0
             policy_optimizer_step = 0
-            kl1_stats = torch.zeros(len(collated_query_responses))
-            kl2_stats = torch.zeros(len(collated_query_responses))
-            kl3_stats = torch.zeros(len(collated_query_responses))
-            kl4_stats = torch.zeros(len(collated_query_responses))
+            kl_stats_4M = torch.zeros(4, len(collated_query_responses))
             kl_loss_stats = torch.zeros(len(collated_query_responses))
             pg_clipfrac_stats = torch.zeros(len(collated_query_responses))
             pg_loss_stats = torch.zeros(len(collated_query_responses))
@@ -958,18 +940,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     # We also clamp the KL loss to avoid numerical instability
                     # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
                     ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
-                    kl1 = ref_logprobs_diff
-                    kl2 = (ref_logprobs_diff) ** 2 / 2
-                    kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
-                    kl4 = ratio * ref_logprobs_diff
-                    if args.kl_estimator == "kl1":
-                        kl = kl1
-                    elif args.kl_estimator == "kl2":
-                        kl = kl2
-                    elif args.kl_estimator == "kl3":
-                        kl = kl3
-                    elif args.kl_estimator == "kl4":
-                        kl = kl4
+                    kl_4BT = estimate_kl(ref_logprobs_diff, ratio)
+                    kl = kl_4BT[args.kl_estimator]
 
                     # grpo change: directly subtract KL in loss (add)
                     loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
@@ -981,18 +953,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
-                        if args.kl_estimator == "kl1":
-                            kl_loss_stats[i] = kl1_stats[i] * args.beta
-                        elif args.kl_estimator == "kl2":
-                            kl_loss_stats[i] = kl2_stats[i] * args.beta
-                        elif args.kl_estimator == "kl3":
-                            kl_loss_stats[i] = kl3_stats[i] * args.beta
-                        elif args.kl_estimator == "kl4":
-                            kl_loss_stats[i] = kl4_stats[i] * args.beta
+                        kl_stats_4M[:, i] = masked_mean(kl_4BT, mb_response_masks_bool, args.masked_mean_axis).float()
+                        kl_loss_stats[i] = kl_stats_4M[args.kl_estimator, i] * args.beta
                         pg_clipfrac_stats[i] = masked_mean(
                             (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
                         )
@@ -1006,10 +968,8 @@ class PolicyTrainerRayProcess(RayProcess):
                             ).float()
 
             with torch.no_grad():
-                self.local_metrics["objective/kl_avg"] = kl1_stats.mean()
-                self.local_metrics["objective/kl2_avg"] = kl2_stats.mean()
-                self.local_metrics["objective/kl3_avg"] = kl3_stats.mean()
-                self.local_metrics["objective/kl4_avg"] = kl4_stats.mean()
+                for j in range(4):
+                    self.local_metrics[f"objective/kl{j}_avg"] = kl_stats_4M[j].mean()
                 self.local_metrics["loss/policy_avg"] = pg_loss_stats.mean()
                 self.local_metrics["loss/kl_avg"] = kl_loss_stats.mean()
                 self.local_metrics["loss/total_avg"] = loss_stats.mean()
