@@ -2,6 +2,7 @@
 
 import gc
 import multiprocessing
+import typing
 import unittest
 
 import datasets
@@ -50,11 +51,12 @@ class GetSuccessfulTestsFastTests(BaseCodeTestCase):
             "TIGER-Lab/AceCode-87K", split="train", num_proc=open_instruct_utils.max_num_processes()
         )
 
+        # Choose the same sample index used in the original snippet.
         i = 1
-        row = ds[i]  # type: ignore[index]
-        assert isinstance(row, dict)
+        row: dict[str, typing.Any] = ds[i]  # type: ignore[assignment]
         program = str(row["inferences"][-1]["completion"])
         tests = code_utils.decode_tests(row["test_cases"])
+        # The dataset also stores a pass-rate; we can use it to sanity-check.
         expected_passes = int(len(tests) * row["inferences"][-1]["pass_rate"])
 
         result, _ = code_utils.get_successful_tests_fast(program=program, tests=tests)
