@@ -79,7 +79,6 @@ from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import (
     INPUT_IDS_PROMPT_KEY,
-    VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -300,8 +299,6 @@ class Args:
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
-    inference_batch_size: int | None = None
-    """inference batch size per vLLM engine. If None, calculated as ceil(num_unique_prompts_rollout / vllm_num_engines) * num_samples_per_prompt_rollout"""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
     vllm_enforce_eager: bool = False
@@ -486,18 +483,6 @@ class Args:
             self.max_possible_score += self.r1_style_format_reward
 
 
-def get_num_verifiers(dataset: Dataset) -> int:
-    if VERIFIER_SOURCE_KEY not in dataset.column_names:
-        return 0
-    verifiers = set()
-    for item in dataset[VERIFIER_SOURCE_KEY]:
-        if isinstance(item, list):
-            verifiers.update(item)
-        else:
-            verifiers.add(item)
-    return len(verifiers)
-
-
 @Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker")
 def prepare_collated_data_for_workers(
     packed_sequences: PackedSequences,
@@ -631,7 +616,6 @@ class PolicyTrainerRayProcess(RayProcess):
         beaker_config: BeakerRuntimeConfig,
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
-        num_verifiers: int,
     ) -> int:
         # ------------------------------------------------------------
         # Monkey patch to load checkpoints with `weights_only=False`
@@ -791,11 +775,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 if hasattr(self, "ref_policy_checkpoint_path")
                 else None,
             )
-        # 49 base metrics: 16 from step() (KL, loss, ratio, etc.), 22 from data_loader_lib
-        # (scores, sequence_lengths, etc.), 7 from BatchStatistics, 4 from reward_metrics.
-        # Each verifier adds 2 metrics: objective/{key}_reward and objective/{key}_correct_rate.
-        max_metrics = 49 + 2 * num_verifiers
-        self.local_metrics = utils.MetricsTracker(max_metrics=max_metrics, device=self.device)
+        self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
         return optimization_steps_done
 
     def forward(
@@ -1586,9 +1566,6 @@ def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.Stream
     args.num_training_steps = args.total_episodes // (
         args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
     )
-    if args.inference_batch_size is None:
-        total_prompts = streaming_config.num_samples_per_prompt_rollout * args.num_unique_prompts_rollout
-        args.inference_batch_size = max(1, math.ceil(total_prompts / args.vllm_num_engines))
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
@@ -1828,9 +1805,8 @@ def create_model_and_optimizer(
     logger.info(f"[DEBUG] ModelGroup created with {len(policy_group.models)} policy actors")
 
     logger.info("[DEBUG] Starting model initialization across all ranks...")
-    num_verifiers = get_num_verifiers(train_dataset)
     inits = [
-        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer, num_verifiers)
+        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
         for model in policy_group.models
     ]
 
@@ -1962,8 +1938,7 @@ def one_training_step(
             [policy_group.models[i].step.remote() for i in range(args.world_size)],
             desc=f"Running training step {training_step}",
         )
-        metrics_list = [r[0] for r in results]
-        array_metrics_list = [r[1] for r in results]
+        metrics, array_metrics = zip(*results)
         if (
             args.load_ref_policy
             and args.ref_policy_update_freq is not None
@@ -1998,21 +1973,15 @@ def one_training_step(
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
-    all_keys = set()
-    for m in metrics_list:
-        all_keys.update(m.keys())
-    average_metrics = {}
-    for k in all_keys:
-        values = [m[k] for m in metrics_list if k in m]
-        average_metrics[k] = sum(values) / len(values)
-    for key, value in array_metrics_list[0].items():
+    average_metrics = {k: np.mean([m[k] for m in metrics if k in m]) for k in set().union(*metrics)}
+    for key, value in array_metrics[0].items():
         average_metrics[key] = value
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
     total_generation_time = average_metrics["time/getting_response"]
-    prompt_lengths = array_metrics_list[0]["batch/prompt_lengths"]
-    response_lengths = array_metrics_list[0]["batch/response_lengths"]
+    prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
+    response_lengths = array_metrics[0]["batch/response_lengths"]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
     utilization_metrics = calculate_utilization_metrics(

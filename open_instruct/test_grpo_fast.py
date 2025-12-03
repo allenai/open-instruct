@@ -23,23 +23,8 @@ from open_instruct.dataset_transformation import (
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
-from open_instruct.grpo_fast import get_num_verifiers
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.vllm_utils import create_vllm_engines
-
-
-class TestGetNumVerifiers(unittest.TestCase):
-    def test_single_verifier_per_example(self):
-        dataset = Dataset.from_dict({VERIFIER_SOURCE_KEY: ["gsm8k", "math", "gsm8k"]})
-        self.assertEqual(get_num_verifiers(dataset), 2)
-
-    def test_multiple_verifiers_per_example(self):
-        dataset = Dataset.from_dict({VERIFIER_SOURCE_KEY: [["gsm8k", "math"], ["code"]]})
-        self.assertEqual(get_num_verifiers(dataset), 3)
-
-    def test_empty_dataset(self):
-        dataset = Dataset.from_dict({VERIFIER_SOURCE_KEY: []})
-        self.assertEqual(get_num_verifiers(dataset), 0)
 
 
 class TestGrpoFastBase(unittest.TestCase):
