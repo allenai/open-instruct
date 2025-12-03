@@ -123,6 +123,24 @@ async def process_request_async(
 
     log(f"process_request_async started for sub_request_id={sub_request_id}")
 
+    try:
+        await _process_request_async_impl(actor, sub_request_id, base_request_id, prompt, sampling_params, log)
+    except Exception as e:
+        import traceback
+
+        log(f"Exception in process_request_async: {e}")
+        traceback.print_exc()
+        raise
+
+
+async def _process_request_async_impl(
+    actor: "LLMRayActor",
+    sub_request_id: str,
+    base_request_id: str,
+    prompt: vllm.TokensPrompt,
+    sampling_params: vllm.SamplingParams,
+    log,
+):
     accumulated_tokens = []
     accumulated_logprobs = []
     masks = []
@@ -153,6 +171,7 @@ async def process_request_async(
         request_output = outputs[0]
         iteration += 1
         output = request_output.outputs[0]
+        log(f"output.text={output.text[:100] if output.text else 'None'}...")
 
         if final_prompt_token_ids is None:
             final_prompt_token_ids = request_output.prompt_token_ids
@@ -160,20 +179,27 @@ async def process_request_async(
         accumulated_tokens.extend(output.token_ids)
         accumulated_logprobs.extend(output.logprobs)
         masks.extend([1] * len(output.token_ids))
+        log(f"accumulated {len(output.token_ids)} tokens, total={len(accumulated_tokens)}")
 
         if not actor.tools or not actor.max_tool_calls:
+            log("no tools, breaking")
             break
 
+        log(f"checking for triggered tool, num_calls={num_calls}")
         triggered_tool, stop_str = get_triggered_tool(
             output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
         )
+        log(f"triggered_tool={triggered_tool is not None}, stop_str={stop_str}")
         if triggered_tool is None:
+            log("no tool triggered, breaking")
             break
 
         assert actor.executor is not None, f"executor is None for request {sub_request_id}"
 
+        log("calling tool via executor...")
         loop = asyncio.get_running_loop()
         tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
+        log(f"tool completed, timeout={tool_result.timeout}, error={tool_result.error}")
 
         tool_called = True
         num_calls += 1
@@ -211,6 +237,7 @@ async def process_request_async(
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
 
+    log(f"while loop completed after {iteration} iterations, creating CompletionOutput")
     complete_output = vllm.CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
         text="",
