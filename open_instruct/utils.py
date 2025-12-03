@@ -65,6 +65,7 @@ from ray.util import state as ray_state
 from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
+from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils
 
@@ -1396,19 +1397,48 @@ def get_train_ds_config(
     }
 
 
-def get_eval_ds_config(offload, stage=0, bf16=True):
+def get_eval_ds_config(
+    offload: bool, stage: int = 0, bf16: bool = True, per_device_train_batch_size: int = 1
+) -> tuple[dict[str, Any], HfDeepSpeedConfig | None]:
+    """Creates a DeepSpeed configuration for evaluation.
+
+    Args:
+        offload: Whether to offload parameters to CPU.
+        stage: ZeRO optimization stage. Only 0 or 3 are relevant as there's no optimizer for eval.
+        bf16: Whether to enable bfloat16 precision.
+        per_device_train_batch_size: Batch size per GPU.
+
+    Returns:
+        Tuple containing a Dictionary containing DeepSpeed configuration, and the actual HfDeepSpeedConfig object if stage 3 is used, else None. We need to return the HfDeepSpeedConfig object so it doesn't go out of scope as HF accelerate uses it internally via a global weakref.
+
+    Raises:
+        ValueError: If stage is not 0 or 3.
+    """
+    if stage not in (0, 3):
+        raise ValueError(
+            f"stage must be 0 or 3 for evaluation (got {stage}). 1 or 2 only differ from stage 0 by optimizer sharding, which is irrelevant for evaluation."
+        )
     zero_opt_dict = {
         "stage": stage,
         "stage3_param_persistence_threshold": "auto",
         "offload_param": {"device": "cpu" if offload else "none", "pin_memory": True},
     }
-    return {
+    ds_config = {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
         "bf16": {"enabled": bf16},
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
     }
+    ds_config["train_micro_batch_size_per_gpu"] = per_device_train_batch_size
+    ds_config["gradient_accumulation_steps"] = 1
+    if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+        # This is needed as it apparently has mysterious side effects.
+        hf_config = HfDeepSpeedConfig(ds_config)
+        logger.info(f"DeepSpeed config: {hf_config}")
+    else:
+        hf_config = None
+    return ds_config, hf_config
 
 
 def get_optimizer_grouped_parameters(
@@ -2461,3 +2491,16 @@ def get_beaker_experiment_url() -> str | None:
         return url
     except Exception:
         return None
+
+
+def get_denominator(loss_denominator: str | float) -> float | str:
+    """
+    Validates and converts the loss_denominator argument.
+    """
+    if loss_denominator == "token":
+        return "token"
+
+    val = float(loss_denominator)
+    if val <= 0:
+        raise ValueError(f"loss_denominator must be greater than 0 if not 'token', got: {loss_denominator}")
+    return val
