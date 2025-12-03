@@ -478,39 +478,28 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
     poll_count = 0
     while True:
         try:
-            log(f"poll #{poll_count} - checking should_stop")
             should_stop = actor._should_stop()
             active_count = len(actor.active_tasks)
-            log(f"poll #{poll_count} - should_stop={should_stop}, active_count={active_count}")
-            if should_stop or active_count >= actor.inference_batch_size:
-                logger.debug(
-                    f"_prefetch_worker sleeping: should_stop={should_stop}, active={active_count}, max={actor.inference_batch_size}"
-                )
+            if should_stop:
+                log("should_stop=True, exiting worker")
+                break
+
+            if active_count >= actor.inference_batch_size:
                 time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
                 continue
 
-            log(f"poll #{poll_count} - calling qsize()")
-            qsize = actor.prompt_queue.qsize()
-            log(f"poll #{poll_count} - qsize()={qsize}")
+            log(f"poll #{poll_count} - calling get(block=True, timeout=1.0)")
             poll_count += 1
-
-            if qsize == 0:
-                log(f"poll #{poll_count - 1} - queue empty, sleeping 0.1s")
-                time.sleep(0.1)
-                log(f"poll #{poll_count - 1} - woke up from sleep")
-                continue
-
-            log(f"queue has items, calling get() (queue size: {qsize})...")
             request = None
             try:
-                request = actor.prompt_queue.get(block=False)
+                request = actor.prompt_queue.get(block=True, timeout=1.0)
             except ray_queue.Empty:
-                log("get(block=False) raised Empty, queue was emptied")
                 continue
             except Exception as e:
                 log(f"get() raised exception: {e}")
                 traceback.print_exc()
                 raise
+
             log(f"got request: {type(request)}")
             add_request(actor, request)
         except Exception as e:
