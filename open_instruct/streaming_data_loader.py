@@ -12,11 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
 import logging
 import threading
 from abc import abstractmethod
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from queue import Queue as StdQueue
@@ -30,6 +29,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
+from open_instruct import data_loader as data_loader_lib
 from open_instruct import utils
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -87,7 +87,6 @@ class StreamingDataLoaderConfig:
     def build(
         self,
         dataset: Dataset,
-        reward_fn: Callable,
         inference_results_Q: ray_queue.Queue,
         param_prompt_Q: ray_queue.Queue,
         tokenizer: PreTrainedTokenizer,
@@ -107,7 +106,6 @@ class StreamingDataLoaderConfig:
     ) -> "StreamingDataLoader":
         return StreamingDataLoader(
             dataset=dataset,
-            reward_fn=reward_fn,
             inference_results_Q=inference_results_Q,
             param_prompt_Q=param_prompt_Q,
             tokenizer=tokenizer,
@@ -225,71 +223,11 @@ class TextDataLoaderBase(DataLoaderBase):
         return self.global_batch_size
 
 
-class ShufflingIterator:
-    def __init__(self, data: np.ndarray, batch_size: int, seed: int | None = None):
-        self.data = data.copy()
-        self.batch_size = batch_size
-        self.index = 0
-        self.epoch_number = 0
-        self.rng = np.random.default_rng(seed)
-        self.rng.shuffle(self.data)
-        self.exclude_list = []
-
-        self._update_effective_size()
-
-    def __iter__(self):
-        return self
-
-    def __next__(self) -> list[int] | int:
-        if self.index >= self.effective_size:
-            self.index = 0
-            self._update_effective_size()
-            self.epoch_number += 1
-            self.rng.shuffle(self.data)
-
-        end_index = self.index + self.batch_size
-        batch = self.data[self.index : end_index].tolist()
-        if self.batch_size == 1:
-            batch = batch[0]
-        self.index = end_index
-
-        return batch
-
-    def get_state(self) -> dict[str, Any]:
-        return {
-            "index": self.index,
-            "epoch_number": self.epoch_number,
-            "data": self.data.copy(),
-            "rng_state": self.rng.bit_generator.state,
-            "exclude_list": self.exclude_list.copy(),
-        }
-
-    def set_state(self, state: dict[str, Any]) -> None:
-        self.index = state["index"]
-        self.epoch_number = state.get("epoch_number", 0)
-        self.data = state["data"].copy()
-        self.rng.bit_generator.state = state["rng_state"]
-        self.exclude_list = state.get("exclude_list", [])
-        self._update_effective_size()
-
-    def exclude_index(self, index: int) -> None:
-        self.exclude_list.append(index)
-
-    def _update_effective_size(self) -> None:
-        if self.exclude_list:
-            mask = ~np.isin(self.data, self.exclude_list)
-            self.data = self.data[mask]
-            self.exclude_list = []
-
-        self.effective_size = len(self.data) - (len(self.data) % self.batch_size)
-
-
 class StreamingDataLoader(TextDataLoaderBase):
     def __init__(
         self,
         *,
         dataset: Dataset,
-        reward_fn: Callable,
         inference_results_Q: ray_queue.Queue,
         param_prompt_Q: ray_queue.Queue,
         tokenizer: PreTrainedTokenizer,
@@ -317,7 +255,6 @@ class StreamingDataLoader(TextDataLoaderBase):
         )
 
         self.dataset = dataset
-        self.reward_fn = reward_fn
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
         self.tokenizer = tokenizer
@@ -333,10 +270,17 @@ class StreamingDataLoader(TextDataLoaderBase):
 
         self.training_step = 0
         self.current_epoch = 0
+        self.seed = seed
 
-        dataset_indices = np.arange(len(dataset))
-        dataset_indices = dataset_indices[dp_rank::dp_world_size]
-        self.iter_dataloader = ShufflingIterator(dataset_indices, 1, seed=seed)
+        self.iter_dataloader = data_loader_lib.HFDataLoader(
+            dataset=dataset,
+            batch_size=1,
+            seed=seed,
+            rank=dp_rank,
+            world_size=dp_world_size,
+            work_dir=work_dir,
+            automatic_reshuffle=True,
+        )
 
         self.local_queue = StdQueue(maxsize=config.async_steps)
         self.background_thread = None
@@ -350,13 +294,13 @@ class StreamingDataLoader(TextDataLoaderBase):
         return {
             "training_step": self.training_step,
             "current_epoch": self.current_epoch,
-            "iter_dataloader_state": self.iter_dataloader.get_state(),
+            "iter_dataloader_state": self.iter_dataloader.state_dict(),
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]):
         self.training_step = state_dict["training_step"]
         self.current_epoch = state_dict.get("current_epoch", 0)
-        self.iter_dataloader.set_state(state_dict["iter_dataloader_state"])
+        self.iter_dataloader.load_state_dict(state_dict["iter_dataloader_state"])
 
     def reshuffle(self, epoch: int | None = None, **kwargs):
         if epoch is not None:
@@ -398,13 +342,12 @@ class StreamingDataLoader(TextDataLoaderBase):
 
     def _data_preparation_loop(self):
         for _ in range(self.config.async_steps * self.global_batch_size // self.dp_world_size):
-            local_index = next(self.iter_dataloader)
-            example = self.dataset[local_index]
-            dataset_index = example["index"]
+            example = next(self.iter_dataloader)
+            dataset_index = example["dataset_index"]
             add_prompt_to_generator(
                 example,
                 dataset_index,
-                self.iter_dataloader.epoch_number,
+                self.iter_dataloader._epoch,
                 self.training_step,
                 self.param_prompt_Q,
                 self.generation_config,
@@ -423,7 +366,6 @@ class StreamingDataLoader(TextDataLoaderBase):
                     num_prompts=self.rank_batch_size,
                     model_dims=self.model_dims,
                     tokenizer=self.tokenizer,
-                    reward_fn=self.reward_fn,
                     dataset=self.dataset,
                     actor_manager=self.actor_manager,
                     active_sampling=self.config.active_sampling,
@@ -724,7 +666,6 @@ def accumulate_inference_batches(
     num_prompts: int,
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
-    reward_fn: Callable,
     dataset: Dataset,
     actor_manager=None,
     timeout: float | None = None,
@@ -732,7 +673,7 @@ def accumulate_inference_batches(
     filter_zero_std_samples: bool = False,
     replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
-    iter_dataloader: ShufflingIterator | None = None,
+    iter_dataloader: data_loader_lib.HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
     training_step: int = None,
     verbose: bool = False,
@@ -788,13 +729,12 @@ def accumulate_inference_batches(
         raw_query = example[RAW_PROMPT_KEY]
 
         if replenish_prompts:
-            local_index = next(iter_dataloader)
-            example = dataset[local_index]
-            dataset_index = example["index"]
+            example = next(iter_dataloader)
+            dataset_index = example["dataset_index"]
             add_prompt_to_generator(
                 example,
                 dataset_index,
-                iter_dataloader.epoch_number,
+                iter_dataloader._epoch,
                 training_step,
                 param_prompt_Q,
                 generation_config,
@@ -814,19 +754,7 @@ def accumulate_inference_batches(
         k_datasets = repeat_each([dataset_name], generation_config.n)
         k_raw_queries = repeat_each([raw_query], generation_config.n)
 
-        scores, reward_metrics = asyncio.run(
-            reward_fn(
-                result.responses,
-                decoded_responses,
-                k_ground_truths,
-                k_datasets,
-                result.finish_reasons,
-                result.request_info,
-                k_raw_queries,
-            )
-        )
-
-        percent_solved = np.mean(scores).item() / max_possible_score
+        percent_solved = np.mean(result.reward_scores).item() / max_possible_score
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             iter_dataloader.exclude_index(result.dataset_index)
             total_no_resampled += 1
@@ -834,15 +762,15 @@ def accumulate_inference_batches(
                 f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
             )
 
-        if filter_zero_std_samples and np.std(scores) == 0:
+        if filter_zero_std_samples and np.std(result.reward_scores) == 0:
             if not active_sampling:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
 
             total_filtered_prompts += 1
-            if scores[0] == 0:
+            if result.reward_scores[0] == 0:
                 filtered_prompt_zero += 1
-            elif scores[0] == max_possible_score:
+            elif result.reward_scores[0] == max_possible_score:
                 filtered_prompt_solved += 1
             else:
                 filtered_prompt_nonzero += 1
@@ -860,8 +788,8 @@ def accumulate_inference_batches(
         all_datasets.extend(k_datasets)
         all_raw_queries.extend(k_raw_queries)
         all_decoded_responses.extend(decoded_responses)
-        all_scores.extend(scores)
-        all_reward_metrics.append(reward_metrics)
+        all_scores.extend(result.reward_scores)
+        all_reward_metrics.append(result.reward_metrics)
         all_percent_solved.append(percent_solved)
 
     if len(results) == 0:

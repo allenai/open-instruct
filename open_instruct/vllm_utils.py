@@ -379,6 +379,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
         ),
         dataset_index=metadata["dataset_index"],
         prompt_id=metadata["prompt_id"],
+        epoch_number=metadata.get("epoch_number", 0),
         token_statistics=TokenStatistics(
             num_prompt_tokens=len(metadata["prompt_token_ids"]),
             num_response_tokens=total_generation_tokens,
@@ -486,6 +487,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
         "prompt_id": request.prompt_id,
+        "epoch_number": request.epoch_number,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),

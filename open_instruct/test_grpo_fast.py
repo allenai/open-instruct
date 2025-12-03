@@ -25,7 +25,6 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.grpo_fast import get_num_verifiers
 from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.streaming_data_loader import PendingQueriesMap, ShufflingIterator
 from open_instruct.vllm_utils import create_vllm_engines
 
 
@@ -279,7 +278,9 @@ class TestGrpoFastBase(unittest.TestCase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, param_prompt_Q, mock_generation_config, False)
+            grpo_fast.add_prompt_to_generator(
+                example, example["dataset_index"], 0, 0, param_prompt_Q, mock_generation_config, False
+            )
 
         return param_prompt_Q, inference_results_Q, mock_dataset
 
@@ -620,7 +621,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             mock_result = self.create_mock_result_from_request(request, num_samples_per_prompt)
             inference_results_Q.put(mock_result)
 
-        mock_args = self.create_mock_args(num_engines, num_samples_per_prompt)
         mock_generation_config = Mock()
         mock_generation_config.n = num_samples_per_prompt
 
@@ -631,7 +631,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
-            prompt_dataset=mock_dataset,
+            dataset=mock_dataset,
         )
 
         self.assertEqual(len(batch.queries), num_prompts * num_samples_per_prompt)
@@ -674,7 +674,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     num_prompts=num_prompts,
                     model_dims=mock_model_dims,
                     tokenizer=tokenizer,
-                    prompt_dataset=mock_dataset,
+                    dataset=mock_dataset,
                 )
                 completed.set()
             except Exception:
@@ -711,7 +711,9 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, param_prompt_Q, mock_generation_config, False)
+            grpo_fast.add_prompt_to_generator(
+                example, example["dataset_index"], 0, 0, param_prompt_Q, mock_generation_config, False
+            )
 
         self.assertEqual(
             param_prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries"
@@ -744,7 +746,9 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, param_prompt_Q, mock_generation_config, False)
+            grpo_fast.add_prompt_to_generator(
+                example, example["dataset_index"], 0, 0, param_prompt_Q, mock_generation_config, False
+            )
 
         request_count = 0
         while not param_prompt_Q.empty():
@@ -840,20 +844,11 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
 
         queries, ground_truths, datasets_list, raw_queries, indices = self.create_test_data(num_prompts)
 
-        test_dataset = Dataset.from_dict(
-            {
-                INPUT_IDS_PROMPT_KEY: queries,
-                GROUND_TRUTHS_KEY: ground_truths,
-                VERIFIER_SOURCE_KEY: datasets_list,
-                RAW_PROMPT_KEY: raw_queries,
-            }
-        )
-
         inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
 
         self._ray_queues.append(inference_results_Q)
 
-        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets_list, raw_queries)
 
         for i in range(num_prompts):
             constant_scores = [0.5] * num_samples_per_prompt
@@ -875,7 +870,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
-            prompt_dataset=mock_dataset,
+            dataset=mock_dataset,
             filter_zero_std_samples=True,
             verbose=False,
             max_possible_score=1.0,
