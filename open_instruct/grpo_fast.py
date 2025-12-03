@@ -2349,8 +2349,10 @@ def run_training(
             and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
-            for eval_example in iter(eval_data_loader):
-                add_prompt_to_generator(eval_example, param_prompt_Q, generation_configs["eval"], is_eval=True)
+            for eval_idx, eval_example in enumerate(iter(eval_data_loader)):
+                add_prompt_to_generator(
+                    eval_example, eval_idx, 0, training_step, param_prompt_Q, generation_configs["eval"], is_eval=True
+                )
 
         episode += args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
