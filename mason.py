@@ -9,9 +9,13 @@ import string
 import sys
 import time
 
+import backoff
 import beaker
+import requests
 from rich.console import Console
 from rich.text import Text
+
+from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS
 
 console = Console()
 
@@ -23,8 +27,6 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/dpo_tune_cache.py",
     "open_instruct/grpo_fast.py",
     "open_instruct/ppo.py",
-    "open_instruct/grpo_vllm_thread_ray_gtrl.py",
-    "open_instruct/ppo_vllm_thread_ray_gtrl.py",
     "open_instruct/reward_modeling.py",
 ]
 
@@ -69,10 +71,10 @@ def build_command_without_args(command, args_to_remove):
     return result
 
 
-def parse_beaker_dataset(dataset_str):
+def parse_beaker_dataset(dataset_str: str) -> dict[str, str]:
     splt = dataset_str.split(":")
     if len(splt) != 2:
-        raise argparse.ArgumentError()
+        raise argparse.ArgumentTypeError(f"Invalid dataset format: {dataset_str}. Expected 'mount_path:beaker_id'")
 
     return {"mount_path": splt[0], "beaker": splt[1]}
 
@@ -86,11 +88,6 @@ def parse_env_var(env_var_str: str) -> dict[str, str]:
         raise argparse.ArgumentTypeError("Environment variable name cannot be empty")
     return {"name": name, "value": value}
 
-
-WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
-GCP_CLUSTERS = ["ai2/augusta"]
-
-INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
 
 # by default, we turn off vllm compile cache
 # torch compile caching seems consistently broken, but the actual compiling isn't.
@@ -196,8 +193,8 @@ def get_args():
     )
     parser.add_argument(
         "--timeout",
-        type=int,
-        help="Timeout for the Beaker task in seconds (e.g., 7200 for 2 hours). If not specified, no timeout is set.",
+        type=str,
+        help="Timeout for the Beaker task as a duration string (e.g., '15m', '1h', '2h30m'). If not specified, no timeout is set.",
         default=None,
     )
     # Split up the mason args from the Python args.
@@ -483,6 +480,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 stdout_data, stderr_data = [], []
 
                 # Set up select to monitor both stdout and stderr
+                assert process.stdout is not None and process.stderr is not None
                 streams = [process.stdout, process.stderr]
                 while True:
                     # Wait for output on either stream
@@ -507,7 +505,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     "SubprocessResult",
                     (),
                     {"returncode": process.returncode, "stdout": "".join(stdout_data), "stderr": "".join(stderr_data)},
-                )
+                )()
                 stdout = result.stdout
                 # Extract the cached dataset path from stdout if it exists
                 for line in stdout.splitlines():
@@ -593,6 +591,9 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     model_revision = command[idx + 1]
                     break
 
+            if model_name_or_path is None:
+                raise ValueError("--model_name_or_path is required for GCP clusters")
+
             if model_name_or_path.startswith("gs://"):
                 gs_saved_path = model_name_or_path
             else:
@@ -615,7 +616,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     gs_saved_path
                 )  # race condition exists, but it's fine since we are launching mason sequentially
                 if not gs_folder:
-                    upload_to_gs_bucket(path, gs_saved_path)
+                    upload_to_gs_bucket(path, gs_saved_path)  # ty: ignore[invalid-argument-type]
 
             download_path = gs_saved_path.replace("gs://", "/gs/")
             download_path_without_last_folder = download_path.rsplit("/", 1)[0]
@@ -727,7 +728,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
     return full_command
 
 
-def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami: str, resumable: bool):
+def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], whoami: str, resumable: bool):
     # Add a check to ensure that the user is using the correct clusters for multi-node jobs
     if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
         confirmation = False
@@ -773,6 +774,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         ),
         resources=beaker.BeakerTaskResources(gpu_count=args.gpus, shared_memory=args.shared_memory),
         replicas=args.num_nodes,
+        timeout=args.timeout,
     )
     if args.num_nodes > 1:
         spec.leader_selection = True
@@ -782,9 +784,6 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         spec.host_networking = False
     else:
         spec.host_networking = True
-
-    if args.timeout is not None:
-        spec.timeout = args.timeout
 
     return spec
 
@@ -804,6 +803,9 @@ def main():
             beaker_client = beaker.Beaker.from_env()
         beaker_secrets = [secret.name for secret in beaker_client.secret.list()]
         whoami = beaker_client.user.get().name
+
+        # Increase timeout to 300s for large experiment specs.
+        beaker.Beaker.TIMEOUT = 300
 
     full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
     if is_external_user:
@@ -831,8 +833,20 @@ def main():
         budget=args.budget,
         retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
     )
-    exp = beaker_client.experiment.create(spec=experiment_spec)
-    console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.experiment.id}")
+
+    @backoff.on_exception(
+        backoff.expo,
+        requests.exceptions.Timeout,
+        max_tries=5,
+        # Factor here is the multiplier for the backoff delay, in seconds.
+        factor=5,
+    )
+    def launch_experiment():
+        exp = beaker_client.experiment.create(spec=experiment_spec)
+        console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.experiment.id}")
+        return exp
+
+    launch_experiment()
 
 
 if __name__ == "__main__":
