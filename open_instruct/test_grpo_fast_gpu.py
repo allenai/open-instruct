@@ -64,27 +64,18 @@ class TestGeneration(TestGrpoFastBase):
         print(f"[TEST] Created queues - prompt_queue id: {id(param_prompt_Q)}", flush=True)
         print(f"[TEST] prompt_queue actor: {param_prompt_Q.actor}", flush=True)
 
-        print("[TEST] Testing queue BEFORE vllm engines...", flush=True)
-        param_prompt_Q.put("test_string_1")
-        print(f"[TEST] After put, qsize={param_prompt_Q.qsize()}", flush=True)
-        result1 = param_prompt_Q.get(timeout=5)
-        print(f"[TEST] Got: {result1}, qsize after get={param_prompt_Q.qsize()}", flush=True)
-        print("[TEST] Queue basic test PASSED!", flush=True)
-
         prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
         stop = list(tools.keys()) if tools else None
         generation_config = SamplingParams(temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, stop=stop)
         request = PromptRequest(
             prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
         )
-        print(f"[TEST] Pre-queuing request {request.prompt_id} before engine creation...", flush=True)
-        param_prompt_Q.put(request, block=True)
 
         print("[TEST] Starting create_vllm_engines...", flush=True)
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
         ray.get(pg.ready())
 
-        create_vllm_engines(
+        engines = create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
             enforce_eager=True,
@@ -104,7 +95,9 @@ class TestGeneration(TestGrpoFastBase):
             max_tool_calls=max_tool_calls,
         )
 
-        print("[TEST] Engine created, waiting for result...", flush=True)
+        print("[TEST] Engine created, submitting request directly...", flush=True)
+        ray.get(engines[0].submit_request.remote(request))
+        print("[TEST] Request submitted, waiting for result...", flush=True)
         result = inference_results_Q.get(timeout=120)
         print("[TEST] Got result!", flush=True)
         param_prompt_Q.put(None)
