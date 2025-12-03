@@ -887,6 +887,7 @@ def create_vllm_engines(
             .options(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
+                max_concurrency=10,
                 scheduling_strategy=scheduling_strategy,
                 runtime_env=ray.runtime_env.RuntimeEnv(
                     env_vars={
