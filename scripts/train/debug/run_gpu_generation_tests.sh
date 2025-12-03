@@ -14,4 +14,4 @@ uv run python mason.py \
     --timeout 30m \
     --budget ai2/oe-adapt \
     --gpus 1 \
-    -- 'source configs/beaker_configs/ray_node_setup.sh && pytest open_instruct/test_grpo_fast_gpu.py::TestGeneration::test_generation_deterministic -xvs'
+    -- 'source configs/beaker_configs/ray_node_setup.sh && pytest open_instruct/test_grpo_fast_gpu.py::TestGeneration -xvs'
