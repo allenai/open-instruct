@@ -892,7 +892,6 @@ def create_vllm_engines(
                     env_vars={
                         "VLLM_USE_V1": "1",
                         "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
-                        "VLLM_USE_RAY_COMPILED_DAG_CHANNEL_TYPE": "nccl",
                         "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
                         "NCCL_CUMEM_ENABLE": "0",
                     }
