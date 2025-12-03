@@ -2783,7 +2783,6 @@ def run_training(
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
-        # Update Beaker progress every step
         maybe_update_beaker_description(
             current_step=training_step,
             total_steps=args.num_training_steps,
