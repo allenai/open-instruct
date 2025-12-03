@@ -472,10 +472,10 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
     poll_count = 0
     while True:
         try:
-            if poll_count % 100 == 0:
-                print(f"[WORKER] loop iteration #{poll_count} start", flush=True)
+            print(f"[WORKER] poll #{poll_count} - checking should_stop", flush=True)
             should_stop = actor._should_stop()
             active_count = len(actor.active_tasks)
+            print(f"[WORKER] poll #{poll_count} - should_stop={should_stop}, active_count={active_count}", flush=True)
             if should_stop or active_count >= actor.inference_batch_size:
                 logger.debug(
                     f"_prefetch_worker sleeping: should_stop={should_stop}, active={active_count}, max={actor.inference_batch_size}"
@@ -483,14 +483,13 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
                 time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
                 continue
 
-            if poll_count % 100 == 0:
-                print(f"[WORKER] calling qsize() #{poll_count}", flush=True)
+            print(f"[WORKER] poll #{poll_count} - calling qsize()", flush=True)
             qsize = actor.prompt_queue.qsize()
-            if poll_count % 10 == 0:
-                print(f"[WORKER] polling for request (queue size: {qsize}, poll #{poll_count})...", flush=True)
+            print(f"[WORKER] poll #{poll_count} - qsize()={qsize}", flush=True)
             poll_count += 1
 
             if qsize == 0:
+                print(f"[WORKER] poll #{poll_count-1} - queue empty, sleeping 0.1s", flush=True)
                 time.sleep(0.1)
                 continue
 
