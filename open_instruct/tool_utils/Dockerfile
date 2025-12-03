@@ -4,14 +4,19 @@ FROM python:3.10-slim
 # Set working directory in container
 WORKDIR /app
 
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:0.8.8 /uv /bin/uv
+
 # Copy requirements first to leverage Docker cache
-COPY requirements.txt requirements.txt
+COPY open_instruct/tool_utils/requirements.txt requirements.txt
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies using uv
+RUN uv pip install --system --no-cache -r requirements.txt
 
-# Copy the rest of the application
-COPY . .
+# Copy the tool server files
+COPY open_instruct/__init__.py open_instruct/__init__.py
+COPY open_instruct/logger_utils.py open_instruct/logger_utils.py
+COPY open_instruct/tool_utils/tool_server.py tool_server.py
 
 # Create cache directory for code execution
 RUN mkdir -p cache && chmod 777 cache
@@ -23,4 +28,4 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 
 # Command to run the application
-CMD ["python", "tool_server.py"]
+CMD ["uv", "run", "--no-project", "tool_server.py"]

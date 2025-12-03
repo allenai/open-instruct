@@ -35,8 +35,9 @@ class PythonCodeTool(Tool):
     """@vwxyzjn: I recommend using something like a FastAPI for this kind of stuff; 1) you
     won't accidentally block the main vLLM process and 2) way easier to parallelize via load balancing."""
 
-    def __init__(self, api_endpoint: str, *args, **kwargs):
+    def __init__(self, api_endpoint: str, api_key: str = None, *args, **kwargs):
         self.api_endpoint = api_endpoint
+        self.api_key = api_key
         super().__init__(*args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:
@@ -79,17 +80,21 @@ class PythonCodeTool(Tool):
         timeout_seconds = 3
         start_time = time.time()
         try:
-            # Call the FastAPI endpoint to execute the code with client-side timeout
+            headers = {"Content-Type": "application/json"}
+            if self.api_key:
+                headers["X-API-Key"] = self.api_key
+
             response = requests.post(
                 self.api_endpoint,
-                json={"code": code, "timeout": timeout_seconds},  # Server-side timeout (keeping this)
-                timeout=timeout_seconds,  # Client-side timeout
+                json={"code": code, "timeout": timeout_seconds},
+                headers=headers,
+                timeout=timeout_seconds,
             )
 
-            # Parse the response
+            response.raise_for_status()
+
             result = response.json()
 
-            # Process the API response
             output = result["output"]
             error = result.get("error") or ""
 
