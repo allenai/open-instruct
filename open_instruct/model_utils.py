@@ -188,14 +188,18 @@ def load_ref_policy(
     ref_policy.eval()
 
     if checkpoint_path:
-        state_dict = torch.load(checkpoint_path, map_location=device)
-        if hasattr(ref_policy, "module"):
-            # Needed if wrapped by DeepSpeed.
-            ref_policy.module.load_state_dict(state_dict)
-        else:
-            # If a vanilla HF model.
-            ref_policy.load_state_dict(state_dict)
-        logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
+        try:
+            state_dict = torch.load(checkpoint_path, map_location=device)
+            if hasattr(ref_policy, "module"):
+                # Needed if wrapped by DeepSpeed.
+                ref_policy.module.load_state_dict(state_dict)
+            else:
+                # If a vanilla HF model.
+                ref_policy.load_state_dict(state_dict)
+            logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
+        except Exception as e:
+            logger.error(f"{rank=}: Error loading reference policy checkpoint from {checkpoint_path}: {e}")
+            logger.error(f"{rank=}: Falling back to loading reference policy from source model...")
     return ref_policy
 
 
