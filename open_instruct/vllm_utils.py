@@ -488,16 +488,26 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
                 time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
                 continue
 
-            log(f"poll #{poll_count} - calling get_nowait()")
+            log(f"poll #{poll_count} - calling get with ray.wait()")
             poll_count += 1
             request = None
             try:
-                request = actor.prompt_queue.get_nowait()
+                ref = actor.prompt_queue.actor.get.remote(1.0)
+                log(f"poll #{poll_count - 1} - got ref, calling ray.wait()")
+                ready, _ = ray.wait([ref], timeout=2.0)
+                log(f"poll #{poll_count - 1} - ray.wait returned, ready={len(ready)}")
+                if ready:
+                    request = ray.get(ref)
+                    log(f"poll #{poll_count - 1} - ray.get returned: {type(request)}")
+                else:
+                    log(f"poll #{poll_count - 1} - ray.wait timed out, continuing")
+                    continue
             except ray_queue.Empty:
+                log(f"poll #{poll_count - 1} - Empty exception, continuing")
                 time.sleep(0.1)
                 continue
             except Exception as e:
-                log(f"get_nowait() raised exception: {e}")
+                log(f"get() raised exception: {e}")
                 traceback.print_exc()
                 raise
 
