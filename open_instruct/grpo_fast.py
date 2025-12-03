@@ -30,6 +30,7 @@
 # isort: off
 import contextlib
 import os
+import pathlib
 from concurrent import futures
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
@@ -133,6 +134,7 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 INVALID_LOGPROB = 1.0
+CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 
 
 class ShutdownSentinel:
@@ -1316,13 +1318,18 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
 
     def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
+        output_path = pathlib.Path(output_dir)
+        marker_path = output_path / CHECKPOINT_COMPLETE_MARKER
+        if marker_path.exists():
+            logger.info(f"Checkpoint already complete at {output_dir}, skipping save")
+            return
+
         model_to_save = self.model
         if chat_template_name is not None and "olmo" in chat_template_name:
-            # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
             model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         if self.rank == 0:
-            os.makedirs(output_dir, exist_ok=True)
+            output_path.mkdir(parents=True, exist_ok=True)
 
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
@@ -1364,14 +1371,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_to_save.save_pretrained(output_dir)
                 if self.stage == 3:
                     torch.save(
-                        get_peft_model_state_dict(model_to_save, output_state_dict),
-                        os.path.join(output_dir, "adapter_model.bin"),
+                        get_peft_model_state_dict(model_to_save, output_state_dict), output_path / "adapter_model.bin"
                     )
             else:
                 model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
-            # save tokenizer
             self.tokenizer.save_pretrained(output_dir)
+            marker_path.touch()
 
     # we need this because we don't know which node is rank 0 is on
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
