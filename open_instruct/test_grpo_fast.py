@@ -176,7 +176,6 @@ class TestGrpoFastBase(unittest.TestCase):
             attention_masks=[torch.ones(length, dtype=torch.long) for length in lengths],
             response_masks=[torch.ones(length, dtype=torch.long) for length in lengths],
             original_responses=[[i] * seq_length for i in range(batch_size)],
-            tool_masks=[torch.zeros(length, dtype=torch.long) for length in lengths],
             advantages=[torch.randn(length) for length in lengths],
             position_ids=[torch.arange(length, dtype=torch.long) for length in lengths],
             vllm_logprobs=[torch.randn(length) for length in lengths],
@@ -894,7 +893,6 @@ class TestDataPreparation(TestGrpoFastBase):
 
         expected_keys = {
             "collated_query_responses",
-            "collated_tool_masks",
             "collated_attention_masks",
             "collated_position_ids",
             "collated_advantages",

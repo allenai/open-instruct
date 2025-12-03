@@ -564,7 +564,7 @@ def prepare_collated_data_for_workers(
 
     Args:
         packed_sequences: Packed training sequences containing query responses,
-            tool masks, attention masks, position IDs, advantages, response masks,
+            attention masks, position IDs, advantages, response masks,
             and vllm logprobs.
         world_size: Number of distributed workers.
         per_device_train_batch_size: Batch size for each device's micro-batch.
@@ -573,14 +573,13 @@ def prepare_collated_data_for_workers(
 
     Returns:
         List of dictionaries, one per worker, each containing collated tensors
-        for query_responses, tool_masks, attention_masks, position_ids,
+        for query_responses, attention_masks, position_ids,
         advantages, response_masks, and vllm_logprobs.
     """
     B = len(packed_sequences.query_responses) // world_size  # essentially doing `drop_last=True`, which is fine.
     collated_data = []
     for i in range(world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
-        per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
         per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
         per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
         per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
@@ -590,7 +589,6 @@ def prepare_collated_data_for_workers(
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
         collated_query_responses = []
-        collated_tool_masks = []
         collated_attention_masks = []
         collated_position_ids = []
         collated_response_masks = []
@@ -600,9 +598,6 @@ def prepare_collated_data_for_workers(
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
                 collate_fn([per_device_packed_query_responses[idx] for idx in micro_range], pad_token_id, pin_memory)
-            )
-            collated_tool_masks.append(
-                collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0, pin_memory)
             )
             collated_attention_masks.append(
                 collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0, pin_memory)
@@ -622,7 +617,6 @@ def prepare_collated_data_for_workers(
         collated_data.append(
             {
                 "collated_query_responses": collated_query_responses,
-                "collated_tool_masks": collated_tool_masks,
                 "collated_attention_masks": collated_attention_masks,
                 "collated_position_ids": collated_position_ids,
                 "collated_advantages": collated_advantages,
@@ -933,7 +927,6 @@ class PolicyTrainerRayProcess(RayProcess):
         self,
         model: PreTrainedModel,
         collated_query_responses: list[torch.Tensor],
-        collated_tool_masks: list[torch.Tensor],
         collated_attention_masks: list[torch.Tensor],
         collated_position_ids: list[torch.Tensor],
         collated_response_masks: list[torch.Tensor],
@@ -948,7 +941,6 @@ class PolicyTrainerRayProcess(RayProcess):
         with context:
             for i in range(len(collated_query_responses)):
                 query_response = collated_query_responses[i]
-                tool_mask = collated_tool_masks[i]
                 attention_mask = collated_attention_masks[i]
                 position_id = collated_position_ids[i]
                 response_mask = collated_response_masks[i]
@@ -963,11 +955,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     return_entropy=return_entropy,
                 )
 
-                if self.args.mask_tool_use and self.args.tool_use:
-                    response_mask = response_mask.bool() & tool_mask.bool()
-                else:
-                    response_mask = response_mask.bool()
-
                 logprob = torch.masked_fill(logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                 collated_logprobs.append(logprob)
 
@@ -979,10 +966,7 @@ class PolicyTrainerRayProcess(RayProcess):
         return collated_logprobs, collated_entropies
 
     def calculate_token_counts(
-        self,
-        accumulation_steps: int,
-        collated_response_masks: list[torch.Tensor],
-        collated_tool_masks: list[torch.Tensor],
+        self, accumulation_steps: int, collated_response_masks: list[torch.Tensor]
     ) -> dict[int, float]:
         """
         Compute the number of training tokens in each batch for this set of responses.
@@ -991,13 +975,9 @@ class PolicyTrainerRayProcess(RayProcess):
         accumulation_counts: dict[int, float] = {}
         local_counts = []
 
-        for i, response_mask in enumerate(collated_response_masks):
+        for response_mask in collated_response_masks:
             response_mask = response_mask.to(self.device)
             mask = response_mask[:, 1:].bool()
-            if self.args.mask_tool_use and self.args.tool_use:
-                tool_mask = collated_tool_masks[i].to(self.device)
-                mask &= tool_mask[:, 1:].bool()
-
             local_counts.append(mask.sum().float())
 
         if not local_counts:
@@ -1017,7 +997,6 @@ class PolicyTrainerRayProcess(RayProcess):
     def train(
         self,
         collated_query_responses,
-        collated_tool_masks,
         collated_attention_masks,
         collated_position_ids,
         collated_advantages,
@@ -1028,18 +1007,17 @@ class PolicyTrainerRayProcess(RayProcess):
     ):
         args = self.args
         to_device_inplace(collated_query_responses, self.device)
-        to_device_inplace(collated_tool_masks, self.device)
         to_device_inplace(collated_attention_masks, self.device)
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
+        collated_response_masks = [mask.bool() for mask in collated_response_masks]
         to_device_inplace(collated_vllm_logprobs, self.device)
         # accumulation steps should always be at least 1
         accumulation_steps = max(math.ceil(len(collated_query_responses) / num_mini_batches - 0.5), 1)
         leftover = len(collated_query_responses) % accumulation_steps
         if leftover > 0:
             collated_query_responses = collated_query_responses[0:-leftover]
-            collated_tool_masks = collated_tool_masks[0:-leftover]
             collated_attention_masks = collated_attention_masks[0:-leftover]
             collated_position_ids = collated_position_ids[0:-leftover]
             collated_advantages = collated_advantages[0:-leftover]
@@ -1056,7 +1034,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 collated_ref_logprobs, _ = self.compute_logprobs(
                     self.ref_policy,
                     collated_query_responses,
-                    collated_tool_masks,
                     collated_attention_masks,
                     collated_position_ids,
                     collated_response_masks,
@@ -1075,7 +1052,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_old_logprobs, _ = self.compute_logprobs(
                         self.model,
                         collated_query_responses,
-                        collated_tool_masks,
                         collated_attention_masks,
                         collated_position_ids,
                         collated_response_masks,
@@ -1086,14 +1062,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 with torch.no_grad():
                     for i in range(len(collated_query_responses)):
-                        tool_mask = collated_tool_masks[i]
                         response_mask = collated_response_masks[i]
-
-                        if args.mask_tool_use and args.tool_use:
-                            response_mask = response_mask.bool() & tool_mask.bool()
-                        else:
-                            response_mask = response_mask.bool()
-
                         vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
                         vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                         vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
@@ -1120,7 +1089,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 # This ensures all minibatches in an accumulation group are normalized by the same total
                 if args.loss_denominator == "token":
                     accumulation_token_counts = self.calculate_token_counts(
-                        accumulation_steps, collated_response_masks, collated_tool_masks
+                        accumulation_steps, collated_response_masks
                     )
                 else:
                     accumulation_token_counts = {
@@ -1130,18 +1099,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
-                    mb_tool_mask = collated_tool_masks[i]
                     mb_advantages = collated_advantages[i]
-                    mb_response_masks = collated_response_masks[i]
-                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()
-                    # if masking snippets, do it here.
-                    if args.mask_tool_use and args.tool_use:
-                        mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
-
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
-
+                    mb_response_masks_bool = collated_response_masks[i][:, 1:]
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_local_logprobs, mb_entropy = self.forward(
@@ -1853,7 +1815,6 @@ def data_preparation_thread(
                     attention_masks=[],
                     response_masks=[],
                     original_responses=[],
-                    tool_masks=[],
                     advantages=[],
                     position_ids=[],
                     vllm_logprobs=[],
@@ -1922,6 +1883,7 @@ def data_preparation_thread(
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
+                mask_tool_use=args.mask_tool_use,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
@@ -1945,7 +1907,6 @@ def data_preparation_thread(
                     )
                     # construct "dummy" sequences for padding out the world size
                     dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
-                    dummy_tool_mask = torch.zeros_like(dummy_qr)
                     dummy_attention = torch.tensor([1, 1], dtype=torch.long)
                     dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
                     dummy_response_mask = torch.zeros_like(dummy_qr)
@@ -1953,7 +1914,6 @@ def data_preparation_thread(
                     # pad out the world size
                     for _ in range(shortfall):
                         packed_sequences.query_responses.append(dummy_qr)
-                        packed_sequences.tool_masks.append(dummy_tool_mask)
                         packed_sequences.attention_masks.append(dummy_attention)
                         packed_sequences.position_ids.append(dummy_position_ids)
                         packed_sequences.response_masks.append(dummy_response_mask)
@@ -2239,6 +2199,7 @@ def create_model_and_optimizer(
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
+        mask_tool_use=args.mask_tool_use,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
