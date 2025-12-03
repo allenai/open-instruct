@@ -471,37 +471,46 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
 
     poll_count = 0
     while True:
-        should_stop = actor._should_stop()
-        active_count = len(actor.active_tasks)
-        if should_stop or active_count >= actor.inference_batch_size:
-            logger.debug(
-                f"_prefetch_worker sleeping: should_stop={should_stop}, active={active_count}, max={actor.inference_batch_size}"
-            )
-            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-            continue
-
-        qsize = actor.prompt_queue.qsize()
-        if poll_count % 10 == 0:
-            print(f"[WORKER] polling for request (queue size: {qsize}, poll #{poll_count})...", flush=True)
-        poll_count += 1
-
-        if qsize == 0:
-            time.sleep(0.1)
-            continue
-
-        print(f"[WORKER] queue has items, calling get() (queue size: {qsize})...", flush=True)
-        request = None
         try:
-            request = actor.prompt_queue.get(block=False)
-        except ray_queue.Empty:
-            print("[WORKER] get(block=False) raised Empty, queue was emptied", flush=True)
-            continue
+            if poll_count % 100 == 0:
+                print(f"[WORKER] loop iteration #{poll_count} start", flush=True)
+            should_stop = actor._should_stop()
+            active_count = len(actor.active_tasks)
+            if should_stop or active_count >= actor.inference_batch_size:
+                logger.debug(
+                    f"_prefetch_worker sleeping: should_stop={should_stop}, active={active_count}, max={actor.inference_batch_size}"
+                )
+                time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+                continue
+
+            if poll_count % 100 == 0:
+                print(f"[WORKER] calling qsize() #{poll_count}", flush=True)
+            qsize = actor.prompt_queue.qsize()
+            if poll_count % 10 == 0:
+                print(f"[WORKER] polling for request (queue size: {qsize}, poll #{poll_count})...", flush=True)
+            poll_count += 1
+
+            if qsize == 0:
+                time.sleep(0.1)
+                continue
+
+            print(f"[WORKER] queue has items, calling get() (queue size: {qsize})...", flush=True)
+            request = None
+            try:
+                request = actor.prompt_queue.get(block=False)
+            except ray_queue.Empty:
+                print("[WORKER] get(block=False) raised Empty, queue was emptied", flush=True)
+                continue
+            except Exception as e:
+                print(f"[WORKER] get() raised exception: {e}", flush=True)
+                traceback.print_exc()
+                raise
+            print(f"[WORKER] got request: {type(request)}", flush=True)
+            add_request(actor, request)
         except Exception as e:
-            print(f"[WORKER] get() raised exception: {e}", flush=True)
+            print(f"[WORKER] exception in loop: {e}", flush=True)
             traceback.print_exc()
             raise
-        print(f"[WORKER] got request: {type(request)}", flush=True)
-        add_request(actor, request)
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
