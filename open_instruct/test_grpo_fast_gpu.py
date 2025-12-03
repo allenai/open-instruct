@@ -155,6 +155,9 @@ class TestGeneration(TestGrpoFastBase):
                 "expected_text": tokenizer.decode(result.responses[0]),
             }
             test_data_path.write_text(json.dumps(test_data, indent=2))
+            print(f"\n[TEST_DATA_START:{test_data_filename}]")
+            print(json.dumps(test_data, indent=2))
+            print(f"[TEST_DATA_END:{test_data_filename}]\n")
             self.fail(f"Test data generated at {test_data_path}. Re-run test to verify.")
             return
 
