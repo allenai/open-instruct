@@ -398,6 +398,22 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
                 if isinstance(result, ShutdownSentinel):
                     logger.info(f"[DataLoader Worker {self.dp_rank}] Received shutdown sentinel, exiting")
                     return
+                if result is None:
+                    logger.info(
+                        f"[DataLoader Worker {self.dp_rank}] All prompts filtered, "
+                        "yielding empty batch"
+                    )
+                    empty_batch = {
+                        "collated_query_responses": [],
+                        "collated_attention_masks": [],
+                        "collated_position_ids": [],
+                        "collated_advantages": [],
+                        "collated_response_masks": [],
+                        "collated_vllm_logprobs": [],
+                        "metrics": {},
+                    }
+                    self.local_queue.put(empty_batch)
+                    continue
 
             getting_response_time = timer.duration
             scores = np.array(batch.scores)

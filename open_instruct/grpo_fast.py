@@ -589,7 +589,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
         self.num_mini_batches = args.num_mini_batches
-        self.dataloader = data_loader_config.build(
+        self.dataloader = iter(data_loader_config.build(
             dataset=dataset,
             inference_results_Q=inference_results_Q,
             param_prompt_Q=param_prompt_Q,
@@ -607,7 +607,7 @@ class PolicyTrainerRayProcess(RayProcess):
             max_possible_score=args.max_possible_score,
             actor_manager=actor_manager,
             model_dims=model_dims,
-        )
+        ))
 
     def from_pretrained(
         self,
@@ -996,6 +996,9 @@ class PolicyTrainerRayProcess(RayProcess):
         collated_advantages = batch_data["collated_advantages"]
         collated_response_masks = batch_data["collated_response_masks"]
         collated_vllm_logprobs = batch_data["collated_vllm_logprobs"]
+        if len(collated_query_responses) == 0:
+            logger.warning("[Training] Empty batch received, skipping training step")
+            return [], {}
         args = self.args
         to_device_inplace(collated_query_responses, self.device)
         to_device_inplace(collated_attention_masks, self.device)
