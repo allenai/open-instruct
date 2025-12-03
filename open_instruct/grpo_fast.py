@@ -225,8 +225,6 @@ class Args:
     """Enable immediate stopping of request processing when should_stop is set, allowing for quick pausing and resumption"""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
-    pack_length: int = 512
-    """the length of the pack (you should prob set to the max length of the model)"""
     loss_denominator: str = "token"
     """Optional constant denominator for masked_mean; can be "token" or a float value.
     when "token", the loss is divided by the total number of tokens in the batch (standard LM training).
@@ -241,19 +239,6 @@ class Args:
     """How many training steps to take before updating the reference policy."""
     load_ref_policy: bool = True
     """Whether to load and use a reference policy for KL penalty calculation."""
-    advantage_normalization_type: Literal["standard", "centered"] = "standard"
-    """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
-    divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
-    DR.GRPO https://arxiv.org/pdf/2503.20783)."""
-    mask_truncated_completions: bool = False
-    """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
-
-    active_sampling: bool = False
-    """Whether to continue sampling responses until you get a full batch."""
-    filter_zero_std_samples: bool = True
-    """Whether to filter out prompts with zero reward std (all samples have the same score)."""
-    no_resampling_pass_rate: float | None = None
-    """If the response to a prompt is solved at a rate higher than this, do not resample this prompt again"""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
