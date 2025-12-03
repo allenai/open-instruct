@@ -2515,8 +2515,8 @@ def main(
             logger.info(f"Restored episode count: {episode}")
 
     # Create additional queues (main queues already created above)
-    generate_metrics_Q = Queue(maxsize=args.async_steps)
-    weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
+    generate_metrics_Q = Queue(maxsize=streaming_config.async_steps)
+    weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
 
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
