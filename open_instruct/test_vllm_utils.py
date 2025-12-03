@@ -24,9 +24,7 @@ class TestVllmUtils3(unittest.TestCase):
         def create_mock_logprobs(token_ids):
             return [{tid: MagicMock(logprob=-0.1 * tid)} for tid in token_ids]
 
-        mock_request = PromptRequest(
-            prompt=[1, 2, 3], generation_config=None, is_eval=False, dataset_index=43039
-        )
+        mock_request = PromptRequest(prompt=[1, 2, 3], generation_config=None, is_eval=False, dataset_index=43039)
         request_id = make_request_id(mock_request)
 
         mock_output1 = MagicMock(spec=vllm.CompletionOutput)
@@ -107,9 +105,7 @@ class TestVllmUtils3(unittest.TestCase):
         def create_mock_logprobs(token_ids):
             return [{tid: MagicMock(logprob=-0.1 * tid)} for tid in token_ids]
 
-        mock_request = PromptRequest(
-            prompt=[1, 2, 3], generation_config=None, is_eval=True, dataset_index=200
-        )
+        mock_request = PromptRequest(prompt=[1, 2, 3], generation_config=None, is_eval=True, dataset_index=200)
         request_id = make_request_id(mock_request)
 
         mock_output1 = MagicMock(spec=vllm.CompletionOutput)

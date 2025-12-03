@@ -38,7 +38,12 @@ with contextlib.suppress(Exception):
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import utils
-from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator, collate_fn
+from open_instruct.data_loader import (
+    DataPreparationActor,
+    accumulate_inference_batches,
+    add_prompt_to_generator,
+    collate_fn,
+)
 
 # isort: on
 import asyncio
@@ -577,37 +582,25 @@ class PolicyTrainerRayProcess(RayProcess):
         master_port: int | None,
         args: Args,
         data_loader_config: data_loader_lib.StreamingDataLoaderConfig,
-        dataset: Dataset,
-        inference_results_Q: ray_queue.Queue,
-        param_prompt_Q: ray_queue.Queue,
+        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
-        generation_config,
-        actor_manager,
-        model_dims: utils.ModelDims,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
         self.num_mini_batches = args.num_mini_batches
-        self.dataloader = iter(data_loader_config.build(
-            dataset=dataset,
-            inference_results_Q=inference_results_Q,
-            param_prompt_Q=param_prompt_Q,
-            tokenizer=tokenizer,
-            generation_config=generation_config,
-            dp_rank=rank,
-            fs_local_rank=self.local_rank,
-            num_training_steps=args.num_training_steps,
-            seed=args.seed,
-            per_device_train_batch_size=args.per_device_train_batch_size,
-            verbose=args.verbose,
-            work_dir=args.output_dir,
-            global_batch_size=args.num_unique_prompts_rollout,
-            dp_world_size=world_size,
-            max_possible_score=args.max_possible_score,
-            actor_manager=actor_manager,
-            model_dims=model_dims,
-        ))
+        self.dataloader = iter(
+            data_loader_config.build_dataloader(
+                data_prep_actor_name=data_prep_actor_name,
+                tokenizer=tokenizer,
+                dp_rank=rank,
+                fs_local_rank=self.local_rank,
+                num_training_steps=args.num_training_steps,
+                work_dir=args.output_dir,
+                global_batch_size=args.num_unique_prompts_rollout,
+                dp_world_size=world_size,
+            )
+        )
 
     def from_pretrained(
         self,
@@ -1413,13 +1406,8 @@ class ModelGroup:
         single_gpu_mode: bool,
         args: Args,
         data_loader_config: data_loader_lib.StreamingDataLoaderConfig,
-        dataset: Dataset,
-        inference_results_Q: ray_queue.Queue,
-        param_prompt_Q: ray_queue.Queue,
+        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
-        generation_config,
-        actor_manager,
-        model_dims: utils.ModelDims,
     ):
         self.pg = pg
         self.ray_process_cls = ray_process_cls
@@ -1434,22 +1422,7 @@ class ModelGroup:
             scheduling_strategy=PlacementGroupSchedulingStrategy(
                 placement_group=self.pg, placement_group_bundle_index=0
             ),
-        ).remote(
-            world_size,
-            0,
-            0,
-            None,
-            None,
-            args,
-            data_loader_config,
-            dataset,
-            inference_results_Q,
-            param_prompt_Q,
-            tokenizer,
-            generation_config,
-            actor_manager,
-            model_dims,
-        )
+        ).remote(world_size, 0, 0, None, None, args, data_loader_config, data_prep_actor_name, tokenizer)
 
         self.models.append(master_policy)
         results, _ = ray_get_with_progress(
@@ -1490,13 +1463,8 @@ class ModelGroup:
                 master_port,
                 args,
                 data_loader_config,
-                dataset,
-                inference_results_Q,
-                param_prompt_Q,
+                data_prep_actor_name,
                 tokenizer,
-                generation_config,
-                actor_manager,
-                model_dims,
             )
             self.models.append(worker_policy)
 
@@ -1788,6 +1756,28 @@ def create_model_and_optimizer(
     logger.info("[DEBUG] KV cache configuration complete")
 
     # Now create policy actors with all dependencies
+    logger.info("[DEBUG] Creating DataPreparationActor singleton...")
+    data_prep_actor_name = "data_prep_singleton"
+    _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
+        dataset=train_dataset,
+        inference_results_Q=inference_results_Q,
+        param_prompt_Q=param_prompt_Q,
+        tokenizer=tokenizer,
+        config=data_loader_config,
+        generation_config=generation_config,
+        num_training_steps=args.num_training_steps,
+        seed=args.seed,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        global_batch_size=args.num_unique_prompts_rollout,
+        dp_world_size=args.world_size,
+        max_possible_score=args.max_possible_score,
+        actor_manager=actor_manager,
+        model_dims=model_dims,
+        verbose=args.verbose,
+        work_dir=args.output_dir,
+    )
+    logger.info(f"[DEBUG] DataPreparationActor singleton created with name: {data_prep_actor_name}")
+
     logger.info("[DEBUG] Creating ModelGroup with policy actors...")
     wandb_url = wandb.run.get_url() if args.with_tracking else None
     policy_group = ModelGroup(
@@ -1797,13 +1787,8 @@ def create_model_and_optimizer(
         args.single_gpu_mode,
         args=args,
         data_loader_config=data_loader_config,
-        dataset=train_dataset,
-        inference_results_Q=inference_results_Q,
-        param_prompt_Q=param_prompt_Q,
+        data_prep_actor_name=data_prep_actor_name,
         tokenizer=tokenizer,
-        generation_config=generation_config,
-        actor_manager=actor_manager,
-        model_dims=model_dims,
     )
     logger.info(f"[DEBUG] ModelGroup created with {len(policy_group.models)} policy actors")
 
