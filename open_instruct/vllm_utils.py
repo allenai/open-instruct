@@ -504,7 +504,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         )
 
 
-def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> None:
+def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.Future | None:
     base_request_id = sub_request["base_request_id"]
     expected_n = sub_request["expected_n"]
 
@@ -518,12 +518,9 @@ def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> None:
     actor.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
 
     if len(actor.request_outputs[base_request_id]["outputs"]) == expected_n:
-        finalize_future = asyncio.run_coroutine_threadsafe(
-            finalize_completed_request(actor, base_request_id), actor.loop
-        )
-        # Surface exceptions that occur during finalization rather than silently
-        # swallowing them, mirroring the previous synchronous behavior.
-        finalize_future.result()
+        return asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
+
+    return None
 
 
 async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str) -> None:
@@ -698,8 +695,16 @@ class LLMRayActor:
         return self._should_stop_value
 
     def process_from_queue(self) -> None:
+        finalize_futures: list[futures.Future] = []
         while True:
-            accumulate_completions(self, self.completion_queue.get())
+            completion_future = accumulate_completions(self, self.completion_queue.get())
+            if completion_future is not None:
+                finalize_futures.append(completion_future)
+
+            for future in finalize_futures.copy():
+                if future.done():
+                    finalize_futures.remove(future)
+                    future.result()
 
     def init_process_group(
         self,
