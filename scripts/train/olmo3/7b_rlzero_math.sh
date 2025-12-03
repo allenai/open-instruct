@@ -54,7 +54,7 @@ python mason.py \
     --chat_template_name olmo_thinker_rlzero \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 512256 \
+    --total_episodes 2049024 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 8 \
     --vllm_num_engines 56 \
@@ -76,4 +76,6 @@ python mason.py \
     --eval_on_step_0 True \
     --oe_eval_tasks $EVALS \
     --oe_eval_gpu_multiplier 4 \
+    --gs_bucket_path gs://ai2-llm/post-training/ \
+    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/michaeln/1763966603_748601 \
     --oe_eval_beaker_image michaeln/oe_eval_olmo3_rlzero $@
