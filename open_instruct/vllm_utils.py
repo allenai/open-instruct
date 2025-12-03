@@ -918,8 +918,6 @@ def create_vllm_engines(
                 max_tool_calls=max_tool_calls_dict,
                 mask_tool_use=mask_tool_use,
                 inflight_updates=inflight_updates,
-                kv_cache_dtype="auto",
-                calculate_kv_scales=False,
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
