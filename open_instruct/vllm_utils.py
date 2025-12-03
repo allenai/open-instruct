@@ -518,7 +518,12 @@ def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> None:
     actor.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
 
     if len(actor.request_outputs[base_request_id]["outputs"]) == expected_n:
-        asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
+        finalize_future = asyncio.run_coroutine_threadsafe(
+            finalize_completed_request(actor, base_request_id), actor.loop
+        )
+        # Surface exceptions that occur during finalization rather than silently
+        # swallowing them, mirroring the previous synchronous behavior.
+        finalize_future.result()
 
 
 async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str) -> None:
