@@ -49,7 +49,6 @@ import socket
 import threading
 import time
 from argparse import Namespace
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from queue import Empty, Full, Queue
@@ -2067,7 +2066,6 @@ def maybe_evaluate(
     generate_metrics_Q: Queue,
     num_eval_prompts: int,
     model_dims: utils.ModelDims,
-    reward_fn: Callable,
     actor_manager=None,
 ):
     """Optionally evaluate the model."""
@@ -2083,7 +2081,6 @@ def maybe_evaluate(
             num_prompts=num_eval_prompts,
             model_dims=model_dims,
             tokenizer=tokenizer,
-            reward_fn=reward_fn,
             dataset=eval_dataset,
             actor_manager=actor_manager,
             timeout=timeout,
@@ -2251,7 +2248,6 @@ def run_training(
     policy_group,
     vllm_engines,
     generation_configs,
-    reward_fn,
     resume_training_step,
     episode,
     wandb_url,
@@ -2426,7 +2422,6 @@ def run_training(
             generate_metrics_Q,
             len(eval_dataset) if eval_dataset else 0,
             model_dims,
-            reward_fn,
             actor_manager,
         )
 
@@ -2489,7 +2484,7 @@ def main(
     )
     generation_configs = create_generation_configs(args, streaming_config)
 
-    (policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager, model_dims, reward_fn) = (
+    (policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager, model_dims) = (
         create_model_and_optimizer(
             args,
             tc,
@@ -2536,7 +2531,6 @@ def main(
             policy_group,
             vllm_engines,
             generation_configs,
-            reward_fn,
             resume_training_step,
             episode,
             wandb_url,
