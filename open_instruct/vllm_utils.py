@@ -478,7 +478,22 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
             continue
 
         print(f"[WORKER] waiting for request (queue size: {actor.prompt_queue.qsize()})...", flush=True)
-        request = actor.prompt_queue.get()
+        import traceback
+
+        request = None
+        while request is None:
+            try:
+                request = actor.prompt_queue.get(timeout=5)
+            except ray_queue.Empty:
+                print(
+                    f"[WORKER] get() timed out after 5s, retrying... (queue size: {actor.prompt_queue.qsize()})",
+                    flush=True,
+                )
+                continue
+            except Exception as e:
+                print(f"[WORKER] get() raised exception: {e}", flush=True)
+                traceback.print_exc()
+                raise
         print(f"[WORKER] got request: {type(request)}", flush=True)
         add_request(actor, request)
 
