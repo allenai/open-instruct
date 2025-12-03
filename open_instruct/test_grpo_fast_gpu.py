@@ -69,6 +69,11 @@ class TestGeneration(TestGrpoFastBase):
         print("[TEST] Queue basic test PASSED!", flush=True)
 
         print("[TEST] Starting create_vllm_engines...", flush=True)
+        from ray.util.placement_group import placement_group
+
+        pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
+        ray.get(pg.ready())
+
         create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
@@ -80,6 +85,8 @@ class TestGeneration(TestGrpoFastBase):
             enable_prefix_caching=False,
             max_model_len=512,
             vllm_gpu_memory_utilization=0.5,
+            single_gpu_mode=True,
+            pg=pg,
             prompt_queue=param_prompt_Q,
             results_queue=inference_results_Q,
             tools=tools,
