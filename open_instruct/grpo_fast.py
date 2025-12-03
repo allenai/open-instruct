@@ -2782,20 +2782,14 @@ def run_training(
     else:
         eval_data_loader = None
     training_start_time = time.perf_counter()  # Track overall training start time
+    maybe_update_beaker_description(
+        current_step=resume_training_step - 1,
+        total_steps=args.num_training_steps,
+        start_time=training_start_time,
+        wandb_url=wandb_url,
+    )
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
-
-        if (
-            training_step == resume_training_step
-            or training_step % args.update_progress_every == 0
-            or training_step == args.num_training_steps
-        ):
-            maybe_update_beaker_description(
-                current_step=training_step,
-                total_steps=args.num_training_steps,
-                start_time=training_start_time,
-                wandb_url=wandb_url,
-            )
 
         # Check if any of the threads have raised an exception.
         health_check_start = time.perf_counter()
@@ -2897,6 +2891,14 @@ def run_training(
             model_dims,
             actor_manager,
         )
+
+        if training_step % args.update_progress_every == 0 or training_step == args.num_training_steps:
+            maybe_update_beaker_description(
+                current_step=training_step,
+                total_steps=args.num_training_steps,
+                start_time=training_start_time,
+                wandb_url=wandb_url,
+            )
 
     if resume_training_step > args.num_training_steps:
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")

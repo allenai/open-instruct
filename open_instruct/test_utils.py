@@ -240,6 +240,53 @@ class TestBeakerDescription(unittest.TestCase):
         self.assertIn("https://wandb.ai/team/project/runs/xyz789", desc)
         self.assertNotIn("% complete", desc)
 
+    @mock.patch("os.environ.get")
+    @mock.patch("beaker.Beaker.from_env")
+    @mock.patch("open_instruct.utils.is_beaker_job")
+    def test_description_does_not_duplicate_on_restart(
+        self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get
+    ):
+        """Test that description doesn't duplicate when job restarts (fresh original_descriptions dict)."""
+        env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
+
+        previous_run_description = (
+            "Single GPU on Beaker with tool use test script. "
+            "git_commit: e6df3c9c git_branch: finbarr/async-reward "
+            "https://wandb.ai/ai2-llm/open_instruct_internal/runs/n53oxnzb "
+            "[5.0% complete (step 1/20), eta 0m]"
+        )
+        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+            mock_beaker_from_env, mock_is_beaker_job, previous_run_description
+        )
+
+        wandb_url = "https://wandb.ai/ai2-llm/open_instruct_internal/runs/n53oxnzb"
+        original_descriptions = {}
+
+        utils.maybe_update_beaker_description(
+            current_step=2,
+            total_steps=20,
+            start_time=time.time(),
+            wandb_url=wandb_url,
+            original_descriptions=original_descriptions,
+        )
+
+        self.assertEqual(len(description_history), 1)
+        desc = description_history[0]
+
+        git_commit_count = desc.count("git_commit:")
+        git_branch_count = desc.count("git_branch:")
+        wandb_count = desc.count("wandb.ai")
+
+        self.assertEqual(
+            git_commit_count, 1, f"git_commit should appear once, but appears {git_commit_count} times in: {desc}"
+        )
+        self.assertEqual(
+            git_branch_count, 1, f"git_branch should appear once, but appears {git_branch_count} times in: {desc}"
+        )
+        self.assertEqual(wandb_count, 1, f"wandb URL should appear once, but appears {wandb_count} times in: {desc}")
+        self.assertIn("Single GPU on Beaker with tool use test script.", desc)
+
 
 class TestSlackAlert(unittest.TestCase):
     @responses.activate
