@@ -467,6 +467,9 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
     print(f"[WORKER] _prefetch_worker started, batch_size={actor.inference_batch_size}", flush=True)
     print(f"[WORKER] prompt_queue id: {id(actor.prompt_queue)}", flush=True)
     print(f"[WORKER] prompt_queue actor: {actor.prompt_queue.actor}", flush=True)
+    import traceback
+
+    poll_count = 0
     while True:
         should_stop = actor._should_stop()
         active_count = len(actor.active_tasks)
@@ -477,23 +480,26 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        print(f"[WORKER] waiting for request (queue size: {actor.prompt_queue.qsize()})...", flush=True)
-        import traceback
+        qsize = actor.prompt_queue.qsize()
+        if poll_count % 10 == 0:
+            print(f"[WORKER] polling for request (queue size: {qsize}, poll #{poll_count})...", flush=True)
+        poll_count += 1
 
+        if qsize == 0:
+            time.sleep(0.1)
+            continue
+
+        print(f"[WORKER] queue has items, calling get() (queue size: {qsize})...", flush=True)
         request = None
-        while request is None:
-            try:
-                request = actor.prompt_queue.get(timeout=5)
-            except ray_queue.Empty:
-                print(
-                    f"[WORKER] get() timed out after 5s, retrying... (queue size: {actor.prompt_queue.qsize()})",
-                    flush=True,
-                )
-                continue
-            except Exception as e:
-                print(f"[WORKER] get() raised exception: {e}", flush=True)
-                traceback.print_exc()
-                raise
+        try:
+            request = actor.prompt_queue.get(block=False)
+        except ray_queue.Empty:
+            print("[WORKER] get(block=False) raised Empty, queue was emptied", flush=True)
+            continue
+        except Exception as e:
+            print(f"[WORKER] get() raised exception: {e}", flush=True)
+            traceback.print_exc()
+            raise
         print(f"[WORKER] got request: {type(request)}", flush=True)
         add_request(actor, request)
 
