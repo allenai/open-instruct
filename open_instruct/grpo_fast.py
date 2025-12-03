@@ -40,6 +40,7 @@ from open_instruct import utils
 
 # isort: on
 import asyncio
+import dataclasses
 import json
 import logging
 import math
@@ -79,6 +80,7 @@ from transformers.integrations import HfDeepSpeedConfig
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
+from open_instruct.data_types import CollatedBatchData, GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -102,7 +104,6 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -556,7 +557,7 @@ def prepare_collated_data_for_workers(
     per_device_train_batch_size: int,
     pad_token_id: int,
     pin_memory: bool = True,
-) -> list[dict[str, list[torch.Tensor]]]:
+) -> list[CollatedBatchData]:
     """Distributes and collates packed sequences for distributed training.
 
     Splits packed sequences across workers, randomly shuffles each worker's data,
@@ -615,14 +616,14 @@ def prepare_collated_data_for_workers(
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
             )
         collated_data.append(
-            {
-                "query_responses": collated_query_responses,
-                "attention_masks": collated_attention_masks,
-                "position_ids": collated_position_ids,
-                "advantages": collated_advantages,
-                "response_masks": collated_response_masks,
-                "vllm_logprobs": collated_vllm_logprobs,
-            }
+            CollatedBatchData(
+                query_responses=collated_query_responses,
+                attention_masks=collated_attention_masks,
+                position_ids=collated_position_ids,
+                advantages=collated_advantages,
+                response_masks=collated_response_masks,
+                vllm_logprobs=collated_vllm_logprobs,
+            )
         )
     return collated_data
 
@@ -924,24 +925,24 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
     def compute_logprobs(
-        self, model: PreTrainedModel, data_BT: dict[str, list[torch.Tensor]], pad_token_id: int, use_grad: bool = False
+        self, model: PreTrainedModel, data_BT: CollatedBatchData, pad_token_id: int, use_grad: bool = False
     ) -> list[torch.Tensor]:
         logprobs_BT: list[torch.Tensor] = []
 
         context = contextlib.nullcontext() if use_grad else torch.no_grad()
         with context:
-            for i in range(len(data_BT["query_responses"])):
+            for i in range(len(data_BT.query_responses)):
                 logprob_BT, _ = self.forward(
                     model,
-                    data_BT["query_responses"][i],
-                    data_BT["attention_masks"][i],
-                    data_BT["position_ids"][i],
+                    data_BT.query_responses[i],
+                    data_BT.attention_masks[i],
+                    data_BT.position_ids[i],
                     pad_token_id,
                     self.args.temperature,
                     return_entropy=False,
                 )
 
-                response_mask_BT = data_BT["response_masks"][i]
+                response_mask_BT = data_BT.response_masks[i]
                 logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:], INVALID_LOGPROB)
                 logprobs_BT.append(logprob_BT)
 
@@ -949,11 +950,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return logprobs_BT
 
-    def calculate_token_counts(
-        self, accumulation_steps: int, data_BT: dict[str, list[torch.Tensor]]
-    ) -> dict[int, float]:
+    def calculate_token_counts(self, accumulation_steps: int, data_BT: CollatedBatchData) -> dict[int, float]:
         accumulation_counts: dict[int, float] = {}
-        local_counts = [mask[:, 1:].sum().float() for mask in data_BT["response_masks"]]
+        local_counts = [mask[:, 1:].sum().float() for mask in data_BT.response_masks]
         if not local_counts:
             return accumulation_counts
 
@@ -968,11 +967,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return accumulation_counts
 
-    def train(self, data_BT: dict[str, list[torch.Tensor]], pad_token_id: int) -> dict[str, float]:
+    def train(self, data_BT: CollatedBatchData, pad_token_id: int) -> dict[str, float]:
         """Train the policy model on a batch of data.
 
         Args:
-            data_BT: Dictionary containing collated tensors with keys:
+            data_BT: CollatedBatchData containing:
                 - query_responses: Token IDs for query+response sequences (B, T)
                 - attention_masks: Attention mask (1=valid, 0=padding) (B, T)
                 - position_ids: Position indices for positional embeddings (B, T)
@@ -984,17 +983,17 @@ class PolicyTrainerRayProcess(RayProcess):
         Returns:
             Dictionary of training metrics (loss, KL, entropy, etc.).
         """
-        for tensors in data_BT.values():
-            to_device_inplace(tensors, self.device)
-        data_BT["response_masks"] = [mask.bool() for mask in data_BT["response_masks"]]
-        num_samples = len(data_BT["query_responses"])
+        for f in dataclasses.fields(data_BT):
+            to_device_inplace(getattr(data_BT, f.name), self.device)
+        data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
+        num_samples = len(data_BT)
         accumulation_steps = max(math.ceil(num_samples / self.args.num_mini_batches - 0.5), 1)
         leftover = num_samples % accumulation_steps
         if leftover > 0:
-            data_BT = {k: v[0:-leftover] for k, v in data_BT.items()}
+            data_BT = data_BT[:-leftover]
             logger.warning(f"{leftover} samples are dropped due to batch size {self.args.num_mini_batches}")
 
-        num_mini_batches = len(data_BT["query_responses"]) // accumulation_steps
+        num_mini_batches = len(data_BT.query_responses) // accumulation_steps
 
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
@@ -1004,7 +1003,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
         # from the generator (note that async mode means these are a bit diff!)
-        old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(len(data_BT["query_responses"]))]
+        old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(len(data_BT.query_responses))]
         if num_mini_batches > 1:
             with Timer("Old logprobs Calculation", noop=self.rank != 0):
                 local_old_logprobs_BT = None
@@ -1012,10 +1011,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_old_logprobs_BT = self.compute_logprobs(self.model, data_BT, pad_token_id, use_grad=False)
 
                 with torch.no_grad():
-                    for i in range(len(data_BT["query_responses"])):
-                        vllm_old_logprob_BT = data_BT["vllm_logprobs"][i][:, 1:]
+                    for i in range(len(data_BT.query_responses)):
+                        vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
                         vllm_old_logprob_BT = torch.masked_fill(
-                            vllm_old_logprob_BT, ~data_BT["response_masks"][i][:, 1:], INVALID_LOGPROB
+                            vllm_old_logprob_BT, ~data_BT.response_masks[i][:, 1:], INVALID_LOGPROB
                         )
                         vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=INVALID_LOGPROB)
 
@@ -1027,7 +1026,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         torch.cuda.empty_cache()
 
         local_step = 0
-        num_samples = len(data_BT["query_responses"])
+        num_samples = len(data_BT.query_responses)
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B: dict[str, torch.Tensor] = {
@@ -1047,25 +1046,25 @@ class PolicyTrainerRayProcess(RayProcess):
                 else:
                     accumulation_token_counts = {
                         int(group_idx * accumulation_steps): self.args.loss_denominator
-                        for group_idx in range((len(data_BT["query_responses"]) // accumulation_steps) + 1)
+                        for group_idx in range((len(data_BT.query_responses) // accumulation_steps) + 1)
                     }
 
                 for i in range(num_samples):
-                    response_mask_BT = data_BT["response_masks"][i][:, 1:]
+                    response_mask_BT = data_BT.response_masks[i][:, 1:]
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
                     local_logprobs_BT, entropy_BT = self.forward(
                         self.model,
-                        data_BT["query_responses"][i],
-                        data_BT["attention_masks"][i],
-                        data_BT["position_ids"][i],
+                        data_BT.query_responses[i],
+                        data_BT.attention_masks[i],
+                        data_BT.position_ids[i],
                         pad_token_id,
                         self.args.temperature,
                         return_entropy=self.args.record_entropy,
                     )
                     local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
-                    vllm_logprobs_BT = data_BT["vllm_logprobs"][i][:, 1:]
+                    vllm_logprobs_BT = data_BT.vllm_logprobs[i][:, 1:]
                     vllm_logprobs_BT = torch.masked_fill(vllm_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
                     vllm_logprobs_BT = torch.nan_to_num(vllm_logprobs_BT, nan=INVALID_LOGPROB)
 
@@ -1113,8 +1112,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    pg_losses_BT = -data_BT["advantages"][i][:, 1:] * ratio_BT
-                    pg_losses2_BT = -data_BT["advantages"][i][:, 1:] * torch.clamp(
+                    pg_losses_BT = -data_BT.advantages[i][:, 1:] * ratio_BT
+                    pg_losses2_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
                         ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher
                     )
 

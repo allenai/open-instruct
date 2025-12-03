@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import vllm
 
-from open_instruct.queue_types import PromptRequest
+from open_instruct.data_types import PromptRequest
 from open_instruct.vllm_utils import make_request_id, process_completed_request
 
 
