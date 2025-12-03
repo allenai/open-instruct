@@ -900,8 +900,9 @@ def accumulate_inference_batches(
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
     )
-    logging.info(
-        f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"
-    )
+    if "time/reward" in combined_reward_metrics:
+        logging.info(
+            f"[Data Preparation Thread] Calculating rewards took {combined_reward_metrics['time/reward']} seconds"
+        )
 
     return combined_result, batch, combined_reward_metrics, batch_stats
