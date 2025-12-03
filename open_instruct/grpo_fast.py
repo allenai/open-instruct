@@ -2328,7 +2328,16 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
-    return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager, model_dims
+    return (
+        policy_group,
+        vllm_engines,
+        tool_objects,
+        resume_training_step,
+        episode,
+        actor_manager,
+        model_dims,
+        _data_prep_actor,
+    )
 
 
 def create_generation_configs(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig):
@@ -2948,23 +2957,30 @@ def main(
     )
     generation_configs = create_generation_configs(args, streaming_config)
 
-    (policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager, model_dims) = (
-        create_model_and_optimizer(
-            args,
-            tc,
-            model_config,
-            beaker_config,
-            wandb_url,
-            tokenizer,
-            inference_results_Q,
-            param_prompt_Q,
-            evaluation_inference_results_Q,
-            streaming_config,
-            train_dataset,
-            eval_dataset,
-            reward_config,
-            generation_configs["train"],
-        )
+    (
+        policy_group,
+        vllm_engines,
+        tool_objects,
+        resume_training_step,
+        episode,
+        actor_manager,
+        model_dims,
+        _data_prep_actor,
+    ) = create_model_and_optimizer(
+        args,
+        tc,
+        model_config,
+        beaker_config,
+        wandb_url,
+        tokenizer,
+        inference_results_Q,
+        param_prompt_Q,
+        evaluation_inference_results_Q,
+        streaming_config,
+        train_dataset,
+        eval_dataset,
+        reward_config,
+        generation_configs["train"],
     )
 
     checkpoint_state = None
