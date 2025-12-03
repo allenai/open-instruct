@@ -1042,11 +1042,11 @@ class PolicyTrainerRayProcess(RayProcess):
             for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
-                if args.loss_denominator == "token":
+                if self.args.loss_denominator == "token":
                     accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
                 else:
                     accumulation_token_counts = {
-                        int(group_idx * accumulation_steps): args.loss_denominator
+                        int(group_idx * accumulation_steps): self.args.loss_denominator
                         for group_idx in range((len(data_BT["query_responses"]) // accumulation_steps) + 1)
                     }
 
@@ -1179,7 +1179,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
                     else:
                         loss = masked_mean(pg_loss_max_BT, response_mask_BT, None, loss_denominator)
-                    loss = loss / accumulation_steps
 
                     # we already took world size into account via the tokens
                     if dist.is_available() and dist.is_initialized():
