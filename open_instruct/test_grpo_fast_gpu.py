@@ -28,9 +28,11 @@ import os
 import pathlib
 import unittest
 
+import ray
 import torch
 from parameterized import parameterized
 from ray.util import queue as ray_queue
+from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
@@ -69,8 +71,6 @@ class TestGeneration(TestGrpoFastBase):
         print("[TEST] Queue basic test PASSED!", flush=True)
 
         print("[TEST] Starting create_vllm_engines...", flush=True)
-        from ray.util.placement_group import placement_group
-
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
         ray.get(pg.ready())
 
