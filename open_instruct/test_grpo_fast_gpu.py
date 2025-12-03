@@ -56,9 +56,10 @@ class TestGeneration(TestGrpoFastBase):
         """Helper to create vLLM engine and run generation."""
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-        param_prompt_Q = ray_queue.Queue(maxsize=1)
-        inference_results_Q = ray_queue.Queue(maxsize=1)
-        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
+        param_prompt_Q = ray_queue.Queue(maxsize=100)
+        inference_results_Q = ray_queue.Queue(maxsize=100)
+        eval_results_Q = ray_queue.Queue(maxsize=100)
+        self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
 
         print(f"[TEST] Created queues - prompt_queue id: {id(param_prompt_Q)}", flush=True)
         print(f"[TEST] prompt_queue actor: {param_prompt_Q.actor}", flush=True)
@@ -98,6 +99,7 @@ class TestGeneration(TestGrpoFastBase):
             pg=pg,
             prompt_queue=param_prompt_Q,
             results_queue=inference_results_Q,
+            eval_results_queue=eval_results_Q,
             tools=tools,
             max_tool_calls=max_tool_calls,
         )
