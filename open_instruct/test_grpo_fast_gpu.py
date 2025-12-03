@@ -67,7 +67,13 @@ class TestGeneration(TestGrpoFastBase):
         prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
         stop = list(tools.keys()) if tools else None
         generation_config = SamplingParams(
-            temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, stop=stop, logprobs=1
+            temperature=0.0,
+            top_p=1.0,
+            max_tokens=max_tokens,
+            seed=42,
+            stop=stop,
+            logprobs=1,
+            include_stop_str_in_output=True,
         )
         request = PromptRequest(
             prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
