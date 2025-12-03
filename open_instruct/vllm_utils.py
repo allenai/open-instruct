@@ -701,10 +701,9 @@ class LLMRayActor:
             if completion_future is not None:
                 finalize_futures.append(completion_future)
 
-            for future in finalize_futures.copy():
-                if future.done():
-                    finalize_futures.remove(future)
-                    future.result()
+            done, not_done = futures.wait(finalize_futures, timeout=0)
+            [future.result() for future in done]
+            finalize_futures = list(not_done)
 
     def init_process_group(
         self,
