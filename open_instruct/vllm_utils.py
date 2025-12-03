@@ -463,6 +463,12 @@ def init_process_group(
     return pg
 
 
+async def _async_queue_get(prompt_queue, timeout: float = 1.0):
+    """Async wrapper for Ray queue get that can be run from asyncio event loop."""
+    ref = prompt_queue.actor.get.remote(timeout)
+    return await ref
+
+
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     import sys
     import traceback
@@ -477,46 +483,39 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
 
     poll_count = 0
     while True:
+        should_stop = actor._should_stop()
+        active_count = len(actor.active_tasks)
+        if should_stop:
+            log("should_stop=True, exiting worker")
+            break
+
+        if active_count >= actor.inference_batch_size:
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+            continue
+
+        log(f"poll #{poll_count}")
+        poll_count += 1
+        request = None
+
+        future = asyncio.run_coroutine_threadsafe(_async_queue_get(actor.prompt_queue, timeout=1.0), actor.loop)
         try:
-            should_stop = actor._should_stop()
-            active_count = len(actor.active_tasks)
-            if should_stop:
-                log("should_stop=True, exiting worker")
-                break
-
-            if active_count >= actor.inference_batch_size:
-                time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-                continue
-
-            log(f"poll #{poll_count} - calling get with ray.wait()")
-            poll_count += 1
-            request = None
-            try:
-                ref = actor.prompt_queue.actor.get.remote(1.0)
-                log(f"poll #{poll_count - 1} - got ref, calling ray.wait()")
-                ready, _ = ray.wait([ref], timeout=2.0)
-                log(f"poll #{poll_count - 1} - ray.wait returned, ready={len(ready)}")
-                if ready:
-                    request = ray.get(ref)
-                    log(f"poll #{poll_count - 1} - ray.get returned: {type(request)}")
-                else:
-                    log(f"poll #{poll_count - 1} - ray.wait timed out, continuing")
-                    continue
-            except ray_queue.Empty:
-                log(f"poll #{poll_count - 1} - Empty exception, continuing")
-                time.sleep(0.1)
-                continue
-            except Exception as e:
-                log(f"get() raised exception: {e}")
-                traceback.print_exc()
-                raise
-
+            request = future.result(timeout=3.0)
             log(f"got request: {type(request)}")
-            add_request(actor, request)
+        except TimeoutError:
+            log("future.result() timed out")
+            future.cancel()
+            continue
+        except ray_queue.Empty:
+            log("Empty exception")
+            time.sleep(0.1)
+            continue
         except Exception as e:
-            log(f"exception in loop: {e}")
+            log(f"get() raised exception: {e}")
             traceback.print_exc()
-            raise
+            time.sleep(0.1)
+            continue
+
+        add_request(actor, request)
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
