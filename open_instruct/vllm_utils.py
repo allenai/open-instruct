@@ -789,7 +789,6 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
-    use_fp8_kv_cache=False,
     inflight_updates: bool = False,
 ) -> list[LLMRayActor]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
@@ -869,8 +868,8 @@ def create_vllm_engines(
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
                 inflight_updates=inflight_updates,
-                kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
-                calculate_kv_scales=use_fp8_kv_cache,
+                kv_cache_dtype="auto",
+                calculate_kv_scales=False,
             )
         )
 
