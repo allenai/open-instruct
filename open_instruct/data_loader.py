@@ -15,6 +15,7 @@
 import logging
 import threading
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from queue import Queue as StdQueue
@@ -308,8 +309,9 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
         )
 
         self.local_queue = StdQueue(maxsize=config.async_steps)
-        self.background_thread = None
         self.shutdown_requested = False
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"DataLoader-Worker-Rank{dp_rank}")
+        self._data_prep_future = self._executor.submit(self._data_preparation_loop)
 
     @property
     def total_batches(self) -> int | None:
@@ -333,7 +335,6 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
 
     def get_mock_batch(self) -> dict[str, Any]:
         dummy_qr = torch.tensor([self.tokenizer.pad_token_id, self.tokenizer.eos_token_id], dtype=torch.long)
-        dummy_tool_mask = torch.zeros_like(dummy_qr)
         dummy_attention = torch.tensor([1, 1], dtype=torch.long)
         dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
         dummy_response_mask = torch.zeros_like(dummy_qr)
@@ -341,7 +342,6 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
 
         return {
             "collated_query_responses": [dummy_qr],
-            "collated_tool_masks": [dummy_tool_mask],
             "collated_attention_masks": [dummy_attention],
             "collated_position_ids": [dummy_position_ids],
             "collated_advantages": [dummy_advantage],
@@ -350,26 +350,20 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
         }
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
-        if self.background_thread is None:
-            self._start_background_thread()
-
-        while self.training_step < self.num_training_steps:
+        for _ in range(self.training_step, self.num_training_steps):
+            self._health_check()
             batch_data = self.local_queue.get()
             self.training_step += 1
             yield batch_data
 
-    def _start_background_thread(self):
-        self.shutdown_requested = False
-        self.background_thread = threading.Thread(
-            target=self._data_preparation_loop, daemon=True, name=f"DataLoader-Worker-Rank{self.dp_rank}"
-        )
-        self.background_thread.start()
+    def _health_check(self):
+        if self._data_prep_future.done():
+            self._data_prep_future.result()
 
     def _data_preparation_loop(self):
         for _ in range(self.config.async_steps * self.global_batch_size // self.dp_world_size):
-            example = next(self.iter_dataloader)
             add_prompt_to_generator(
-                example,
+                next(self.iter_dataloader),
                 self.iter_dataloader._epoch,
                 self.training_step,
                 self.param_prompt_Q,
@@ -534,7 +528,6 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
 
     def _prepare_collated_data_for_self(self, packed_sequences: PackedSequences) -> dict[str, list[torch.Tensor]]:
         per_device_packed_query_responses = packed_sequences.query_responses
-        per_device_packed_tool_masks = getattr(packed_sequences, "tool_masks", None)
         per_device_packed_attention_masks = packed_sequences.attention_masks
         per_device_packed_position_ids = packed_sequences.position_ids
         per_device_packed_advantages = packed_sequences.advantages
@@ -543,7 +536,6 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
 
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
         collated_query_responses = []
-        collated_tool_masks = [] if per_device_packed_tool_masks is not None else None
         collated_attention_masks = []
         collated_position_ids = []
         collated_response_masks = []
@@ -556,10 +548,6 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
                     [per_device_packed_query_responses[idx] for idx in micro_range], self.tokenizer.pad_token_id, True
                 )
             )
-            if per_device_packed_tool_masks is not None:
-                collated_tool_masks.append(
-                    collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0, True)
-                )
             collated_attention_masks.append(
                 collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0, True)
             )
@@ -574,7 +562,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, True)
             )
 
-        result = {
+        return {
             "collated_query_responses": collated_query_responses,
             "collated_attention_masks": collated_attention_masks,
             "collated_position_ids": collated_position_ids,
@@ -582,14 +570,10 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             "collated_response_masks": collated_response_masks,
             "collated_vllm_logprobs": collated_vllm_logprobs,
         }
-        if collated_tool_masks is not None:
-            result["collated_tool_masks"] = collated_tool_masks
-        return result
 
     def shutdown(self):
         self.shutdown_requested = True
-        if self.background_thread is not None:
-            self.background_thread.join(timeout=5.0)
+        self._executor.shutdown(wait=True)
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
