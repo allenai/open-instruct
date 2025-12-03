@@ -1651,18 +1651,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     training_start_time = time.time()  # Track overall training start time
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            # Update Beaker progress every 10 steps or on first/last step
-            if (
-                training_step == resume_training_step
-                or training_step % 10 == 0
-                or training_step == args.num_training_steps
-            ):
-                maybe_update_beaker_description(
-                    current_step=training_step,
-                    total_steps=args.num_training_steps,
-                    start_time=training_start_time,
-                    wandb_url=wandb_url,
-                )
+            # Update Beaker progress every step
+            maybe_update_beaker_description(
+                current_step=training_step,
+                total_steps=args.num_training_steps,
+                start_time=training_start_time,
+                wandb_url=wandb_url,
+            )
 
             print("-" * 100)
             episode += (

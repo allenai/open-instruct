@@ -2783,18 +2783,13 @@ def run_training(
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
-        # Update Beaker progress every 10 steps or on first/last step
-        if (
-            training_step == resume_training_step
-            or training_step % 10 == 0
-            or training_step == args.num_training_steps
-        ):
-            maybe_update_beaker_description(
-                current_step=training_step,
-                total_steps=args.num_training_steps,
-                start_time=training_start_time,
-                wandb_url=wandb_url,
-            )
+        # Update Beaker progress every step
+        maybe_update_beaker_description(
+            current_step=training_step,
+            total_steps=args.num_training_steps,
+            start_time=training_start_time,
+            wandb_url=wandb_url,
+        )
 
         # Check if any of the threads have raised an exception.
         health_check_start = time.perf_counter()
