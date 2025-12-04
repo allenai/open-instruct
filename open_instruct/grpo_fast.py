@@ -147,9 +147,7 @@ def warn_if_low_disk_space(path: str, *, threshold: float, send_slack_alerts: bo
     if path.startswith(CLOUD_PATH_PREFIXES):
         return
 
-    target_path = path if os.path.exists(path) else os.path.dirname(path) or "."
-
-    usage = shutil.disk_usage(target_path)
+    usage = shutil.disk_usage(path)
     if usage.total == 0:
         return
 
@@ -159,7 +157,7 @@ def warn_if_low_disk_space(path: str, *, threshold: float, send_slack_alerts: bo
         free_gib = usage.free / (1024**3)
         total_gib = usage.total / (1024**3)
         warning_message = (
-            f"Disk usage near capacity for {target_path}: {used_percent:.1f}% used "
+            f"Disk usage near capacity for {path}: {used_percent:.1f}% used "
             f"({free_gib:.1f} GiB free of {total_gib:.1f} GiB). Checkpointing may fail."
         )
         logger.warning(warning_message)
