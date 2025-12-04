@@ -13,6 +13,8 @@ import os
 import pathlib
 import unittest
 
+os.environ["VLLM_BATCH_INVARIANT"] = "1"
+
 import ray
 import torch
 from parameterized import parameterized
