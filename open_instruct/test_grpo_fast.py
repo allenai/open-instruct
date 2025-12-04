@@ -30,17 +30,6 @@ from open_instruct.vllm_utils import create_vllm_engines
 class TestGrpoFastBase(unittest.TestCase):
     """Base class with common test utilities."""
 
-    @classmethod
-    def setUpClass(cls):
-        """Initialize Ray once for all tests in this class."""
-        env_vars = dict(os.environ) | {"NCCL_CUMEM_ENABLE": "0", "VLLM_ENABLE_V1_MULTIPROCESSING": "0"}
-        ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": env_vars})
-
-    @classmethod
-    def tearDownClass(cls):
-        """Shutdown Ray after all tests in this class."""
-        ray.shutdown()
-
     def _get_resource_tracker_state(self):
         """Get current resource tracker state for debugging."""
         tracked_resources = {}
@@ -74,10 +63,25 @@ class TestGrpoFastBase(unittest.TestCase):
         return tracked_resources
 
     def setUp(self):
-        """Setup per-test state."""
+        """Initialize Ray and check for pre-existing leaks."""
+        # Save original environment variable value
         self._original_nccl_cumem = os.environ.get("NCCL_CUMEM_ENABLE")
+
+        # Record initial resource tracker state
         self._initial_resources = self._get_resource_tracker_state()
+
+        # Track Ray queues for cleanup
         self._ray_queues = []
+
+        utils.check_runtime_leaks()
+
+        # Initialize Ray for this test
+        # Match production (grpo_fast.py:3096) - use runtime_env with env_vars
+        env_vars = dict(os.environ)
+        env_vars["NCCL_CUMEM_ENABLE"] = "0"
+        env_vars["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
+        if not ray.is_initialized():
+            ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": env_vars})
 
     def _cleanup_ray_queues(self):
         """Clean up all Ray queues created during the test."""
@@ -89,8 +93,15 @@ class TestGrpoFastBase(unittest.TestCase):
         self._ray_queues.clear()
 
     def tearDown(self):
-        """Check for leaks after each test."""
+        """Check for leaks and shutdown Ray."""
+        # Clean up Ray queues BEFORE shutting down Ray
         self._cleanup_ray_queues()
+
+        # Shutdown Ray
+        if ray.is_initialized():
+            ray.shutdown()
+
+        # Force garbage collection to clean up any lingering objects
         gc.collect()
 
         # Get final resource tracker state
@@ -103,6 +114,8 @@ class TestGrpoFastBase(unittest.TestCase):
             new_names = [n for n in names if n not in initial_names]
             if new_names:
                 new_resources[rtype] = new_names
+
+        utils.check_runtime_leaks()
 
         # Check for semaphore leaks
         if new_resources:
