@@ -133,20 +133,17 @@ logger = logger_utils.setup_logger(__name__)
 
 INVALID_LOGPROB = 1.0
 DISK_USAGE_WARNING_THRESHOLD = 0.85
+CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://")
+
+
+def _is_cloud_path(path: str) -> bool:
+    return path.startswith(CLOUD_PATH_PREFIXES)
 
 
 def warn_if_low_disk_space(path: str, *, threshold: float, send_slack_alerts: bool) -> None:
-    """Warns when disk usage exceeds the provided threshold.
-
-    Parameters
-    ----------
-    path
-        Directory to inspect. If the path does not yet exist, the parent directory is used.
-    threshold
-        Fractional threshold (0-1) at which warnings are emitted.
-    send_slack_alerts
-        Whether to forward warnings to Slack via the configured webhook.
-    """
+    """Warns when disk usage exceeds the provided threshold."""
+    if _is_cloud_path(path):
+        return
 
     target_path = path if os.path.exists(path) else os.path.dirname(path) or "."
 

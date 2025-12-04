@@ -277,6 +277,63 @@ class TestSlackAlert(unittest.TestCase):
         self.assertIn("Disk is nearly full", request_body["text"])
 
 
+class TestWarnIfLowDiskSpace(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("gcs", "gs://bucket/path"),
+            ("s3", "s3://bucket/path"),
+            ("azure", "az://container/path"),
+            ("hdfs", "hdfs://cluster/path"),
+        ]
+    )
+    def test_cloud_paths_skipped(self, name, path):
+        with mock.patch("shutil.disk_usage") as mock_disk_usage:
+            grpo_fast.warn_if_low_disk_space(path, threshold=0.5, send_slack_alerts=False)
+            mock_disk_usage.assert_not_called()
+
+    @mock.patch("shutil.disk_usage")
+    def test_no_warning_below_threshold(self, mock_disk_usage):
+        mock_disk_usage.return_value = mock.Mock(total=100, used=50, free=50)
+        with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
+            grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
+            mock_warning.assert_not_called()
+
+    @mock.patch("shutil.disk_usage")
+    def test_warning_above_threshold(self, mock_disk_usage):
+        mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
+        with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
+            grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
+            mock_warning.assert_called_once()
+            self.assertIn("90.0%", mock_warning.call_args[0][0])
+
+    @responses.activate
+    @mock.patch("shutil.disk_usage")
+    @mock.patch("open_instruct.utils.get_beaker_experiment_url")
+    @mock.patch("os.environ.get")
+    def test_slack_alert_sent_when_enabled(self, mock_environ_get, mock_get_beaker_url, mock_disk_usage):
+        webhook_url = "https://hooks.slack.com/services/test"
+        mock_environ_get.return_value = webhook_url
+        mock_get_beaker_url.return_value = None
+        mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
+        responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
+
+        grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=True)
+
+        self.assertEqual(len(responses.calls), 1)
+        request_body = json.loads(responses.calls[0].request.body)
+        self.assertIn("Disk usage near capacity", request_body["text"])
+
+    @mock.patch("os.path.exists")
+    @mock.patch("shutil.disk_usage")
+    def test_nonexistent_path_uses_parent(self, mock_disk_usage, mock_exists):
+        mock_exists.return_value = False
+        mock_disk_usage.return_value = mock.Mock(total=100, used=50, free=50)
+
+        grpo_fast.warn_if_low_disk_space("/parent/child", threshold=0.85, send_slack_alerts=False)
+
+        mock_disk_usage.assert_called_once_with("/parent")
+
+
 class TestUtilityFunctions(unittest.TestCase):
     """Test utility functions in utils module."""
 

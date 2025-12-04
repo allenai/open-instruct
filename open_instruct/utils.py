@@ -2496,11 +2496,7 @@ def send_slack_message(message: str, *, include_beaker_url: bool = True) -> None
 
 def send_slack_alert(error: Exception) -> None:
     """Sends an alert about a training failure to a Slack webhook (if configured)."""
-
-    beaker_url = get_beaker_experiment_url()
-    beaker_message = f"Check it out: {beaker_url}. " if beaker_url else ""
-    message = f"<!here> A RL job has died. {beaker_message}Error message: {str(error)}."
-    send_slack_message(message, include_beaker_url=False)
+    send_slack_message(f"<!here> A RL job has died. Error message: {str(error)}.")
 
 
 def get_beaker_experiment_url() -> str | None:
