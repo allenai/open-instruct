@@ -450,8 +450,13 @@ def accumulate_inference_batches(
         disable=not verbose,
     )
     num_prompts_sampled = 0
+    logger.info(f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts")
     while num_prompts_sampled < num_prompts:
+        logger.info(f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts}")
         result = inference_results_Q.get(timeout=timeout)
+        logger.info(
+            f"[accumulate_inference_batches] Got result: {result.dataset_index if hasattr(result, 'dataset_index') else type(result)}"
+        )
 
         if isinstance(result, ShutdownSentinel):
             return result, None, None, None
@@ -770,6 +775,9 @@ class DataPreparationActor:
         self._prep_future = self._executor.submit(self._data_preparation_loop)
 
     def _data_preparation_loop(self):
+        logger.info(
+            f"[DataPreparationActor] Starting data preparation loop, async_steps={self.config.async_steps}, global_batch_size={self.global_batch_size}"
+        )
         for _ in range(self.config.async_steps * self.global_batch_size):
             add_prompt_to_generator(
                 next(self.iter_dataloader),
@@ -779,6 +787,9 @@ class DataPreparationActor:
                 self.generation_config,
                 is_eval=False,
             )
+        logger.info(
+            f"[DataPreparationActor] Initial prompts submitted, entering main loop for {self.num_training_steps} steps"
+        )
 
         for step in range(self.training_step, self.num_training_steps):
             if self.shutdown_requested:
