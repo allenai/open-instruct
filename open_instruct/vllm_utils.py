@@ -395,12 +395,17 @@ async def _check_health(port: int) -> None:
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
+    logger.info("[_prefetch_worker] Starting prefetch worker loop")
     while True:
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
+        logger.info(f"[_prefetch_worker] Waiting for request, active_tasks={len(actor.active_tasks)}")
         request = actor.prompt_queue.get()
+        logger.info(
+            f"[_prefetch_worker] Got request: dataset_index={request.dataset_index}, is_eval={request.is_eval}"
+        )
         add_request(actor, request)
 
 

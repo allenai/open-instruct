@@ -384,6 +384,9 @@ def add_prompt_to_generator(
     is_eval: bool,
 ) -> None:
     query = example[INPUT_IDS_PROMPT_KEY]
+    logger.info(
+        f"[add_prompt_to_generator] Adding prompt: dataset_index={example['dataset_index']}, epoch={epoch_number}, step={training_step}"
+    )
 
     param_prompt_Q.put(
         PromptRequest(
