@@ -18,6 +18,7 @@
 import argparse
 import asyncio
 import dataclasses
+import json
 import os
 import queue
 import socket
@@ -198,35 +199,40 @@ def split_request_id(full_request_id: str) -> dict:
     return {"base_id": "_".join(parts[:-1]), "request_index": int(parts[-1])}
 
 
-def get_triggered_tool(
-    output_text: str,
-    tools: dict[str, Tool],
-    max_tool_calls: dict[str, int],
-    num_calls: int,
-    sampling_params: SamplingConfig,
-) -> tuple[Tool | None, str | None]:
-    """Check if any tool was triggered and return the tool and stop_str if found.
+def format_tools_for_openai(tools: dict[str, Tool]) -> list[dict[str, Any]]:
+    formatted_tools = []
+    for tool_name, tool in tools.items():
+        formatted_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": f"Execute the {tool_name} tool.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "input": {
+                                "type": "string",
+                                "description": "The content to send to the tool.",
+                            }
+                        },
+                        "required": ["input"],
+                    },
+                },
+            }
+        )
+    return formatted_tools
 
-    Args:
-        output_text: The generated text to check for tool triggers
-        tools: Dictionary mapping stop strings to Tool instances
-        max_tool_calls: Dictionary mapping stop strings to their call limits
-        num_calls: Current number of tool calls for this request
-        sampling_params: Sampling parameters containing stop strings
 
-    Returns:
-        Tuple of (tool, stop_str) if a tool was triggered, (None, None) otherwise.
-    """
-    if not sampling_params.stop:
-        return None, None
+def extract_tool_calls(choice) -> list[Any]:
+    if hasattr(choice, "tool_calls") and choice.tool_calls is not None:
+        return choice.tool_calls
 
-    for stop_str in sampling_params.stop:
-        if stop_str in tools and output_text.endswith(stop_str):
-            if num_calls < max_tool_calls.get(stop_str, 0):
-                return tools[stop_str], stop_str
-            else:
-                return MaxCallsExceededTool(start_str="<tool>", end_str="</tool>"), stop_str
-    return None, None
+    message = getattr(choice, "message", None)
+    if message is not None and hasattr(message, "tool_calls"):
+        return message.tool_calls or []
+
+    return []
 
 
 def process_completed_request(request_id, outs, current_time, tools, request_metadata):
@@ -793,18 +799,25 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
+    openai_tools = format_tools_for_openai(actor.tools) if actor.tools else []
 
     while True:
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+        extra_body = {
+            "return_token_ids": True,
+            "cache_salt": base_request_id,
+            "include_stop_str_in_output": True,
+            "skip_special_tokens": False,
+        }
+
+        if openai_tools:
+            extra_body["tools"] = openai_tools
+            extra_body["tool_choice"] = "auto"
+
         api_response = await actor.client.completions.create(
             model=actor.model_name,
             prompt=current_prompt,
-            extra_body={
-                "return_token_ids": True,
-                "cache_salt": base_request_id,
-                "include_stop_str_in_output": True,
-                "skip_special_tokens": False,
-            },
+            extra_body=extra_body,
             **dataclasses.asdict(current_sampling_params),
         )
 
@@ -821,19 +834,31 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
         response_masks.extend([1] * len(model_tokens))
 
-        if not actor.tools or not actor.max_tool_calls:
-            break
-
-        triggered_tool, stop_str = get_triggered_tool(
-            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
-        )
-        if triggered_tool is None:
+        tool_calls = extract_tool_calls(output) if actor.tools else []
+        if not tool_calls:
             break
 
         assert actor.executor is not None, f"executor is None for request {sub_request_id}"
 
+        tool_call = tool_calls[0]
+        tool_name = getattr(tool_call.function, "name", None) if hasattr(tool_call, "function") else None
+        if tool_name is None or tool_name not in actor.tools:
+            break
+
+        if num_calls < actor.max_tool_calls.get(tool_name, 0):
+            selected_tool: Tool = actor.tools[tool_name]
+        else:
+            selected_tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
+
+        arguments = getattr(tool_call.function, "arguments", "") if hasattr(tool_call, "function") else ""
+        try:
+            parsed_arguments = json.loads(arguments) if arguments else {}
+            tool_input = parsed_arguments.get("input") or arguments
+        except json.JSONDecodeError:
+            tool_input = arguments
+
         loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
+        tool_result = await loop.run_in_executor(actor.executor, selected_tool, tool_input)
 
         tool_called = True
         num_calls += 1
@@ -940,12 +965,11 @@ def create_vllm_engines(
     train_dataset=None,
     eval_dataset=None,
 ) -> list[LLMRayActor]:
-    # Convert max_tool_calls to a dict mapping tool end strings to their limits
+    # Convert max_tool_calls to a dict mapping tool names to their limits
     if tools:
         assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
             "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
         )
-        # tool key is the end_str
         if len(max_tool_calls) == 1:
             max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools}
         else:

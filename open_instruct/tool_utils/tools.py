@@ -3,6 +3,11 @@ import time
 import traceback
 from dataclasses import dataclass
 
+
+def _sanitize_name(token: str) -> str:
+    stripped = token.strip().strip("<>")
+    return stripped.lstrip("/") or "tool"
+
 import requests
 
 
@@ -18,9 +23,10 @@ class ToolOutput:
 
 
 class Tool:
-    def __init__(self, start_str: str, end_str: str):
+    def __init__(self, start_str: str, end_str: str, name: str | None = None):
         self.start_str = start_str
         self.end_str = end_str
+        self.name = name or _sanitize_name(start_str) or self.__class__.__name__.lower()
 
     def __call__(self, prompt: str) -> ToolOutput:
         raise NotImplementedError("Subclasses must implement this method")

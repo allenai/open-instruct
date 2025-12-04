@@ -1531,12 +1531,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     api_endpoint=args.search_api_endpoint,
                     number_documents_to_search=args.number_documents_to_search,
                 )
-                tool_objects[tool.end_str] = tool
+                tool_objects[tool.name] = tool
             elif tool.lower() == "code":
                 from open_instruct.tool_utils.tools import PythonCodeTool
 
                 tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
-                tool_objects[tool.end_str] = tool
+                tool_objects[tool.name] = tool
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 

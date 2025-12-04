@@ -2163,14 +2163,14 @@ def create_model_and_optimizer(
                     api_endpoint=args.search_api_endpoint,
                     number_documents_to_search=args.number_documents_to_search,
                 )
-                tool_objects[tool.end_str] = tool
+                tool_objects[tool.name] = tool
                 # Add tool end string to stop_strings
                 args.stop_strings.append(tool.end_str)
             elif tool.lower() == "code":
                 from open_instruct.tool_utils.tools import PythonCodeTool
 
                 tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
-                tool_objects[tool.end_str] = tool
+                tool_objects[tool.name] = tool
                 # Add tool end string to stop_strings
                 args.stop_strings.append(tool.end_str)
             else:
