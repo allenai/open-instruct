@@ -92,26 +92,10 @@ class TestGeneration(TestGrpoFastBase):
 
         return result
 
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
-    def test_tool_triggered_on_stop_string(self):
-        """Test that tools are properly triggered when model generates stop string."""
-        code_endpoint = os.environ.get("CODE_TOOL_API_ENDPOINT", DEFAULT_CODE_TOOL_ENDPOINT)
-        tools = {"</code>": PythonCodeTool(api_endpoint=code_endpoint, start_str="<code>", end_str="</code>")}
-        prompt = "Write 3 separate Python code blocks. Block 1 prints '1'. Block 2 prints '2'. Block 3 prints '3'. Surround each block with <code> and </code> tags. Execute each separately.\n\nBlock 1: <code>"
-
-        result = self._setup_engine_and_generate(
-            tokenizer_name="Qwen/Qwen3-1.7B", prompt=prompt, tools=tools, max_tool_calls=(5,), max_tokens=1024
-        )
-
-        self.assertTrue(
-            result.request_info.tool_calleds[0],
-            "Tool should have been called when model generates text with stop string.",
-        )
-
     @parameterized.expand([True, False])
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_generation_deterministic(self, use_tools):
-        """Test generation produces expected output."""
+        """Test generation produces expected output and tool invocation behavior."""
         test_data_filename = f"generation_{'with' if use_tools else 'without'}_tools_expected.json"
         test_data_path = TEST_DATA_DIR / test_data_filename
 
@@ -136,6 +120,12 @@ class TestGeneration(TestGrpoFastBase):
             max_tool_calls=max_tool_calls,
             max_tokens=1024 if use_tools else 256,
         )
+
+        if use_tools:
+            self.assertTrue(
+                result.request_info.tool_calleds[0],
+                "Tool should have been called when model generates text with stop string.",
+            )
 
         if not test_data_path.exists():
             tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
