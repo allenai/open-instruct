@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 import vllm
 from parameterized import parameterized
 
-from open_instruct.data_types import PromptRequest
 from open_instruct import vllm_utils
+from open_instruct.data_types import PromptRequest
 
 
 class TestTruncateToolOutputTokens(unittest.TestCase):
