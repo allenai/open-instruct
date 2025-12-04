@@ -23,7 +23,7 @@ from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct.queue_types import PromptRequest
+from open_instruct.queue_types import GenerationResult, PromptRequest
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.tool_utils.tools import PythonCodeTool
 from open_instruct.vllm_utils import create_vllm_engines
