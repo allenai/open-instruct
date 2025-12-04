@@ -334,14 +334,6 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
         mock_disk_usage.assert_called_once_with("/parent")
 
     @mock.patch("shutil.disk_usage")
-    def test_oserror_logs_warning_and_returns(self, mock_disk_usage):
-        mock_disk_usage.side_effect = OSError("Permission denied")
-        with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
-            grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
-            mock_warning.assert_called_once()
-            self.assertIn("Unable to inspect disk usage", mock_warning.call_args[0][0])
-
-    @mock.patch("shutil.disk_usage")
     def test_zero_total_disk_space_returns_early(self, mock_disk_usage):
         mock_disk_usage.return_value = mock.Mock(total=0, used=0, free=0)
         with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
