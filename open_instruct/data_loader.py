@@ -775,6 +775,13 @@ class DataPreparationActor:
         self._prep_future = self._executor.submit(self._data_preparation_loop)
 
     def _data_preparation_loop(self):
+        try:
+            self._data_preparation_loop_inner()
+        except Exception:
+            logger.exception("[DataPreparationActor] Exception in data preparation loop")
+            raise
+
+    def _data_preparation_loop_inner(self):
         logger.info(
             f"[DataPreparationActor] Starting data preparation loop, async_steps={self.config.async_steps}, global_batch_size={self.global_batch_size}"
         )
@@ -796,6 +803,7 @@ class DataPreparationActor:
                 logger.info("[DataPreparationActor] Shutdown requested, exiting")
                 return
 
+            logger.info(f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches")
             result, batch, reward_metrics, batch_stats = accumulate_inference_batches(
                 self.inference_results_Q,
                 self.generation_config,
@@ -813,6 +821,9 @@ class DataPreparationActor:
                 training_step=step,
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
+            )
+            logger.info(
+                f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result is None: {result is None}"
             )
 
             if isinstance(result, ShutdownSentinel):
