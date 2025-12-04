@@ -158,10 +158,13 @@ def ray_get_with_progress(
     if enable:
         futures_iter = tqdm(futures_iter, total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n")
 
-    for future in futures_iter:
-        idx = fut_to_idx[future]
-        results[idx] = future.result()
-        completion_times[idx] = time.perf_counter() - t0
+    try:
+        for future in futures_iter:
+            idx = fut_to_idx[future]
+            results[idx] = future.result()
+            completion_times[idx] = time.perf_counter() - t0
+    except TimeoutError as e:
+        raise TimeoutError(f"{desc} failed.") from e
 
     return results, completion_times
 
