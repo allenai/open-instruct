@@ -17,4 +17,4 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --no-host-networking \
        --gpus 1 \
-       -- source configs/beaker_configs/ray_node_setup.sh \&\& uv run pytest open_instruct/test_grpo_fast_gpu.py -xvs
+       -- source configs/beaker_configs/ray_node_setup.sh \&\& uv run pytest open_instruct/test_grpo_fast_gpu.py -xvs \; cp -r open_instruct/test_data /output/test_data 2\>/dev/null \|\| true
