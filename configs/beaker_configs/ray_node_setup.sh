@@ -14,7 +14,7 @@ echo PATH=$PATH
 
 BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
 
-RAY_NODE_PORT=8888
+RAY_NODE_PORT=$((8800 + RANDOM % 100))
 mkdir -p "$HOME/.triton/autotune"
 
 echo "Cleaning up any existing Ray processes..."
@@ -23,20 +23,26 @@ pkill -9 -f "gcs_server" 2>/dev/null || true
 pkill -9 -f "raylet" 2>/dev/null || true
 pkill -9 -f "redis-server" 2>/dev/null || true
 pkill -9 -f "plasma_store" 2>/dev/null || true
+pkill -9 -f "log_monitor" 2>/dev/null || true
+pkill -9 -f "monitor.py" 2>/dev/null || true
 ray stop --force 2>/dev/null || true
 sleep 3
 
 rm -rf /tmp/ray* 2>/dev/null || true
-rm -rf /dev/shm/plasma* 2>/dev/null || true
+rm -rf /dev/shm/* 2>/dev/null || true
 rm -rf ~/.ray 2>/dev/null || true
+rm -rf /run/user/*/ray* 2>/dev/null || true
 sleep 2
 
 RAY_TEMP_DIR="/tmp/ray_${BEAKER_EXPERIMENT_ID:-$$}_$(date +%s)"
 mkdir -p "$RAY_TEMP_DIR"
+export RAY_TMPDIR="$RAY_TEMP_DIR"
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
     echo "Starting Ray head node with temp dir: $RAY_TEMP_DIR"
-    ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0 --temp-dir="$RAY_TEMP_DIR"
+    echo "Listing /tmp before start:"
+    ls -la /tmp/ || true
+    ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0 --temp-dir="$RAY_TEMP_DIR" --disable-usage-stats
 else
     echo "Starting Ray worker node $BEAKER_REPLICA_RANK with temp dir: $RAY_TEMP_DIR"
     export RAY_ADDRESS="${BEAKER_LEADER_REPLICA_IP}:${RAY_NODE_PORT}"
