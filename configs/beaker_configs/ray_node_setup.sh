@@ -36,8 +36,7 @@ mkdir -p "$RAY_TEMP_DIR"
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
     echo "Starting Ray head node with temp dir: $RAY_TEMP_DIR"
-    RAY_STORAGE_DIR="$RAY_TEMP_DIR/storage"
-    ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0 --temp-dir="$RAY_TEMP_DIR" --storage="$RAY_STORAGE_DIR"
+    ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0 --temp-dir="$RAY_TEMP_DIR"
 else
     echo "Starting Ray worker node $BEAKER_REPLICA_RANK with temp dir: $RAY_TEMP_DIR"
     export RAY_ADDRESS="${BEAKER_LEADER_REPLICA_IP}:${RAY_NODE_PORT}"
