@@ -1927,6 +1927,9 @@ def one_training_step(
             desc=f"Running training step {training_step}",
         )
         metrics, array_metrics = zip(*results)
+        if all(len(m) == 0 for m in metrics):
+            logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
+            return
         if (
             args.load_ref_policy
             and args.ref_policy_update_freq is not None
