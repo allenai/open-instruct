@@ -133,11 +133,7 @@ logger = logger_utils.setup_logger(__name__)
 
 INVALID_LOGPROB = 1.0
 DISK_USAGE_WARNING_THRESHOLD = 0.85
-CLOUD_PATH_PREFIXES = ("gs://",)
-
-
-def _is_cloud_path(path: str) -> bool:
-    return path.startswith(CLOUD_PATH_PREFIXES)
+CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://")
 
 
 def warn_if_low_disk_space(path: str, *, threshold: float, send_slack_alerts: bool) -> None:
@@ -148,17 +144,12 @@ def warn_if_low_disk_space(path: str, *, threshold: float, send_slack_alerts: bo
         threshold: Usage ratio (0.0-1.0) above which to warn.
         send_slack_alerts: Whether to also send a Slack alert when warning.
     """
-    if _is_cloud_path(path):
+    if path.startswith(CLOUD_PATH_PREFIXES):
         return
 
     target_path = path if os.path.exists(path) else os.path.dirname(path) or "."
 
-    try:
-        usage = shutil.disk_usage(target_path)
-    except OSError as exc:
-        logger.warning("Unable to inspect disk usage for %s: %s", target_path, exc)
-        return
-
+    usage = shutil.disk_usage(target_path)
     if usage.total == 0:
         return
 
@@ -173,7 +164,7 @@ def warn_if_low_disk_space(path: str, *, threshold: float, send_slack_alerts: bo
         )
         logger.warning(warning_message)
         if send_slack_alerts:
-            utils.send_slack_message(f"<!here> {warning_message}")
+            utils.send_slack_message(f"{warning_message}")
 
 
 class ShutdownSentinel:
