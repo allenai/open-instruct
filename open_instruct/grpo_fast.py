@@ -2152,7 +2152,8 @@ def create_model_and_optimizer(
     )
 
     # Set up tools
-    max_len = args.max_prompt_token_length + args.response_length
+    # Use pack_length for vLLM's max_model_len to accommodate chat template tokens
+    max_len = args.pack_length
     tool_objects = {}
     if args.tools:
         for tool in args.tools:
