@@ -37,7 +37,31 @@ DEFAULT_CODE_TOOL_ENDPOINT = "https://open-instruct-tool-server-10554368204.us-c
 
 
 class TestGeneration(TestGrpoFastBase):
-    """Tests for tool invocation with vLLM."""
+    """Tests for tool invocation with vLLM.
+
+    GPU tests need per-test Ray init/shutdown because vLLM engines can crash
+    and leave Ray in a bad state. This overrides the base class's class-level
+    fixtures to use per-test isolation instead.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        pass
+
+    @classmethod
+    def tearDownClass(cls):
+        pass
+
+    def setUp(self):
+        super().setUp()
+        if not ray.is_initialized():
+            env_vars = dict(os.environ) | {"NCCL_CUMEM_ENABLE": "0", "VLLM_ENABLE_V1_MULTIPROCESSING": "0"}
+            ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": env_vars})
+
+    def tearDown(self):
+        if ray.is_initialized():
+            ray.shutdown()
+        super().tearDown()
 
     def _setup_engine_and_generate(self, tokenizer_name, prompt, tools=None, max_tool_calls=None, max_tokens=50):
         """Helper to create vLLM engine and run generation."""
