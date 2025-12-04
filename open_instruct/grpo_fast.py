@@ -2704,6 +2704,7 @@ def run_training(
     model_dims: utils.ModelDims,
     checkpoint_state=None,
 ):
+    raise ValueError("I am a fake error for testing.")
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
 
