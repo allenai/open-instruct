@@ -34,14 +34,12 @@ rm -rf ~/.ray 2>/dev/null || true
 rm -rf /run/user/*/ray* 2>/dev/null || true
 sleep 2
 
-RAY_TEMP_DIR="/tmp/ray_${BEAKER_EXPERIMENT_ID:-$$}_$(date +%s)"
+RAY_TEMP_DIR="/tmp/r_$(date +%s)"
 mkdir -p "$RAY_TEMP_DIR"
 export RAY_TMPDIR="$RAY_TEMP_DIR"
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
     echo "Starting Ray head node with temp dir: $RAY_TEMP_DIR"
-    echo "Listing /tmp before start:"
-    ls -la /tmp/ || true
     ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0 --temp-dir="$RAY_TEMP_DIR" --disable-usage-stats
 else
     echo "Starting Ray worker node $BEAKER_REPLICA_RANK with temp dir: $RAY_TEMP_DIR"
