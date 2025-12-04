@@ -16,18 +16,23 @@ BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk 
 
 RAY_NODE_PORT=8888
 mkdir -p "$HOME/.triton/autotune"  # Create Triton autotune cache directory to silence warnings
-ray stop --force
-rm -rf /tmp/ray 2>/dev/null || true  # Clean up entire Ray temp directory to avoid stale session issues
-sleep 2  # Wait for cleanup to complete
+pkill -9 -f "ray::" 2>/dev/null || true
+pkill -9 -f "gcs_server" 2>/dev/null || true
+pkill -9 -f "raylet" 2>/dev/null || true
+ray stop --force 2>/dev/null || true
+rm -rf /tmp/ray* 2>/dev/null || true
+sleep 2
+
+RAY_TEMP_DIR="/tmp/ray_${BEAKER_EXPERIMENT_ID:-$$}"
+mkdir -p "$RAY_TEMP_DIR"
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
-    echo "Starting Ray head node"
-    ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0
+    echo "Starting Ray head node with temp dir: $RAY_TEMP_DIR"
+    ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0 --temp-dir="$RAY_TEMP_DIR"
 else
-    echo "Starting Ray worker node $BEAKER_REPLICA_RANK"
+    echo "Starting Ray worker node $BEAKER_REPLICA_RANK with temp dir: $RAY_TEMP_DIR"
     export RAY_ADDRESS="${BEAKER_LEADER_REPLICA_IP}:${RAY_NODE_PORT}"
-    # Start worker without --block so we can control lifecycle and exit code.
-    ray start --address="${RAY_ADDRESS}" --dashboard-host=0.0.0.0
+    ray start --address="${RAY_ADDRESS}" --dashboard-host=0.0.0.0 --temp-dir="$RAY_TEMP_DIR"
 
     cleanup() {
         echo "[ray_node_setup] Cleanup: stopping Ray worker and exiting 0"
