@@ -444,6 +444,7 @@ def _create_server_args(model_path: str) -> argparse.Namespace:
 def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> None:
     base_request_id = sub_request["base_request_id"]
     expected_n = sub_request["expected_n"]
+    logger.info(f"[accumulate_completions] {base_request_id}: received sub-request")
 
     if base_request_id not in actor.request_outputs:
         actor.request_outputs[base_request_id] = {
@@ -477,6 +478,7 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
     dataset = actor.eval_dataset if is_eval else actor.train_dataset
     result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
+    logger.info(f"[finalize_completed_request] {base_request_id}: Putting result in queue (is_eval={is_eval})")
     results_queue.put(result)
 
 
@@ -803,6 +805,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     while True:
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+        logger.info(f"[process_request] {sub_request_id}: Making API call with max_tokens={current_max_tokens}")
         api_response = await actor.client.completions.create(
             model=actor.model_name,
             prompt=current_prompt,
@@ -814,6 +817,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             },
             **dataclasses.asdict(current_sampling_params),
         )
+        logger.info(f"[process_request] {sub_request_id}: Got API response")
 
         output = api_response.choices[0]
         model_tokens = list(output.token_ids)
