@@ -58,5 +58,4 @@ uv run python mason.py \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --push_to_hub false \
-    --send_slack_alerts True \
     --single_gpu_mode
