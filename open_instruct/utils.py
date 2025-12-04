@@ -2481,15 +2481,18 @@ def send_slack_message(message: str, *, include_beaker_url: bool = True) -> None
         logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
         return
 
-    beaker_message = ""
+    beaker_suffix = ""
     if include_beaker_url:
         beaker_url = get_beaker_experiment_url()
-        beaker_message = f"Check it out: {beaker_url}. " if beaker_url else ""
+        beaker_suffix = f" Check it out: {beaker_url}" if beaker_url else ""
 
-    payload = {"text": f"{beaker_message}{message}"}
-    response = requests.post(slack_webhook_url, json=payload)
-    if not response.ok:
-        logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
+    payload = {"text": f"{message}{beaker_suffix}"}
+    try:
+        response = requests.post(slack_webhook_url, json=payload)
+        if not response.ok:
+            logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
+    except requests.RequestException as exc:
+        logger.warning("Failed to send Slack alert due to network error: %s", exc)
 
 
 def send_slack_alert(error: Exception) -> None:
