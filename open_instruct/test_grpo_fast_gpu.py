@@ -4,22 +4,7 @@ These tests require CUDA and will be skipped if not available.
 
 To run on Beaker:
 
-    BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-    BEAKER_IMAGE="${BEAKER_USER}/open-instruct-integration-test"
-
-    uv run python mason.py \\
-        --cluster ai2/saturn \\
-        --image "$BEAKER_IMAGE" \\
-        --description "GPU test: test_grpo_fast_gpu.py" \\
-        --pure_docker_mode \\
-        --workspace ai2/open-instruct-dev \\
-        --priority urgent \\
-        --num_nodes 1 \\
-        --max_retries 0 \\
-        --timeout 30m \\
-        --budget ai2/oe-adapt \\
-        --gpus 1 \\
-        -- source configs/beaker_configs/ray_node_setup.sh \\&\\& pytest open_instruct/test_grpo_fast_gpu.py -xvs
+    ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_generation_tests.sh
 """
 
 import json
