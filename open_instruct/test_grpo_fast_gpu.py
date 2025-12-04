@@ -102,10 +102,10 @@ class TestGeneration(TestGrpoFastBase):
         """Test that tools are properly triggered when model generates stop string."""
         code_endpoint = os.environ.get("CODE_TOOL_API_ENDPOINT", DEFAULT_CODE_TOOL_ENDPOINT)
         tools = {"</code>": PythonCodeTool(api_endpoint=code_endpoint, start_str="<code>", end_str="</code>")}
-        prompt = "Count from 1 to 3 using Python. After each count, execute the code and show the result: <code>"
+        prompt = "Write 3 separate Python code blocks. Block 1 prints '1'. Block 2 prints '2'. Block 3 prints '3'. Surround each block with <code> and </code> tags. Execute each separately.\n\nBlock 1: <code>"
 
         result = self._setup_engine_and_generate(
-            tokenizer_name="Qwen/Qwen3-1.7B", prompt=prompt, tools=tools, max_tool_calls=(5,), max_tokens=512
+            tokenizer_name="Qwen/Qwen3-1.7B", prompt=prompt, tools=tools, max_tool_calls=(5,), max_tokens=1024
         )
 
         self.assertTrue(
@@ -129,7 +129,7 @@ class TestGeneration(TestGrpoFastBase):
         )
         max_tool_calls = (5,) if use_tools else None
         prompt = (
-            "Count from 1 to 3 using Python. After each count, execute the code and show the result: <code>"
+            "Write 3 separate Python code blocks. Block 1 prints '1'. Block 2 prints '2'. Block 3 prints '3'. Surround each block with <code> and </code> tags. Execute each separately.\n\nBlock 1: <code>"
             if use_tools
             else "What is 2 + 2? Answer:"
         )
@@ -139,7 +139,7 @@ class TestGeneration(TestGrpoFastBase):
             prompt=prompt,
             tools=tools,
             max_tool_calls=max_tool_calls,
-            max_tokens=512 if use_tools else 256,
+            max_tokens=1024 if use_tools else 256,
         )
 
         if not test_data_path.exists():
