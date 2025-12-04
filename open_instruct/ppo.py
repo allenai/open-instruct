@@ -390,6 +390,16 @@ class Args:
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
+        if self.tools is not None and len(self.tools) > 0:
+            for tool in self.tools:
+                if tool not in ["search", "code"]:
+                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
+            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+            if self.tool_call_parser is None:
+                raise ValueError(
+                    "--tool_call_parser is required when --tools is specified. "
+                    "Choose a parser compatible with your model (e.g., olmo3, hermes, llama3_json)."
+                )
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:

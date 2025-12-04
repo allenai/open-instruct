@@ -74,6 +74,6 @@ uv run python mason.py \
     --max_tool_calls 5 \
     --vllm_enable_prefix_caching \
     --tools code search \
-    --tool_call_parser hermes \
+    --tool_call_parser hermes \  # Qwen uses hermes: https://qwen.readthedocs.io/en/latest/deployment/vllm.html#parsing-tool-calls
     --search_api_endpoint "http://saturn-cs-aus-248.reviz.ai2.in:47479/search" \
     --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute
