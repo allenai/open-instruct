@@ -101,7 +101,7 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.queue_types import ShutdownSentinel
+from open_instruct.queue_types import GenerationResult, ShutdownSentinel
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean
 from open_instruct.utils import (
     ArgumentParserPlus,
