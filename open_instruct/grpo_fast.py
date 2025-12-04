@@ -1831,8 +1831,8 @@ def create_generation_configs(args: Args, streaming_config: data_loader_lib.Stre
     generation_config = vllm_utils.SamplingConfig(
         temperature=args.temperature,
         top_p=args.vllm_top_p,
-        max_tokens=args.response_length,
-        n=args.num_samples_per_prompt_rollout,
+        max_tokens=streaming_config.response_length,
+        n=streaming_config.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
         seed=args.seed,
         logprobs=1,
