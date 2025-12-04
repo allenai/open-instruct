@@ -1967,7 +1967,7 @@ def one_training_step(
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
-    total_generation_time = average_metrics["time/getting_response"]
+    total_generation_time = data_thread_metrics.get("time/getting_response", 0.0)
     prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
     response_lengths = array_metrics[0]["batch/response_lengths"]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
