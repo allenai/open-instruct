@@ -259,6 +259,23 @@ class TestSlackAlert(unittest.TestCase):
         self.assertIn("https://beaker.org/ex/test-123", request_body["text"])
         self.assertIn("Test error message", request_body["text"])
 
+    @responses.activate
+    @mock.patch("open_instruct.utils.get_beaker_experiment_url")
+    @mock.patch("os.environ.get")
+    def test_send_slack_message_with_beaker_url(self, mock_environ_get, mock_get_beaker_url):
+        webhook_url = "https://hooks.slack.com/services/test"
+        mock_environ_get.return_value = webhook_url
+        mock_get_beaker_url.return_value = "https://beaker.org/ex/test-456"
+
+        responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
+
+        utils.send_slack_message("<!here> Disk is nearly full.")
+
+        self.assertEqual(len(responses.calls), 1)
+        request_body = json.loads(responses.calls[0].request.body)
+        self.assertIn("https://beaker.org/ex/test-456", request_body["text"])
+        self.assertIn("Disk is nearly full", request_body["text"])
+
 
 class TestUtilityFunctions(unittest.TestCase):
     """Test utility functions in utils module."""
