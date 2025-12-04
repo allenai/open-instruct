@@ -3025,7 +3025,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         )
     except Exception as e:
         if args.send_slack_alerts:
-            utils.send_slack_alert(e)
+            utils.send_slack_alert(e, "RL job")
         raise
     finally:
         cleanup_training_resources(
