@@ -369,6 +369,8 @@ class Args:
     with length 1 (applies to all tools) or matching the length of the tools list (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
+    tool_call_parser: str | None = None
+    """The vLLM tool call parser to use (e.g., 'olmo3', 'llama3_json', 'mistral'). Required when tools are enabled."""
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs from the tools or not."""
 
@@ -1555,6 +1557,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
+        mask_tool_use=args.mask_tool_use,
+        tool_call_parser=args.tool_call_parser,
     )
     resume_training_step = ray.get(inits)[0] + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout

@@ -201,7 +201,7 @@ def split_request_id(full_request_id: str) -> dict:
 
 def format_tools_for_openai(tools: dict[str, Tool]) -> list[dict[str, Any]]:
     formatted_tools = []
-    for tool_name, tool in tools.items():
+    for tool_name, _tool in tools.items():
         formatted_tools.append(
             {
                 "type": "function",
@@ -210,12 +210,7 @@ def format_tools_for_openai(tools: dict[str, Tool]) -> list[dict[str, Any]]:
                     "description": f"Execute the {tool_name} tool.",
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "input": {
-                                "type": "string",
-                                "description": "The content to send to the tool.",
-                            }
-                        },
+                        "properties": {"input": {"type": "string", "description": "The content to send to the tool."}},
                         "required": ["input"],
                     },
                 },
@@ -432,10 +427,13 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         )
 
 
-def _create_server_args(model_path: str) -> argparse.Namespace:
+def _create_server_args(model_path: str, tool_call_parser: str | None = None) -> argparse.Namespace:
     parser = FlexibleArgumentParser()
     parser = make_arg_parser(parser)
-    args = parser.parse_args(["--model", model_path])
+    args_list = ["--model", model_path]
+    if tool_call_parser:
+        args_list.extend(["--enable-auto-tool-choice", "--tool-call-parser", tool_call_parser])
+    args = parser.parse_args(args_list)
     args.disable_fastapi_docs = True
     return args
 
@@ -511,6 +509,7 @@ class LLMRayActor:
         tools: dict[str, Tool] | None = None,
         max_tool_calls: dict[str, int] | None = None,
         mask_tool_use: bool = True,
+        tool_call_parser: str | None = None,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
         results_queue: ray_queue.Queue,
@@ -524,7 +523,14 @@ class LLMRayActor:
     ):
         assert_threaded_actor(self)
         self._init_config(
-            tools, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
+            tools,
+            max_tool_calls,
+            mask_tool_use,
+            tool_call_parser,
+            inflight_updates,
+            reward_config,
+            train_dataset,
+            eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -541,6 +547,7 @@ class LLMRayActor:
         tools: dict[str, Tool] | None,
         max_tool_calls: dict[str, int] | None,
         mask_tool_use: bool,
+        tool_call_parser: str | None,
         inflight_updates: bool,
         reward_config: RewardConfig | None,
         train_dataset,
@@ -549,6 +556,7 @@ class LLMRayActor:
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.mask_tool_use = mask_tool_use
+        self.tool_call_parser = tool_call_parser
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
         self.active_tasks = {}
@@ -611,7 +619,7 @@ class LLMRayActor:
 
             engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
-            args = _create_server_args(engine_client.vllm_config.model_config.model)
+            args = _create_server_args(engine_client.vllm_config.model_config.model, self.tool_call_parser)
             app = build_app(args)
             await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
 
@@ -796,45 +804,48 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
     original_prompt = actor.request_metadata[base_request_id]["prompt_token_ids"]
-    current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
-    openai_tools = format_tools_for_openai(actor.tools) if actor.tools else []
+    openai_tools = format_tools_for_openai(actor.tools) if actor.tools else None
+
+    initial_prompt_text = actor.llm_engine.tokenizer.decode(original_prompt, skip_special_tokens=False)
+    messages = [{"role": "user", "content": initial_prompt_text}]
 
     while True:
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
-        extra_body = {
-            "return_token_ids": True,
-            "cache_salt": base_request_id,
-            "include_stop_str_in_output": True,
-            "skip_special_tokens": False,
-        }
+        extra_body = {"return_token_ids": True, "cache_salt": base_request_id, "skip_special_tokens": False}
 
-        if openai_tools:
-            extra_body["tools"] = openai_tools
-            extra_body["tool_choice"] = "auto"
-
-        api_response = await actor.client.completions.create(
+        api_response = await actor.client.chat.completions.create(
             model=actor.model_name,
-            prompt=current_prompt,
+            messages=messages,
+            tools=openai_tools,
+            tool_choice="auto" if openai_tools else None,
             extra_body=extra_body,
-            **dataclasses.asdict(current_sampling_params),
+            temperature=current_sampling_params.temperature,
+            top_p=current_sampling_params.top_p,
+            max_tokens=current_sampling_params.max_tokens,
+            n=current_sampling_params.n,
+            stop=current_sampling_params.stop,
+            seed=current_sampling_params.seed,
+            logprobs=current_sampling_params.logprobs is not None,
+            top_logprobs=current_sampling_params.logprobs,
         )
 
-        output = api_response.choices[0]
-        model_tokens = list(output.token_ids)
+        choice = api_response.choices[0]
+        model_tokens = list(choice.token_ids) if hasattr(choice, "token_ids") else []
 
         response_tokens.extend(model_tokens)
-        current_prompt.extend(model_tokens)
 
-        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
-        for logprob in output.logprobs.token_logprobs:
-            response_logprobs.append(logprob)
-            cumulative_logprob += logprob
+        if choice.logprobs and choice.logprobs.content:
+            for token_logprob in choice.logprobs.content:
+                response_logprobs.append(token_logprob.logprob)
+                cumulative_logprob += token_logprob.logprob
+        else:
+            response_logprobs.extend([0.0] * len(model_tokens))
 
         response_masks.extend([1] * len(model_tokens))
 
-        tool_calls = extract_tool_calls(output) if actor.tools else []
+        tool_calls = extract_tool_calls(choice) if actor.tools else []
         if not tool_calls:
             break
 
@@ -867,13 +878,17 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         tool_output += tool_result.output
         tool_runtime += tool_result.runtime
 
-        tool_tokens = actor.llm_engine.tokenizer.encode(
-            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+        messages.append(
+            {"role": "assistant", "content": choice.message.content, "tool_calls": choice.message.tool_calls}
         )
+        messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": tool_result.output})
+
+        tool_output_text = tool_result.start_str + tool_result.output + tool_result.end_str
+        tool_tokens = actor.llm_engine.tokenizer.encode(tool_output_text, add_special_tokens=False)
 
         tool_tokens, excess = truncate_tool_output_tokens(
             tool_tokens,
-            current_prompt_len=len(current_prompt),
+            current_prompt_len=len(original_prompt) + len(response_tokens),
             current_response_len=len(response_masks),
             max_model_len=max_model_len,
             max_tokens=sampling_params.max_tokens,
@@ -882,7 +897,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         response_tokens.extend(tool_tokens)
         response_logprobs.extend([0.0] * len(tool_tokens))
         response_masks.extend([0 if actor.mask_tool_use else 1] * len(tool_tokens))
-        current_prompt.extend(tool_tokens)
 
         current_max_tokens = sampling_params.max_tokens - len(response_masks)
         if excess > 0 or current_max_tokens <= 0:
@@ -893,7 +907,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         token_ids=response_tokens,
         cumulative_logprob=cumulative_logprob,
         logprobs=response_logprobs,
-        finish_reason=output.finish_reason,
+        finish_reason=choice.finish_reason,
     )
     if actor.tools:
         complete_output.mask = response_masks
@@ -955,6 +969,7 @@ def create_vllm_engines(
     tools: dict[str, Tool] | None = None,
     max_tool_calls: tuple[int, ...] = (5,),
     mask_tool_use: bool = True,
+    tool_call_parser: str | None = None,
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
@@ -1041,6 +1056,7 @@ def create_vllm_engines(
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
                 mask_tool_use=mask_tool_use,
+                tool_call_parser=tool_call_parser,
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,

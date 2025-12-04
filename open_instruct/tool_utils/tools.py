@@ -3,12 +3,12 @@ import time
 import traceback
 from dataclasses import dataclass
 
+import requests
+
 
 def _sanitize_name(token: str) -> str:
     stripped = token.strip().strip("<>")
     return stripped.lstrip("/") or "tool"
-
-import requests
 
 
 @dataclass
@@ -45,41 +45,19 @@ class PythonCodeTool(Tool):
         self.api_endpoint = api_endpoint
         super().__init__(*args, **kwargs)
 
-    def __call__(self, prompt: str) -> ToolOutput:
-        r"""
-        NOTE: We avoid using `r'<tool>\s*(.*?)\s*</tool>'` because it will fail in this case  # noqa: W605
-        Let's implement this in Python using the `<code>` tag to execute the code and get the result.
-        </think>
-
-        <code>
-        def find_sum_of_a():
-            total_sum = 0
-            for n in range(100):  # Arbitrary large range for n
-                for m in range(100):  # Arbitrary large range for m
-                    a = 2**n * 3**m
-                    if 6*n > a or 6*m > a:
-                        continue
-                    total_sum += a
-            return total_sum
-
-        result = find_sum_of_a()
-        print(result)
-        </code>
-
-        Instead, Use negative look-behind approach to find the code block.
-        """
+    def __call__(self, input_text: str) -> ToolOutput:
         re_str = r"(?s)(?<!`)<tool>\s*(.*?)\s*</tool>"
         re_str = re_str.replace("<tool>", "<code>").replace("</tool>", "</code>")
 
-        code_blocks = re.findall(re_str, prompt, re.DOTALL)
+        code_blocks = re.findall(re_str, input_text, re.DOTALL)
+        code = code_blocks[-1] if code_blocks else input_text.strip()
+
+        if not code:
+            return ToolOutput(output="", called=False, error="", timeout=False, runtime=0)
+
         all_outputs = []
         timeout = False
         error = ""
-        if len(code_blocks) == 0:
-            return ToolOutput(output="", called=False, error="", timeout=False, runtime=0)
-
-        # Only execute the last code block
-        code = code_blocks[-1]
 
         # Define timeout in seconds
         timeout_seconds = 3

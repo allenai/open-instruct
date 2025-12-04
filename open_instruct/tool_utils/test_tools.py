@@ -93,16 +93,19 @@ class TestPythonCodeTool(unittest.TestCase):
         self.assertEqual(self.tool.start_str, "<code>")
         self.assertEqual(self.tool.end_str, "</code>")
 
-    def test_no_code_blocks(self):
-        prompt = "This is a prompt without any code blocks."
+    def test_direct_code_input(self):
+        """Test that direct code input (without XML tags) is executed.
+
+        This is the expected behavior for OpenAI tool calling, where vLLM's
+        tool parser extracts arguments and passes them directly to the tool.
+        """
+        prompt = 'print("direct input")'
         result = self.tool(prompt)
 
         self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.output, "")
-        self.assertFalse(result.called)
-        self.assertEqual(result.error, "")
+        self.assertTrue(result.called)
+        self.assertIn("direct input", result.output)
         self.assertFalse(result.timeout)
-        self.assertEqual(result.runtime, 0)
 
     def test_successful_code_execution(self):
         prompt = """Let me calculate this.

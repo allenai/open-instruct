@@ -430,6 +430,8 @@ class Args:
     """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
+    tool_call_parser: str | None = None
+    """The vLLM tool call parser to use (e.g., 'olmo3', 'llama3_json', 'mistral'). Required when tools are enabled."""
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
 
@@ -2200,6 +2202,7 @@ def create_model_and_optimizer(
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
         mask_tool_use=args.mask_tool_use,
+        tool_call_parser=args.tool_call_parser,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
