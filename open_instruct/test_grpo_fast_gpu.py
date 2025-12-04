@@ -97,7 +97,7 @@ class TestGeneration(TestGrpoFastBase):
 
     @parameterized.expand([("with_tools", TOOL_PROMPT, True, 1024), ("without_tools", NO_TOOL_PROMPT, False, 256)])
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
-    def test_generation_deterministic(self, name, prompt, use_tools, max_tokens):
+    def test_generation_deterministic(self, name: str, prompt: str, use_tools: bool, max_tokens: int):
         """Test generation produces expected output and tool invocation behavior."""
         test_data_filename = f"generation_{name}_expected.json"
         test_data_path = TEST_DATA_DIR / test_data_filename
@@ -142,6 +142,63 @@ class TestGeneration(TestGrpoFastBase):
 
         expected = json.loads(test_data_path.read_text())
         self.assertEqual(result.responses[0], expected["expected_token_ids"])
+
+
+class TestVLLMQueueSystem(TestGrpoFastBase):
+    """Tests for the vLLM queue-based system."""
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
+    def test_vllm_queue_system_single_prompt(self):
+        """Test the new queue-based vLLM system with a single prompt 'What is the capital of France?'"""
+        tokenizer_name = "EleutherAI/pythia-14m"
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+        test_prompt = "What is the capital of France?"
+        prompt_token_ids = tokenizer.encode(test_prompt, return_tensors="pt").tolist()[0]
+
+        param_prompt_Q = ray_queue.Queue(maxsize=1)
+        inference_results_Q = ray_queue.Queue(maxsize=1)
+
+        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
+
+        vllm_engines = create_vllm_engines(
+            num_engines=1,
+            tensor_parallel_size=1,
+            enforce_eager=True,
+            tokenizer_name_or_path=tokenizer_name,
+            pretrain=tokenizer_name,
+            revision="main",
+            seed=42,
+            enable_prefix_caching=False,
+            max_model_len=512,
+            vllm_gpu_memory_utilization=0.5,
+            prompt_queue=param_prompt_Q,
+            results_queue=inference_results_Q,
+        )
+
+        generation_config = SamplingParams(temperature=0.0, top_p=1.0, max_tokens=5, seed=42)
+
+        [e.process_from_queue.remote() for e in vllm_engines]
+
+        param_prompt_Q.put(
+            PromptRequest(
+                prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
+            )
+        )
+
+        result = inference_results_Q.get()
+
+        self.assertIsInstance(result, GenerationResult)
+
+        self.assertGreater(len(result.responses), 0)
+        response_ids = result.responses[0]
+
+        generated_text = tokenizer.decode(response_ids, skip_special_tokens=True)
+
+        self.assertIsInstance(generated_text, str)
+        self.assertGreater(len(generated_text), 0)
+
+        param_prompt_Q.put(None)
 
 
 if __name__ == "__main__":
