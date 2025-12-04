@@ -806,7 +806,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     original_prompt = actor.request_metadata[base_request_id]["prompt_token_ids"]
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
-    openai_tools = format_tools_for_openai(actor.tools) if actor.tools else None
+    openai_tools = format_tools_for_openai(actor.tools) if actor.tools and actor.tool_call_parser else None
 
     initial_prompt_text = actor.llm_engine.tokenizer.decode(original_prompt, skip_special_tokens=False)
     messages = [{"role": "user", "content": initial_prompt_text}]
@@ -845,7 +845,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
         response_masks.extend([1] * len(model_tokens))
 
-        tool_calls = extract_tool_calls(choice) if actor.tools else []
+        tool_calls = extract_tool_calls(choice) if actor.tools and actor.tool_call_parser else []
         if not tool_calls:
             break
 
