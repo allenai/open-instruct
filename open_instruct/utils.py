@@ -2474,7 +2474,7 @@ def send_slack_alert(error: Exception, description: str) -> None:
         logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
         return
     beaker_url = get_beaker_job_url()
-    beaker_message = f"Check it out: {beaker_url}" if beaker_url else ""
+    beaker_message = f"Check it out: {beaker_url} " if beaker_url else ""
     message = f"<!here> A {description} has died. {beaker_message}Error message: {str(error)}."
     payload = {"text": message}
     response = requests.post(slack_webhook_url, json=payload)
