@@ -20,8 +20,6 @@ from unittest import mock
 
 import pytest
 import responses
-import torch
-import vllm
 from dateutil import parser
 from parameterized import parameterized
 
@@ -471,35 +469,27 @@ class TestModelDims(unittest.TestCase):
         self.assertLessEqual(metrics["learner_mfu"], 100)
 
     def test_model_dims_match_vllm_config(self):
-        model_name = "Qwen/Qwen2.5-7B"
-        expected_dims = MODEL_DIMS[model_name]
+        expected_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
 
-        mock_platform = mock.Mock()
-        mock_platform.device_type = "cuda"
-        mock_platform.is_cuda_alike.return_value = True
-        mock_platform.supported_dtypes = [torch.float16, torch.bfloat16, torch.float32]
-        mock_platform.get_device_total_memory.return_value = 80 * 1024**3
-        mock_platform.get_device_name.return_value = "NVIDIA H100 80GB HBM3"
+        mock_hf_text_config = mock.Mock()
+        mock_hf_text_config.intermediate_size = 18944
+        mock_hf_text_config.sliding_window = None
+        mock_hf_text_config.num_attention_heads = 28
+        mock_hf_text_config.num_key_value_heads = 4
 
-        mock_model_cls = mock.Mock()
-        mock_model_cls.supports_multimodal.return_value = False
-        mock_model_cls.is_attention_free.return_value = False
-        mock_model_cls.is_attention_free = False
+        mock_model_config = mock.Mock()
+        mock_model_config.get_hidden_size.return_value = 3584
+        mock_model_config.get_num_layers.return_value = 28
+        mock_model_config.get_vocab_size.return_value = 152064
+        mock_model_config.get_head_size.return_value = 128
+        mock_model_config.hf_text_config = mock_hf_text_config
 
-        def mock_inspect_return(*args, **kwargs):
-            return mock_model_cls, "Qwen2ForCausalLM"
+        mock_vllm_config = mock.Mock()
+        mock_vllm_config.model_config = mock_model_config
+        mock_vllm_config.parallel_config = mock.Mock()
 
-        with (
-            mock.patch("vllm.platforms.current_platform", mock_platform),
-            mock.patch(
-                "vllm.model_executor.models.registry.ModelRegistry.inspect_model_cls", side_effect=mock_inspect_return
-            ),
-            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
-        ):
-            engine_args = vllm.EngineArgs(model=model_name, load_format="dummy", max_model_len=512)
-            vllm_config = engine_args.create_engine_config()
-            vllm_dims = utils.ModelDims.from_vllm_config(vllm_config)
-        vllm_dims.device_name = "h100"
+        with mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
+            vllm_dims = utils.ModelDims.from_vllm_config(mock_vllm_config)
 
         self.assertEqual(vllm_dims, expected_dims)
 
@@ -525,3 +515,21 @@ class TestModelDims(unittest.TestCase):
 #             "natolambert/tulu-v2-sft-mixture-science": 7468,  # original data slightly different
 #         }
 #         _ = get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["messages"])
+
+
+class TestGetDenominator(unittest.TestCase):
+    @parameterized.expand([("token", "token"), ("0.5", 0.5), (0.5, 0.5), (1, 1.0)])
+    def test_valid_inputs(self, input_val, expected):
+        self.assertEqual(utils.get_denominator(input_val), expected)
+
+    @parameterized.expand(
+        [
+            ("invalid", "could not convert string to float"),
+            ("-1", "loss_denominator must be greater than 0"),
+            (0, "loss_denominator must be greater than 0"),
+            ("0", "loss_denominator must be greater than 0"),
+        ]
+    )
+    def test_invalid_inputs(self, input_val, error_msg):
+        with self.assertRaisesRegex(ValueError, error_msg):
+            utils.get_denominator(input_val)
