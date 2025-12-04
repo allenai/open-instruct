@@ -92,11 +92,14 @@ class TestGeneration(TestGrpoFastBase):
 
         return result
 
-    @parameterized.expand([True, False])
+    TOOL_PROMPT = "Write 3 separate Python code blocks. Block 1 prints '1'. Block 2 prints '2'. Block 3 prints '3'. Surround each block with <code> and </code> tags. Execute each separately.\n\nBlock 1: <code>"
+    NO_TOOL_PROMPT = "What is 2 + 2? Answer:"
+
+    @parameterized.expand([("with_tools", TOOL_PROMPT, True, 1024), ("without_tools", NO_TOOL_PROMPT, False, 256)])
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
-    def test_generation_deterministic(self, use_tools):
+    def test_generation_deterministic(self, name, prompt, use_tools, max_tokens):
         """Test generation produces expected output and tool invocation behavior."""
-        test_data_filename = f"generation_{'with' if use_tools else 'without'}_tools_expected.json"
+        test_data_filename = f"generation_{name}_expected.json"
         test_data_path = TEST_DATA_DIR / test_data_filename
 
         tokenizer_name = "Qwen/Qwen3-1.7B"
@@ -107,18 +110,13 @@ class TestGeneration(TestGrpoFastBase):
             else None
         )
         max_tool_calls = (5,) if use_tools else None
-        prompt = (
-            "Write 3 separate Python code blocks. Block 1 prints '1'. Block 2 prints '2'. Block 3 prints '3'. Surround each block with <code> and </code> tags. Execute each separately.\n\nBlock 1: <code>"
-            if use_tools
-            else "What is 2 + 2? Answer:"
-        )
 
         result = self._setup_engine_and_generate(
             tokenizer_name=tokenizer_name,
             prompt=prompt,
             tools=tools,
             max_tool_calls=max_tool_calls,
-            max_tokens=1024 if use_tools else 256,
+            max_tokens=max_tokens,
         )
 
         if use_tools:
