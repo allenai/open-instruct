@@ -3061,7 +3061,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         )
     except Exception as e:
         if args.send_slack_alerts:
-            utils.send_slack_alert(e)
+            utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
         raise
     finally:
         cleanup_training_resources(

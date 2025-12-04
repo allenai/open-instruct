@@ -239,26 +239,7 @@ class TestBeakerDescription(unittest.TestCase):
         self.assertNotIn("% complete", desc)
 
 
-class TestSlackAlert(unittest.TestCase):
-    @responses.activate
-    @mock.patch("open_instruct.utils.get_beaker_experiment_url")
-    @mock.patch("os.environ.get")
-    def test_send_slack_alert_with_beaker_url(self, mock_environ_get, mock_get_beaker_url):
-        webhook_url = "https://hooks.slack.com/services/test"
-        mock_environ_get.return_value = webhook_url
-        mock_get_beaker_url.return_value = "https://beaker.org/ex/test-123"
-
-        responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
-
-        test_error = ValueError("Test error message")
-        utils.send_slack_alert(test_error)
-
-        self.assertEqual(len(responses.calls), 1)
-        request_body = json.loads(responses.calls[0].request.body)
-        self.assertIn("<!here> A RL job has died.", request_body["text"])
-        self.assertIn("https://beaker.org/ex/test-123", request_body["text"])
-        self.assertIn("Test error message", request_body["text"])
-
+class TestSlackMessage(unittest.TestCase):
     @responses.activate
     @mock.patch("open_instruct.utils.get_beaker_experiment_url")
     @mock.patch("os.environ.get")

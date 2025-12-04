@@ -2467,24 +2467,19 @@ def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, An
     return combined
 
 
-def send_slack_message(message: str, *, include_beaker_url: bool = True) -> None:
+def send_slack_message(message: str) -> None:
     """Sends a message to a Slack webhook if configured.
 
     Args:
         message: Message body to send to Slack.
-        include_beaker_url: Whether to prefix the message with the Beaker experiment
-            URL when available.
     """
-
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
     if not slack_webhook_url:
         logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
         return
 
-    beaker_suffix = ""
-    if include_beaker_url:
-        beaker_url = get_beaker_experiment_url()
-        beaker_suffix = f" Check it out: {beaker_url}" if beaker_url else ""
+    beaker_url = get_beaker_experiment_url()
+    beaker_suffix = f" Check it out: {beaker_url}" if beaker_url else ""
 
     payload = {"text": f"{message}{beaker_suffix}"}
     try:
@@ -2493,11 +2488,6 @@ def send_slack_message(message: str, *, include_beaker_url: bool = True) -> None
             logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
     except requests.RequestException as exc:
         logger.warning("Failed to send Slack alert due to network error: %s", exc)
-
-
-def send_slack_alert(error: Exception) -> None:
-    """Sends an alert about a training failure to a Slack webhook (if configured)."""
-    send_slack_message(f"<!here> A RL job has died. Error message: {str(error)}.")
 
 
 def get_beaker_experiment_url() -> str | None:
