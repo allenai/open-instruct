@@ -141,7 +141,13 @@ def _is_cloud_path(path: str) -> bool:
 
 
 def warn_if_low_disk_space(path: str, *, threshold: float, send_slack_alerts: bool) -> None:
-    """Warns when disk usage exceeds the provided threshold."""
+    """Warns when disk usage exceeds the provided threshold.
+
+    Args:
+        path: Filesystem path to check disk usage for.
+        threshold: Usage ratio (0.0-1.0) above which to warn.
+        send_slack_alerts: Whether to also send a Slack alert when warning.
+    """
     if _is_cloud_path(path):
         return
 

@@ -2470,12 +2470,10 @@ def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, An
 def send_slack_message(message: str, *, include_beaker_url: bool = True) -> None:
     """Sends a message to a Slack webhook if configured.
 
-    Parameters
-    ----------
-    message
-        Message body to send to Slack.
-    include_beaker_url
-        Whether to prefix the message with the Beaker experiment URL when available.
+    Args:
+        message: Message body to send to Slack.
+        include_beaker_url: Whether to prefix the message with the Beaker experiment
+            URL when available.
     """
 
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
