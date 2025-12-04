@@ -9,15 +9,18 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
-def calculate_response_log_likelihood(
+def calculate_response_entropy(
     model,
     tokenizer,
     prompt: str,
     response: str,
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
-) -> Tuple[float, int]:
+) -> Tuple[float, float, int]:
     """
-    Calculate the average log likelihood of a response given a prompt.
+    Calculate the average entropy of the model's output distribution over response tokens.
+    
+    Entropy measures the model's uncertainty at each token position.
+    Higher entropy = more uncertainty, lower entropy = more confident predictions.
     
     Args:
         model: The language model
@@ -27,7 +30,7 @@ def calculate_response_log_likelihood(
         device: Device to run on
         
     Returns:
-        Tuple of (average_log_likelihood, num_response_tokens)
+        Tuple of (average_entropy, total_entropy, num_response_tokens)
     """
     # Format as a conversation
     messages = [
@@ -56,29 +59,37 @@ def calculate_response_log_likelihood(
     
     # Get model outputs
     with torch.no_grad():
-        outputs = model(full_tokens, labels=full_tokens)
+        outputs = model(full_tokens)
         logits = outputs.logits
     
-    # Calculate log probabilities
+    # Calculate probabilities
+    probs = torch.nn.functional.softmax(logits, dim=-1)
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
     
-    # Get the log probabilities of the actual tokens
-    # Note: logits[0, i] predicts token[i+1]
-    token_log_probs = []
+    # Calculate entropy at each position: H = -sum(p * log(p))
+    # Note: logits[0, i] predicts token[i+1], so we look at positions predicting response tokens
+    token_entropies = []
     for i in range(prompt_length - 1, full_tokens.shape[1] - 1):
-        token_id = full_tokens[0, i + 1].item()
-        token_log_prob = log_probs[0, i, token_id].item()
-        token_log_probs.append(token_log_prob)
+        # Get the probability distribution at this position
+        p = probs[0, i]  # Shape: [vocab_size]
+        log_p = log_probs[0, i]  # Shape: [vocab_size]
+        
+        # Entropy: H = -sum(p * log(p))
+        # Using natural log (base e), multiply by log2(e) to convert to bits if needed
+        entropy = -torch.sum(p * log_p).item()
+        token_entropies.append(entropy)
     
-    # Calculate average
-    if len(token_log_probs) > 0:
-        avg_log_likelihood = np.mean(token_log_probs)
-        num_response_tokens = len(token_log_probs)
+    # Calculate statistics
+    if len(token_entropies) > 0:
+        avg_entropy = np.mean(token_entropies)
+        total_entropy = np.sum(token_entropies)
+        num_response_tokens = len(token_entropies)
     else:
-        avg_log_likelihood = 0.0
+        avg_entropy = 0.0
+        total_entropy = 0.0
         num_response_tokens = 0
     
-    return avg_log_likelihood, num_response_tokens
+    return avg_entropy, total_entropy, num_response_tokens
 
 
 def evaluate_models_on_dataset(
@@ -90,7 +101,7 @@ def evaluate_models_on_dataset(
     batch_size: int = 1  # Processing one at a time for simplicity
 ) -> pd.DataFrame:
     """
-    Evaluate multiple models on a dataset and calculate response log likelihoods.
+    Evaluate multiple models on a dataset and calculate response entropy.
     
     Args:
         dataset: HuggingFace dataset or list of dicts with prompt/response pairs
@@ -108,7 +119,6 @@ def evaluate_models_on_dataset(
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained("/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_1000/")
 
-
     for model_name in model_names:
         if "Olmo" in model_name:
             save_name = "step_0"
@@ -120,10 +130,6 @@ def evaluate_models_on_dataset(
         print(f"{'='*80}")
         
         try:            
-            # Set padding token if not set
-            # if tokenizer.pad_token is None:
-                # tokenizer.pad_token = tokenizer.eos_token
-            
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 torch_dtype=torch.float16 if device == "cuda" else torch.float32,
@@ -140,40 +146,44 @@ def evaluate_models_on_dataset(
             for idx, sample in enumerate(tqdm(dataset, desc=f"Processing {model_name}")):
                 messages = sample["messages"]
                 prompt = messages[0]["content"]
-                response = messages[1]["content"]
+                response = messages[1]["content"]  # Fixed: should be index 1 for assistant response
                 
                 try:
-                    avg_log_likelihood, num_tokens = calculate_response_log_likelihood(
+                    avg_entropy, total_entropy, num_tokens = calculate_response_entropy(
                         model, tokenizer, prompt, response, device
                     )
                     
                     results.append({
-                        "model": model_name,
+                        "model": save_name,
                         "sample_id": idx,
                         "prompt": prompt,
                         "response": response,
                         "in_distribution": sample["in_distribution"],
                         "domain": sample["domain"],
-                        "avg_log_likelihood": avg_log_likelihood,
+                        "avg_entropy": avg_entropy,
+                        "total_entropy": total_entropy,
                         "num_response_tokens": num_tokens,
-                        "perplexity": np.exp(-avg_log_likelihood) if avg_log_likelihood != 0 else float('inf')
+                        # Convert to bits (base 2) for interpretability
+                        "avg_entropy_bits": avg_entropy / np.log(2) if avg_entropy != 0 else 0.0,
                     })
                     
                 except Exception as e:
                     print(f"Error processing sample {idx}: {e}")
                     results.append({
-                        "model": model_name,
+                        "model": save_name,
                         "sample_id": idx,
                         "prompt": prompt,
                         "response": response,
-                        "avg_log_likelihood": None,
+                        "in_distribution": sample.get("in_distribution"),
+                        "domain": sample.get("domain"),
+                        "avg_entropy": None,
+                        "total_entropy": None,
                         "num_response_tokens": 0,
-                        "perplexity": None
+                        "avg_entropy_bits": None,
                     })
             
             # Clean up
             del model
-            # del tokenizer
             torch.cuda.empty_cache() if device == "cuda" else None
             
         except Exception as e:
@@ -181,6 +191,7 @@ def evaluate_models_on_dataset(
             continue
     
     return pd.DataFrame(results)
+
 
 def load_data_from_huggingface(dataset_name: str, split: str = "test", subset: str = None) -> Dataset:
     """Load data from HuggingFace datasets hub"""
@@ -190,17 +201,11 @@ def load_data_from_huggingface(dataset_name: str, split: str = "test", subset: s
         dataset = load_dataset(dataset_name, split=split)
     return dataset
 
+
 def main():
     dataset = load_data_from_huggingface("jacobmorrison/social-rl-eval-dataset-100", split="train")
     
-    # Option 2: Load from CSV (uncomment and modify)
-    # dataset = load_data_from_csv("/mnt/user-data/uploads/your_data.csv")
-    
-    # Option 3: Load from JSONL (uncomment and modify)
-    # dataset = load_data_from_jsonl("/mnt/user-data/uploads/your_data.jsonl")
-    
     # Define your models
-    # Replace with your actual model names
     model_names = [
         "allenai/Olmo-3-1025-7B",
         "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_50",
@@ -223,7 +228,6 @@ def main():
         "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_900",
         "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_950",
         "/weka/oe-adapt-default/jacobm/social-rl/checkpoints/baseline_random_all/test_exp__1__1761341180_checkpoints/step_1000",
-        # Add your models here
     ]
     
     # Run evaluation
@@ -235,9 +239,9 @@ def main():
     )
     
     # Save results
-    results_df.to_csv("calc-likelihoods/log_likelihood_results-100.csv", index=False)
+    results_df.to_csv("calc-likelihoods/entropy_results-100.csv", index=False)
     print("\n" + "="*80)
-    print("Results saved to: calc-likelihoods/log_likelihood_results-100.csv")
+    print("Results saved to: calc-likelihoods/entropy_results-100.csv")
     print("="*80)
     
     # Display summary statistics
@@ -245,8 +249,9 @@ def main():
     print("SUMMARY STATISTICS BY MODEL")
     print("="*80)
     summary = results_df.groupby('model').agg({
-        'avg_log_likelihood': ['mean', 'std', 'min', 'max'],
-        'perplexity': ['mean', 'std', 'min', 'max'],
+        'avg_entropy': ['mean', 'std', 'min', 'max'],
+        'avg_entropy_bits': ['mean', 'std', 'min', 'max'],
+        'total_entropy': ['mean', 'std'],
         'num_response_tokens': 'mean'
     }).round(4)
     print(summary)
@@ -255,10 +260,10 @@ def main():
     print("\n" + "="*80)
     print("DETAILED RESULTS")
     print("="*80)
-    for model in model_names:
+    for model in results_df['model'].unique():
         print(f"\nModel: {model}")
         model_results = results_df[results_df['model'] == model]
-        print(model_results[['sample_id', 'avg_log_likelihood', 'perplexity', 'num_response_tokens']])
+        print(model_results[['sample_id', 'avg_entropy', 'avg_entropy_bits', 'total_entropy', 'num_response_tokens']])
 
 
 if __name__ == "__main__":
