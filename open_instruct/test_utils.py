@@ -19,6 +19,7 @@ import unittest
 from unittest import mock
 
 import pytest
+import ray
 import responses
 from dateutil import parser
 from parameterized import parameterized
@@ -585,3 +586,23 @@ class TestGetDenominator(unittest.TestCase):
     def test_invalid_inputs(self, input_val, error_msg):
         with self.assertRaisesRegex(ValueError, error_msg):
             utils.get_denominator(input_val)
+
+
+class TestRayGetWithProgress(unittest.TestCase):
+    def setUp(self):
+        ray.init(num_cpus=2, num_gpus=0)
+
+    def tearDown(self):
+        ray.shutdown()
+
+    def test_timeout_error_includes_desc(self):
+        @ray.remote
+        def slow_task():
+            time.sleep(10)
+            return "done"
+
+        refs = [slow_task.remote()]
+        desc = "Test slow operation"
+
+        with pytest.raises(TimeoutError, match=desc):
+            utils.ray_get_with_progress(refs, desc=desc, enable=False, timeout=0.1)
