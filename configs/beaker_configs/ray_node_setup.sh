@@ -17,7 +17,8 @@ BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk 
 RAY_NODE_PORT=8888
 mkdir -p "$HOME/.triton/autotune"  # Create Triton autotune cache directory to silence warnings
 ray stop --force
-rm -rf /tmp/ray/session_* 2>/dev/null || true  # Clean up stale Ray sessions
+rm -rf /tmp/ray 2>/dev/null || true  # Clean up entire Ray temp directory to avoid stale session issues
+sleep 2  # Wait for cleanup to complete
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
     echo "Starting Ray head node"
