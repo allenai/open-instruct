@@ -5,8 +5,6 @@ BEAKER_IMAGE="$1"
 echo "Using Beaker image: $BEAKER_IMAGE"
 
 uv run python mason.py \
-       --cluster ai2/jupiter \
-       --cluster ai2/augusta \
        --cluster ai2/saturn \
        --image "$BEAKER_IMAGE" \
        --description "GPU tests for test_grpo_fast_gpu.py" \
