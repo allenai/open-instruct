@@ -133,7 +133,7 @@ logger = logger_utils.setup_logger(__name__)
 
 INVALID_LOGPROB = 1.0
 DISK_USAGE_WARNING_THRESHOLD = 0.85
-CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://")
+CLOUD_PATH_PREFIXES = ("gs://",)
 
 
 def _is_cloud_path(path: str) -> bool:
