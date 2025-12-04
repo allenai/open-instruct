@@ -40,7 +40,7 @@ uv run python mason.py \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen3-1.7B \
-    --tool_call_parser hermes \  # Qwen uses hermes: https://qwen.readthedocs.io/en/latest/deployment/vllm.html#parsing-tool-calls
+    --tool_call_parser hermes \
     --stop_strings "</answer>" \
     --apply_verifiable_reward true \
     --temperature 1.0 \
