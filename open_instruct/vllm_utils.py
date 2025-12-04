@@ -115,32 +115,6 @@ async def process_request_async(
     sampling_params: vllm.SamplingParams,
 ):
     """Process a single async request with tool support, awaiting tools inline."""
-    import sys
-
-    def log(msg):
-        sys.stderr.write(f"[PROCESS_REQUEST] {msg}\n")
-        sys.stderr.flush()
-
-    log(f"process_request_async started for sub_request_id={sub_request_id}")
-
-    try:
-        await _process_request_async_impl(actor, sub_request_id, base_request_id, prompt, sampling_params, log)
-    except Exception as e:
-        import traceback
-
-        log(f"Exception in process_request_async: {e}")
-        traceback.print_exc()
-        raise
-
-
-async def _process_request_async_impl(
-    actor: "LLMRayActor",
-    sub_request_id: str,
-    base_request_id: str,
-    prompt: vllm.TokensPrompt,
-    sampling_params: vllm.SamplingParams,
-    log,
-):
     accumulated_tokens = []
     accumulated_logprobs = []
     masks = []
@@ -159,19 +133,15 @@ async def _process_request_async_impl(
 
     while True:
         iteration_request_id = f"{sub_request_id}_iter{iteration}"
-        log(f"starting iteration {iteration}, request_id={iteration_request_id}")
-        log("calling actor.llm_engine.generate()...")
         outputs = [
             o
             async for o in actor.llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
             if o.finished
         ]
-        log(f"generate() completed, got {len(outputs)} outputs")
         assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
         request_output = outputs[0]
         iteration += 1
         output = request_output.outputs[0]
-        log(f"output.text={output.text[:100] if output.text else 'None'}...")
 
         if final_prompt_token_ids is None:
             final_prompt_token_ids = request_output.prompt_token_ids
@@ -179,27 +149,20 @@ async def _process_request_async_impl(
         accumulated_tokens.extend(output.token_ids)
         accumulated_logprobs.extend(output.logprobs)
         masks.extend([1] * len(output.token_ids))
-        log(f"accumulated {len(output.token_ids)} tokens, total={len(accumulated_tokens)}")
 
         if not actor.tools or not actor.max_tool_calls:
-            log("no tools, breaking")
             break
 
-        log(f"checking for triggered tool, num_calls={num_calls}")
         triggered_tool, stop_str = get_triggered_tool(
             output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
         )
-        log(f"triggered_tool={triggered_tool is not None}, stop_str={stop_str}")
         if triggered_tool is None:
-            log("no tool triggered, breaking")
             break
 
         assert actor.executor is not None, f"executor is None for request {sub_request_id}"
 
-        log("calling tool via executor...")
         loop = asyncio.get_running_loop()
         tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
-        log(f"tool completed, timeout={tool_result.timeout}, error={tool_result.error}")
 
         tool_called = True
         num_calls += 1
@@ -237,7 +200,6 @@ async def _process_request_async_impl(
         current_sampling_params = sampling_params.clone()
         current_sampling_params.max_tokens = new_sample_tokens
 
-    log(f"while loop completed after {iteration} iterations, creating CompletionOutput")
     complete_output = vllm.CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
         text="",
@@ -259,7 +221,6 @@ async def _process_request_async_impl(
 
     actor.active_tasks.pop(sub_request_id, None)
 
-    log(f"putting result to completion_queue for sub_request_id={sub_request_id}")
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
@@ -275,7 +236,6 @@ async def _process_request_async_impl(
             "tools": actor.tools,
         }
     )
-    log(f"process_request_async completed for sub_request_id={sub_request_id}")
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -510,48 +470,24 @@ async def _async_queue_get(prompt_queue, timeout: float = 1.0):
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
-    import sys
-    import traceback
-
-    def log(msg):
-        sys.stderr.write(f"[WORKER] {msg}\n")
-        sys.stderr.flush()
-
-    log(f"_prefetch_worker started, batch_size={actor.inference_batch_size}")
-    log(f"prompt_queue id: {id(actor.prompt_queue)}")
-    log(f"prompt_queue actor: {actor.prompt_queue.actor}")
-
-    poll_count = 0
     while True:
-        should_stop = actor._should_stop()
-        active_count = len(actor.active_tasks)
-        if should_stop:
-            log("should_stop=True, exiting worker")
+        if actor._should_stop():
             break
 
-        if active_count >= actor.inference_batch_size:
+        if len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
-
-        log(f"poll #{poll_count}")
-        poll_count += 1
-        request = None
 
         future = asyncio.run_coroutine_threadsafe(_async_queue_get(actor.prompt_queue, timeout=1.0), actor.loop)
         try:
             request = future.result(timeout=3.0)
-            log(f"got request: {type(request)}")
         except TimeoutError:
-            log("future.result() timed out")
             future.cancel()
             continue
         except ray_queue.Empty:
-            log("Empty exception")
             time.sleep(0.1)
             continue
-        except Exception as e:
-            log(f"get() raised exception: {e}")
-            traceback.print_exc()
+        except Exception:
             time.sleep(0.1)
             continue
 
@@ -559,15 +495,7 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
-    import sys
-
-    def log(msg):
-        sys.stderr.write(f"[ADD_REQUEST] {msg}\n")
-        sys.stderr.flush()
-
-    log(f"add_request called with request.prompt_id={request.prompt_id}")
     request_id = make_request_id(request)
-    log(f"request_id={request_id}")
 
     sampling_params = request.generation_config.clone()
     sampling_params.n = 1  # Use n=1 for tool processing
@@ -584,18 +512,14 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
 
     tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
 
-    log(f"scheduling {request.generation_config.n} sub-requests on actor.loop")
     for j in range(request.generation_config.n):
         sub_sampling_params = sampling_params.clone()
         if request.generation_config.seed is not None:
             sub_sampling_params.seed = request.generation_config.seed + j
         sub_request_id = f"{request_id}_{j}"
-        log(f"scheduling sub_request_id={sub_request_id}")
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params), actor.loop
         )
-        log(f"scheduled sub_request_id={sub_request_id}, future={actor.active_tasks[sub_request_id]}")
-    log(f"add_request completed, {len(actor.active_tasks)} active tasks")
 
 
 class LLMRayActor:

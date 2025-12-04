@@ -2,9 +2,9 @@
 
 These tests require CUDA and will be skipped if not available.
 
-To run on Beaker:
+To run locally (requires GPU):
 
-    ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_generation_tests.sh
+    pytest open_instruct/test_grpo_fast_gpu.py -xvs
 """
 
 import json
@@ -46,9 +46,6 @@ class TestGeneration(TestGrpoFastBase):
         eval_results_Q = ray_queue.Queue(maxsize=100)
         self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
 
-        print(f"[TEST] Created queues - prompt_queue id: {id(param_prompt_Q)}", flush=True)
-        print(f"[TEST] prompt_queue actor: {param_prompt_Q.actor}", flush=True)
-
         prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
         stop = list(tools.keys()) if tools else None
         generation_config = SamplingParams(
@@ -64,7 +61,6 @@ class TestGeneration(TestGrpoFastBase):
             prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
         )
 
-        print("[TEST] Starting create_vllm_engines...", flush=True)
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
         ray.get(pg.ready())
 
@@ -88,11 +84,8 @@ class TestGeneration(TestGrpoFastBase):
             max_tool_calls=max_tool_calls,
         )
 
-        print("[TEST] Engine created, submitting request directly...", flush=True)
         ray.get(engines[0].submit_request.remote(request))
-        print("[TEST] Request submitted, waiting for result...", flush=True)
         result = inference_results_Q.get(timeout=120)
-        print("[TEST] Got result!", flush=True)
         param_prompt_Q.put(None)
 
         return result
@@ -154,9 +147,6 @@ class TestGeneration(TestGrpoFastBase):
                 "expected_text": tokenizer.decode(result.responses[0]),
             }
             test_data_path.write_text(json.dumps(test_data, indent=2))
-            print(f"\n[TEST_DATA_START:{test_data_filename}]")
-            print(json.dumps(test_data, indent=2))
-            print(f"[TEST_DATA_END:{test_data_filename}]\n")
             self.fail(f"Test data generated at {test_data_path}. Re-run test to verify.")
             return
 
