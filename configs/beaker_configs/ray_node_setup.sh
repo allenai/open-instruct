@@ -14,7 +14,7 @@ echo PATH=$PATH
 
 BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
 
-RAY_NODE_PORT=$((8800 + RANDOM % 100))
+RAY_NODE_PORT=6379
 mkdir -p "$HOME/.triton/autotune"
 
 echo "Cleaning up any existing Ray processes..."
