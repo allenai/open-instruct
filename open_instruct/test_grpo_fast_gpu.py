@@ -2,9 +2,9 @@
 
 These tests require CUDA and will be skipped if not available.
 
-To run locally (requires GPU):
+To run:
 
-    pytest open_instruct/test_grpo_fast_gpu.py -xvs
+    ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
 """
 
 import json
@@ -15,6 +15,7 @@ import unittest
 
 os.environ["VLLM_BATCH_INVARIANT"] = "1"
 
+import datasets
 import ray
 import torch
 from parameterized import parameterized
@@ -23,6 +24,7 @@ from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
 
 from open_instruct.data_types import GenerationResult, PromptRequest
+from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.tool_utils.tools import PythonCodeTool
 from open_instruct.utils import maybe_update_beaker_description
@@ -62,6 +64,9 @@ class TestGeneration(TestGrpoFastBase):
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
         ray.get(pg.ready())
 
+        train_dataset = datasets.Dataset.from_dict({"ground_truth": [["4"]], "dataset": ["test"], "prompt": [prompt]})
+        reward_config = RewardConfig()
+
         engines = create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
@@ -80,6 +85,8 @@ class TestGeneration(TestGrpoFastBase):
             eval_results_queue=eval_results_Q,
             tools=tools,
             max_tool_calls=max_tool_calls,
+            reward_config=reward_config,
+            train_dataset=train_dataset,
         )
 
         ray.get(engines[0].submit_request.remote(request))
@@ -157,6 +164,11 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
 
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
+        train_dataset = datasets.Dataset.from_dict(
+            {"ground_truth": [["Paris"]], "dataset": ["test"], "prompt": [test_prompt]}
+        )
+        reward_config = RewardConfig()
+
         engines = create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
@@ -170,6 +182,8 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
             vllm_gpu_memory_utilization=0.5,
             prompt_queue=param_prompt_Q,
             results_queue=inference_results_Q,
+            reward_config=reward_config,
+            train_dataset=train_dataset,
         )
 
         generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=5, seed=42)
