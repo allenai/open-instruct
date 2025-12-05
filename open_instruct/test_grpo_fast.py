@@ -1,6 +1,5 @@
 import dataclasses
 import gc
-import os
 import threading
 import time
 import unittest
@@ -62,9 +61,6 @@ class TestGrpoFastBase(unittest.TestCase):
 
     def setUp(self):
         """Initialize Ray and check for pre-existing leaks."""
-        # Save original environment variable value
-        self._original_nccl_cumem = os.environ.get("NCCL_CUMEM_ENABLE")
-
         # Record initial resource tracker state
         self._initial_resources = self._get_resource_tracker_state()
 
@@ -74,10 +70,8 @@ class TestGrpoFastBase(unittest.TestCase):
         utils.check_runtime_leaks()
 
         # Initialize Ray for this test
-        # Match production (grpo_fast.py:3096) - use runtime_env with env_vars
-        env_vars = dict(os.environ) | {"NCCL_CUMEM_ENABLE": "0", "VLLM_ENABLE_V1_MULTIPROCESSING": "0"}
         if not ray.is_initialized():
-            ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": env_vars})
+            ray.init(include_dashboard=False)
 
     def _cleanup_ray_queues(self):
         """Clean up all Ray queues created during the test."""
@@ -123,12 +117,6 @@ class TestGrpoFastBase(unittest.TestCase):
             # Fail if there are semaphore leaks
             if "semaphore" in new_resources:
                 self.fail(leak_msg)
-
-        # Restore original environment variable value
-        if self._original_nccl_cumem is None:
-            os.environ.pop("NCCL_CUMEM_ENABLE", None)
-        else:
-            os.environ["NCCL_CUMEM_ENABLE"] = self._original_nccl_cumem
 
     def create_test_data(self, num_prompts, prefix="", start_idx=0):
         """Create test data with consistent naming."""
