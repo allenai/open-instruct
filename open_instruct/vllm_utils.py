@@ -102,17 +102,6 @@ INFERENCE_INIT_TIMEOUT_S = 1200
 
 
 @dataclasses.dataclass
-class SamplingConfig:
-    temperature: float = 0.7
-    top_p: float = 1.0
-    max_tokens: int = 256
-    n: int = 1
-    stop: list[str] | None = None
-    seed: int | None = None
-    logprobs: int | None = 1
-
-
-@dataclasses.dataclass
 class CompletionOutput:
     index: int
     token_ids: list[int]
