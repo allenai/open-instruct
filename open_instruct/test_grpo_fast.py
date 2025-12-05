@@ -1,7 +1,6 @@
 import dataclasses
 import gc
 import os
-import random
 import threading
 import time
 import unittest
@@ -476,41 +475,6 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 
 class GrpoIntegrationTests(TestGrpoFastBase):
     """Integration tests for GRPO with parallel processing."""
-
-    @ray.remote
-    def mock_vllm_engine(engine_id, prompt_queue, results_queue, num_samples_per_prompt=1):
-        """Mock vLLM engine that processes prompts from queue."""
-        while True:
-            # Get request from queue
-            request = prompt_queue.get()
-            if request is None:  # Stop signal
-                break
-
-            # Simulate processing time
-            time.sleep(random.uniform(0.01, 0.05))
-
-            # Create mock generation result
-            batch_size = len(request.prompts)
-            total_responses = batch_size * num_samples_per_prompt
-
-            # Important: vLLM keeps dataset_index as the original unique indices
-            mock_result = GenerationResult(
-                responses=[[1, 2, 3] for _ in range(total_responses)],
-                finish_reasons=["stop"] * total_responses,
-                masks=[[1, 1, 1] for _ in range(total_responses)],
-                request_info=RequestInfo(
-                    num_calls=[0] * total_responses,
-                    timeouts=[0] * total_responses,
-                    tool_errors=[""] * total_responses,
-                    tool_outputs=[""] * total_responses,
-                    tool_runtimes=[0.0] * total_responses,
-                    tool_calleds=[False] * total_responses,
-                ),
-                dataset_index=request.dataset_index,  # Original indices, not replicated
-            )
-
-            # Push to results queue
-            results_queue.put(mock_result)
 
     def test_out_of_order_processing(self):
         """Test that dataset indices can be processed out of order."""
