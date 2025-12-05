@@ -24,7 +24,6 @@ import socket
 import sys
 import threading
 import time
-import types
 from collections import defaultdict
 from collections.abc import Awaitable
 from concurrent import futures
@@ -161,120 +160,6 @@ def truncate_tool_output_tokens(
 
     remaining = max(0, max_tokens - current_response_len)
     return tool_output_token_ids[:remaining], excess
-
-
-async def process_request_async(
-    actor: "LLMRayActor", sub_request_id: str, base_request_id: str, sampling_params: vllm.SamplingParams
-):
-    """Process a single async request with tool support, awaiting tools inline."""
-    tokens = list(actor.request_metadata[base_request_id]["prompt_token_ids"])
-    prompt_len = len(tokens)
-    logprobs = []
-    masks = []
-    num_calls = 0
-    timeout = False
-    tool_error = ""
-    tool_output = ""
-    tool_runtime = 0.0
-    tool_called = False
-    current_sampling_params = sampling_params.clone()
-    iteration = 0
-
-    while True:
-        iteration_request_id = f"{sub_request_id}_iter{iteration}"
-        outputs = [
-            o
-            async for o in actor.llm_engine.generate(
-                vllm.TokensPrompt(prompt_token_ids=tokens, cache_salt=base_request_id),
-                current_sampling_params,
-                iteration_request_id,
-            )
-            if o.finished
-        ]
-        assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
-        request_output = outputs[0]
-        iteration += 1
-        output = request_output.outputs[0]
-
-        tokens.extend(output.token_ids)
-        logprobs.extend(output.logprobs)
-        masks.extend([1] * len(output.token_ids))
-
-        if not actor.tools or not actor.max_tool_calls:
-            break
-
-        triggered_tool, stop_str = get_triggered_tool(
-            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
-        )
-        if triggered_tool is None:
-            break
-
-        assert actor.executor is not None, f"executor is None for request {sub_request_id}"
-
-        loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
-
-        tool_called = True
-        num_calls += 1
-        timeout = timeout or tool_result.timeout
-        tool_error += "" if tool_result.error is None else tool_result.error
-        tool_output += tool_result.output
-        tool_runtime += tool_result.runtime
-
-        tool_output_token_ids = actor.llm_engine.tokenizer.encode(
-            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
-        )
-
-        tool_output_token_ids, excess = truncate_tool_output_tokens(
-            tool_output_token_ids,
-            current_prompt_len=len(tokens),
-            current_response_len=len(masks),
-            max_model_len=actor.llm_engine.model_config.max_model_len,
-            max_tokens=sampling_params.max_tokens,
-        )
-
-        tokens.extend(tool_output_token_ids)
-        logprobs.extend([{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids])
-        masks.extend([0 if actor.mask_tool_use else 1] * len(tool_output_token_ids))
-        current_sampling_params = sampling_params.clone()
-        current_sampling_params.max_tokens = sampling_params.max_tokens - len(masks)
-
-    complete_output = vllm.CompletionOutput(
-        index=split_request_id(sub_request_id)["request_index"],
-        text="",
-        token_ids=tokens[prompt_len:],
-        cumulative_logprob=output.cumulative_logprob,
-        logprobs=logprobs,
-        finish_reason=output.finish_reason,
-        stop_reason=output.stop_reason,
-    )
-
-    if actor.tools:
-        complete_output.mask = masks
-        complete_output.num_calls = num_calls
-        complete_output.timeout = timeout
-        complete_output.tool_error = tool_error
-        complete_output.tool_output = tool_output
-        complete_output.tool_runtime = tool_runtime
-        complete_output.tool_called = tool_called
-
-    actor.active_tasks.pop(sub_request_id, None)
-
-    actor.completion_queue.put(
-        {
-            "base_request_id": base_request_id,
-            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
-            "request_output": vllm.RequestOutput(
-                request_id=sub_request_id,
-                prompt=request_output.prompt,
-                prompt_token_ids=tokens,
-                outputs=[complete_output],
-                finished=True,
-                prompt_logprobs=None,  # not used but required for init.
-            ),
-            "tools": actor.tools,
-        }
-    )
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
