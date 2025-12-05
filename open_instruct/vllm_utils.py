@@ -183,7 +183,7 @@ def get_bundle_indices_list(placement_group: ray.util.placement_group) -> list[i
 def make_request_id(request: PromptRequest) -> str:
     """Generate a unique tracking key for a request."""
     prefix = "eval" if request.is_eval else "train"
-    return f"{prefix}_{request.get_prompt_id()}"
+    return f"{prefix}_{request.prompt_id}"
 
 
 def split_request_id(full_request_id: str) -> dict:
@@ -410,7 +410,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
-        "prompt_id": request.get_prompt_id(),
+        "prompt_id": request.prompt_id,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),

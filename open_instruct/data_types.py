@@ -39,14 +39,19 @@ class GenerationResult:
     finish_reasons: list[str]
     masks: list[list[int]]
     request_info: RequestInfo
-    dataset_index: int | None = None
-    prompt_id: str | None = None
-    epoch_number: int = 0
+    dataset_index: int | None
+    prompt_id: str | None
     token_statistics: TokenStatistics | None = None
     start_time: float | None = None
     logprobs: list[list[float]] | None = None
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None
+
+    def epoch(self) -> int:
+        """Extract epoch number from prompt_id (format: '{epoch}_{dataset_index}')."""
+        if self.prompt_id is None:
+            return 0
+        return int(self.prompt_id.split("_")[0])
 
 
 @dataclass
@@ -56,22 +61,13 @@ class PromptRequest:
     Note: We intentionally type `generation_config` as `Any` to avoid importing
     heavy dependencies (e.g., vLLM) at import time in deserializers like Ray's
     `_QueueActor`.
-
-    prompt_id can be passed directly, or computed from epoch_number and dataset_index.
     """
 
     prompt: list[int]
     generation_config: Any
     dataset_index: int
-    prompt_id: str | None = None
-    epoch_number: int = 0
-    training_step: int = 0
+    prompt_id: str
     is_eval: bool = False
-
-    def get_prompt_id(self) -> str:
-        if self.prompt_id is not None:
-            return self.prompt_id
-        return f"{self.epoch_number}_{self.dataset_index}"
 
 
 @dataclass

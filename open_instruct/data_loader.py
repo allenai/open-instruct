@@ -32,6 +32,7 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
 from open_instruct import utils
+from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, ShutdownSentinel, TokenStatistics
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -39,7 +40,6 @@ from open_instruct.dataset_transformation import (
     VERIFIER_SOURCE_KEY,
 )
 from open_instruct.model_utils import Batch
-from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, ShutdownSentinel, TokenStatistics
 from open_instruct.rl_utils import PackedSequences, pack_sequences
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
@@ -376,20 +376,16 @@ class PendingQueriesMap:
 
 
 def add_prompt_to_generator(
-    example: dict[str, Any],
-    epoch_number: int,
-    training_step: int,
-    param_prompt_Q: ray_queue.Queue,
-    generation_config,
-    is_eval: bool,
+    example: dict[str, Any], epoch_number: int, param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
 ) -> None:
+    dataset_index = example["dataset_index"]
+    prompt_id = f"{epoch_number}_{dataset_index}"
     param_prompt_Q.put(
         PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
-            epoch_number=epoch_number,
-            training_step=training_step,
-            dataset_index=example["dataset_index"],
+            dataset_index=dataset_index,
+            prompt_id=prompt_id,
             is_eval=is_eval,
         )
     )
@@ -452,7 +448,7 @@ def accumulate_inference_batches(
         assert len(result.responses) == generation_config.n, (
             f"Mismatch: individual prompt result has {len(result.responses)} responses "
             f"but expected {generation_config.n} samples per prompt. "
-            f"Dataset index: {result.dataset_index}, Epoch: {result.epoch_number}"
+            f"Dataset index: {result.dataset_index}, Epoch: {result.epoch()}"
         )
 
         example = dataset[result.dataset_index]
@@ -463,9 +459,7 @@ def accumulate_inference_batches(
 
         if replenish_prompts:
             example = next(iter_dataloader)
-            add_prompt_to_generator(
-                example, iter_dataloader._epoch, training_step, param_prompt_Q, generation_config, is_eval=False
-            )
+            add_prompt_to_generator(example, iter_dataloader._epoch, param_prompt_Q, generation_config, is_eval=False)
 
         for i in range(len(result.finish_reasons)):
             if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
@@ -591,7 +585,7 @@ def accumulate_inference_batches(
         masks=combined_masks,
         request_info=combined_request_info,
         dataset_index=None,
-        epoch_number=results[0].epoch_number,
+        prompt_id=results[0].prompt_id,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
     )
@@ -772,7 +766,6 @@ class DataPreparationActor:
             add_prompt_to_generator(
                 next(self.iter_dataloader),
                 self.iter_dataloader._epoch,
-                self.training_step,
                 self.param_prompt_Q,
                 self.generation_config,
                 is_eval=False,
