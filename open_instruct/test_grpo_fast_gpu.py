@@ -91,7 +91,7 @@ class TestGeneration(TestGrpoFastBase):
         train_dataset = datasets.Dataset.from_dict({"ground_truth": [["4"]], "dataset": ["test"], "prompt": [prompt]})
         reward_config = RewardConfig()
 
-        create_vllm_engines(
+        engines = create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
             enforce_eager=True,
@@ -113,7 +113,7 @@ class TestGeneration(TestGrpoFastBase):
             train_dataset=train_dataset,
         )
 
-        time.sleep(1)
+        ray.get(engines[0].ready.remote())
         param_prompt_Q.put(request)
         result = inference_results_Q.get(timeout=120)
         param_prompt_Q.put(None)
@@ -193,7 +193,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         )
         reward_config = RewardConfig()
 
-        create_vllm_engines(
+        engines = create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
             enforce_eager=True,
@@ -210,7 +210,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
             train_dataset=train_dataset,
         )
 
-        time.sleep(1)
+        ray.get(engines[0].ready.remote())
         generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=5, seed=42)
         request = PromptRequest(
             prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
