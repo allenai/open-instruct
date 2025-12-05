@@ -6,8 +6,8 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 echo "Using Beaker image: $BEAKER_IMAGE"
 
 uv run python mason.py \
-    --cluster ai2/phobos-cirrascale \
-    --cluster ai2/hammond-cirrascale \
+    --cluster ai2/phobos \
+    --cluster ai2/hammond \
     --image "$BEAKER_IMAGE" \
     --description "Test tool parsers (Hermes, OLMo3, get_triggered_tool)." \
     --pure_docker_mode \
