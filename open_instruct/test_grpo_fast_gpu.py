@@ -11,6 +11,8 @@ import json
 import logging
 import os
 import pathlib
+import subprocess
+import time
 import unittest
 
 os.environ["VLLM_BATCH_INVARIANT"] = "1"
@@ -37,11 +39,33 @@ maybe_update_beaker_description()
 
 TEST_DATA_DIR = pathlib.Path(__file__).parent / "test_data"
 
-DEFAULT_CODE_TOOL_ENDPOINT = "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute"
-
 
 class TestGeneration(TestGrpoFastBase):
     """Tests for tool invocation with vLLM."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.server_process = subprocess.Popen(
+            ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1212"],
+            cwd="open_instruct/tool_utils",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        time.sleep(3)
+        cls.tool_api_endpoint = "http://localhost:1212/execute"
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.server_process:
+            cls.server_process.terminate()
+            try:
+                cls.server_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                cls.server_process.kill()
+                cls.server_process.wait()
+        super().tearDownClass()
 
     def _setup_engine_and_generate(self, tokenizer_name, prompt, tools=None, max_tool_calls=None, max_tokens=50):
         """Helper to create vLLM engine and run generation."""
@@ -106,9 +130,8 @@ class TestGeneration(TestGrpoFastBase):
         test_data_path = TEST_DATA_DIR / test_data_filename
 
         tokenizer_name = "Qwen/Qwen3-1.7B"
-        code_endpoint = os.environ.get("CODE_TOOL_API_ENDPOINT", DEFAULT_CODE_TOOL_ENDPOINT)
         tools = (
-            {"</code>": PythonCodeTool(api_endpoint=code_endpoint, start_str="<code>", end_str="</code>")}
+            {"</code>": PythonCodeTool(api_endpoint=self.tool_api_endpoint, start_str="<code>", end_str="</code>")}
             if use_tools
             else None
         )
