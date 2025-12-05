@@ -379,13 +379,12 @@ def add_prompt_to_generator(
     example: dict[str, Any], epoch_number: int, param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
 ) -> None:
     dataset_index = example["dataset_index"]
-    prompt_id = f"{epoch_number}_{dataset_index}"
     param_prompt_Q.put(
         PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
             dataset_index=dataset_index,
-            prompt_id=prompt_id,
+            prompt_id=f"{epoch_number}_{dataset_index}",
             is_eval=is_eval,
         )
     )
