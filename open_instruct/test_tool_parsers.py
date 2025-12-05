@@ -1,3 +1,8 @@
+"""Test tool parser formats for vLLM.
+
+Run on Beaker (requires vLLM):
+    ./scripts/train/build_image_and_launch.sh scripts/train/debug/test_tool_parsers.sh
+"""
 import json
 import re
 import unittest
@@ -5,7 +10,7 @@ from unittest import mock
 
 import transformers
 from vllm.entrypoints.openai import protocol as vllm_protocol
-from vllm.entrypoints.openai import tool_parsers
+from vllm.entrypoints.openai.tool_parsers import ToolParserManager
 
 from open_instruct.queue_types import SamplingConfig
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, PythonCodeTool, Tool, ToolOutput
@@ -58,7 +63,8 @@ class TestToolParserFormats(unittest.TestCase):
 {"name": "code", "arguments": {"input": "print(2 + 2)"}}
 </tool_call>"""
 
-        parser = tool_parsers.Hermes2ProToolParser(self.tokenizer)
+        parser_cls = ToolParserManager.get_tool_parser("hermes")
+        parser = parser_cls(self.tokenizer)
         request = mock.MagicMock(spec=vllm_protocol.ChatCompletionRequest)
         result = parser.extract_tool_calls(output, request)
 
@@ -70,7 +76,8 @@ class TestToolParserFormats(unittest.TestCase):
         """OLMo3 uses Python-like function call syntax."""
         output = '[code(input="print(2 + 2)")]'
 
-        parser = tool_parsers.Olmo3PythonicToolParser(self.tokenizer)
+        parser_cls = ToolParserManager.get_tool_parser("olmo3")
+        parser = parser_cls(self.tokenizer)
         request = mock.MagicMock(spec=vllm_protocol.ChatCompletionRequest)
         result = parser.extract_tool_calls(output, request)
 
