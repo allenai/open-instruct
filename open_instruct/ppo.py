@@ -369,6 +369,8 @@ class Args:
     with length 1 (applies to all tools) or matching the length of the tools list (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
+    tool_call_parser: str | None = None
+    """The vLLM tool call parser to use (e.g., 'olmo3', 'llama3_json', 'mistral'). Required when tools are enabled."""
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs from the tools or not."""
 
@@ -388,6 +390,16 @@ class Args:
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
+        if self.tools is not None and len(self.tools) > 0:
+            for tool in self.tools:
+                if tool not in ["search", "code"]:
+                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
+            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+            if self.tool_call_parser is None:
+                raise ValueError(
+                    "--tool_call_parser is required when --tools is specified. "
+                    "Choose a parser compatible with your model (e.g., olmo3, hermes, llama3_json)."
+                )
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
@@ -1531,12 +1543,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     api_endpoint=args.search_api_endpoint,
                     number_documents_to_search=args.number_documents_to_search,
                 )
-                tool_objects[tool.end_str] = tool
+                tool_objects[tool.name] = tool
             elif tool.lower() == "code":
                 from open_instruct.tool_utils.tools import PythonCodeTool
 
                 tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
-                tool_objects[tool.end_str] = tool
+                tool_objects[tool.name] = tool
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
@@ -1555,6 +1567,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
+        mask_tool_use=args.mask_tool_use,
+        tool_call_parser=args.tool_call_parser,
     )
     resume_training_step = ray.get(inits)[0] + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
@@ -1570,7 +1584,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # Setup training
     stop_strings = [] if args.stop_strings is None else args.stop_strings
     if args.tool_use:
-        stop_strings += list(tool_objects.keys())
+        stop_strings += [tool.end_str for tool in tool_objects.values()]
     generation_config = SamplingParams(
         temperature=args.temperature,
         top_p=0.98,  # prevent rare out-of-vocab tokens with qwen

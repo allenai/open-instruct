@@ -461,6 +461,8 @@ class Args:
     """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
+    tool_call_parser: str | None = None
+    """The vLLM tool call parser to use (e.g., 'olmo3', 'llama3_json', 'mistral'). Required when tools are enabled."""
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
 
@@ -537,6 +539,11 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+            if self.tool_call_parser is None:
+                raise ValueError(
+                    "--tool_call_parser is required when --tools is specified. "
+                    "Choose a parser compatible with your model (e.g., olmo3, hermes, llama3_json)."
+                )
             if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
                 assert self.mask_tool_use, (
                     "Must mask tool use when using vLLM logprobs or truncated importance sampling."
@@ -2136,7 +2143,8 @@ def create_model_and_optimizer(
     )
 
     # Set up tools
-    max_len = args.max_prompt_token_length + args.response_length
+    # Use pack_length for vLLM's max_model_len to accommodate chat template tokens
+    max_len = args.pack_length
     tool_objects = {}
     if args.tools:
         for tool in args.tools:
@@ -2149,14 +2157,14 @@ def create_model_and_optimizer(
                     api_endpoint=args.search_api_endpoint,
                     number_documents_to_search=args.number_documents_to_search,
                 )
-                tool_objects[tool.end_str] = tool
+                tool_objects[tool.name] = tool
                 # Add tool end string to stop_strings
                 args.stop_strings.append(tool.end_str)
             elif tool.lower() == "code":
                 from open_instruct.tool_utils.tools import PythonCodeTool
 
                 tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
-                tool_objects[tool.end_str] = tool
+                tool_objects[tool.name] = tool
                 # Add tool end string to stop_strings
                 args.stop_strings.append(tool.end_str)
             else:
@@ -2186,6 +2194,7 @@ def create_model_and_optimizer(
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
         mask_tool_use=args.mask_tool_use,
+        tool_call_parser=args.tool_call_parser,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,

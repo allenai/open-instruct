@@ -13,18 +13,12 @@ class SearchTool(Tool):
         self.number_documents_to_search = kwargs.pop("number_documents_to_search", 3)
         super().__init__(*args, **kwargs)
 
-    def __call__(self, prompt: str) -> ToolOutput:
-        # Find Python code blocks using regex
-        re_str = r"<tool>\s*(.*?)\s*</tool>"  # we replace <tool> immediately with the custom start_str
+    def __call__(self, input_text: str) -> ToolOutput:
+        re_str = r"<tool>\s*(.*?)\s*</tool>"
         re_str = re_str.replace("<tool>", self.start_str).replace("</tool>", self.end_str)
 
-        query_blocks = re.findall(re_str, prompt, re.DOTALL)
-
-        if len(query_blocks) == 0:
-            return ToolOutput(output="", called=False, error="", timeout=False, runtime=0)
-
-        # Only execute the last code block
-        query_string = query_blocks[-1]
+        query_blocks = re.findall(re_str, input_text, re.DOTALL)
+        query_string = query_blocks[-1] if query_blocks else input_text.strip()
 
         if not query_string:
             return ToolOutput(

@@ -18,6 +18,7 @@
 import argparse
 import asyncio
 import dataclasses
+import json
 import os
 import queue
 import socket
@@ -198,35 +199,35 @@ def split_request_id(full_request_id: str) -> dict:
     return {"base_id": "_".join(parts[:-1]), "request_index": int(parts[-1])}
 
 
-def get_triggered_tool(
-    output_text: str,
-    tools: dict[str, Tool],
-    max_tool_calls: dict[str, int],
-    num_calls: int,
-    sampling_params: SamplingConfig,
-) -> tuple[Tool | None, str | None]:
-    """Check if any tool was triggered and return the tool and stop_str if found.
+def format_tools_for_openai(tools: dict[str, Tool]) -> list[dict[str, Any]]:
+    formatted_tools = []
+    for tool_name, _tool in tools.items():
+        formatted_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": f"Execute the {tool_name} tool.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"input": {"type": "string", "description": "The content to send to the tool."}},
+                        "required": ["input"],
+                    },
+                },
+            }
+        )
+    return formatted_tools
 
-    Args:
-        output_text: The generated text to check for tool triggers
-        tools: Dictionary mapping stop strings to Tool instances
-        max_tool_calls: Dictionary mapping stop strings to their call limits
-        num_calls: Current number of tool calls for this request
-        sampling_params: Sampling parameters containing stop strings
 
-    Returns:
-        Tuple of (tool, stop_str) if a tool was triggered, (None, None) otherwise.
-    """
-    if not sampling_params.stop:
-        return None, None
+def extract_tool_calls(choice) -> list[Any]:
+    if hasattr(choice, "tool_calls") and choice.tool_calls is not None:
+        return choice.tool_calls
 
-    for stop_str in sampling_params.stop:
-        if stop_str in tools and output_text.endswith(stop_str):
-            if num_calls < max_tool_calls.get(stop_str, 0):
-                return tools[stop_str], stop_str
-            else:
-                return MaxCallsExceededTool(start_str="<tool>", end_str="</tool>"), stop_str
-    return None, None
+    message = getattr(choice, "message", None)
+    if message is not None and hasattr(message, "tool_calls"):
+        return message.tool_calls or []
+
+    return []
 
 
 def process_completed_request(request_id, outs, current_time, tools, request_metadata):
@@ -426,10 +427,13 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         )
 
 
-def _create_server_args(model_path: str) -> argparse.Namespace:
+def _create_server_args(model_path: str, tool_call_parser: str | None = None) -> argparse.Namespace:
     parser = FlexibleArgumentParser()
     parser = make_arg_parser(parser)
-    args = parser.parse_args(["--model", model_path])
+    args_list = ["--model", model_path]
+    if tool_call_parser:
+        args_list.extend(["--enable-auto-tool-choice", "--tool-call-parser", tool_call_parser])
+    args = parser.parse_args(args_list)
     args.disable_fastapi_docs = True
     return args
 
@@ -505,6 +509,7 @@ class LLMRayActor:
         tools: dict[str, Tool] | None = None,
         max_tool_calls: dict[str, int] | None = None,
         mask_tool_use: bool = True,
+        tool_call_parser: str | None = None,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
         results_queue: ray_queue.Queue,
@@ -518,7 +523,14 @@ class LLMRayActor:
     ):
         assert_threaded_actor(self)
         self._init_config(
-            tools, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
+            tools,
+            max_tool_calls,
+            mask_tool_use,
+            tool_call_parser,
+            inflight_updates,
+            reward_config,
+            train_dataset,
+            eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -535,6 +547,7 @@ class LLMRayActor:
         tools: dict[str, Tool] | None,
         max_tool_calls: dict[str, int] | None,
         mask_tool_use: bool,
+        tool_call_parser: str | None,
         inflight_updates: bool,
         reward_config: RewardConfig | None,
         train_dataset,
@@ -543,6 +556,7 @@ class LLMRayActor:
         self.tools = tools or {}
         self.max_tool_calls = max_tool_calls or {}
         self.mask_tool_use = mask_tool_use
+        self.tool_call_parser = tool_call_parser
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
         self.active_tasks = {}
@@ -605,7 +619,7 @@ class LLMRayActor:
 
             engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
-            args = _create_server_args(engine_client.vllm_config.model_config.model)
+            args = _create_server_args(engine_client.vllm_config.model_config.model, self.tool_call_parser)
             app = build_app(args)
             await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
 
@@ -790,50 +804,72 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
     original_prompt = actor.request_metadata[base_request_id]["prompt_token_ids"]
-    current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
+    openai_tools = format_tools_for_openai(actor.tools) if actor.tools and actor.tool_call_parser else None
+
+    initial_prompt_text = actor.llm_engine.tokenizer.decode(original_prompt, skip_special_tokens=False)
+    messages = [{"role": "user", "content": initial_prompt_text}]
 
     while True:
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
-        api_response = await actor.client.completions.create(
+        extra_body = {"return_token_ids": True, "cache_salt": base_request_id, "skip_special_tokens": False}
+
+        api_response = await actor.client.chat.completions.create(
             model=actor.model_name,
-            prompt=current_prompt,
-            extra_body={
-                "return_token_ids": True,
-                "cache_salt": base_request_id,
-                "include_stop_str_in_output": True,
-                "skip_special_tokens": False,
-            },
-            **dataclasses.asdict(current_sampling_params),
+            messages=messages,
+            tools=openai_tools,
+            tool_choice="auto" if openai_tools else None,
+            extra_body=extra_body,
+            temperature=current_sampling_params.temperature,
+            top_p=current_sampling_params.top_p,
+            max_tokens=current_sampling_params.max_tokens,
+            n=current_sampling_params.n,
+            stop=current_sampling_params.stop,
+            seed=current_sampling_params.seed,
+            logprobs=current_sampling_params.logprobs is not None,
+            top_logprobs=current_sampling_params.logprobs,
         )
 
-        output = api_response.choices[0]
-        model_tokens = list(output.token_ids)
+        choice = api_response.choices[0]
+        model_tokens = list(choice.token_ids) if hasattr(choice, "token_ids") else []
 
         response_tokens.extend(model_tokens)
-        current_prompt.extend(model_tokens)
 
-        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
-        for logprob in output.logprobs.token_logprobs:
-            response_logprobs.append(logprob)
-            cumulative_logprob += logprob
+        if choice.logprobs and choice.logprobs.content:
+            for token_logprob in choice.logprobs.content:
+                response_logprobs.append(token_logprob.logprob)
+                cumulative_logprob += token_logprob.logprob
+        else:
+            response_logprobs.extend([0.0] * len(model_tokens))
 
         response_masks.extend([1] * len(model_tokens))
 
-        if not actor.tools or not actor.max_tool_calls:
-            break
-
-        triggered_tool, stop_str = get_triggered_tool(
-            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
-        )
-        if triggered_tool is None:
+        tool_calls = extract_tool_calls(choice) if actor.tools and actor.tool_call_parser else []
+        if not tool_calls:
             break
 
         assert actor.executor is not None, f"executor is None for request {sub_request_id}"
 
+        tool_call = tool_calls[0]
+        tool_name = getattr(tool_call.function, "name", None) if hasattr(tool_call, "function") else None
+        if tool_name is None or tool_name not in actor.tools:
+            break
+
+        if num_calls < actor.max_tool_calls.get(tool_name, 0):
+            selected_tool: Tool = actor.tools[tool_name]
+        else:
+            selected_tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
+
+        arguments = getattr(tool_call.function, "arguments", "") if hasattr(tool_call, "function") else ""
+        try:
+            parsed_arguments = json.loads(arguments) if arguments else {}
+            tool_input = parsed_arguments.get("input") or arguments
+        except json.JSONDecodeError:
+            tool_input = arguments
+
         loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
+        tool_result = await loop.run_in_executor(actor.executor, selected_tool, tool_input)
 
         tool_called = True
         num_calls += 1
@@ -842,13 +878,17 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         tool_output += tool_result.output
         tool_runtime += tool_result.runtime
 
-        tool_tokens = actor.llm_engine.tokenizer.encode(
-            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+        messages.append(
+            {"role": "assistant", "content": choice.message.content, "tool_calls": choice.message.tool_calls}
         )
+        messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": tool_result.output})
+
+        tool_output_text = tool_result.start_str + tool_result.output + tool_result.end_str
+        tool_tokens = actor.llm_engine.tokenizer.encode(tool_output_text, add_special_tokens=False)
 
         tool_tokens, excess = truncate_tool_output_tokens(
             tool_tokens,
-            current_prompt_len=len(current_prompt),
+            current_prompt_len=len(original_prompt) + len(response_tokens),
             current_response_len=len(response_masks),
             max_model_len=max_model_len,
             max_tokens=sampling_params.max_tokens,
@@ -857,7 +897,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         response_tokens.extend(tool_tokens)
         response_logprobs.extend([0.0] * len(tool_tokens))
         response_masks.extend([0 if actor.mask_tool_use else 1] * len(tool_tokens))
-        current_prompt.extend(tool_tokens)
 
         current_max_tokens = sampling_params.max_tokens - len(response_masks)
         if excess > 0 or current_max_tokens <= 0:
@@ -868,7 +907,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         token_ids=response_tokens,
         cumulative_logprob=cumulative_logprob,
         logprobs=response_logprobs,
-        finish_reason=output.finish_reason,
+        finish_reason=choice.finish_reason,
     )
     if actor.tools:
         complete_output.mask = response_masks
@@ -930,6 +969,7 @@ def create_vllm_engines(
     tools: dict[str, Tool] | None = None,
     max_tool_calls: tuple[int, ...] = (5,),
     mask_tool_use: bool = True,
+    tool_call_parser: str | None = None,
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
@@ -940,12 +980,11 @@ def create_vllm_engines(
     train_dataset=None,
     eval_dataset=None,
 ) -> list[LLMRayActor]:
-    # Convert max_tool_calls to a dict mapping tool end strings to their limits
+    # Convert max_tool_calls to a dict mapping tool names to their limits
     if tools:
         assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
             "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
         )
-        # tool key is the end_str
         if len(max_tool_calls) == 1:
             max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools}
         else:
@@ -1017,6 +1056,7 @@ def create_vllm_engines(
                 tools=tools,
                 max_tool_calls=max_tool_calls_dict,
                 mask_tool_use=mask_tool_use,
+                tool_call_parser=tool_call_parser,
                 inflight_updates=inflight_updates,
                 kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
                 calculate_kv_scales=use_fp8_kv_cache,
