@@ -1655,6 +1655,20 @@ def create_model_and_optimizer(
     generation_config,
 ) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
+    # Wait for all expected GPUs to be available in the cluster
+    # This ensures worker nodes have fully registered their resources
+    expected_gpus = sum(args.num_learners_per_node) + args.vllm_num_engines * args.vllm_tensor_parallel_size
+    logger.info(f"[DEBUG] Waiting for {expected_gpus} GPUs to be available in cluster...")
+    for i in range(60):  # Wait up to 60 seconds
+        cluster_resources = ray.cluster_resources()
+        available_gpus = cluster_resources.get("GPU", 0)
+        logger.info(f"[DEBUG] Cluster has {available_gpus} GPUs (need {expected_gpus})")
+        if available_gpus >= expected_gpus:
+            break
+        time.sleep(1)
+    else:
+        logger.warning(f"[WARNING] Only {available_gpus} GPUs available, expected {expected_gpus}")
+
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
