@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import re
 
-df = pd.read_csv("calc-likelihoods/log_likelihood_results-100.csv")
+df = pd.read_csv("calc-likelihoods/log_likelihood_results-SFT-100.csv")
 
 def extract_step(model_name):
     """Extract step number from model name."""
@@ -63,13 +63,13 @@ for domain in domains:
 
 ax.set_xlabel('Training Step', fontsize=12, fontweight='bold')
 ax.set_ylabel('Average Log Likelihood', fontsize=12, fontweight='bold')
-ax.set_title('Average Log Likelihood over Training Steps', fontsize=14, fontweight='bold')
+ax.set_title('Average Log Likelihood over Training Steps (SFT)', fontsize=14, fontweight='bold')
 ax.legend(loc='best', framealpha=0.9, fontsize=9)
 ax.grid(True, alpha=0.3, linestyle='--')
 
 plt.tight_layout()
-plt.savefig('calc-likelihoods/plots/likelihood_plot.png', dpi=300, bbox_inches='tight')
-plt.savefig('calc-likelihoods/plots/likelihood_plot.pdf', bbox_inches='tight')
+plt.savefig('calc-likelihoods/plots/sft_likelihood_plot.png', dpi=300, bbox_inches='tight')
+plt.savefig('calc-likelihoods/plots/sft_likelihood_plot.pdf', bbox_inches='tight')
 print("✓ Combined plot saved")
 plt.close()
 
@@ -105,13 +105,13 @@ for domain in domains:
         
         ax.set_xlabel('Training Step', fontsize=12, fontweight='bold')
         ax.set_ylabel('Average Log Likelihood', fontsize=12, fontweight='bold')
-        ax.set_title(f'{domain.upper()} - {dist_label.upper()}', fontsize=14, fontweight='bold')
+        ax.set_title(f'{domain.upper()} - {dist_label.upper()} (SFT)', fontsize=14, fontweight='bold')
         ax.grid(True, alpha=0.3, linestyle='--')
         
         plt.tight_layout()
         
         # Save with descriptive filename
-        filename = f'calc-likelihoods/plots/individual_{domain}_{dist_label.replace("-", "_")}.png'
+        filename = f'calc-likelihoods/plots/sft_individual_{domain}_{dist_label.replace("-", "_")}.png'
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.savefig(filename.replace('.png', '.pdf'), bbox_inches='tight')
         print(f"✓ Individual plot saved: {filename}")
@@ -158,14 +158,14 @@ for domain in domains:
     
     ax.set_xlabel('Training Step', fontsize=12, fontweight='bold')
     ax.set_ylabel('Average Log Likelihood', fontsize=12, fontweight='bold')
-    ax.set_title(f'{domain.upper()} - Average Log Likelihood over Training', 
+    ax.set_title(f'{domain.upper()} - Average Log Likelihood over Training (SFT)', 
                  fontsize=14, fontweight='bold')
     ax.legend(loc='best', framealpha=0.9, fontsize=11)
     ax.grid(True, alpha=0.3, linestyle='--')
     
     plt.tight_layout()
     
-    filename = f'calc-likelihoods/plots/domain_{domain}.png'
+    filename = f'calc-likelihoods/plots/sft_likelihood_domain_{domain}.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.savefig(filename.replace('.png', '.pdf'), bbox_inches='tight')
     print(f"✓ Domain plot saved: {filename}")
