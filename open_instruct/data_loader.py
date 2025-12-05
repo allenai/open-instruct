@@ -383,14 +383,9 @@ def add_prompt_to_generator(
     generation_config,
     is_eval: bool,
 ) -> None:
-    query = example[INPUT_IDS_PROMPT_KEY]
-    logger.info(
-        f"[add_prompt_to_generator] Adding prompt: dataset_index={example['dataset_index']}, epoch={epoch_number}, step={training_step}"
-    )
-
     param_prompt_Q.put(
         PromptRequest(
-            prompt=query,
+            prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
             epoch_number=epoch_number,
             training_step=training_step,
@@ -419,8 +414,6 @@ def accumulate_inference_batches(
     verbose: bool = False,
     max_possible_score: float = 1.0,
 ) -> tuple[GenerationResult, Batch, dict, BatchStatistics]:
-    import ray
-
     if no_resampling_pass_rate is not None:
         assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
 
@@ -450,13 +443,8 @@ def accumulate_inference_batches(
         disable=not verbose,
     )
     num_prompts_sampled = 0
-    logger.info(f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts")
     while num_prompts_sampled < num_prompts:
-        logger.info(f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts}")
         result = inference_results_Q.get(timeout=timeout)
-        logger.info(
-            f"[accumulate_inference_batches] Got result: {result.dataset_index if hasattr(result, 'dataset_index') else type(result)}"
-        )
 
         if isinstance(result, ShutdownSentinel):
             return result, None, None, None
@@ -581,12 +569,10 @@ def accumulate_inference_batches(
         total_response_tokens += result.token_statistics.num_response_tokens
         max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
 
-    total_generation_time = max_generation_time
-
     accumulated_stats = TokenStatistics(
         num_prompt_tokens=total_prompt_tokens,
         num_response_tokens=total_response_tokens,
-        generation_time=total_generation_time,
+        generation_time=max_generation_time,
         earliest_start_time=earliest_start_time,
     )
 
@@ -782,9 +768,6 @@ class DataPreparationActor:
             raise
 
     def _data_preparation_loop_inner(self):
-        logger.info(
-            f"[DataPreparationActor] Starting data preparation loop, async_steps={self.config.async_steps}, global_batch_size={self.global_batch_size}"
-        )
         for _ in range(self.config.async_steps * self.global_batch_size):
             add_prompt_to_generator(
                 next(self.iter_dataloader),
@@ -794,16 +777,11 @@ class DataPreparationActor:
                 self.generation_config,
                 is_eval=False,
             )
-        logger.info(
-            f"[DataPreparationActor] Initial prompts submitted, entering main loop for {self.num_training_steps} steps"
-        )
 
         for step in range(self.training_step, self.num_training_steps):
             if self.shutdown_requested:
-                logger.info("[DataPreparationActor] Shutdown requested, exiting")
                 return
 
-            logger.info(f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches")
             result, batch, reward_metrics, batch_stats = accumulate_inference_batches(
                 self.inference_results_Q,
                 self.generation_config,
@@ -822,16 +800,11 @@ class DataPreparationActor:
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
             )
-            logger.info(
-                f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result is None: {result is None}"
-            )
 
             if isinstance(result, ShutdownSentinel):
-                logger.info("[DataPreparationActor] Received shutdown sentinel, exiting")
                 return
 
             if result is None:
-                logger.info("[DataPreparationActor] All prompts filtered, yielding empty batch")
                 empty_data = [
                     {
                         "collated_query_responses": [],
