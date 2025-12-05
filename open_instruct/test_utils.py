@@ -468,31 +468,6 @@ class TestModelDims(unittest.TestCase):
         )
         self.assertLessEqual(metrics["learner_mfu"], 100)
 
-    def test_model_dims_match_vllm_config(self):
-        expected_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
-
-        mock_hf_text_config = mock.Mock()
-        mock_hf_text_config.intermediate_size = 18944
-        mock_hf_text_config.sliding_window = None
-        mock_hf_text_config.num_attention_heads = 28
-        mock_hf_text_config.num_key_value_heads = 4
-
-        mock_model_config = mock.Mock()
-        mock_model_config.get_hidden_size.return_value = 3584
-        mock_model_config.get_num_layers.return_value = 28
-        mock_model_config.get_vocab_size.return_value = 152064
-        mock_model_config.get_head_size.return_value = 128
-        mock_model_config.hf_text_config = mock_hf_text_config
-
-        mock_vllm_config = mock.Mock()
-        mock_vllm_config.model_config = mock_model_config
-        mock_vllm_config.parallel_config = mock.Mock()
-
-        with mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
-            vllm_dims = utils.ModelDims.from_vllm_config(mock_vllm_config)
-
-        self.assertEqual(vllm_dims, expected_dims)
-
 
 # useful for checking if public datasets are still available
 # class CheckTuluDatasetsTest(unittest.TestCase):

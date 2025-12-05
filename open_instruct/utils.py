@@ -56,7 +56,6 @@ import numpy as np
 import ray
 import requests
 import torch
-import vllm.config
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -1808,36 +1807,6 @@ class ModelDims:
         lm_head_params = self.vocab_size * self.hidden_size
 
         return embedding_params + layer_params + lm_head_params
-
-    @classmethod
-    def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
-        """Create ModelDims from a vLLM config object."""
-        model_config = vllm_config.model_config
-        hidden_size = model_config.get_hidden_size()
-
-        # Try to get intermediate_size, default to 4x hidden_size if not present
-        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
-
-        sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
-        num_sliding_window_layers = 0
-
-        if sliding_window is not None:
-            layer_types = getattr(model_config.hf_text_config, "layer_types", None)
-            if layer_types is not None:
-                num_sliding_window_layers = sum(1 for lt in layer_types if lt == "sliding_attention")
-
-        return cls(
-            num_layers=model_config.get_num_layers(vllm_config.parallel_config),
-            hidden_size=hidden_size,
-            intermediate_size=intermediate_size,
-            vocab_size=model_config.get_vocab_size(),
-            num_attn_heads=model_config.hf_text_config.num_attention_heads,
-            num_kv_heads=model_config.hf_text_config.num_key_value_heads,
-            head_dim=model_config.get_head_size(),
-            sliding_window=sliding_window,
-            num_sliding_window_layers=num_sliding_window_layers,
-            device_name=get_device_name(torch.cuda.get_device_name(0)),
-        )
 
     @property
     def device_flops(self) -> float:

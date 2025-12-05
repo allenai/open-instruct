@@ -1,5 +1,6 @@
 import logging
 import unittest
+from unittest import mock
 from unittest.mock import MagicMock
 
 import vllm
@@ -7,6 +8,7 @@ from parameterized import parameterized
 
 from open_instruct import vllm_utils
 from open_instruct.queue_types import PromptRequest
+from open_instruct.utils import MODEL_DIMS
 
 
 class TestTruncateToolOutputTokens(unittest.TestCase):
@@ -195,6 +197,33 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_outputs, ["", ""])
         self.assertEqual(result.request_info.tool_runtimes, [0.0, 0.0])
         self.assertEqual(result.request_info.tool_calleds, [False, False])
+
+
+class TestModelDimsFromVllmConfig(unittest.TestCase):
+    def test_model_dims_match_vllm_config(self):
+        expected_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
+
+        mock_hf_text_config = mock.Mock()
+        mock_hf_text_config.intermediate_size = 18944
+        mock_hf_text_config.sliding_window = None
+        mock_hf_text_config.num_attention_heads = 28
+        mock_hf_text_config.num_key_value_heads = 4
+
+        mock_model_config = mock.Mock()
+        mock_model_config.get_hidden_size.return_value = 3584
+        mock_model_config.get_num_layers.return_value = 28
+        mock_model_config.get_vocab_size.return_value = 152064
+        mock_model_config.get_head_size.return_value = 128
+        mock_model_config.hf_text_config = mock_hf_text_config
+
+        mock_vllm_config = mock.Mock()
+        mock_vllm_config.model_config = mock_model_config
+        mock_vllm_config.parallel_config = mock.Mock()
+
+        with mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
+            vllm_dims = vllm_utils.model_dims_from_vllm_config(mock_vllm_config)
+
+        self.assertEqual(vllm_dims, expected_dims)
 
 
 if __name__ == "__main__":
