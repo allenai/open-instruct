@@ -978,8 +978,15 @@ def create_vllm_engines(
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
         bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
+        cluster_resources = ray.cluster_resources()
+        available_resources = ray.available_resources()
+        logger.info(f"[DEBUG] Cluster resources: {cluster_resources}")
+        logger.info(f"[DEBUG] Available resources: {available_resources}")
+        logger.info(f"[DEBUG] Creating vLLM placement group with {len(bundles)} bundles")
         pg = placement_group(bundles, strategy="PACK")
+        logger.info(f"[DEBUG] Waiting for vLLM placement group...")
         ray.get(pg.ready())
+        logger.info(f"[DEBUG] vLLM placement group ready!")
 
     # ensure we use bundles on the same node where possible if tp>1.
     bundle_indices_list = get_bundle_indices_list(pg)
