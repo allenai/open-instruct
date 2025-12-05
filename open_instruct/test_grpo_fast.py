@@ -1,6 +1,9 @@
 import dataclasses
 import gc
 import os
+
+os.environ["HF_HUB_OFFLINE"] = "1"
+
 import random
 import threading
 import time
@@ -264,7 +267,7 @@ class TestGrpoFastBase(unittest.TestCase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, param_prompt_Q, mock_generation_config, False)
+            grpo_fast.add_prompt_to_generator(example, 0, 0, param_prompt_Q, mock_generation_config, False)
 
         return param_prompt_Q, inference_results_Q, mock_dataset
 
@@ -605,19 +608,17 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             mock_result = self.create_mock_result_from_request(request, num_samples_per_prompt)
             inference_results_Q.put(mock_result)
 
-        mock_args = self.create_mock_args(num_engines, num_samples_per_prompt)
         mock_generation_config = Mock()
         mock_generation_config.n = num_samples_per_prompt
 
         mock_model_dims = self.create_mock_model_dims()
         combined_result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
             inference_results_Q,
-            mock_args,
             generation_config=mock_generation_config,
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
-            prompt_dataset=mock_dataset,
+            dataset=mock_dataset,
         )
 
         self.assertEqual(len(batch.queries), num_prompts * num_samples_per_prompt)
@@ -646,8 +647,6 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                 mock_result = self.create_mock_result(i, f"0_{i}")
                 inference_results_Q.put(mock_result)
 
-        mock_args = self.create_mock_args(num_engines)
-
         completed = threading.Event()
 
         def run_accumulate():
@@ -658,12 +657,11 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                 mock_model_dims = self.create_mock_model_dims()
                 grpo_fast.accumulate_inference_batches(
                     inference_results_Q,
-                    mock_args,
                     generation_config=mock_generation_config,
                     num_prompts=num_prompts,
                     model_dims=mock_model_dims,
                     tokenizer=tokenizer,
-                    prompt_dataset=mock_dataset,
+                    dataset=mock_dataset,
                 )
                 completed.set()
             except Exception:
@@ -683,6 +681,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
     def test_more_engines_than_queries(self):
         """Test that add_prompt_to_generator handles gracefully when engines > queries."""
+        # More engines than queries - should handle gracefully with single-prompt batches
         num_queries = 4
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
@@ -699,7 +698,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, param_prompt_Q, mock_generation_config, False)
+            grpo_fast.add_prompt_to_generator(example, 0, 0, param_prompt_Q, mock_generation_config, False)
 
         self.assertEqual(
             param_prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries"
@@ -732,7 +731,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, param_prompt_Q, mock_generation_config, False)
+            grpo_fast.add_prompt_to_generator(example, 0, 0, param_prompt_Q, mock_generation_config, False)
 
         request_count = 0
         while not param_prompt_Q.empty():
@@ -826,13 +825,13 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         num_prompts = 8
         num_samples_per_prompt = 4
 
-        queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
+        queries, ground_truths, datasets_list, raw_queries, indices = self.create_test_data(num_prompts)
 
         inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
 
         self._ray_queues.append(inference_results_Q)
 
-        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets_list, raw_queries)
 
         for i in range(num_prompts):
             constant_scores = [0.5] * num_samples_per_prompt
@@ -841,7 +840,6 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
             )
             inference_results_Q.put(mock_result)
 
-        mock_args = self.create_mock_args(num_engines=4, num_samples=num_samples_per_prompt)
         mock_generation_config = Mock()
         mock_generation_config.n = num_samples_per_prompt
         mock_model_dims = self.create_mock_model_dims()
@@ -851,13 +849,14 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
 
         result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
             inference_results_Q,
-            mock_args,
             generation_config=mock_generation_config,
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
-            prompt_dataset=mock_dataset,
+            dataset=mock_dataset,
             filter_zero_std_samples=True,
+            verbose=False,
+            max_possible_score=1.0,
         )
 
         self.assertIsNone(result)
