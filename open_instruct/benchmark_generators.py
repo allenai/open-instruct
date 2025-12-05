@@ -29,7 +29,7 @@ from ray.util import queue as ray_queue
 
 from open_instruct import dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
-from open_instruct.queue_types import PromptRequest
+from open_instruct.data_types import PromptRequest
 
 logger = logger_utils.setup_logger(__name__)
 
