@@ -395,17 +395,12 @@ async def _check_health(port: int) -> None:
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
-    logger.info("[_prefetch_worker] Starting prefetch worker loop")
     while True:
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        logger.info(f"[_prefetch_worker] Waiting for request, active_tasks={len(actor.active_tasks)}")
         request = actor.prompt_queue.get()
-        logger.info(
-            f"[_prefetch_worker] Got request: dataset_index={request.dataset_index}, is_eval={request.is_eval}"
-        )
         add_request(actor, request)
 
 
@@ -444,7 +439,6 @@ def _create_server_args(model_path: str) -> argparse.Namespace:
 def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> None:
     base_request_id = sub_request["base_request_id"]
     expected_n = sub_request["expected_n"]
-    logger.info(f"[accumulate_completions] {base_request_id}: received sub-request")
 
     if base_request_id not in actor.request_outputs:
         actor.request_outputs[base_request_id] = {
@@ -478,7 +472,6 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
     dataset = actor.eval_dataset if is_eval else actor.train_dataset
     result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
-    logger.info(f"[finalize_completed_request] {base_request_id}: Putting result in queue (is_eval={is_eval})")
     results_queue.put(result)
 
 
@@ -805,7 +798,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     while True:
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
-        logger.info(f"[process_request] {sub_request_id}: Making API call with max_tokens={current_max_tokens}")
         api_response = await actor.client.completions.create(
             model=actor.model_name,
             prompt=current_prompt,
@@ -817,7 +809,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             },
             **dataclasses.asdict(current_sampling_params),
         )
-        logger.info(f"[process_request] {sub_request_id}: Got API response")
 
         output = api_response.choices[0]
         model_tokens = list(output.token_ids)
@@ -976,24 +967,14 @@ def create_vllm_engines(
     logger.info(f"num_gpus: {num_gpus}")
 
     if not use_hybrid_engine:
-        # Create a big placement group to ensure that all engines are packed
         bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
-        cluster_resources = ray.cluster_resources()
-        available_resources = ray.available_resources()
-        logger.info(f"[DEBUG] Cluster resources: {cluster_resources}")
-        logger.info(f"[DEBUG] Available resources: {available_resources}")
-        logger.info(f"[DEBUG] Creating vLLM placement group with {len(bundles)} bundles")
         pg = placement_group(bundles, strategy="PACK")
-        logger.info(f"[DEBUG] Waiting for vLLM placement group...")
         ray.get(pg.ready())
-        logger.info(f"[DEBUG] vLLM placement group ready!")
 
     # ensure we use bundles on the same node where possible if tp>1.
     bundle_indices_list = get_bundle_indices_list(pg)
 
-    logger.info(f"[DEBUG] Creating {num_engines} vLLM engines with tensor_parallel_size={tensor_parallel_size}")
     for i in range(num_engines):
-        logger.info(f"[DEBUG] Creating vLLM engine {i + 1}/{num_engines}")
         bundle_indices = None
         bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
 
@@ -1045,12 +1026,9 @@ def create_vllm_engines(
                 eval_dataset=eval_dataset,
             )
         )
-        logger.info(f"[DEBUG] vLLM engine {i + 1}/{num_engines} actor created")
 
-    logger.info(f"[DEBUG] All {num_engines} vLLM engine actors created, waiting for ready() (timeout=1200s)...")
     ray_get_with_progress(
         [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=1200
     )
-    logger.info(f"[DEBUG] All {num_engines} vLLM engines ready!")
 
     return vllm_engines
