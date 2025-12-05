@@ -59,7 +59,7 @@ class TestGeneration(TestGrpoFastBase):
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
         ray.get(pg.ready())
 
-        create_vllm_engines(
+        engines = create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
             enforce_eager=True,
@@ -79,7 +79,7 @@ class TestGeneration(TestGrpoFastBase):
             max_tool_calls=max_tool_calls,
         )
 
-        param_prompt_Q.put(request)
+        ray.get(engines[0].submit_request.remote(request))
         result = inference_results_Q.get(timeout=120)
         param_prompt_Q.put(None)
 
@@ -154,7 +154,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
 
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
-        create_vllm_engines(
+        engines = create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
             enforce_eager=True,
@@ -170,13 +170,11 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         )
 
         generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=5, seed=42)
-
-        param_prompt_Q.put(
-            PromptRequest(
-                prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
-            )
+        request = PromptRequest(
+            prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
         )
 
+        ray.get(engines[0].submit_request.remote(request))
         result = inference_results_Q.get()
 
         self.assertIsInstance(result, GenerationResult)
