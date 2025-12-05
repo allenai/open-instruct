@@ -39,7 +39,7 @@ from open_instruct.dataset_transformation import (
     VERIFIER_SOURCE_KEY,
 )
 from open_instruct.model_utils import Batch
-from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, ShutdownSentinel, TokenStatistics
+from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, ShutdownSentinel, TokenStatistics
 from open_instruct.rl_utils import PackedSequences, pack_sequences
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
