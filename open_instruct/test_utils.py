@@ -19,9 +19,8 @@ import unittest
 from unittest import mock
 
 import pytest
+import ray
 import responses
-import torch
-import vllm
 from dateutil import parser
 from parameterized import parameterized
 
@@ -241,25 +240,77 @@ class TestBeakerDescription(unittest.TestCase):
         self.assertNotIn("% complete", desc)
 
 
-class TestSlackAlert(unittest.TestCase):
+class TestSlackMessage(unittest.TestCase):
     @responses.activate
     @mock.patch("open_instruct.utils.get_beaker_experiment_url")
     @mock.patch("os.environ.get")
-    def test_send_slack_alert_with_beaker_url(self, mock_environ_get, mock_get_beaker_url):
+    def test_send_slack_message_with_beaker_url(self, mock_environ_get, mock_get_beaker_url):
         webhook_url = "https://hooks.slack.com/services/test"
         mock_environ_get.return_value = webhook_url
-        mock_get_beaker_url.return_value = "https://beaker.org/ex/test-123"
+        mock_get_beaker_url.return_value = "https://beaker.org/ex/test-456"
 
         responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
 
-        test_error = ValueError("Test error message")
-        utils.send_slack_alert(test_error)
+        utils.send_slack_message("<!here> Disk is nearly full.")
 
         self.assertEqual(len(responses.calls), 1)
         request_body = json.loads(responses.calls[0].request.body)
-        self.assertIn("<!here> A RL job has died.", request_body["text"])
-        self.assertIn("https://beaker.org/ex/test-123", request_body["text"])
-        self.assertIn("Test error message", request_body["text"])
+        self.assertIn("https://beaker.org/ex/test-456", request_body["text"])
+        self.assertIn("Disk is nearly full", request_body["text"])
+
+
+class TestWarnIfLowDiskSpace(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("gcs", "gs://bucket/path"),
+            ("s3", "s3://bucket/path"),
+            ("azure", "az://container/path"),
+            ("hdfs", "hdfs://cluster/path"),
+        ]
+    )
+    def test_cloud_paths_skipped(self, name, path):
+        with mock.patch("shutil.disk_usage") as mock_disk_usage:
+            grpo_fast.warn_if_low_disk_space(path, threshold=0.5, send_slack_alerts=False)
+            mock_disk_usage.assert_not_called()
+
+    @mock.patch("shutil.disk_usage")
+    def test_no_warning_below_threshold(self, mock_disk_usage):
+        mock_disk_usage.return_value = mock.Mock(total=100, used=50, free=50)
+        with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
+            grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
+            mock_warning.assert_not_called()
+
+    @mock.patch("shutil.disk_usage")
+    def test_warning_above_threshold(self, mock_disk_usage):
+        mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
+        with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
+            grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
+            mock_warning.assert_called_once()
+            self.assertIn("90.0%", mock_warning.call_args[0][0])
+
+    @responses.activate
+    @mock.patch("shutil.disk_usage")
+    @mock.patch("open_instruct.utils.get_beaker_experiment_url")
+    @mock.patch("os.environ.get")
+    def test_slack_alert_sent_when_enabled(self, mock_environ_get, mock_get_beaker_url, mock_disk_usage):
+        webhook_url = "https://hooks.slack.com/services/test"
+        mock_environ_get.return_value = webhook_url
+        mock_get_beaker_url.return_value = None
+        mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
+        responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
+
+        grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=True)
+
+        self.assertEqual(len(responses.calls), 1)
+        request_body = json.loads(responses.calls[0].request.body)
+        self.assertIn("Disk usage near capacity", request_body["text"])
+
+    @mock.patch("shutil.disk_usage")
+    def test_zero_total_disk_space_returns_early(self, mock_disk_usage):
+        mock_disk_usage.return_value = mock.Mock(total=0, used=0, free=0)
+        with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
+            grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
+            mock_warning.assert_not_called()
 
 
 class TestUtilityFunctions(unittest.TestCase):
@@ -471,35 +522,27 @@ class TestModelDims(unittest.TestCase):
         self.assertLessEqual(metrics["learner_mfu"], 100)
 
     def test_model_dims_match_vllm_config(self):
-        model_name = "Qwen/Qwen2.5-7B"
-        expected_dims = MODEL_DIMS[model_name]
+        expected_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
 
-        mock_platform = mock.Mock()
-        mock_platform.device_type = "cuda"
-        mock_platform.is_cuda_alike.return_value = True
-        mock_platform.supported_dtypes = [torch.float16, torch.bfloat16, torch.float32]
-        mock_platform.get_device_total_memory.return_value = 80 * 1024**3
-        mock_platform.get_device_name.return_value = "NVIDIA H100 80GB HBM3"
+        mock_hf_text_config = mock.Mock()
+        mock_hf_text_config.intermediate_size = 18944
+        mock_hf_text_config.sliding_window = None
+        mock_hf_text_config.num_attention_heads = 28
+        mock_hf_text_config.num_key_value_heads = 4
 
-        mock_model_cls = mock.Mock()
-        mock_model_cls.supports_multimodal.return_value = False
-        mock_model_cls.is_attention_free.return_value = False
-        mock_model_cls.is_attention_free = False
+        mock_model_config = mock.Mock()
+        mock_model_config.get_hidden_size.return_value = 3584
+        mock_model_config.get_num_layers.return_value = 28
+        mock_model_config.get_vocab_size.return_value = 152064
+        mock_model_config.get_head_size.return_value = 128
+        mock_model_config.hf_text_config = mock_hf_text_config
 
-        def mock_inspect_return(*args, **kwargs):
-            return mock_model_cls, "Qwen2ForCausalLM"
+        mock_vllm_config = mock.Mock()
+        mock_vllm_config.model_config = mock_model_config
+        mock_vllm_config.parallel_config = mock.Mock()
 
-        with (
-            mock.patch("vllm.platforms.current_platform", mock_platform),
-            mock.patch(
-                "vllm.model_executor.models.registry.ModelRegistry.inspect_model_cls", side_effect=mock_inspect_return
-            ),
-            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
-        ):
-            engine_args = vllm.EngineArgs(model=model_name, load_format="dummy", max_model_len=512)
-            vllm_config = engine_args.create_engine_config()
-            vllm_dims = utils.ModelDims.from_vllm_config(vllm_config)
-        vllm_dims.device_name = "h100"
+        with mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
+            vllm_dims = utils.ModelDims.from_vllm_config(mock_vllm_config)
 
         self.assertEqual(vllm_dims, expected_dims)
 
@@ -543,3 +586,23 @@ class TestGetDenominator(unittest.TestCase):
     def test_invalid_inputs(self, input_val, error_msg):
         with self.assertRaisesRegex(ValueError, error_msg):
             utils.get_denominator(input_val)
+
+
+class TestRayGetWithProgress(unittest.TestCase):
+    def setUp(self):
+        ray.init(num_cpus=2, num_gpus=0)
+
+    def tearDown(self):
+        ray.shutdown()
+
+    def test_timeout_error_includes_desc(self):
+        @ray.remote
+        def slow_task():
+            time.sleep(10)
+            return "done"
+
+        refs = [slow_task.remote()]
+        desc = "Test slow operation"
+
+        with pytest.raises(TimeoutError, match=desc):
+            utils.ray_get_with_progress(refs, desc=desc, enable=False, timeout=0.1)

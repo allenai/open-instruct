@@ -15,20 +15,25 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import argparse
 import asyncio
+import dataclasses
 import os
 import queue
+import socket
 import sys
 import threading
 import time
-import types
 from collections import defaultdict
 from collections.abc import Awaitable
 from concurrent import futures
 from datetime import timedelta
 from typing import Any
 
+import aiohttp
+import backoff
 import datasets
+import openai
 import ray
 import torch
 import torch.distributed
@@ -46,12 +51,16 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from vllm.entrypoints.launcher import serve_http
+from vllm.entrypoints.openai.api_server import build_app, init_app_state
+from vllm.entrypoints.openai.cli_args import make_arg_parser
+from vllm.utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
+from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ModelDims, ray_get_with_progress
 
@@ -61,6 +70,42 @@ NUM_PREFETCH_WORKERS = 2
 NUM_TOOL_WORKERS = 20
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
+INFERENCE_INIT_TIMEOUT_S = 1200
+
+
+@dataclasses.dataclass
+class SamplingConfig:
+    temperature: float = 0.7
+    top_p: float = 1.0
+    max_tokens: int = 256
+    n: int = 1
+    stop: list[str] | None = None
+    seed: int | None = None
+    logprobs: int | None = 1
+
+
+@dataclasses.dataclass
+class CompletionOutput:
+    index: int
+    token_ids: list[int]
+    logprobs: list[float]
+    finish_reason: str
+    cumulative_logprob: float = 0.0
+    mask: list[int] | None = None
+    num_calls: int = 0
+    timeout: bool = False
+    tool_error: str = ""
+    tool_output: str = ""
+    tool_runtime: float = 0.0
+    tool_called: bool = False
+
+
+@dataclasses.dataclass
+class RequestOutput:
+    request_id: str
+    prompt_token_ids: list[int]
+    outputs: list[CompletionOutput]
+    finished: bool = True
 
 
 def assert_threaded_actor(instance):
@@ -88,157 +133,33 @@ def assert_threaded_actor(instance):
         return
 
 
-def _truncate_tool_output_tokens(
+def truncate_tool_output_tokens(
     tool_output_token_ids: list[int],
-    current_prompt_token_ids: list[int],
-    accumulated_tokens: list[int],
+    current_prompt_len: int,
+    current_response_len: int,
     max_model_len: int,
     max_tokens: int,
-    current_mask_len: int,
-) -> tuple[list[int], int, list[int]]:
-    prompt_and_tool_output = current_prompt_token_ids + accumulated_tokens + tool_output_token_ids
-    excess = len(prompt_and_tool_output) - max_model_len
+) -> tuple[list[int], int]:
+    """Truncate tool output tokens to fit within max_model_len and max_tokens.
+
+    Args:
+        tool_output_token_ids: Token IDs from the tool output to potentially truncate.
+        current_prompt_len: Number of tokens in the current prompt (original + accumulated).
+        current_response_len: Number of tokens in the response so far (for max_tokens check).
+        max_model_len: Maximum total sequence length the model can handle.
+        max_tokens: Maximum number of response tokens allowed.
+
+    Returns:
+        A tuple of (truncated_tokens, excess) where excess is the number of tokens
+        that exceeded max_model_len (0 if no truncation due to max_model_len).
+    """
+    total_len = current_prompt_len + len(tool_output_token_ids)
+    excess = max(0, total_len - max_model_len)
     if excess > 0:
-        tool_output_token_ids = tool_output_token_ids[:-excess]
+        tool_output_token_ids = tool_output_token_ids[:-excess] if excess < len(tool_output_token_ids) else []
 
-    remaining = max_tokens - current_mask_len
-    if remaining <= 0:
-        return [], excess, prompt_and_tool_output
-    elif len(tool_output_token_ids) > remaining:
-        return tool_output_token_ids[:remaining], excess, prompt_and_tool_output
-
-    return tool_output_token_ids, excess, prompt_and_tool_output
-
-
-async def process_request_async(
-    actor: "LLMRayActor",
-    sub_request_id: str,
-    base_request_id: str,
-    prompt: vllm.TokensPrompt,
-    sampling_params: vllm.SamplingParams,
-):
-    """Process a single async request with tool support, awaiting tools inline."""
-    accumulated_tokens = []
-    accumulated_logprobs = []
-    masks = []
-    num_calls = 0
-    timeout = False
-    tool_error = ""
-    tool_output = ""
-    tool_runtime = 0.0
-    tool_called = False
-
-    current_prompt = prompt
-    current_prompt_token_ids = actor.request_metadata[base_request_id]["prompt_token_ids"]
-    current_sampling_params = sampling_params.clone()
-    final_prompt_token_ids = None
-    iteration = 0
-
-    while True:
-        iteration_request_id = f"{sub_request_id}_iter{iteration}"
-        outputs = [
-            o
-            async for o in actor.llm_engine.generate(current_prompt, current_sampling_params, iteration_request_id)
-            if o.finished
-        ]
-        assert len(outputs) == 1, f"Expected exactly 1 output, got {len(outputs)} for request {iteration_request_id}"
-        request_output = outputs[0]
-        iteration += 1
-        output = request_output.outputs[0]
-
-        if final_prompt_token_ids is None:
-            final_prompt_token_ids = request_output.prompt_token_ids
-
-        accumulated_tokens.extend(output.token_ids)
-        accumulated_logprobs.extend(output.logprobs)
-        masks.extend([1] * len(output.token_ids))
-
-        if not actor.tools or not actor.max_tool_calls:
-            break
-
-        triggered_tool, stop_str = get_triggered_tool(
-            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
-        )
-        if triggered_tool is None:
-            break
-
-        assert actor.executor is not None, f"executor is None for request {sub_request_id}"
-
-        loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
-
-        tool_called = True
-        num_calls += 1
-        timeout = timeout or tool_result.timeout
-        tool_error += "" if tool_result.error is None else tool_result.error
-        tool_output += tool_result.output
-        tool_runtime += tool_result.runtime
-
-        tool_output_token_ids = actor.llm_engine.tokenizer.encode(
-            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
-        )
-
-        tool_output_token_ids, excess, prompt_and_tool_output = _truncate_tool_output_tokens(
-            tool_output_token_ids,
-            current_prompt_token_ids,
-            accumulated_tokens,
-            actor.llm_engine.model_config.max_model_len,
-            sampling_params.max_tokens,
-            len(masks),
-        )
-
-        accumulated_tokens.extend(tool_output_token_ids)
-        accumulated_logprobs.extend(
-            [{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids]
-        )
-        masks.extend([0 if actor.mask_tool_use else 1] * len(tool_output_token_ids))
-
-        new_sample_tokens = sampling_params.max_tokens - len(masks)
-        if excess > 0 or new_sample_tokens <= 0:
-            break
-
-        current_prompt = vllm.TokensPrompt(prompt_token_ids=prompt_and_tool_output, cache_salt=base_request_id)
-        current_prompt_token_ids = prompt_and_tool_output
-        final_prompt_token_ids = prompt_and_tool_output
-        current_sampling_params = sampling_params.clone()
-        current_sampling_params.max_tokens = new_sample_tokens
-
-    complete_output = vllm.CompletionOutput(
-        index=split_request_id(sub_request_id)["request_index"],
-        text="",
-        token_ids=accumulated_tokens,
-        cumulative_logprob=output.cumulative_logprob,
-        logprobs=accumulated_logprobs,
-        finish_reason=output.finish_reason,
-        stop_reason=output.stop_reason,
-    )
-
-    if actor.tools:
-        complete_output.mask = masks
-        complete_output.num_calls = num_calls
-        complete_output.timeout = timeout
-        complete_output.tool_error = tool_error
-        complete_output.tool_output = tool_output
-        complete_output.tool_runtime = tool_runtime
-        complete_output.tool_called = tool_called
-
-    actor.active_tasks.pop(sub_request_id, None)
-
-    actor.completion_queue.put(
-        {
-            "base_request_id": base_request_id,
-            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
-            "request_output": vllm.RequestOutput(
-                request_id=sub_request_id,
-                prompt=request_output.prompt,
-                prompt_token_ids=final_prompt_token_ids,
-                outputs=[complete_output],
-                finished=True,
-                prompt_logprobs=None,  # not used but required for init.
-            ),
-            "tools": actor.tools,
-        }
-    )
+    remaining = max(0, max_tokens - current_response_len)
+    return tool_output_token_ids[:remaining], excess
 
 
 # Edited from: https://github.com/OpenRLHF/OpenRLHF/pull/971/files
@@ -282,7 +203,7 @@ def get_triggered_tool(
     tools: dict[str, Tool],
     max_tool_calls: dict[str, int],
     num_calls: int,
-    sampling_params: vllm.SamplingParams,
+    sampling_params: SamplingConfig,
 ) -> tuple[Tool | None, str | None]:
     """Check if any tool was triggered and return the tool and stop_str if found.
 
@@ -296,6 +217,9 @@ def get_triggered_tool(
     Returns:
         Tuple of (tool, stop_str) if a tool was triggered, (None, None) otherwise.
     """
+    if not sampling_params.stop:
+        return None, None
+
     for stop_str in sampling_params.stop:
         if stop_str in tools and output_text.endswith(stop_str):
             if num_calls < max_tool_calls.get(stop_str, 0):
@@ -310,7 +234,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
 
     Args:
         request_id: The base request ID
-        outs: List of vllm.RequestOutput objects for all sub-requests
+        outs: List of RequestOutput objects for all sub-requests
         current_time: Current timestamp for performance metrics
         tools: Dictionary of available tools (may be None or empty)
         request_metadata: Dictionary containing metadata for all requests
@@ -318,19 +242,15 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
     Returns:
         Tuple of (result, is_eval) where result is a GenerationResult and is_eval is a boolean
     """
-    final_output = vllm.RequestOutput(
+    final_output = RequestOutput(
         request_id=request_id,
-        prompt=outs[0].prompt,
         prompt_token_ids=outs[0].prompt_token_ids,
-        prompt_logprobs=None,
         outputs=[completion for out in outs for completion in out.outputs],
-        finished=outs[0].finished,
     )
 
     total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
-    metadata = request_metadata[request_id]  # Don't pop yet, _poll_tool_futures might need it
+    metadata = request_metadata[request_id]
 
-    # Process the vLLM RequestOutput into GenerationResult format
     response_ids = [list(out.token_ids) for out in final_output.outputs]
     finish_reasons = [out.finish_reason for out in final_output.outputs]
     use_tools = bool(tools)
@@ -338,12 +258,9 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
     logprobs = []
     for idx, out in enumerate(final_output.outputs):
         assert len(out.token_ids) == len(out.logprobs), (
-            f"vLLM CompletionOutput {idx}: token_ids length ({len(out.token_ids)}) "
-            f"!= logprobs length ({len(out.logprobs)})"
+            f"CompletionOutput {idx}: token_ids length ({len(out.token_ids)}) != logprobs length ({len(out.logprobs)})"
         )
-        logprobs.append(
-            [logprob_dict[token_id].logprob for token_id, logprob_dict in zip(out.token_ids, out.logprobs)]
-        )
+        logprobs.append(out.logprobs)
 
     # Extract attributes based on whether tools are used
     if use_tools:
@@ -466,6 +383,16 @@ def init_process_group(
     return pg
 
 
+@backoff.on_exception(backoff.constant, (aiohttp.ClientError, RuntimeError), max_time=60, interval=0.5)
+async def _check_health(port: int) -> None:
+    async with (
+        aiohttp.ClientSession() as session,
+        session.get(f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=2.0)) as response,
+    ):
+        if response.status != 200:
+            raise RuntimeError(f"vLLM server health check failed with status {response.status}")
+
+
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     while True:
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
@@ -478,9 +405,7 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
-
-    sampling_params = request.generation_config.clone()
-    sampling_params.n = 1  # Use n=1 for tool processing
+    sampling_params = dataclasses.replace(request.generation_config, n=1)
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
@@ -492,16 +417,21 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "start_time": time.perf_counter(),
     }
 
-    tokens_prompt = vllm.TokensPrompt(prompt_token_ids=request.prompt, cache_salt=request_id)
-
     for j in range(request.generation_config.n):
-        sub_sampling_params = sampling_params.clone()
-        if request.generation_config.seed is not None:
-            sub_sampling_params.seed = request.generation_config.seed + j
+        seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
+        sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
         sub_request_id = f"{request_id}_{j}"
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
-            process_request_async(actor, sub_request_id, request_id, tokens_prompt, sub_sampling_params), actor.loop
+            process_request(actor, sub_request_id, sub_sampling_params), actor.loop
         )
+
+
+def _create_server_args(model_path: str) -> argparse.Namespace:
+    parser = FlexibleArgumentParser()
+    parser = make_arg_parser(parser)
+    args = parser.parse_args(["--model", model_path])
+    args.disable_fastapi_docs = True
+    return args
 
 
 def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> None:
@@ -596,6 +526,7 @@ class LLMRayActor:
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
+        self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
 
@@ -665,28 +596,75 @@ class LLMRayActor:
         init_complete = threading.Event()
         self.loop = None
         self.llm_engine = None
+        self.client = None
+        self.server_port = None
 
-        async def _init_engine():
+        async def _init_engine_and_server():
             running_loop = asyncio.get_running_loop()
             assert running_loop == self.loop, f"Loop mismatch! running={running_loop}, actor.loop={self.loop}"
-            return vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
+
+            engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
+
+            args = _create_server_args(engine_client.vllm_config.model_config.model)
+            app = build_app(args)
+            await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
+
+            # Create a socket and bind to port 0 to let the OS assign an available port.
+            # We pass the socket to serve_http to avoid race conditions where another
+            # process could claim the port between bind() and server startup.
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(1)
+            self.server_port = sock.getsockname()[1]
+
+            logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
+
+            asyncio.create_task(
+                serve_http(app, sock=sock, host="127.0.0.1", port=self.server_port, log_level="warning")
+            )
+
+            # Yield control to allow the server task to start before returning.
+            await asyncio.sleep(0.1)
+
+            return engine_client
 
         def _run_loop():
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-            self.llm_engine = self.loop.run_until_complete(_init_engine())
-            init_complete.set()
+            try:
+                self.loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self.loop)
+                self.llm_engine = self.loop.run_until_complete(_init_engine_and_server())
+            finally:
+                # Signal completion to the waiting main thread even if init failed.
+                init_complete.set()
             self.loop.run_forever()
 
         self.loop_thread = threading.Thread(target=_run_loop, daemon=True)
         self.loop_thread.start()
-        init_complete.wait()
+
+        if init_complete.wait(timeout=INFERENCE_INIT_TIMEOUT_S):
+            if self.llm_engine is None:
+                raise RuntimeError("vLLM engine initialization failed. Check Ray worker logs for details.")
+            return
+        message = "timed out" if self.loop_thread.is_alive() else "thread died before completing"
+        raise RuntimeError(f"vLLM engine {message}")
+
+    def _init_openai_client(self) -> None:
+        base_url = f"http://127.0.0.1:{self.server_port}/v1"
+        self.client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=60.0)
+        self.model_name = self.llm_engine.vllm_config.model_config.model
+
+        logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
+
+        asyncio.run(_check_health(self.server_port))
+        logger.info("vLLM OpenAI API server is ready")
 
     def get_model_dims(self):
         """Get only the model dimensions without loading weights."""
         return ModelDims.from_vllm_config(self.llm_engine.vllm_config)
 
     def _should_stop(self) -> bool:
+        if self.actor_manager is None:
+            return self._should_stop_value
         if (time.perf_counter() - self._last_should_stop_update) > SHOULD_STOP_TIMEOUT_S:
             should_stop_ref = self.actor_manager.should_stop.remote()
             ready_refs, _ = ray.wait([should_stop_ref], timeout=SHOULD_STOP_TIMEOUT_S)
@@ -794,6 +772,127 @@ class LLMRayActor:
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_config)
 
         return int(max_concurrency)
+
+
+async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
+    """Process a single async request with tool support, awaiting tools inline."""
+    await _check_health(actor.server_port)
+    response_tokens = []
+    response_logprobs = []
+    response_masks = []
+    cumulative_logprob = 0.0
+    num_calls = 0
+    timeout = False
+    tool_error = ""
+    tool_output = ""
+    tool_runtime = 0.0
+    tool_called = False
+
+    base_request_id = split_request_id(sub_request_id)["base_id"]
+    original_prompt = actor.request_metadata[base_request_id]["prompt_token_ids"]
+    current_prompt = list(original_prompt)
+    max_model_len = actor.llm_engine.model_config.max_model_len
+    current_max_tokens = sampling_params.max_tokens
+
+    while True:
+        current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+        api_response = await actor.client.completions.create(
+            model=actor.model_name,
+            prompt=current_prompt,
+            extra_body={
+                "return_token_ids": True,
+                "cache_salt": base_request_id,
+                "include_stop_str_in_output": True,
+                "skip_special_tokens": False,
+            },
+            **dataclasses.asdict(current_sampling_params),
+        )
+
+        output = api_response.choices[0]
+        model_tokens = list(output.token_ids)
+
+        response_tokens.extend(model_tokens)
+        current_prompt.extend(model_tokens)
+
+        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
+        for logprob in output.logprobs.token_logprobs:
+            response_logprobs.append(logprob)
+            cumulative_logprob += logprob
+
+        response_masks.extend([1] * len(model_tokens))
+
+        if not actor.tools or not actor.max_tool_calls:
+            break
+
+        triggered_tool, stop_str = get_triggered_tool(
+            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
+        )
+        if triggered_tool is None:
+            break
+
+        assert actor.executor is not None, f"executor is None for request {sub_request_id}"
+
+        loop = asyncio.get_running_loop()
+        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
+
+        tool_called = True
+        num_calls += 1
+        timeout = timeout or tool_result.timeout
+        tool_error += "" if tool_result.error is None else tool_result.error
+        tool_output += tool_result.output
+        tool_runtime += tool_result.runtime
+
+        tool_tokens = actor.llm_engine.tokenizer.encode(
+            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+        )
+
+        tool_tokens, excess = truncate_tool_output_tokens(
+            tool_tokens,
+            current_prompt_len=len(current_prompt),
+            current_response_len=len(response_masks),
+            max_model_len=max_model_len,
+            max_tokens=sampling_params.max_tokens,
+        )
+
+        response_tokens.extend(tool_tokens)
+        response_logprobs.extend([0.0] * len(tool_tokens))
+        response_masks.extend([0 if actor.mask_tool_use else 1] * len(tool_tokens))
+        current_prompt.extend(tool_tokens)
+
+        current_max_tokens = sampling_params.max_tokens - len(response_masks)
+        if excess > 0 or current_max_tokens <= 0:
+            break
+
+    complete_output = CompletionOutput(
+        index=split_request_id(sub_request_id)["request_index"],
+        token_ids=response_tokens,
+        cumulative_logprob=cumulative_logprob,
+        logprobs=response_logprobs,
+        finish_reason=output.finish_reason,
+    )
+    if actor.tools:
+        complete_output.mask = response_masks
+        complete_output.num_calls = num_calls
+        complete_output.timeout = timeout
+        complete_output.tool_error = tool_error
+        complete_output.tool_output = tool_output
+        complete_output.tool_runtime = tool_runtime
+        complete_output.tool_called = tool_called
+
+    actor.active_tasks.pop(sub_request_id, None)
+
+    actor.completion_queue.put(
+        {
+            "base_request_id": base_request_id,
+            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
+            "request_output": RequestOutput(
+                request_id=sub_request_id,
+                prompt_token_ids=actor.request_metadata[base_request_id]["prompt_token_ids"],
+                outputs=[complete_output],
+            ),
+            "tools": actor.tools,
+        }
+    )
 
 
 def get_cuda_arch_list() -> str:
