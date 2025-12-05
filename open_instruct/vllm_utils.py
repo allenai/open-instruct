@@ -24,6 +24,7 @@ import socket
 import sys
 import threading
 import time
+import types
 from collections import defaultdict
 from collections.abc import Awaitable
 from concurrent import futures
@@ -236,7 +237,7 @@ async def process_request_async(
         logprobs.extend([{token_id: types.SimpleNamespace(logprob=0.0)} for token_id in tool_output_token_ids])
         masks.extend([0 if actor.mask_tool_use else 1] * len(tool_output_token_ids))
         current_sampling_params = sampling_params.clone()
-        current_sampling_params.max_tokens = new_sample_tokens
+        current_sampling_params.max_tokens = sampling_params.max_tokens - len(masks)
 
     complete_output = vllm.CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
