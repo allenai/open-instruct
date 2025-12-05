@@ -21,12 +21,11 @@ from parameterized import parameterized
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
-from vllm import SamplingParams
 
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.tool_utils.tools import PythonCodeTool
-from open_instruct.vllm_utils import create_vllm_engines
+from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -50,14 +49,8 @@ class TestGeneration(TestGrpoFastBase):
 
         prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
         stop = list(tools.keys()) if tools else None
-        generation_config = SamplingParams(
-            temperature=0.0,
-            top_p=1.0,
-            max_tokens=max_tokens,
-            seed=42,
-            stop=stop,
-            logprobs=1,
-            include_stop_str_in_output=True,
+        generation_config = SamplingConfig(
+            temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, stop=stop, logprobs=1
         )
         request = PromptRequest(
             prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
@@ -66,7 +59,7 @@ class TestGeneration(TestGrpoFastBase):
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
         ray.get(pg.ready())
 
-        engines = create_vllm_engines(
+        create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
             enforce_eager=True,
@@ -86,7 +79,7 @@ class TestGeneration(TestGrpoFastBase):
             max_tool_calls=max_tool_calls,
         )
 
-        ray.get(engines[0].submit_request.remote(request))
+        param_prompt_Q.put(request)
         result = inference_results_Q.get(timeout=120)
         param_prompt_Q.put(None)
 
@@ -161,7 +154,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
 
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
-        vllm_engines = create_vllm_engines(
+        create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
             enforce_eager=True,
@@ -176,9 +169,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
             results_queue=inference_results_Q,
         )
 
-        generation_config = SamplingParams(temperature=0.0, top_p=1.0, max_tokens=5, seed=42)
-
-        [e.process_from_queue.remote() for e in vllm_engines]
+        generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=5, seed=42)
 
         param_prompt_Q.put(
             PromptRequest(
