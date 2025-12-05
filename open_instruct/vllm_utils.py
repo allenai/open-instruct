@@ -296,7 +296,6 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
         ),
         dataset_index=metadata["dataset_index"],
         prompt_id=metadata["prompt_id"],
-        epoch_number=metadata.get("epoch_number", 0),
         token_statistics=TokenStatistics(
             num_prompt_tokens=len(metadata["prompt_token_ids"]),
             num_response_tokens=total_generation_tokens,
@@ -412,7 +411,6 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "is_eval": request.is_eval,
         "dataset_index": request.dataset_index,
         "prompt_id": request.prompt_id,
-        "epoch_number": request.epoch_number,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),
@@ -967,6 +965,7 @@ def create_vllm_engines(
     logger.info(f"num_gpus: {num_gpus}")
 
     if not use_hybrid_engine:
+        # Create a big placement group to ensure that all engines are packed
         bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
