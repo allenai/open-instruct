@@ -741,6 +741,14 @@ class LLMRayActor:
     def ready(self) -> bool:
         return True
 
+    def submit_request(self, request: PromptRequest) -> None:
+        """Submit a request directly to the actor, bypassing the queue.
+
+        This is useful for testing when the background queue polling thread
+        cannot make Ray API calls from within the actor.
+        """
+        add_request(self, request)
+
     def check_background_threads(self) -> None:
         if self._prefetch_future.done():
             self._prefetch_future.result()

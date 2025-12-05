@@ -66,7 +66,7 @@ class TestGeneration(TestGrpoFastBase):
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
         ray.get(pg.ready())
 
-        create_vllm_engines(
+        engines = create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
             enforce_eager=True,
@@ -86,7 +86,7 @@ class TestGeneration(TestGrpoFastBase):
             max_tool_calls=max_tool_calls,
         )
 
-        param_prompt_Q.put(request)
+        ray.get(engines[0].submit_request.remote(request))
         result = inference_results_Q.get(timeout=120)
         param_prompt_Q.put(None)
 
