@@ -405,7 +405,8 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
-    sampling_params = dataclasses.replace(request.generation_config, n=1)
+    sampling_params = request.generation_config.clone()
+    sampling_params.n = 1
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
@@ -418,8 +419,9 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     }
 
     for j in range(request.generation_config.n):
-        seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
-        sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
+        sub_sampling_params = sampling_params.clone()
+        if request.generation_config.seed is not None:
+            sub_sampling_params.seed = request.generation_config.seed + j
         sub_request_id = f"{request_id}_{j}"
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request(actor, sub_request_id, sub_sampling_params), actor.loop
