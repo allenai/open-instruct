@@ -1,3 +1,4 @@
+import dataclasses
 import gc
 import os
 import random
@@ -17,13 +18,13 @@ from vllm import SamplingParams
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_fast, rl_utils, utils
+from open_instruct.data_types import CollatedBatchData, GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
-from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.vllm_utils import create_vllm_engines
 
 
@@ -892,12 +893,12 @@ class TestDataPreparation(TestGrpoFastBase):
         self.assertEqual(len(result), world_size)
 
         expected_keys = {
-            "collated_query_responses",
-            "collated_attention_masks",
-            "collated_position_ids",
-            "collated_advantages",
-            "collated_response_masks",
-            "collated_vllm_logprobs",
+            "query_responses",
+            "attention_masks",
+            "position_ids",
+            "advantages",
+            "response_masks",
+            "vllm_logprobs",
         }
 
         expected_samples_per_worker = batch_size // world_size
@@ -907,16 +908,17 @@ class TestDataPreparation(TestGrpoFastBase):
         ) // per_device_train_batch_size
 
         for worker_data in result:
-            self.assertIsInstance(worker_data, dict)
-            self.assertEqual(set(worker_data.keys()), expected_keys)
+            self.assertIsInstance(worker_data, CollatedBatchData)
+            self.assertEqual({f.name for f in dataclasses.fields(worker_data)}, expected_keys)
 
-            total_samples = sum(len(batch) for batch in worker_data["collated_query_responses"])
+            total_samples = sum(len(batch) for batch in worker_data.query_responses)
             self.assertEqual(total_samples, expected_samples_per_worker)
 
-            num_microbatches = len(worker_data["collated_query_responses"])
+            num_microbatches = len(worker_data.query_responses)
             self.assertEqual(num_microbatches, expected_num_microbatches)
 
-            for value in worker_data.values():
+            for field in dataclasses.fields(worker_data):
+                value = getattr(worker_data, field.name)
                 self.assertIsInstance(value, list)
                 self.assertEqual(len(value), expected_num_microbatches)
                 for i, tensor in enumerate(value):
@@ -929,7 +931,7 @@ class TestDataPreparation(TestGrpoFastBase):
             if not variable_length:
                 continue
 
-            for batch in worker_data["collated_query_responses"]:
+            for batch in worker_data.query_responses:
                 for row in batch:
                     padding_mask = row == pad_token_id
                     if not padding_mask.any():
