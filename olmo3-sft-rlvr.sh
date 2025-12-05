@@ -65,7 +65,7 @@ python mason.py \
     --max_prompt_token_length 2048 \
     --response_length 4096 \
     --pack_length 6144 \
-    --model_name_or_path allenai/Olmo-3-7B-Instruct-SFT \
+    --model_name_or_path jacobmorrison/Olmo-3-7B-Instruct-SFT-do-sample \
     --chat_template_name olmo \
     --non_stop_penalty False \
     --temperature 1.0 \
