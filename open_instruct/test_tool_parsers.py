@@ -73,10 +73,10 @@ class TestToolParserFormats(unittest.TestCase):
         self.assertEqual(json.loads(result.tool_calls[0].function.arguments), {"input": "print(2 + 2)"})
 
     def test_olmo3_format(self):
-        """OLMo3 uses Python-like function call syntax."""
-        output = '[code(input="print(2 + 2)")]'
+        """OLMo3 uses Python-like function call syntax with named arguments."""
+        output = "[code(input='print(2 + 2)')]"
 
-        parser_cls = ToolParserManager.get_tool_parser("olmo3")
+        parser_cls = ToolParserManager.get_tool_parser("pythonic")
         parser = parser_cls(self.tokenizer)
         request = mock.MagicMock(spec=vllm_protocol.ChatCompletionRequest)
         result = parser.extract_tool_calls(output, request)
