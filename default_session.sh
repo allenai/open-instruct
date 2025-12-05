@@ -11,7 +11,6 @@ itwl() {
     --mount src=weka,ref=oe-eval-default,dst=/weka/oe-eval-default \
     --image beaker://jacobm/open_instruct_dev_random_rewards10 \
     --mount src=secret,ref=${beaker_whoami}_id_ed25519,dst=/root/.ssh/id_ed25519 \
-    --mount src=secret,ref=${beaker_whoami}_bashrc_remote,dst=/root/.bashrc \
     --mount src=secret,ref=${beaker_whoami}_ssh_config,dst=/root/.ssh/config \
     --priority normal \
     --host-networking \
@@ -19,6 +18,7 @@ itwl() {
     --gpus $num_gpus
 }
 itwl 1
+    --mount src=secret,ref=${beaker_whoami}_bashrc_remote,dst=/root/.bashrc \
 
 # workspace=ai2/olmo-instruct
 

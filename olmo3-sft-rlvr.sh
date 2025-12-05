@@ -63,10 +63,10 @@ python mason.py \
     --dataset_mixer_eval_list hamishivi/rlvr_acecoder_filtered_filtered 4 hamishivi/IF_multi_constraints_upto5_filtered 4 hamishivi/rlvr_orz_math_57k_collected_filtered 4 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 16384 \
-    --pack_length 18432 \
+    --response_length 4096 \
+    --pack_length 6144 \
     --model_name_or_path allenai/Olmo-3-7B-Instruct-SFT \
-    --chat_template_name olmo_no_system_prompt \
+    --chat_template_name olmo \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 10000000 \

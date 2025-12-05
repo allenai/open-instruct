@@ -281,9 +281,9 @@ def process_dataset(
     print(f"Processed {len(result_dataset)} examples")
     print(f"Generated {num_responses} response(s) per prompt")
 
-    print("Pushing dataset to hub")
-    result_dataset.push_to_hub("jacobmorrison/social-rl-eval-dataset-SFT-100")
-    print("Done!")
+    # print("Pushing dataset to hub")
+    # result_dataset.push_to_hub("jacobmorrison/social-rl-eval-dataset-SFT-100")
+    # print("Done!")
 
 def main():
     parser = argparse.ArgumentParser(
