@@ -314,11 +314,10 @@ class TestCheckpointing(TestGrpoFastBase):
 
             checkpoint_dirs = [d for d in os.listdir(temp_dir) if d.startswith("global_step")]
             self.assertEqual(len(checkpoint_dirs), 1)
-            checkpoint_path = os.path.join(temp_dir, checkpoint_dirs[0])
 
             self._cleanup_model_group(model_group, pg)
 
-            args2 = self._create_test_args(temp_dir, checkpoint_state_dir=checkpoint_path)
+            args2 = self._create_test_args(temp_dir, checkpoint_state_dir=temp_dir)
             pg2 = placement_group([{"GPU": 1, "CPU": 4}, {"GPU": 1, "CPU": 4}], strategy="PACK")
             ray.get(pg2.ready())
             model_group2 = ModelGroup(pg2, PolicyTrainerRayProcess, [1, 1], single_gpu_mode=False)
@@ -368,11 +367,10 @@ class TestCheckpointing(TestGrpoFastBase):
 
             checkpoint_dirs = [d for d in os.listdir(temp_dir) if d.startswith("global_step")]
             self.assertEqual(len(checkpoint_dirs), 1)
-            checkpoint_path = os.path.join(temp_dir, checkpoint_dirs[0])
 
             self._cleanup_model_group(model_group, pg)
 
-            args2 = self._create_test_args(temp_dir, checkpoint_state_dir=checkpoint_path, deepspeed_stage=stage)
+            args2 = self._create_test_args(temp_dir, checkpoint_state_dir=temp_dir, deepspeed_stage=stage)
             pg2 = placement_group([{"GPU": 1, "CPU": 4}, {"GPU": 1, "CPU": 4}], strategy="PACK")
             ray.get(pg2.ready())
             model_group2 = ModelGroup(pg2, PolicyTrainerRayProcess, [1, 1], single_gpu_mode=False)
