@@ -308,9 +308,11 @@ class TestCheckpointing(TestGrpoFastBase):
         pg = placement_group([{"GPU": 1, "CPU": 4}] * num_ranks, strategy="PACK")
         ray.get(pg.ready())
 
-        policy_cls = ray.remote(grpo_fast.PolicyTrainerRayProcess)
         model_group = grpo_fast.ModelGroup(
-            pg=pg, ray_process_cls=policy_cls, num_gpus_per_node=[num_ranks], single_gpu_mode=False
+            pg=pg,
+            ray_process_cls=grpo_fast.PolicyTrainerRayProcess,
+            num_gpus_per_node=[num_ranks],
+            single_gpu_mode=False,
         )
 
         ray_get_with_progress(
