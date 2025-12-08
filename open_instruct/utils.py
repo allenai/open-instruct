@@ -1034,7 +1034,10 @@ def maybe_update_beaker_description(
         return
 
     if experiment_id not in original_descriptions:
-        original_descriptions[experiment_id] = spec.description or ""
+        raw_description = spec.description or ""
+        if "git_commit:" in raw_description:
+            raw_description = raw_description.split("git_commit:")[0].strip()
+        original_descriptions[experiment_id] = raw_description
 
     # Build description from scratch each time
     description_components = [
