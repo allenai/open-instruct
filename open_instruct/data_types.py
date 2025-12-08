@@ -1,5 +1,8 @@
+import dataclasses
 from dataclasses import dataclass
 from typing import Any
+
+import torch
 
 
 @dataclass
@@ -55,3 +58,21 @@ class PromptRequest:
     dataset_index: int
     prompt_id: str
     is_eval: bool = False
+
+
+@dataclass
+class CollatedBatchData:
+    """Container for collated batch data passed to training workers."""
+
+    query_responses: list[torch.Tensor]
+    attention_masks: list[torch.Tensor]
+    position_ids: list[torch.Tensor]
+    advantages: list[torch.Tensor]
+    response_masks: list[torch.Tensor]
+    vllm_logprobs: list[torch.Tensor]
+
+    def __getitem__(self, idx: int | slice) -> "CollatedBatchData":
+        return CollatedBatchData(**{f.name: getattr(self, f.name)[idx] for f in dataclasses.fields(self)})
+
+    def __len__(self) -> int:
+        return len(self.query_responses)

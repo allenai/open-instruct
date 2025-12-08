@@ -1822,13 +1822,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             except Empty:
                 print("[Main Thread] 🙈 Evaluation responses not received")
 
-            if training_step % 10 == 0 or training_step == args.num_training_steps:
-                maybe_update_beaker_description(
-                    current_step=training_step,
-                    total_steps=args.num_training_steps,
-                    start_time=training_start_time,
-                    wandb_url=wandb_url,
-                )
+            maybe_update_beaker_description(
+                current_step=training_step,
+                total_steps=args.num_training_steps,
+                start_time=training_start_time,
+                wandb_url=wandb_url,
+            )
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):

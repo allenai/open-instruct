@@ -158,10 +158,13 @@ def ray_get_with_progress(
     if enable:
         futures_iter = tqdm(futures_iter, total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n")
 
-    for future in futures_iter:
-        idx = fut_to_idx[future]
-        results[idx] = future.result()
-        completion_times[idx] = time.perf_counter() - t0
+    try:
+        for future in futures_iter:
+            idx = fut_to_idx[future]
+            results[idx] = future.result()
+            completion_times[idx] = time.perf_counter() - t0
+    except TimeoutError as e:
+        raise TimeoutError(f"{desc} failed.") from e
 
     return results, completion_times
 
@@ -2470,19 +2473,27 @@ def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, An
     return combined
 
 
-def send_slack_alert(error: Exception) -> None:
-    """Sends an alert about a training failure to a Slack webhook (if the env var SLACK_WEBHOOK is set)."""
+def send_slack_message(message: str) -> None:
+    """Sends a message to a Slack webhook if configured.
+
+    Args:
+        message: Message body to send to Slack.
+    """
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
     if not slack_webhook_url:
         logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
         return
+
     beaker_url = get_beaker_experiment_url()
-    beaker_message = f"Check it out: {beaker_url}. " if beaker_url else ""
-    message = f"<!here> A RL job has died. {beaker_message}Error message: {str(error)}."
-    payload = {"text": message}
-    response = requests.post(slack_webhook_url, json=payload)
-    if not response.ok:
-        logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
+    beaker_suffix = f" Check it out: {beaker_url}" if beaker_url else ""
+
+    payload = {"text": f"{message}{beaker_suffix}"}
+    try:
+        response = requests.post(slack_webhook_url, json=payload)
+        if not response.ok:
+            logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
+    except requests.RequestException as exc:
+        logger.warning("Failed to send Slack alert due to network error: %s", exc)
 
 
 def get_beaker_experiment_url() -> str | None:
