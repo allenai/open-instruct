@@ -571,16 +571,17 @@ class LLMRayActor:
 
     def _setup_shared_kv_cache(self, kwargs: dict, model_cache_dir: str, kv_cache_sharing_group_size: int) -> None:
         import os
+        import shutil
         import tempfile
 
         from transformers import AutoConfig
 
-        from open_instruct.models import register_shared_kv_model
+        import open_instruct.models
 
-        register_shared_kv_model()
         config = AutoConfig.from_pretrained(model_cache_dir, trust_remote_code=True)
         config.kv_cache_sharing_group_size = kv_cache_sharing_group_size
         config.architectures = ["Olmo2SharedKVForCausalLM"]
+        config.auto_map = {"AutoModelForCausalLM": "modeling.Olmo2SharedKVForCausalLM"}
         temp_config_dir = tempfile.mkdtemp(prefix="shared_kv_config_")
         for item in os.listdir(model_cache_dir):
             if item == "config.json":
@@ -589,8 +590,12 @@ class LLMRayActor:
             dst = os.path.join(temp_config_dir, item)
             os.symlink(src, dst)
         config.save_pretrained(temp_config_dir)
+        models_src = open_instruct.models.__file__
+        modeling_dst = os.path.join(temp_config_dir, "modeling.py")
+        shutil.copy(models_src, modeling_dst)
         kwargs["model"] = temp_config_dir
         kwargs["revision"] = None
+        kwargs["trust_remote_code"] = True
         logger.info(
             f"Created local shared KV cache config at {temp_config_dir} with group_size={kv_cache_sharing_group_size}"
         )
