@@ -516,8 +516,7 @@ class LLMRayActor:
         eval_dataset=None,
         use_shared_kv_cache: bool = False,
         kv_cache_sharing_group_size: int = 2,
-        original_model_path: str | None = None,
-        original_revision: str | None = None,
+        model_cache_dir: str | None = None,
         **kwargs,
     ):
         assert_threaded_actor(self)
@@ -526,8 +525,8 @@ class LLMRayActor:
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
-        if use_shared_kv_cache and original_model_path:
-            self._setup_shared_kv_cache(kwargs, original_model_path, original_revision, kv_cache_sharing_group_size)
+        if use_shared_kv_cache and model_cache_dir:
+            self._setup_shared_kv_cache(kwargs, model_cache_dir, kv_cache_sharing_group_size)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -570,24 +569,20 @@ class LLMRayActor:
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
 
-    def _setup_shared_kv_cache(
-        self, kwargs: dict, original_model_path: str, original_revision: str | None, kv_cache_sharing_group_size: int
-    ) -> None:
+    def _setup_shared_kv_cache(self, kwargs: dict, model_cache_dir: str, kv_cache_sharing_group_size: int) -> None:
         import os
         import tempfile
 
-        from huggingface_hub import snapshot_download
         from transformers import AutoConfig
 
         from open_instruct.models import register_shared_kv_model
 
         register_shared_kv_model()
-        model_dir = snapshot_download(original_model_path, revision=original_revision)
-        config = AutoConfig.from_pretrained(model_dir, trust_remote_code=True)
+        config = AutoConfig.from_pretrained(model_cache_dir, trust_remote_code=True)
         config.kv_cache_sharing_group_size = kv_cache_sharing_group_size
         temp_config_dir = tempfile.mkdtemp(prefix="shared_kv_config_")
-        for item in os.listdir(model_dir):
-            src = os.path.join(model_dir, item)
+        for item in os.listdir(model_cache_dir):
+            src = os.path.join(model_cache_dir, item)
             dst = os.path.join(temp_config_dir, item)
             os.symlink(src, dst)
         config.save_pretrained(temp_config_dir)
@@ -977,8 +972,14 @@ def create_vllm_engines(
     kv_cache_sharing_group_size: int = 2,
 ) -> list[LLMRayActor]:
     model_path = pretrain
+    model_cache_dir = None
     if use_shared_kv_cache:
+        from huggingface_hub import snapshot_download
+
         logger.info(f"Using shared KV cache with group size {kv_cache_sharing_group_size}")
+        logger.info(f"Downloading model {pretrain} to local cache (once on head node)...")
+        model_cache_dir = snapshot_download(pretrain, revision=revision)
+        logger.info(f"Model cached at {model_cache_dir}")
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -1065,8 +1066,7 @@ def create_vllm_engines(
                 eval_dataset=eval_dataset,
                 use_shared_kv_cache=use_shared_kv_cache,
                 kv_cache_sharing_group_size=kv_cache_sharing_group_size,
-                original_model_path=pretrain if use_shared_kv_cache else None,
-                original_revision=revision if use_shared_kv_cache else None,
+                model_cache_dir=model_cache_dir,
             )
         )
 
