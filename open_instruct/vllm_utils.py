@@ -583,6 +583,8 @@ class LLMRayActor:
         config.architectures = ["Olmo2SharedKVForCausalLM"]
         temp_config_dir = tempfile.mkdtemp(prefix="shared_kv_config_")
         for item in os.listdir(model_cache_dir):
+            if item == "config.json":
+                continue
             src = os.path.join(model_cache_dir, item)
             dst = os.path.join(temp_config_dir, item)
             os.symlink(src, dst)
