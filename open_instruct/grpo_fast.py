@@ -398,8 +398,6 @@ class Args:
     # Experiment tracking
     verbose: bool = False
     """If toggled, debug output will be shown"""
-    update_progress_every: int = 10
-    """How often to update the progress bar (in steps)."""
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
@@ -2781,17 +2779,12 @@ def run_training(
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
-        if (
-            training_step == resume_training_step
-            or training_step % args.update_progress_every == 0
-            or training_step == args.num_training_steps
-        ):
-            maybe_update_beaker_description(
-                current_step=training_step,
-                total_steps=args.num_training_steps,
-                start_time=training_start_time,
-                wandb_url=wandb_url,
-            )
+        maybe_update_beaker_description(
+            current_step=training_step,
+            total_steps=args.num_training_steps,
+            start_time=training_start_time,
+            wandb_url=wandb_url,
+        )
 
         # Check if any of the threads have raised an exception.
         health_check_start = time.perf_counter()
