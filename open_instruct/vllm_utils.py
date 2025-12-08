@@ -573,16 +573,23 @@ class LLMRayActor:
     def _setup_shared_kv_cache(
         self, kwargs: dict, original_model_path: str, original_revision: str | None, kv_cache_sharing_group_size: int
     ) -> None:
+        import os
         import tempfile
 
+        from huggingface_hub import snapshot_download
         from transformers import AutoConfig
 
         from open_instruct.models import register_shared_kv_model
 
         register_shared_kv_model()
-        config = AutoConfig.from_pretrained(original_model_path, revision=original_revision, trust_remote_code=True)
+        model_dir = snapshot_download(original_model_path, revision=original_revision)
+        config = AutoConfig.from_pretrained(model_dir, trust_remote_code=True)
         config.kv_cache_sharing_group_size = kv_cache_sharing_group_size
         temp_config_dir = tempfile.mkdtemp(prefix="shared_kv_config_")
+        for item in os.listdir(model_dir):
+            src = os.path.join(model_dir, item)
+            dst = os.path.join(temp_config_dir, item)
+            os.symlink(src, dst)
         config.save_pretrained(temp_config_dir)
         kwargs["model"] = temp_config_dir
         kwargs["revision"] = None
