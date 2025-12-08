@@ -580,6 +580,7 @@ class LLMRayActor:
         register_shared_kv_model()
         config = AutoConfig.from_pretrained(model_cache_dir, trust_remote_code=True)
         config.kv_cache_sharing_group_size = kv_cache_sharing_group_size
+        config.architectures = ["Olmo2SharedKVForCausalLM"]
         temp_config_dir = tempfile.mkdtemp(prefix="shared_kv_config_")
         for item in os.listdir(model_cache_dir):
             src = os.path.join(model_cache_dir, item)
@@ -679,7 +680,7 @@ class LLMRayActor:
 
     def _init_openai_client(self) -> None:
         base_url = f"http://127.0.0.1:{self.server_port}/v1"
-        self.client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=60.0)
+        self.client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=300.0)
         self.model_name = self.llm_engine.vllm_config.model_config.model
 
         logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
