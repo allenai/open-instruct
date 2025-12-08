@@ -360,6 +360,10 @@ class Olmo2SharedKVForCausalLM(nn.Module, SupportsPP, SupportsLoRA):
 
     packed_modules_mapping = {"qkv_proj": ["q_proj", "k_proj", "v_proj"], "gate_up_proj": ["gate_proj", "up_proj"]}
 
+    @classmethod
+    def is_backend_compatible(cls) -> bool:
+        return True
+
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         config = vllm_config.model_config.hf_config
