@@ -3,9 +3,32 @@ import unittest
 from unittest.mock import MagicMock
 
 import vllm
+from parameterized import parameterized
 
-from open_instruct.queue_types import PromptRequest
-from open_instruct.vllm_utils import make_request_id, process_completed_request
+from open_instruct import vllm_utils
+from open_instruct.data_types import PromptRequest
+
+
+class TestTruncateToolOutputTokens(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("no_truncation", [1, 2, 3, 4, 5], 10, 5, 100, 50, [1, 2, 3, 4, 5], 0),
+            ("truncate_max_model_len", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 95, 5, 100, 50, [1, 2, 3, 4, 5], 5),
+            ("truncate_max_tokens", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 10, 47, 100, 50, [1, 2, 3], 0),
+            ("truncate_both_limits", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 95, 47, 100, 50, [1, 2, 3], 5),
+            ("no_space_for_model", [1, 2, 3], 100, 5, 100, 50, [], 3),
+            ("no_remaining_response", [1, 2, 3], 10, 50, 100, 50, [], 0),
+            ("empty_input", [], 10, 5, 100, 50, [], 0),
+        ]
+    )
+    def test_truncate_tool_output_tokens(
+        self, name, tokens, prompt_len, response_len, max_model_len, max_tokens, expected_tokens, expected_excess
+    ):
+        result, excess = vllm_utils.truncate_tool_output_tokens(
+            tokens, prompt_len, response_len, max_model_len, max_tokens
+        )
+        self.assertEqual(result, expected_tokens)
+        self.assertEqual(excess, expected_excess)
 
 
 class TestVllmUtils3(unittest.TestCase):
@@ -22,12 +45,12 @@ class TestVllmUtils3(unittest.TestCase):
         """
 
         def create_mock_logprobs(token_ids):
-            return [{tid: MagicMock(logprob=-0.1 * tid)} for tid in token_ids]
+            return [-0.1 * tid for tid in token_ids]
 
         mock_request = PromptRequest(
             prompt=[1, 2, 3], generation_config=None, is_eval=False, dataset_index=43039, prompt_id="test_prompt_1"
         )
-        request_id = make_request_id(mock_request)
+        request_id = vllm_utils.make_request_id(mock_request)
 
         mock_output1 = MagicMock(spec=vllm.CompletionOutput)
         mock_output1.token_ids = [1, 2, 3]
@@ -72,7 +95,7 @@ class TestVllmUtils3(unittest.TestCase):
 
         tools = {"</tool>": MagicMock()}
 
-        result, is_eval = process_completed_request(
+        result, is_eval = vllm_utils.process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
             current_time=1001.0,
@@ -105,12 +128,12 @@ class TestVllmUtils3(unittest.TestCase):
         """Test that process_completed_request correctly handles outputs without tool attributes."""
 
         def create_mock_logprobs(token_ids):
-            return [{tid: MagicMock(logprob=-0.1 * tid)} for tid in token_ids]
+            return [-0.1 * tid for tid in token_ids]
 
         mock_request = PromptRequest(
             prompt=[1, 2, 3], generation_config=None, is_eval=True, dataset_index=200, prompt_id="test_prompt_2"
         )
-        request_id = make_request_id(mock_request)
+        request_id = vllm_utils.make_request_id(mock_request)
 
         mock_output1 = MagicMock(spec=vllm.CompletionOutput)
         mock_output1.token_ids = [1, 2, 3]
@@ -139,7 +162,7 @@ class TestVllmUtils3(unittest.TestCase):
             }
         }
 
-        result, is_eval = process_completed_request(
+        result, is_eval = vllm_utils.process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
             current_time=2000.5,
