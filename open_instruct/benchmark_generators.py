@@ -271,7 +271,7 @@ def setup_vllm_engines(
 
     logger.info("vLLM engines ready")
 
-    return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager  # type: ignore[return-value]
+    return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager
 
 
 def simulate_weight_sync(
