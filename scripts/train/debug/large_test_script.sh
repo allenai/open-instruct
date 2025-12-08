@@ -35,8 +35,11 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path Qwen/Qwen2.5-7B \
-        --chat_template_name tulu_thinker \
+        --model_name_or_path allenai/Olmo-3-1025-7B \
+        --chat_template_name r1_simple_chat_postpend_think \
+        --add_bos \
+        --vllm_use_shared_kv_cache \
+        --vllm_kv_cache_sharing_group_size 2 \
 	--inflight_updates True \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
