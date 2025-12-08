@@ -977,12 +977,26 @@ def create_vllm_engines(
     model_path = pretrain
     model_cache_dir = None
     if use_shared_kv_cache:
+        import json
+
         from huggingface_hub import snapshot_download
 
         logger.info(f"Using shared KV cache with group size {kv_cache_sharing_group_size}")
         logger.info(f"Downloading model {pretrain} to local cache (once on head node)...")
         model_cache_dir = snapshot_download(pretrain, revision=revision)
         logger.info(f"Model cached at {model_cache_dir}")
+
+        config_path = os.path.join(model_cache_dir, "config.json")
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                content = f.read()
+            if not content.strip():
+                logger.warning(f"config.json at {config_path} is empty/corrupted. Deleting and re-downloading...")
+                os.remove(config_path)
+                model_cache_dir = snapshot_download(pretrain, revision=revision)
+            else:
+                json.loads(content)
+                logger.info("config.json is valid")
 
         if enable_prefix_caching:
             logger.warning("Shared KV cache is incompatible with prefix caching. Disabling prefix caching.")
