@@ -272,7 +272,7 @@ class TestCheckpointing(TestGrpoFastBase):
             load_ref_policy=False,
             keep_last_n_checkpoints=2,
             gs_checkpoint_state_dir=None,
-            checkpoint_state_freq=1,
+            checkpoint_state_freq=-1,
             filter_zero_std_samples=False,
         )
 
