@@ -31,8 +31,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import utils
-from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, ShutdownSentinel, TokenStatistics
+from open_instruct import data_types, utils
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -283,14 +282,15 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
         dummy_response_mask = torch.zeros_like(dummy_qr)
         dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
 
-        return {
-            "collated_query_responses": [dummy_qr],
-            "collated_attention_masks": [dummy_attention],
-            "collated_position_ids": [dummy_position_ids],
-            "collated_advantages": [dummy_advantage],
-            "collated_response_masks": [dummy_response_mask],
-            "collated_vllm_logprobs": [torch.zeros_like(dummy_qr, dtype=torch.float)],
-        }
+        batch = data_types.CollatedBatchData(
+            query_responses=[dummy_qr],
+            attention_masks=[dummy_attention],
+            position_ids=[dummy_position_ids],
+            advantages=[dummy_advantage],
+            response_masks=[dummy_response_mask],
+            vllm_logprobs=[torch.zeros_like(dummy_qr, dtype=torch.float)],
+        )
+        return {"batch": batch, "metrics": {}}
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         for step in range(self.training_step, self.num_training_steps):
@@ -380,7 +380,7 @@ def add_prompt_to_generator(
 ) -> None:
     dataset_index = example["dataset_index"]
     param_prompt_Q.put(
-        PromptRequest(
+        data_types.PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
             dataset_index=dataset_index,
@@ -408,7 +408,7 @@ def accumulate_inference_batches(
     training_step: int = None,
     verbose: bool = False,
     max_possible_score: float = 1.0,
-) -> tuple[GenerationResult, Batch, dict, BatchStatistics]:
+) -> tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]:
     if no_resampling_pass_rate is not None:
         assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
 
@@ -441,7 +441,7 @@ def accumulate_inference_batches(
     while num_prompts_sampled < num_prompts:
         result = inference_results_Q.get(timeout=timeout)
 
-        if isinstance(result, ShutdownSentinel):
+        if isinstance(result, data_types.ShutdownSentinel):
             return result, None, None, None
 
         assert len(result.responses) == generation_config.n, (
@@ -562,14 +562,14 @@ def accumulate_inference_batches(
         total_response_tokens += result.token_statistics.num_response_tokens
         max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
 
-    accumulated_stats = TokenStatistics(
+    accumulated_stats = data_types.TokenStatistics(
         num_prompt_tokens=total_prompt_tokens,
         num_response_tokens=total_response_tokens,
         generation_time=max_generation_time,
         earliest_start_time=earliest_start_time,
     )
 
-    combined_request_info = RequestInfo(
+    combined_request_info = data_types.RequestInfo(
         num_calls=combined_num_calls,
         timeouts=combined_timeouts,
         tool_errors=combined_tool_errors,
@@ -578,7 +578,7 @@ def accumulate_inference_batches(
         tool_calleds=combined_tool_calleds,
     )
 
-    combined_result = GenerationResult(
+    combined_result = data_types.GenerationResult(
         responses=combined_responses,
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
@@ -626,7 +626,7 @@ def prepare_collated_data_for_workers(
     per_device_train_batch_size: int,
     pad_token_id: int,
     pin_memory: bool = True,
-) -> list[dict[str, list[torch.Tensor]]]:
+) -> list[data_types.CollatedBatchData]:
     """Distributes and collates packed sequences for distributed training.
 
     Splits packed sequences across workers, randomly shuffles each worker's data,
@@ -642,7 +642,7 @@ def prepare_collated_data_for_workers(
         pin_memory: Whether to pin memory for faster data transfer to GPU.
 
     Returns:
-        List of dictionaries, one per worker, each containing collated tensors
+        List of CollatedBatchData, one per worker, each containing collated tensors
         for query_responses, attention_masks, position_ids,
         advantages, response_masks, and vllm_logprobs.
     """
@@ -684,14 +684,14 @@ def prepare_collated_data_for_workers(
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
             )
         collated_data.append(
-            {
-                "collated_query_responses": collated_query_responses,
-                "collated_attention_masks": collated_attention_masks,
-                "collated_position_ids": collated_position_ids,
-                "collated_advantages": collated_advantages,
-                "collated_response_masks": collated_response_masks,
-                "collated_vllm_logprobs": collated_vllm_logprobs,
-            }
+            data_types.CollatedBatchData(
+                query_responses=collated_query_responses,
+                attention_masks=collated_attention_masks,
+                position_ids=collated_position_ids,
+                advantages=collated_advantages,
+                response_masks=collated_response_masks,
+                vllm_logprobs=collated_vllm_logprobs,
+            )
         )
     return collated_data
 
@@ -793,19 +793,19 @@ class DataPreparationActor:
                 max_possible_score=self.config.max_possible_score,
             )
 
-            if isinstance(result, ShutdownSentinel):
+            if isinstance(result, data_types.ShutdownSentinel):
                 return
 
             if result is None:
                 empty_data = [
-                    {
-                        "collated_query_responses": [],
-                        "collated_attention_masks": [],
-                        "collated_position_ids": [],
-                        "collated_advantages": [],
-                        "collated_response_masks": [],
-                        "collated_vllm_logprobs": [],
-                    }
+                    data_types.CollatedBatchData(
+                        query_responses=[],
+                        attention_masks=[],
+                        position_ids=[],
+                        advantages=[],
+                        response_masks=[],
+                        vllm_logprobs=[],
+                    )
                     for _ in range(self.dp_world_size)
                 ]
                 with self.lock:
@@ -935,10 +935,10 @@ class DataPreparationActor:
         while True:
             with self.lock:
                 if step <= self.current_prepared_step:
-                    data = self.prepared_data[step][rank].copy()
-                    data["metrics"] = self.metrics[step]
+                    batch_data = self.prepared_data[step][rank]
+                    result = {"batch": batch_data, "metrics": self.metrics[step]}
                     self._cleanup_old_steps(step)
-                    return data
+                    return result
             time.sleep(0.01)
 
     def _cleanup_old_steps(self, current_step: int):

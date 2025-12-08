@@ -38,13 +38,8 @@ with contextlib.suppress(Exception):
     import deepspeed
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import utils
-from open_instruct.data_loader import (
-    DataPreparationActor,
-    accumulate_inference_batches,
-    add_prompt_to_generator,
-    collate_fn,
-)
+from open_instruct import data_types, utils
+from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
 
 # isort: on
 import asyncio
@@ -104,7 +99,7 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.rl_utils import PackedSequences, Timer, masked_mean
+from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -520,84 +515,6 @@ class Args:
             self.max_possible_score += self.r1_style_format_reward
 
 
-@Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker")
-def prepare_collated_data_for_workers(
-    packed_sequences: PackedSequences,
-    world_size: int,
-    per_device_train_batch_size: int,
-    pad_token_id: int,
-    pin_memory: bool = True,
-) -> list[dict[str, list[torch.Tensor]]]:
-    """Distributes and collates packed sequences for distributed training.
-
-    Splits packed sequences across workers, randomly shuffles each worker's data,
-    and collates into micro-batches for training.
-
-    Args:
-        packed_sequences: Packed training sequences containing query responses,
-            attention masks, position IDs, advantages, response masks,
-            and vllm logprobs.
-        world_size: Number of distributed workers.
-        per_device_train_batch_size: Batch size for each device's micro-batch.
-        pad_token_id: Token ID used for padding sequences.
-        pin_memory: Whether to pin memory for faster data transfer to GPU.
-
-    Returns:
-        List of dictionaries, one per worker, each containing collated tensors
-        for query_responses, attention_masks, position_ids,
-        advantages, response_masks, and vllm_logprobs.
-    """
-    B = len(packed_sequences.query_responses) // world_size  # essentially doing `drop_last=True`, which is fine.
-    collated_data = []
-    for i in range(world_size):
-        per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
-        per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
-        per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
-        per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
-        per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
-        per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
-
-        # Shuffle the batch and collate the data
-        b_inds = np.random.permutation(len(per_device_packed_query_responses))
-        collated_query_responses = []
-        collated_attention_masks = []
-        collated_position_ids = []
-        collated_response_masks = []
-        collated_advantages = []
-        collated_vllm_logprobs = []
-        for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
-            micro_range = b_inds[j : j + per_device_train_batch_size]
-            collated_query_responses.append(
-                collate_fn([per_device_packed_query_responses[idx] for idx in micro_range], pad_token_id, pin_memory)
-            )
-            collated_attention_masks.append(
-                collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0, pin_memory)
-            )
-            collated_position_ids.append(
-                collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0, pin_memory)
-            )
-            collated_response_masks.append(
-                collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0, pin_memory)
-            )
-            collated_advantages.append(
-                collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0, pin_memory)
-            )
-            collated_vllm_logprobs.append(
-                collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
-            )
-        collated_data.append(
-            {
-                "collated_query_responses": collated_query_responses,
-                "collated_attention_masks": collated_attention_masks,
-                "collated_position_ids": collated_position_ids,
-                "collated_advantages": collated_advantages,
-                "collated_response_masks": collated_response_masks,
-                "collated_vllm_logprobs": collated_vllm_logprobs,
-            }
-        )
-    return collated_data
-
-
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
     for i in range(len(tensors_list)):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
@@ -924,66 +841,39 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
     def compute_logprobs(
-        self,
-        model: PreTrainedModel,
-        collated_query_responses: list[torch.Tensor],
-        collated_attention_masks: list[torch.Tensor],
-        collated_position_ids: list[torch.Tensor],
-        collated_response_masks: list[torch.Tensor],
-        pad_token_id: int,
-        use_grad: bool = False,
-        return_entropy: bool = False,
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor] | None]:
-        collated_logprobs = []
-        collated_entropies = [] if return_entropy else None
+        self, model: PreTrainedModel, data_BT: data_types.CollatedBatchData, pad_token_id: int, use_grad: bool = False
+    ) -> list[torch.Tensor]:
+        logprobs_BT: list[torch.Tensor] = []
 
         context = contextlib.nullcontext() if use_grad else torch.no_grad()
         with context:
-            for i in range(len(collated_query_responses)):
-                query_response = collated_query_responses[i]
-                attention_mask = collated_attention_masks[i]
-                position_id = collated_position_ids[i]
-                response_mask = collated_response_masks[i]
-
-                logprob, entropy = self.forward(
+            for i in range(len(data_BT.query_responses)):
+                logprob_BT, _ = self.forward(
                     model,
-                    query_response,
-                    attention_mask,
-                    position_id,
+                    data_BT.query_responses[i],
+                    data_BT.attention_masks[i],
+                    data_BT.position_ids[i],
                     pad_token_id,
                     self.args.temperature,
-                    return_entropy=return_entropy,
+                    return_entropy=False,
                 )
 
-                logprob = torch.masked_fill(logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                collated_logprobs.append(logprob)
-
-                if return_entropy:
-                    collated_entropies.append(entropy)
+                response_mask_BT = data_BT.response_masks[i]
+                logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:], INVALID_LOGPROB)
+                logprobs_BT.append(logprob_BT)
 
                 torch.cuda.empty_cache()
 
-        return collated_logprobs, collated_entropies
+        return logprobs_BT
 
     def calculate_token_counts(
-        self, accumulation_steps: int, collated_response_masks: list[torch.Tensor]
+        self, accumulation_steps: int, data_BT: data_types.CollatedBatchData
     ) -> dict[int, float]:
-        """
-        Compute the number of training tokens in each batch for this set of responses.
-        Return a dictionary of batch indices to the number of training tokens in that batch.
-        """
         accumulation_counts: dict[int, float] = {}
-        local_counts = []
-
-        for response_mask in collated_response_masks:
-            response_mask = response_mask.to(self.device)
-            mask = response_mask[:, 1:].bool()
-            local_counts.append(mask.sum().float())
-
+        local_counts = [mask[:, 1:].sum().float() for mask in data_BT.response_masks]
         if not local_counts:
             return accumulation_counts
 
-        # do the all_reduce once to avoid calling each loop
         counts_tensor = torch.stack(local_counts)
         dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
 
@@ -997,138 +887,94 @@ class PolicyTrainerRayProcess(RayProcess):
     def step(self):
         batch_data = next(self.dataloader)
         batch_metrics = batch_data["metrics"]
-        collated_query_responses = batch_data["collated_query_responses"]
-        collated_attention_masks = batch_data["collated_attention_masks"]
-        collated_position_ids = batch_data["collated_position_ids"]
-        collated_advantages = batch_data["collated_advantages"]
-        collated_response_masks = batch_data["collated_response_masks"]
-        collated_vllm_logprobs = batch_data["collated_vllm_logprobs"]
-        if len(collated_query_responses) == 0:
+        data_BT = batch_data["batch"]
+        if len(data_BT) == 0:
             logger.warning("[Training] Empty batch received, skipping training step")
             return [], {}
         args = self.args
-        to_device_inplace(collated_query_responses, self.device)
-        to_device_inplace(collated_attention_masks, self.device)
-        to_device_inplace(collated_position_ids, self.device)
-        to_device_inplace(collated_advantages, self.device)
-        to_device_inplace(collated_response_masks, self.device)
-        collated_response_masks = [mask.bool() for mask in collated_response_masks]
-        to_device_inplace(collated_vllm_logprobs, self.device)
-        # accumulation steps should always be at least 1
-        accumulation_steps = max(math.ceil(len(collated_query_responses) / self.num_mini_batches - 0.5), 1)
-        # Sync accumulation_steps across ranks so all learners call allreduce on the same iterations
+        for f in dataclasses.fields(data_BT):
+            to_device_inplace(getattr(data_BT, f.name), self.device)
+        data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
+        num_samples = len(data_BT)
+        accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
         accumulation_steps_tensor = torch.tensor([accumulation_steps], device=self.device, dtype=torch.int32)
         torch.distributed.all_reduce(accumulation_steps_tensor, op=torch.distributed.ReduceOp.MIN)
         accumulation_steps = int(accumulation_steps_tensor.item())
-        leftover = len(collated_query_responses) % accumulation_steps
+        leftover = num_samples % accumulation_steps
         if leftover > 0:
-            collated_query_responses = collated_query_responses[0:-leftover]
-            collated_attention_masks = collated_attention_masks[0:-leftover]
-            collated_position_ids = collated_position_ids[0:-leftover]
-            collated_advantages = collated_advantages[0:-leftover]
-            collated_response_masks = collated_response_masks[0:-leftover]
-            collated_vllm_logprobs = collated_vllm_logprobs[0:-leftover]
+            data_BT = data_BT[:-leftover]
             logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
 
-        # recalculate the "real" number of mini-batches
-        num_mini_batches = len(collated_query_responses) // accumulation_steps
+        num_mini_batches = len(data_BT.query_responses) // accumulation_steps
 
-        collated_ref_logprobs = []
+        ref_logprobs_BT: list[torch.Tensor] = []
         if args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
-                collated_ref_logprobs, _ = self.compute_logprobs(
-                    self.ref_policy,
-                    collated_query_responses,
-                    collated_attention_masks,
-                    collated_position_ids,
-                    collated_response_masks,
-                    self.pad_token_id,
-                    use_grad=False,
-                    return_entropy=False,
-                )
-        # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
-        # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
-        # from the generator (note that async mode means these are a bit diff!)
-        old_logprobs = [None for _ in range(len(collated_query_responses))]
+                ref_logprobs_BT = self.compute_logprobs(self.ref_policy, data_BT, self.pad_token_id, use_grad=False)
+
+        old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(len(data_BT.query_responses))]
         if num_mini_batches > 1:
             with Timer("Old logprobs Calculation", noop=self.rank != 0):
-                local_old_logprobs = None
+                local_old_logprobs_BT = None
                 if not args.use_vllm_logprobs:
-                    local_old_logprobs, _ = self.compute_logprobs(
-                        self.model,
-                        collated_query_responses,
-                        collated_attention_masks,
-                        collated_position_ids,
-                        collated_response_masks,
-                        self.pad_token_id,
-                        use_grad=False,
-                        return_entropy=False,
+                    local_old_logprobs_BT = self.compute_logprobs(
+                        self.model, data_BT, self.pad_token_id, use_grad=False
                     )
 
                 with torch.no_grad():
-                    for i in range(len(collated_query_responses)):
-                        response_mask = collated_response_masks[i]
-                        vllm_old_logprob = collated_vllm_logprobs[i][:, 1:]
-                        vllm_old_logprob = torch.masked_fill(vllm_old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                        vllm_old_logprob = torch.nan_to_num(vllm_old_logprob, nan=INVALID_LOGPROB)
+                    for i in range(len(data_BT.query_responses)):
+                        vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
+                        vllm_old_logprob_BT = torch.masked_fill(
+                            vllm_old_logprob_BT, ~data_BT.response_masks[i][:, 1:], INVALID_LOGPROB
+                        )
+                        vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=INVALID_LOGPROB)
 
                         if args.use_vllm_logprobs:
-                            old_logprobs[i] = vllm_old_logprob
+                            old_logprobs_BT[i] = vllm_old_logprob_BT
                         else:
-                            old_logprobs[i] = local_old_logprobs[i]
+                            old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
                         torch.cuda.empty_cache()
 
         local_step = 0
-        # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            kl_stats_4M = torch.zeros(4, len(collated_query_responses))
-            kl_loss_stats = torch.zeros(len(collated_query_responses))
-            pg_clipfrac_stats = torch.zeros(len(collated_query_responses))
-            pg_loss_stats = torch.zeros(len(collated_query_responses))
-            loss_stats = torch.zeros(len(collated_query_responses))
-            ratio_stats = torch.zeros(len(collated_query_responses))
-            entropy_stats = torch.zeros(len(collated_query_responses))
+            num_samples = len(data_BT)
+            kl_stats_4M = torch.zeros(4, num_samples)
+            kl_loss_stats = torch.zeros(num_samples)
+            pg_clipfrac_stats = torch.zeros(num_samples)
+            pg_loss_stats = torch.zeros(num_samples)
+            loss_stats = torch.zeros(num_samples)
+            ratio_stats = torch.zeros(num_samples)
+            entropy_stats = torch.zeros(num_samples)
             for epoch_idx in range(args.num_epochs):
-                # Pre-compute total tokens for each accumulation group if using "token" normalization
-                # This ensures all minibatches in an accumulation group are normalized by the same total
                 if args.loss_denominator == "token":
-                    accumulation_token_counts = self.calculate_token_counts(
-                        accumulation_steps, collated_response_masks
-                    )
+                    accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
                 else:
                     accumulation_token_counts = {
                         int(group_idx * accumulation_steps): args.loss_denominator
-                        for group_idx in range((len(collated_query_responses) // accumulation_steps) + 1)
+                        for group_idx in range((num_samples // accumulation_steps) + 1)
                     }
 
-                for i in range(len(collated_query_responses)):
-                    mb_query_responses = collated_query_responses[i]
-                    mb_advantages = collated_advantages[i]
-                    # retrieve the loss denominator for the current batch
+                for i in range(num_samples):
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
-                    mb_response_masks_bool = collated_response_masks[i][:, 1:]
-                    mb_attention_mask = collated_attention_masks[i]
-                    mb_position_id = collated_position_ids[i]
+                    response_mask_BT = data_BT.response_masks[i]
                     mb_local_logprobs, mb_entropy = self.forward(
                         self.model,
-                        mb_query_responses,
-                        mb_attention_mask,
-                        mb_position_id,
+                        data_BT.query_responses[i],
+                        data_BT.attention_masks[i],
+                        data_BT.position_ids[i],
                         self.pad_token_id,
                         args.temperature,
                         return_entropy=args.record_entropy,
                     )
-                    mb_local_logprobs = torch.masked_fill(mb_local_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
-                    mb_vllm_logprobs = collated_vllm_logprobs[i][:, 1:]
-                    mb_vllm_logprobs = torch.masked_fill(mb_vllm_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
-                    # Replace any remaining NaN values (query tokens in packed sequences are set to NaN by pack_sequences in rl_utils.py)
+                    mb_local_logprobs = torch.masked_fill(mb_local_logprobs, ~response_mask_BT[:, 1:], INVALID_LOGPROB)
+                    mb_vllm_logprobs = data_BT.vllm_logprobs[i][:, 1:]
+                    mb_vllm_logprobs = torch.masked_fill(mb_vllm_logprobs, ~response_mask_BT[:, 1:], INVALID_LOGPROB)
                     mb_vllm_logprobs = torch.nan_to_num(mb_vllm_logprobs, nan=INVALID_LOGPROB)
 
-                    # Compare vLLM logprobs with local logprobs
                     with torch.no_grad():
-                        valid_mask = mb_response_masks_bool & ~torch.isnan(mb_vllm_logprobs)
+                        valid_mask = response_mask_BT[:, 1:] & ~torch.isnan(mb_vllm_logprobs)
                         logprob_diff = (mb_local_logprobs - mb_vllm_logprobs).abs()
                         masked_diff = torch.masked_fill(logprob_diff, ~valid_mask, 0.0)
                         mean_diff = masked_diff.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
@@ -1146,94 +992,79 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     mb_new_logprobs = mb_local_logprobs
 
-                    # Cache the old logprobs
                     if num_mini_batches > 1:
-                        mb_old_logprobs = old_logprobs[i]
+                        mb_old_logprobs = old_logprobs_BT[i]
                     else:
                         with torch.no_grad():
                             if epoch_idx == 0:
                                 if args.use_vllm_logprobs:
-                                    old_logprobs[i] = mb_vllm_logprobs
+                                    old_logprobs_BT[i] = mb_vllm_logprobs
                                 else:
-                                    old_logprobs[i] = mb_local_logprobs.detach()
-                            mb_old_logprobs = old_logprobs[i]
+                                    old_logprobs_BT[i] = mb_local_logprobs.detach()
+                            mb_old_logprobs = old_logprobs_BT[i]
 
                     old_logprobs_mask = mb_old_logprobs != INVALID_LOGPROB
-                    assert torch.all(old_logprobs_mask == mb_response_masks_bool), (
+                    assert torch.all(old_logprobs_mask == response_mask_BT[:, 1:]), (
                         f"Old logprobs mask should match response mask. "
                         f"old_mask sum={old_logprobs_mask.sum()}, "
-                        f"response_mask sum={mb_response_masks_bool.sum()}"
+                        f"response_mask sum={response_mask_BT[:, 1:].sum()}"
                     )
 
-                    # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
                     ratio = torch.exp(logprobs_diff)
-                    pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(
+                    pg_losses = -data_BT.advantages[i][:, 1:] * ratio
+                    pg_losses2 = -data_BT.advantages[i][:, 1:] * torch.clamp(
                         ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher
                     )
 
-                    # Apply truncated importance sampling if enabled
                     if args.truncated_importance_sampling_ratio_cap > 0 and mb_vllm_logprobs is not None:
                         old_logprobs_mask = mb_old_logprobs != INVALID_LOGPROB
                         vllm_logprobs_mask = mb_vllm_logprobs != INVALID_LOGPROB
 
-                        assert torch.all(old_logprobs_mask == mb_response_masks_bool), (
+                        assert torch.all(old_logprobs_mask == response_mask_BT[:, 1:]), (
                             f"Old logprobs mask should match response mask. "
                             f"old_mask sum={old_logprobs_mask.sum()}, "
-                            f"response_mask sum={mb_response_masks_bool.sum()}"
+                            f"response_mask sum={response_mask_BT[:, 1:].sum()}"
                         )
-                        assert torch.all(vllm_logprobs_mask == mb_response_masks_bool), (
+                        assert torch.all(vllm_logprobs_mask == response_mask_BT[:, 1:]), (
                             f"vLLM logprobs mask should match response mask. "
                             f"vllm_mask sum={vllm_logprobs_mask.sum()}, "
-                            f"response_mask sum={mb_response_masks_bool.sum()}"
+                            f"response_mask sum={response_mask_BT[:, 1:].sum()}"
                         )
 
-                        valid_mask = mb_response_masks_bool
+                        valid_mask = response_mask_BT[:, 1:]
 
-                        # Initialize importance ratio to 1.0 (no effect) for all positions
                         tis_imp_ratio = torch.ones_like(mb_old_logprobs)
 
                         if valid_mask.any():
-                            # Calculate logprob difference only for valid positions
                             logprob_diff_is = mb_old_logprobs - mb_vllm_logprobs
-                            # Clamp to prevent numerical overflow in exp
                             logprob_diff_is = torch.where(
                                 valid_mask, logprob_diff_is.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff_is)
                             )
-                            # Compute importance ratio only for valid positions
                             tis_imp_ratio = torch.where(valid_mask, torch.exp(logprob_diff_is), tis_imp_ratio)
-                            # Apply cap
                             tis_imp_ratio = torch.clamp(
                                 tis_imp_ratio, max=args.truncated_importance_sampling_ratio_cap
                             )
 
-                        # Apply importance sampling to losses
                         pg_losses = pg_losses * tis_imp_ratio
                         pg_losses2 = pg_losses2 * tis_imp_ratio
 
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
                     if args.load_ref_policy:
-                        mb_ref_logprob = collated_ref_logprobs[i]
-                        # Here we recalculate kl: we want the KL loss to backpropagate through the model
-                        # We also clamp the KL loss to avoid numerical instability
-                        # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
+                        mb_ref_logprob = ref_logprobs_BT[i]
                         ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
                         kl_4BT = estimate_kl(ref_logprobs_diff, ratio)
                         kl = kl_4BT[args.kl_estimator]
-                        # grpo change: directly subtract KL in loss (add)
                         loss = masked_mean(
-                            pg_loss_max + (args.beta * kl), mb_response_masks_bool, None, loss_denominator
+                            pg_loss_max + (args.beta * kl), response_mask_BT[:, 1:], None, loss_denominator
                         )
                     else:
-                        loss = masked_mean(pg_loss_max, mb_response_masks_bool, None, loss_denominator)
+                        loss = masked_mean(pg_loss_max, response_mask_BT[:, 1:], None, loss_denominator)
 
-                    # we already took world size into account via the tokens
                     if dist.is_available() and dist.is_initialized():
                         loss *= dist.get_world_size()
 
-                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
@@ -1241,16 +1072,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
                     with torch.no_grad():
                         if args.load_ref_policy:
-                            # NOTE: in packed implementation, kl calculation are averages over response tokens
-                            kl_stats_4M[:, i] = masked_mean(kl_4BT, mb_response_masks_bool).float()
+                            kl_stats_4M[:, i] = masked_mean(kl_4BT, response_mask_BT[:, 1:]).float()
                             kl_loss_stats[i] = kl_stats_4M[args.kl_estimator, i] * args.beta
-                        pg_clipfrac_stats[i] = masked_mean((pg_losses2 > pg_losses).float(), mb_response_masks_bool)
-                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool)
+                        pg_clipfrac_stats[i] = masked_mean((pg_losses2 > pg_losses).float(), response_mask_BT[:, 1:])
+                        pg_loss_stats[i] = masked_mean(pg_loss_max, response_mask_BT[:, 1:])
                         loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool)
+                        ratio_stats[i] = masked_mean(ratio, response_mask_BT[:, 1:])
                         if args.record_entropy:
-                            # Calculate entropy statistics
-                            entropy_stats[i] = masked_mean(mb_entropy, mb_response_masks_bool).float()
+                            entropy_stats[i] = masked_mean(mb_entropy, response_mask_BT[:, 1:]).float()
 
             with torch.no_grad():
                 if args.load_ref_policy:
