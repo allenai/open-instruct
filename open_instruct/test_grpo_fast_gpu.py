@@ -283,6 +283,11 @@ class TestCheckpointing(TestGrpoFastBase):
         gc.collect()
         time.sleep(1)
 
+    def _extract_training_step(self, result):
+        if isinstance(result, list):
+            return result[0]
+        return result
+
     @unittest.skipUnless(torch.cuda.is_available() and torch.cuda.device_count() >= 2, "Need 2+ GPUs")
     def test_checkpoint_save_load_roundtrip(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -331,7 +336,7 @@ class TestCheckpointing(TestGrpoFastBase):
                 timeout=600,
             )
 
-            self.assertEqual(results[0], 5)
+            self.assertEqual(self._extract_training_step(results[0]), 5)
 
             self._cleanup_model_group(model_group2, pg2)
 
@@ -384,7 +389,7 @@ class TestCheckpointing(TestGrpoFastBase):
                 timeout=600,
             )
 
-            self.assertEqual(results[0], 3)
+            self.assertEqual(self._extract_training_step(results[0]), 3)
 
             self._cleanup_model_group(model_group2, pg2)
 
