@@ -30,6 +30,7 @@
 # isort: off
 import contextlib
 import os
+import pathlib
 from concurrent import futures
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
@@ -61,6 +62,7 @@ from datetime import timedelta
 from queue import Empty, Full, Queue
 from typing import Any, Literal
 
+import backoff
 import datasets
 import numpy as np
 import pandas as pd
@@ -129,6 +131,38 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 INVALID_LOGPROB = 1.0
+CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
+DISK_USAGE_WARNING_THRESHOLD = 0.85
+CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://")
+
+
+def warn_if_low_disk_space(path: str, *, threshold: float, send_slack_alerts: bool) -> None:
+    """Warns when disk usage exceeds the provided threshold.
+
+    Args:
+        path: Filesystem path to check disk usage for.
+        threshold: Usage ratio (0.0-1.0) above which to warn.
+        send_slack_alerts: Whether to also send a Slack alert when warning.
+    """
+    if path.startswith(CLOUD_PATH_PREFIXES):
+        return
+
+    usage = shutil.disk_usage(path)
+    if usage.total == 0:
+        return
+
+    used_ratio = usage.used / usage.total
+    if used_ratio >= threshold:
+        used_percent = used_ratio * 100
+        free_gib = usage.free / (1024**3)
+        total_gib = usage.total / (1024**3)
+        warning_message = (
+            f"Disk usage near capacity for {path}: {used_percent:.1f}% used "
+            f"({free_gib:.1f} GiB free of {total_gib:.1f} GiB). Checkpointing may fail."
+        )
+        logger.warning(warning_message)
+        if send_slack_alerts:
+            utils.send_slack_message(f"{warning_message}")
 
 
 @dataclass
@@ -334,8 +368,6 @@ class Args:
     # Experiment tracking
     verbose: bool = False
     """If toggled, debug output will be shown"""
-    update_progress_every: int = 10
-    """How often to update the progress bar (in steps)."""
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
@@ -1302,13 +1334,18 @@ class PolicyTrainerRayProcess(RayProcess):
         self.dataloader.load_state_dict(state)
 
     def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
+        output_path = pathlib.Path(output_dir)
+        marker_path = output_path / CHECKPOINT_COMPLETE_MARKER
+        if marker_path.exists():
+            logger.info(f"Checkpoint already complete at {output_dir}, skipping save")
+            return
+
         model_to_save = self.model
         if chat_template_name is not None and "olmo" in chat_template_name:
-            # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
             model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         if self.rank == 0:
-            os.makedirs(output_dir, exist_ok=True)
+            output_path.mkdir(parents=True, exist_ok=True)
 
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
@@ -1350,14 +1387,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_to_save.save_pretrained(output_dir)
                 if self.stage == 3:
                     torch.save(
-                        get_peft_model_state_dict(model_to_save, output_state_dict),
-                        os.path.join(output_dir, "adapter_model.bin"),
+                        get_peft_model_state_dict(model_to_save, output_state_dict), output_path / "adapter_model.bin"
                     )
             else:
                 model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
-            # save tokenizer
             self.tokenizer.save_pretrained(output_dir)
+            marker_path.touch()
 
     # we need this because we don't know which node is rank 0 is on
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
@@ -1908,26 +1944,7 @@ def one_training_step(
             )
             ray_get_with_progress(update_ref_policy_future, desc=f"Updating reference policy at step {training_step}")
 
-    save_time = 0
-    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
-        with Timer("[Main Thread] 🗡️ Saving model") as timer:
-            checkpoint_dir = f"{args.output_dir}_checkpoints"
-            step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-            logger.info(f"Saving model at step {training_step} to {step_dir}")
-            ray_get_with_progress(
-                [
-                    policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
-                    for i in range(args.world_size)
-                ],
-                desc=f"Saving model at step {training_step}",
-            )
-            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                for i in range(args.world_size):
-                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                        step_dir, leaderboard_name, wandb_url, training_step
-                    )
-        save_time += timer.duration
+    save_time = maybe_save_checkpoint(args, training_step, policy_group, chat_template_name, tokenizer, wandb_url)
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
@@ -1980,6 +1997,39 @@ def one_training_step(
             if (isinstance(value, (np.ndarray, list))) and len(value) > 0:
                 metrics[key] = wandb.Histogram(value)
         wandb.log(metrics, step=episode)
+
+
+@backoff.on_exception(backoff.expo, Exception, max_tries=3)
+def maybe_save_checkpoint(
+    args: Args,
+    training_step: int,
+    policy_group: ModelGroup,
+    chat_template_name: str,
+    tokenizer: PreTrainedTokenizer,
+    wandb_url: str,
+) -> float:
+    save_time = 0
+    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
+        with Timer("[Main Thread] 🗡️ Saving model") as timer:
+            checkpoint_dir = f"{args.output_dir}_checkpoints"
+            step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
+            logger.info(f"Saving model at step {training_step} to {step_dir}")
+            ray_get_with_progress(
+                [
+                    policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
+                    for i in range(args.world_size)
+                ],
+                desc=f"Saving model at step {training_step}",
+            )
+            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                for i in range(args.world_size):
+                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                        step_dir, leaderboard_name, wandb_url, training_step
+                    )
+        save_time = timer.duration
+
+    return save_time
 
 
 def maybe_evaluate(
@@ -2254,17 +2304,12 @@ def run_training(
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
-        if (
-            training_step == resume_training_step
-            or training_step % args.update_progress_every == 0
-            or training_step == args.num_training_steps
-        ):
-            maybe_update_beaker_description(
-                current_step=training_step,
-                total_steps=args.num_training_steps,
-                start_time=training_start_time,
-                wandb_url=wandb_url,
-            )
+        maybe_update_beaker_description(
+            current_step=training_step,
+            total_steps=args.num_training_steps,
+            start_time=training_start_time,
+            wandb_url=wandb_url,
+        )
 
         # Check if any of the threads have raised an exception.
         health_check_start = time.perf_counter()
