@@ -267,7 +267,7 @@ class TestGrpoFastBase(unittest.TestCase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, 0, 0, param_prompt_Q, mock_generation_config, False)
+            grpo_fast.add_prompt_to_generator(example, param_prompt_Q, mock_generation_config, False)
 
         return param_prompt_Q, inference_results_Q, mock_dataset
 
@@ -611,14 +611,19 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         mock_generation_config = Mock()
         mock_generation_config.n = num_samples_per_prompt
 
+        mock_args = Mock()
+        mock_args.verbose = False
+        mock_args.max_possible_score = 1.0
+
         mock_model_dims = self.create_mock_model_dims()
         combined_result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
             inference_results_Q,
+            args=mock_args,
             generation_config=mock_generation_config,
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
-            dataset=mock_dataset,
+            prompt_dataset=mock_dataset,
         )
 
         self.assertEqual(len(batch.queries), num_prompts * num_samples_per_prompt)
@@ -654,14 +659,19 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                 mock_generation_config = Mock()
                 mock_generation_config.n = 1
 
+                mock_args = Mock()
+                mock_args.verbose = False
+                mock_args.max_possible_score = 1.0
+
                 mock_model_dims = self.create_mock_model_dims()
                 grpo_fast.accumulate_inference_batches(
                     inference_results_Q,
+                    args=mock_args,
                     generation_config=mock_generation_config,
                     num_prompts=num_prompts,
                     model_dims=mock_model_dims,
                     tokenizer=tokenizer,
-                    dataset=mock_dataset,
+                    prompt_dataset=mock_dataset,
                 )
                 completed.set()
             except Exception:
@@ -698,7 +708,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, 0, 0, param_prompt_Q, mock_generation_config, False)
+            grpo_fast.add_prompt_to_generator(example, param_prompt_Q, mock_generation_config, False)
 
         self.assertEqual(
             param_prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries"
@@ -731,7 +741,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, 0, 0, param_prompt_Q, mock_generation_config, False)
+            grpo_fast.add_prompt_to_generator(example, param_prompt_Q, mock_generation_config, False)
 
         request_count = 0
         while not param_prompt_Q.empty():
@@ -844,19 +854,22 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         mock_generation_config.n = num_samples_per_prompt
         mock_model_dims = self.create_mock_model_dims()
 
+        mock_args = Mock()
+        mock_args.verbose = False
+        mock_args.max_possible_score = 1.0
+
         tokenizer_name = "EleutherAI/pythia-14m"
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
         result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
             inference_results_Q,
+            args=mock_args,
             generation_config=mock_generation_config,
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
-            dataset=mock_dataset,
+            prompt_dataset=mock_dataset,
             filter_zero_std_samples=True,
-            verbose=False,
-            max_possible_score=1.0,
         )
 
         self.assertIsNone(result)
