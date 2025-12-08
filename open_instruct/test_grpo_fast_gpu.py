@@ -32,9 +32,10 @@ from transformers import AutoTokenizer
 from open_instruct import grpo_fast
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig
+from open_instruct.model_utils import ModelConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.tool_utils.tools import PythonCodeTool
-from open_instruct.utils import maybe_update_beaker_description, ray_get_with_progress
+from open_instruct.utils import BeakerRuntimeConfig, maybe_update_beaker_description, ray_get_with_progress
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
 logging.basicConfig(level=logging.INFO)
@@ -237,12 +238,14 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         param_prompt_Q.put(None)
 
 
+TEST_MODEL_NAME = "HuggingFaceTB/SmolLM2-135M"
+
+
 def create_checkpoint_test_args(
     checkpoint_dir: str, num_ranks: int = 2, deepspeed_stage: int = 3, seed: int = 42
 ) -> grpo_fast.Args:
     """Create minimal Args for checkpoint testing."""
     return grpo_fast.Args(
-        model_name_or_path="HuggingFaceTB/SmolLM2-135M",
         checkpoint_state_dir=checkpoint_dir,
         checkpoint_state_freq=1,
         num_learners_per_node=[num_ranks],
@@ -259,11 +262,20 @@ def create_checkpoint_test_args(
         temperature=0.7,
         beta=0.01,
         num_epochs=1,
-        gradient_checkpointing=True,
         output_dir=checkpoint_dir,
         backend_timeout=5,
         load_ref_policy=False,
     )
+
+
+def create_checkpoint_test_model_config(deepspeed_stage: int = 3) -> ModelConfig:
+    """Create minimal ModelConfig for checkpoint testing."""
+    return ModelConfig(model_name_or_path=TEST_MODEL_NAME, gradient_checkpointing=(deepspeed_stage == 3))
+
+
+def create_checkpoint_test_beaker_config() -> BeakerRuntimeConfig:
+    """Create minimal BeakerRuntimeConfig for checkpoint testing."""
+    return BeakerRuntimeConfig(beaker_workload_id="test-checkpoint")
 
 
 class TestCheckpointing(TestGrpoFastBase):
@@ -288,6 +300,9 @@ class TestCheckpointing(TestGrpoFastBase):
         args = create_checkpoint_test_args(
             checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=deepspeed_stage
         )
+        model_config = create_checkpoint_test_model_config(deepspeed_stage=deepspeed_stage)
+        beaker_config = create_checkpoint_test_beaker_config()
+        tokenizer = AutoTokenizer.from_pretrained(TEST_MODEL_NAME)
 
         pg = placement_group([{"GPU": 1, "CPU": 4}] * num_ranks, strategy="PACK")
         ray.get(pg.ready())
@@ -298,7 +313,11 @@ class TestCheckpointing(TestGrpoFastBase):
         )
 
         ray_get_with_progress(
-            [model_group.models[i].from_pretrained.remote(args) for i in range(num_ranks)], desc="Loading models"
+            [
+                model_group.models[i].from_pretrained.remote(args, model_config, beaker_config, "", tokenizer)
+                for i in range(num_ranks)
+            ],
+            desc="Loading models",
         )
 
         return model_group, args
