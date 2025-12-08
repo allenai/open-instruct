@@ -7,6 +7,7 @@ To run:
     ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
 """
 
+import gc
 import json
 import logging
 import os
@@ -26,17 +27,21 @@ import ray
 import torch
 from parameterized import parameterized
 from ray.util import queue as ray_queue
-from ray.util.placement_group import placement_group
+from ray.util.placement_group import placement_group, remove_placement_group
 from transformers import AutoTokenizer
 
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig
+from open_instruct.grpo_fast import Args, ModelGroup, PolicyTrainerRayProcess
+from open_instruct.model_utils import ModelConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.tool_utils.tools import PythonCodeTool
 from open_instruct.utils import (
+    BeakerRuntimeConfig,
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
     maybe_update_beaker_description,
+    ray_get_with_progress,
 )
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
@@ -238,6 +243,152 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         self.assertGreater(len(generated_text), 0)
 
         param_prompt_Q.put(None)
+
+
+class TestCheckpointing(TestGrpoFastBase):
+    """GPU tests for checkpoint save/load with DeepSpeed."""
+
+    def _create_test_args(
+        self, output_dir: str, checkpoint_state_dir: str | None = None, deepspeed_stage: int = 2
+    ) -> Args:
+        return Args(
+            output_dir=output_dir,
+            checkpoint_state_dir=checkpoint_state_dir,
+            deepspeed_stage=deepspeed_stage,
+            deepspeed_offload_param=False,
+            deepspeed_offload_optimizer=False,
+            deepspeed_zpg=1,
+            seed=42,
+            backend_timeout=10,
+            per_device_train_batch_size=1,
+            learning_rate=1e-5,
+            num_training_steps=10,
+            num_epochs=1,
+            num_mini_batches=1,
+            warm_up_steps=0,
+            warmup_ratio=0.0,
+            lr_scheduler_type="constant",
+            beta=0.0,
+            load_ref_policy=False,
+            keep_last_n_checkpoints=2,
+            gs_checkpoint_state_dir=None,
+            checkpoint_state_freq=1,
+            filter_zero_std_samples=False,
+        )
+
+    def _cleanup_model_group(self, model_group: ModelGroup, pg):
+        for model in model_group.models:
+            ray.kill(model)
+        remove_placement_group(pg)
+        gc.collect()
+        time.sleep(1)
+
+    @unittest.skipUnless(torch.cuda.is_available() and torch.cuda.device_count() >= 2, "Need 2+ GPUs")
+    def test_checkpoint_save_load_roundtrip(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            args = self._create_test_args(temp_dir)
+            model_config = ModelConfig(model_name_or_path="EleutherAI/pythia-14m")
+            beaker_config = BeakerRuntimeConfig(beaker_workload_id="test")
+            tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+
+            pg = placement_group([{"GPU": 1, "CPU": 4}, {"GPU": 1, "CPU": 4}], strategy="PACK")
+            ray.get(pg.ready())
+
+            model_group = ModelGroup(pg, PolicyTrainerRayProcess, [2], single_gpu_mode=False)
+
+            ray_get_with_progress(
+                [
+                    m.from_pretrained.remote(args, model_config, beaker_config, None, tokenizer)
+                    for m in model_group.models
+                ],
+                desc="Initializing models",
+                timeout=300,
+            )
+
+            client_state = {"training_step": 5}
+            ray_get_with_progress(
+                [m.save_checkpoint_state.remote(temp_dir, client_state) for m in model_group.models],
+                desc="Saving checkpoint",
+                timeout=120,
+            )
+
+            checkpoint_dirs = [d for d in os.listdir(temp_dir) if d.startswith("global_step")]
+            self.assertEqual(len(checkpoint_dirs), 1)
+            checkpoint_path = os.path.join(temp_dir, checkpoint_dirs[0])
+
+            self._cleanup_model_group(model_group, pg)
+
+            args2 = self._create_test_args(temp_dir, checkpoint_state_dir=checkpoint_path)
+            pg2 = placement_group([{"GPU": 1, "CPU": 4}, {"GPU": 1, "CPU": 4}], strategy="PACK")
+            ray.get(pg2.ready())
+            model_group2 = ModelGroup(pg2, PolicyTrainerRayProcess, [2], single_gpu_mode=False)
+
+            results = ray_get_with_progress(
+                [
+                    m.from_pretrained.remote(args2, model_config, beaker_config, None, tokenizer)
+                    for m in model_group2.models
+                ],
+                desc="Loading from checkpoint",
+                timeout=300,
+            )
+
+            self.assertEqual(results[0], 5)
+
+            self._cleanup_model_group(model_group2, pg2)
+
+    @parameterized.expand([(2,), (3,)])
+    @unittest.skipUnless(torch.cuda.is_available() and torch.cuda.device_count() >= 2, "Need 2+ GPUs")
+    def test_checkpoint_deepspeed_stages(self, stage: int):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            args = self._create_test_args(temp_dir, deepspeed_stage=stage)
+            model_config = ModelConfig(model_name_or_path="EleutherAI/pythia-14m")
+            beaker_config = BeakerRuntimeConfig(beaker_workload_id="test")
+            tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+
+            pg = placement_group([{"GPU": 1, "CPU": 4}, {"GPU": 1, "CPU": 4}], strategy="PACK")
+            ray.get(pg.ready())
+
+            model_group = ModelGroup(pg, PolicyTrainerRayProcess, [2], single_gpu_mode=False)
+
+            ray_get_with_progress(
+                [
+                    m.from_pretrained.remote(args, model_config, beaker_config, None, tokenizer)
+                    for m in model_group.models
+                ],
+                desc=f"Initializing models (stage {stage})",
+                timeout=300,
+            )
+
+            client_state = {"training_step": 3}
+            ray_get_with_progress(
+                [m.save_checkpoint_state.remote(temp_dir, client_state) for m in model_group.models],
+                desc=f"Saving checkpoint (stage {stage})",
+                timeout=120,
+            )
+
+            checkpoint_dirs = [d for d in os.listdir(temp_dir) if d.startswith("global_step")]
+            self.assertEqual(len(checkpoint_dirs), 1)
+            checkpoint_path = os.path.join(temp_dir, checkpoint_dirs[0])
+
+            self._cleanup_model_group(model_group, pg)
+
+            args2 = self._create_test_args(temp_dir, checkpoint_state_dir=checkpoint_path, deepspeed_stage=stage)
+            pg2 = placement_group([{"GPU": 1, "CPU": 4}, {"GPU": 1, "CPU": 4}], strategy="PACK")
+            ray.get(pg2.ready())
+            model_group2 = ModelGroup(pg2, PolicyTrainerRayProcess, [2], single_gpu_mode=False)
+
+            results = ray_get_with_progress(
+                [
+                    m.from_pretrained.remote(args2, model_config, beaker_config, None, tokenizer)
+                    for m in model_group2.models
+                ],
+                desc=f"Loading from checkpoint (stage {stage})",
+                timeout=300,
+            )
+
+            self.assertEqual(results[0], 3)
+
+            self._cleanup_model_group(model_group2, pg2)
 
 
 class TestCheckpointingCPU(unittest.TestCase):
