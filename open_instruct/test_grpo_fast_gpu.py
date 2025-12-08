@@ -260,7 +260,7 @@ def create_checkpoint_test_args(
         learning_rate=1e-6,
         response_length=32,
         temperature=0.7,
-        beta=0.01,
+        beta=0.0,
         num_epochs=1,
         output_dir=checkpoint_dir,
         backend_timeout=5,
