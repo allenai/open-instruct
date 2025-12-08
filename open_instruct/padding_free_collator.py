@@ -78,8 +78,12 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
         def filter_batch(match_string, features):
             return [{k.replace(match_string, ""): v for k, v in f.items() if match_string in k} for f in features]
 
-        chosen_features = super().__call__(filter_batch("chosen_", features), return_tensors=return_tensors)
-        rejected_features = super().__call__(filter_batch("rejected_", features), return_tensors=return_tensors)
+        chosen_features = super().__call__(
+            filter_batch("chosen_", features), return_tensors=return_tensors, separator_id=separator_id
+        )
+        rejected_features = super().__call__(
+            filter_batch("rejected_", features), return_tensors=return_tensors, separator_id=separator_id
+        )
 
         result = {}
         for k in chosen_features:
