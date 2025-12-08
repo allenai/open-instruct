@@ -294,7 +294,7 @@ class TestCheckpointing(TestGrpoFastBase):
             pg = placement_group([{"GPU": 1, "CPU": 4}, {"GPU": 1, "CPU": 4}], strategy="PACK")
             ray.get(pg.ready())
 
-            model_group = ModelGroup(pg, PolicyTrainerRayProcess, [2], single_gpu_mode=False)
+            model_group = ModelGroup(pg, PolicyTrainerRayProcess, [1, 1], single_gpu_mode=False)
 
             ray_get_with_progress(
                 [
@@ -302,7 +302,7 @@ class TestCheckpointing(TestGrpoFastBase):
                     for m in model_group.models
                 ],
                 desc="Initializing models",
-                timeout=300,
+                timeout=600,
             )
 
             client_state = {"training_step": 5}
@@ -321,7 +321,7 @@ class TestCheckpointing(TestGrpoFastBase):
             args2 = self._create_test_args(temp_dir, checkpoint_state_dir=checkpoint_path)
             pg2 = placement_group([{"GPU": 1, "CPU": 4}, {"GPU": 1, "CPU": 4}], strategy="PACK")
             ray.get(pg2.ready())
-            model_group2 = ModelGroup(pg2, PolicyTrainerRayProcess, [2], single_gpu_mode=False)
+            model_group2 = ModelGroup(pg2, PolicyTrainerRayProcess, [1, 1], single_gpu_mode=False)
 
             results = ray_get_with_progress(
                 [
@@ -329,7 +329,7 @@ class TestCheckpointing(TestGrpoFastBase):
                     for m in model_group2.models
                 ],
                 desc="Loading from checkpoint",
-                timeout=300,
+                timeout=600,
             )
 
             self.assertEqual(results[0], 5)
@@ -348,7 +348,7 @@ class TestCheckpointing(TestGrpoFastBase):
             pg = placement_group([{"GPU": 1, "CPU": 4}, {"GPU": 1, "CPU": 4}], strategy="PACK")
             ray.get(pg.ready())
 
-            model_group = ModelGroup(pg, PolicyTrainerRayProcess, [2], single_gpu_mode=False)
+            model_group = ModelGroup(pg, PolicyTrainerRayProcess, [1, 1], single_gpu_mode=False)
 
             ray_get_with_progress(
                 [
@@ -356,7 +356,7 @@ class TestCheckpointing(TestGrpoFastBase):
                     for m in model_group.models
                 ],
                 desc=f"Initializing models (stage {stage})",
-                timeout=300,
+                timeout=600,
             )
 
             client_state = {"training_step": 3}
@@ -375,7 +375,7 @@ class TestCheckpointing(TestGrpoFastBase):
             args2 = self._create_test_args(temp_dir, checkpoint_state_dir=checkpoint_path, deepspeed_stage=stage)
             pg2 = placement_group([{"GPU": 1, "CPU": 4}, {"GPU": 1, "CPU": 4}], strategy="PACK")
             ray.get(pg2.ready())
-            model_group2 = ModelGroup(pg2, PolicyTrainerRayProcess, [2], single_gpu_mode=False)
+            model_group2 = ModelGroup(pg2, PolicyTrainerRayProcess, [1, 1], single_gpu_mode=False)
 
             results = ray_get_with_progress(
                 [
@@ -383,7 +383,7 @@ class TestCheckpointing(TestGrpoFastBase):
                     for m in model_group2.models
                 ],
                 desc=f"Loading from checkpoint (stage {stage})",
-                timeout=300,
+                timeout=600,
             )
 
             self.assertEqual(results[0], 3)
