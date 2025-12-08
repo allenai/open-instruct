@@ -939,7 +939,27 @@ def create_vllm_engines(
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
+    use_shared_kv_cache: bool = False,
+    kv_cache_sharing_group_size: int = 2,
 ) -> list[LLMRayActor]:
+    model_path = pretrain
+    if use_shared_kv_cache:
+        import tempfile
+
+        from transformers import AutoConfig
+
+        from open_instruct.models import register_shared_kv_model
+
+        register_shared_kv_model()
+        config = AutoConfig.from_pretrained(pretrain, revision=revision, trust_remote_code=True)
+        config.kv_cache_sharing_group_size = kv_cache_sharing_group_size
+        temp_config_dir = tempfile.mkdtemp(prefix="shared_kv_config_")
+        config.save_pretrained(temp_config_dir)
+        model_path = temp_config_dir
+        logger.info(
+            f"Using shared KV cache with group size {kv_cache_sharing_group_size}. Config saved to {temp_config_dir}"
+        )
+
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
         assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
@@ -994,8 +1014,8 @@ def create_vllm_engines(
                 ),
             )
             .remote(
-                model=pretrain,
-                revision=revision,
+                model=model_path,
+                revision=revision if not use_shared_kv_cache else None,
                 tokenizer=tokenizer_name_or_path,
                 tokenizer_revision=revision,
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",

@@ -17,7 +17,7 @@ uv run python mason.py \
        --priority urgent \
        --num_nodes 1 \
        --max_retries 0 \
-       --timeout 15m \
+       --timeout 30m \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --budget ai2/oe-adapt \
        --gpus 1 \
@@ -32,7 +32,9 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen3-1.7B \
+    --model_name_or_path allenai/Olmo-3-1025-7B \
+    --vllm_use_shared_kv_cache \
+    --vllm_kv_cache_sharing_group_size 2 \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
@@ -53,7 +55,7 @@ uv run python mason.py \
     --seed 3 \
     --local_eval_every 1 \
     --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.3 \
+    --vllm_gpu_memory_utilization 0.9 \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \

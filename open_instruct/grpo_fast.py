@@ -344,6 +344,10 @@ class Args:
     """vLLM GPU memory utilization"""
     vllm_enable_prefix_caching: bool = False
     """whether to enable prefix caching"""
+    vllm_use_shared_kv_cache: bool = False
+    """Enable MixAttention-style KV cache sharing for global attention layers"""
+    vllm_kv_cache_sharing_group_size: int = 2
+    """Number of global attention layers that share the same KV cache"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
     deepspeed_stage: int = 0
@@ -2208,6 +2212,8 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        use_shared_kv_cache=args.vllm_use_shared_kv_cache,
+        kv_cache_sharing_group_size=args.vllm_kv_cache_sharing_group_size,
     )
 
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
