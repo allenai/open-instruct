@@ -2611,10 +2611,10 @@ def save_final_model(
 
 
 def validate_model_cache(model_name_or_path: str, revision: str | None = None) -> None:
-    """Validate that cached config.json is valid JSON, delete if corrupted."""
+    """Validate that cached config.json is valid JSON, delete and re-download if corrupted."""
     import json
 
-    from huggingface_hub import try_to_load_from_cache
+    from huggingface_hub import hf_hub_download, try_to_load_from_cache
 
     cached_config = try_to_load_from_cache(model_name_or_path, "config.json", revision=revision)
     if cached_config is None or isinstance(cached_config, str) is False:
@@ -2624,8 +2624,10 @@ def validate_model_cache(model_name_or_path: str, revision: str | None = None) -
     with open(cached_config) as f:
         content = f.read()
     if not content.strip():
-        logger.warning(f"Cached config.json at {cached_config} is empty/corrupted. Deleting...")
+        logger.warning(f"Cached config.json at {cached_config} is empty/corrupted. Deleting and re-downloading...")
         os.remove(cached_config)
+        hf_hub_download(model_name_or_path, "config.json", revision=revision, force_download=True)
+        logger.info("Re-downloaded config.json")
         return
     json.loads(content)
     logger.info(f"Cached config.json at {cached_config} is valid")
