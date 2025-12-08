@@ -254,6 +254,7 @@ def create_checkpoint_test_args(
         per_device_train_batch_size=1,
         num_unique_prompts_rollout=4,
         num_samples_per_prompt_rollout=1,
+        filter_zero_std_samples=False,
         total_episodes=10,
         num_training_steps=5,
         seed=seed,
