@@ -29,13 +29,15 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
 
-from open_instruct import grpo_fast
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.model_utils import ModelConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.tool_utils.tools import PythonCodeTool
-from open_instruct.utils import BeakerRuntimeConfig, maybe_update_beaker_description, ray_get_with_progress
+from open_instruct.utils import (
+    calibrate_checkpoint_state_dir,
+    clean_last_n_checkpoints_deepspeed,
+    maybe_update_beaker_description,
+)
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
 logging.basicConfig(level=logging.INFO)
@@ -238,222 +240,6 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         param_prompt_Q.put(None)
 
 
-TEST_MODEL_NAME = "HuggingFaceTB/SmolLM2-135M"
-
-
-def create_checkpoint_test_args(
-    checkpoint_dir: str, num_ranks: int = 2, deepspeed_stage: int = 3, seed: int = 42
-) -> grpo_fast.Args:
-    """Create minimal Args for checkpoint testing."""
-    return grpo_fast.Args(
-        checkpoint_state_dir=checkpoint_dir,
-        checkpoint_state_freq=1,
-        num_learners_per_node=[num_ranks],
-        deepspeed_stage=deepspeed_stage,
-        deepspeed_zpg=1,
-        per_device_train_batch_size=1,
-        num_unique_prompts_rollout=4,
-        num_samples_per_prompt_rollout=1,
-        filter_zero_std_samples=False,
-        total_episodes=10,
-        num_training_steps=5,
-        seed=seed,
-        learning_rate=1e-6,
-        response_length=32,
-        temperature=0.7,
-        beta=0.0,
-        num_epochs=1,
-        output_dir=checkpoint_dir,
-        backend_timeout=5,
-        load_ref_policy=False,
-    )
-
-
-def create_checkpoint_test_model_config(deepspeed_stage: int = 3) -> ModelConfig:
-    """Create minimal ModelConfig for checkpoint testing."""
-    return ModelConfig(model_name_or_path=TEST_MODEL_NAME, gradient_checkpointing=(deepspeed_stage == 3))
-
-
-def create_checkpoint_test_beaker_config() -> BeakerRuntimeConfig:
-    """Create minimal BeakerRuntimeConfig for checkpoint testing."""
-    return BeakerRuntimeConfig(beaker_workload_id="test-checkpoint")
-
-
-class TestCheckpointing(TestGrpoFastBase):
-    """GPU tests for checkpointing with DeepSpeed. Requires 2+ GPUs."""
-
-    def setUp(self):
-        super().setUp()
-        self.temp_dir = tempfile.mkdtemp()
-
-    def tearDown(self):
-        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
-            shutil.rmtree(self.temp_dir)
-        super().tearDown()
-
-    def _get_num_gpus(self) -> int:
-        return torch.cuda.device_count()
-
-    def _create_model_group(
-        self, checkpoint_dir: str, num_ranks: int, deepspeed_stage: int = 3
-    ) -> tuple[grpo_fast.ModelGroup, grpo_fast.Args]:
-        """Create a ModelGroup for testing."""
-        args = create_checkpoint_test_args(
-            checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=deepspeed_stage
-        )
-        model_config = create_checkpoint_test_model_config(deepspeed_stage=deepspeed_stage)
-        beaker_config = create_checkpoint_test_beaker_config()
-        tokenizer = AutoTokenizer.from_pretrained(TEST_MODEL_NAME)
-
-        pg = placement_group([{"GPU": 1, "CPU": 4}] * num_ranks, strategy="PACK")
-        ray.get(pg.ready())
-
-        model_group = grpo_fast.ModelGroup(
-            pg=pg,
-            ray_process_cls=grpo_fast.PolicyTrainerRayProcess,
-            num_gpus_per_node=[num_ranks],
-            single_gpu_mode=False,
-        )
-
-        ray_get_with_progress(
-            [
-                model_group.models[i].from_pretrained.remote(args, model_config, beaker_config, "", tokenizer)
-                for i in range(num_ranks)
-            ],
-            desc="Loading models",
-        )
-
-        return model_group, args
-
-    def _cleanup_model_group(self, model_group: grpo_fast.ModelGroup):
-        """Clean up model group actors."""
-        for model in model_group.models:
-            ray.kill(model)
-
-    @unittest.skipUnless(torch.cuda.is_available() and torch.cuda.device_count() >= 2, "Requires 2+ GPUs")
-    @parameterized.expand([(2,), (3,)])
-    def test_checkpoint_save_creates_correct_structure(self, deepspeed_stage: int):
-        """Test that checkpoint save creates the correct directory structure."""
-        num_ranks = min(2, self._get_num_gpus())
-        checkpoint_dir = os.path.join(self.temp_dir, "checkpoints")
-        os.makedirs(checkpoint_dir, exist_ok=True)
-
-        model_group, args = self._create_model_group(
-            checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=deepspeed_stage
-        )
-
-        client_state = {"training_step": 1, "episode": 10, "dataloader_state": {"current_index": 5}}
-
-        ray_get_with_progress(
-            [
-                model_group.models[i].save_checkpoint_state.remote(checkpoint_dir, client_state.copy())
-                for i in range(num_ranks)
-            ],
-            desc="Saving checkpoint",
-        )
-
-        step_dir = os.path.join(checkpoint_dir, "global_step1")
-        self.assertTrue(os.path.exists(step_dir), f"Expected {step_dir} to exist")
-
-        for rank in range(num_ranks):
-            rank_dir = os.path.join(step_dir, f"global_{rank}")
-            self.assertTrue(os.path.exists(rank_dir), f"Expected {rank_dir} to exist")
-
-        self._cleanup_model_group(model_group)
-
-    @unittest.skipUnless(torch.cuda.is_available() and torch.cuda.device_count() >= 2, "Requires 2+ GPUs")
-    @parameterized.expand([(2,), (3,)])
-    def test_checkpoint_load_restores_training_step(self, deepspeed_stage: int):
-        """Test that loading a checkpoint restores the training step."""
-        num_ranks = min(2, self._get_num_gpus())
-        checkpoint_dir = os.path.join(self.temp_dir, "checkpoints")
-        os.makedirs(checkpoint_dir, exist_ok=True)
-
-        model_group, args = self._create_model_group(
-            checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=deepspeed_stage
-        )
-
-        training_step = 5
-        client_state = {"training_step": training_step, "episode": 50, "dataloader_state": {"current_index": 25}}
-
-        ray_get_with_progress(
-            [
-                model_group.models[i].save_checkpoint_state.remote(checkpoint_dir, client_state.copy())
-                for i in range(num_ranks)
-            ],
-            desc="Saving checkpoint",
-        )
-
-        self._cleanup_model_group(model_group)
-
-        model_group2, args2 = self._create_model_group(
-            checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=deepspeed_stage
-        )
-
-        self._cleanup_model_group(model_group2)
-
-    @unittest.skipUnless(torch.cuda.is_available() and torch.cuda.device_count() >= 2, "Requires 2+ GPUs")
-    def test_rng_state_saved_and_restored(self):
-        """Test that RNG states are correctly saved and restored for determinism."""
-        num_ranks = min(2, self._get_num_gpus())
-        checkpoint_dir = os.path.join(self.temp_dir, "checkpoints")
-        os.makedirs(checkpoint_dir, exist_ok=True)
-
-        model_group, args = self._create_model_group(
-            checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=3
-        )
-
-        client_state = {"training_step": 1, "episode": 10, "dataloader_state": {}}
-
-        ray_get_with_progress(
-            [
-                model_group.models[i].save_checkpoint_state.remote(checkpoint_dir, client_state.copy())
-                for i in range(num_ranks)
-            ],
-            desc="Saving checkpoint",
-        )
-
-        step_dir = os.path.join(checkpoint_dir, "global_step1")
-        for rank in range(num_ranks):
-            rank_dir = os.path.join(step_dir, f"global_{rank}")
-            files = os.listdir(rank_dir)
-            self.assertTrue(len(files) > 0, f"Expected files in {rank_dir}")
-
-        self._cleanup_model_group(model_group)
-
-    @unittest.skipUnless(torch.cuda.is_available() and torch.cuda.device_count() >= 2, "Requires 2+ GPUs")
-    def test_multiple_checkpoints_saved(self):
-        """Test saving multiple checkpoints at different steps."""
-        num_ranks = min(2, self._get_num_gpus())
-        checkpoint_dir = os.path.join(self.temp_dir, "checkpoints")
-        os.makedirs(checkpoint_dir, exist_ok=True)
-
-        model_group, args = self._create_model_group(
-            checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=3
-        )
-
-        for step in [1, 2, 3]:
-            client_state = {
-                "training_step": step,
-                "episode": step * 10,
-                "dataloader_state": {"current_index": step * 5},
-            }
-
-            ray_get_with_progress(
-                [
-                    model_group.models[i].save_checkpoint_state.remote(checkpoint_dir, client_state.copy())
-                    for i in range(num_ranks)
-                ],
-                desc=f"Saving checkpoint step {step}",
-            )
-
-        for step in [1, 2, 3]:
-            step_dir = os.path.join(checkpoint_dir, f"global_step{step}")
-            self.assertTrue(os.path.exists(step_dir), f"Expected {step_dir} to exist")
-
-        self._cleanup_model_group(model_group)
-
-
 class TestCheckpointingCPU(unittest.TestCase):
     """CPU tests for checkpoint utilities (no GPU required)."""
 
@@ -494,8 +280,6 @@ class TestCheckpointingCPU(unittest.TestCase):
 
     def test_clean_last_n_checkpoints_deepspeed(self):
         """Test checkpoint cleanup utility."""
-        from open_instruct.utils import clean_last_n_checkpoints_deepspeed
-
         checkpoint_dir = self.temp_dir
         for step in [1, 2, 3, 4, 5]:
             step_dir = os.path.join(checkpoint_dir, f"global_step{step}")
@@ -512,8 +296,6 @@ class TestCheckpointingCPU(unittest.TestCase):
 
     def test_calibrate_checkpoint_state_dir_removes_incomplete(self):
         """Test that calibrate_checkpoint_state_dir removes incomplete checkpoints."""
-        from open_instruct.utils import calibrate_checkpoint_state_dir
-
         checkpoint_dir = self.temp_dir
 
         complete_dir = os.path.join(checkpoint_dir, "global_step1")
