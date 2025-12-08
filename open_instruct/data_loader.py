@@ -447,7 +447,7 @@ def accumulate_inference_batches(
         assert len(result.responses) == generation_config.n, (
             f"Mismatch: individual prompt result has {len(result.responses)} responses "
             f"but expected {generation_config.n} samples per prompt. "
-            f"Dataset index: {result.dataset_index}, Epoch: {result.epoch()}"
+            f"Dataset index: {result.dataset_index}, Prompt ID: {result.prompt_id}"
         )
 
         example = dataset[result.dataset_index]

@@ -4,7 +4,6 @@ import os
 
 os.environ["HF_HUB_OFFLINE"] = "1"
 
-import random
 import threading
 import time
 import unittest

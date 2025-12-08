@@ -47,12 +47,6 @@ class GenerationResult:
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None
 
-    def epoch(self) -> int:
-        """Extract epoch number from prompt_id (format: '{epoch}_{dataset_index}')."""
-        if self.prompt_id is None:
-            return 0
-        return int(self.prompt_id.split("_")[0])
-
 
 @dataclass
 class PromptRequest:
