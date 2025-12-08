@@ -981,6 +981,10 @@ def create_vllm_engines(
         model_cache_dir = snapshot_download(pretrain, revision=revision)
         logger.info(f"Model cached at {model_cache_dir}")
 
+        if enable_prefix_caching:
+            logger.warning("Shared KV cache is incompatible with prefix caching. Disabling prefix caching.")
+            enable_prefix_caching = False
+
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
         assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
