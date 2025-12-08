@@ -514,6 +514,10 @@ class LLMRayActor:
         reward_config: RewardConfig | None = None,
         train_dataset=None,
         eval_dataset=None,
+        use_shared_kv_cache: bool = False,
+        kv_cache_sharing_group_size: int = 2,
+        original_model_path: str | None = None,
+        original_revision: str | None = None,
         **kwargs,
     ):
         assert_threaded_actor(self)
@@ -521,6 +525,11 @@ class LLMRayActor:
             tools, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+
+        if use_shared_kv_cache and original_model_path:
+            args, kwargs = self._setup_shared_kv_cache(
+                args, kwargs, original_model_path, original_revision, kv_cache_sharing_group_size
+            )
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -562,6 +571,32 @@ class LLMRayActor:
         # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
+
+    def _setup_shared_kv_cache(
+        self,
+        args: tuple,
+        kwargs: dict,
+        original_model_path: str,
+        original_revision: str | None,
+        kv_cache_sharing_group_size: int,
+    ) -> tuple[tuple, dict]:
+        import tempfile
+
+        from transformers import AutoConfig
+
+        from open_instruct.models import register_shared_kv_model
+
+        register_shared_kv_model()
+        config = AutoConfig.from_pretrained(original_model_path, revision=original_revision, trust_remote_code=True)
+        config.kv_cache_sharing_group_size = kv_cache_sharing_group_size
+        temp_config_dir = tempfile.mkdtemp(prefix="shared_kv_config_")
+        config.save_pretrained(temp_config_dir)
+        args = (temp_config_dir,) + args[1:]
+        kwargs["revision"] = None
+        logger.info(
+            f"Created local shared KV cache config at {temp_config_dir} with group_size={kv_cache_sharing_group_size}"
+        )
+        return args, kwargs
 
     def _init_executor(self) -> None:
         max_workers = NUM_PREFETCH_WORKERS + (NUM_TOOL_WORKERS if self.tools else 0)
@@ -944,21 +979,7 @@ def create_vllm_engines(
 ) -> list[LLMRayActor]:
     model_path = pretrain
     if use_shared_kv_cache:
-        import tempfile
-
-        from transformers import AutoConfig
-
-        from open_instruct.models import register_shared_kv_model
-
-        register_shared_kv_model()
-        config = AutoConfig.from_pretrained(pretrain, revision=revision, trust_remote_code=True)
-        config.kv_cache_sharing_group_size = kv_cache_sharing_group_size
-        temp_config_dir = tempfile.mkdtemp(prefix="shared_kv_config_")
-        config.save_pretrained(temp_config_dir)
-        model_path = temp_config_dir
-        logger.info(
-            f"Using shared KV cache with group size {kv_cache_sharing_group_size}. Config saved to {temp_config_dir}"
-        )
+        logger.info(f"Using shared KV cache with group size {kv_cache_sharing_group_size}")
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
@@ -1043,6 +1064,10 @@ def create_vllm_engines(
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
+                use_shared_kv_cache=use_shared_kv_cache,
+                kv_cache_sharing_group_size=kv_cache_sharing_group_size,
+                original_model_path=pretrain if use_shared_kv_cache else None,
+                original_revision=revision if use_shared_kv_cache else None,
             )
         )
 
