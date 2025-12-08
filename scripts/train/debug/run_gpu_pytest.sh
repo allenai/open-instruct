@@ -19,4 +19,4 @@ uv run python mason.py \
        --gpus 1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)" \
-       -- source configs/beaker_configs/ray_node_setup.sh \&\& uv run pytest open_instruct/test_grpo_fast_gpu.py -xvs \; cp -r open_instruct/test_data /output/test_data 2\>/dev/null \|\| true
+       -- source configs/beaker_configs/ray_node_setup.sh \&\& uv run pytest open_instruct/test_grpo_fast_gpu.py -xvs
