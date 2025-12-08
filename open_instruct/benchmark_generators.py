@@ -17,7 +17,7 @@ import pathlib
 import threading
 import time
 from concurrent import futures
-from typing import Any
+from typing import Any, cast
 
 import datasets
 import numpy as np
@@ -244,6 +244,9 @@ def setup_vllm_engines(
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
     tokenizer_name_or_path = tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
+    assert tokenizer_name_or_path is not None
+    assert model_config.model_name_or_path is not None
+    assert model_config.model_revision is not None
 
     vllm_engines = vllm_utils.create_vllm_engines(
         num_engines=args.vllm_num_engines,
@@ -268,7 +271,7 @@ def setup_vllm_engines(
 
     logger.info("vLLM engines ready")
 
-    return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager
+    return vllm_engines, param_prompt_Q, inference_results_Q, actor_manager  # type: ignore[return-value]
 
 
 def simulate_weight_sync(
@@ -331,10 +334,8 @@ def submission_thread(
                 PromptRequest(
                     prompt=prompt,
                     dataset_index=dataset_index,
-                    training_step=batch_idx,
-                    epoch_number=batch_idx,
+                    prompt_id=f"batch_{batch_idx}_prompt_{i}",
                     generation_config=generation_config,
-                    start_time=time.perf_counter(),
                 )
             )
     logger.info(f"[Submission Thread] All {num_batches} batches submitted")
@@ -394,10 +395,8 @@ def run_benchmark(
             PromptRequest(
                 prompt=prompt,
                 dataset_index=dataset_index,
-                training_step=0,
-                epoch_number=0,
+                prompt_id=f"warmup_prompt_{i}",
                 generation_config=generation_config,
-                start_time=time.perf_counter(),
             )
         )
 
@@ -515,51 +514,66 @@ def run_benchmark(
         executor.shutdown(wait=True)
         logger.info("Threads cleaned up")
 
+    return results
+
 
 def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     """Calculate total and aggregated metrics from results."""
-    aggregated_results = {
-        "total_mfu": 0.0,
-        "total_mbu": 0.0,
-        "total_tokens_per_second": 0.0,
-        "total_generation_time": 0.0,
-        "total_weight_sync_time": 0.0,
-        "total_num_new_tokens": 0,
-        "finish_reasons": collections.defaultdict(int),
-        "response_lengths": [],
-        "prompt_lengths": [],
-    }
+    total_mfu = 0.0
+    total_mbu = 0.0
+    total_tokens_per_second = 0.0
+    total_generation_time = 0.0
+    total_weight_sync_time = 0.0
+    total_num_new_tokens = 0
+    finish_reasons: collections.defaultdict[str, int] = collections.defaultdict(int)
+    response_lengths: list[int] = []
+    prompt_lengths: list[int] = []
+
     for result in results:
         for key, value in result.items():
             if key == "mfu":
-                aggregated_results["total_mfu"] += value
+                total_mfu += value
             elif key == "mbu":
-                aggregated_results["total_mbu"] += value
+                total_mbu += value
             elif key == "tokens_per_second":
-                aggregated_results["total_tokens_per_second"] += value
+                total_tokens_per_second += value
             elif key == "generation_time":
-                aggregated_results["total_generation_time"] += value
+                total_generation_time += value
             elif key == "weight_sync_time":
-                aggregated_results["total_weight_sync_time"] += value
+                total_weight_sync_time += value
             elif key == "num_new_tokens":
-                aggregated_results["total_num_new_tokens"] += value
+                total_num_new_tokens += value
             elif key == "finish_reasons":
                 for reason, count in value.items():
-                    aggregated_results["finish_reasons"][reason] += count
-            elif key in ["response_lengths", "prompt_lengths"]:
-                aggregated_results[key].extend(value)
+                    finish_reasons[reason] += count
+            elif key == "response_lengths":
+                response_lengths.extend(value)
+            elif key == "prompt_lengths":
+                prompt_lengths.extend(value)
 
     num_results = len(results)
-    aggregated_results["avg_tokens_per_second"] = (
-        aggregated_results["total_num_new_tokens"] / aggregated_results["total_generation_time"]
-        if aggregated_results["total_generation_time"] > 0
-        else 0
-    )
-    aggregated_results["avg_mfu"] = aggregated_results["total_mfu"] / num_results
-    aggregated_results["avg_mbu"] = aggregated_results["total_mbu"] / num_results
-    aggregated_results["avg_generation_time"] = aggregated_results["total_generation_time"] / num_results
-    aggregated_results["avg_weight_sync_time"] = aggregated_results["total_weight_sync_time"] / num_results
-    return aggregated_results
+    avg_tokens_per_second = total_num_new_tokens / total_generation_time if total_generation_time > 0 else 0
+    avg_mfu = total_mfu / num_results
+    avg_mbu = total_mbu / num_results
+    avg_generation_time = total_generation_time / num_results
+    avg_weight_sync_time = total_weight_sync_time / num_results
+
+    return {
+        "total_mfu": total_mfu,
+        "total_mbu": total_mbu,
+        "total_tokens_per_second": total_tokens_per_second,
+        "total_generation_time": total_generation_time,
+        "total_weight_sync_time": total_weight_sync_time,
+        "total_num_new_tokens": total_num_new_tokens,
+        "finish_reasons": finish_reasons,
+        "response_lengths": response_lengths,
+        "prompt_lengths": prompt_lengths,
+        "avg_tokens_per_second": avg_tokens_per_second,
+        "avg_mfu": avg_mfu,
+        "avg_mbu": avg_mbu,
+        "avg_generation_time": avg_generation_time,
+        "avg_weight_sync_time": avg_weight_sync_time,
+    }
 
 
 def print_summary(
@@ -643,10 +657,13 @@ def main() -> None:
     """Main benchmark function."""
     # Parse arguments using ArgumentParserPlus
     parser = utils.ArgumentParserPlus(
-        (grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig)
+        (grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig)  # type: ignore[arg-type]
     )
 
-    args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
+    args, tokenizer_config, model_config = cast(
+        tuple[grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig],
+        parser.parse_args_into_dataclasses(),
+    )
 
     # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
