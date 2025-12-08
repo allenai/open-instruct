@@ -432,7 +432,7 @@ def _create_server_args(model_path: str) -> argparse.Namespace:
     args = parser.parse_args(["--model", model_path])
     args.disable_fastapi_docs = True
     return args
-  
+
 
 def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.Future | None:
     base_request_id = sub_request["base_request_id"]
