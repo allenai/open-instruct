@@ -527,9 +527,7 @@ class LLMRayActor:
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         if use_shared_kv_cache and original_model_path:
-            args, kwargs = self._setup_shared_kv_cache(
-                args, kwargs, original_model_path, original_revision, kv_cache_sharing_group_size
-            )
+            self._setup_shared_kv_cache(kwargs, original_model_path, original_revision, kv_cache_sharing_group_size)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -573,13 +571,8 @@ class LLMRayActor:
         self._should_stop_value = False
 
     def _setup_shared_kv_cache(
-        self,
-        args: tuple,
-        kwargs: dict,
-        original_model_path: str,
-        original_revision: str | None,
-        kv_cache_sharing_group_size: int,
-    ) -> tuple[tuple, dict]:
+        self, kwargs: dict, original_model_path: str, original_revision: str | None, kv_cache_sharing_group_size: int
+    ) -> None:
         import tempfile
 
         from transformers import AutoConfig
@@ -591,12 +584,11 @@ class LLMRayActor:
         config.kv_cache_sharing_group_size = kv_cache_sharing_group_size
         temp_config_dir = tempfile.mkdtemp(prefix="shared_kv_config_")
         config.save_pretrained(temp_config_dir)
-        args = (temp_config_dir,) + args[1:]
+        kwargs["model"] = temp_config_dir
         kwargs["revision"] = None
         logger.info(
             f"Created local shared KV cache config at {temp_config_dir} with group_size={kv_cache_sharing_group_size}"
         )
-        return args, kwargs
 
     def _init_executor(self) -> None:
         max_workers = NUM_PREFETCH_WORKERS + (NUM_TOOL_WORKERS if self.tools else 0)
