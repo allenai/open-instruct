@@ -1,4 +1,4 @@
-"""GPU tests for generation with tool invocation.
+"""GPU tests for generation with tool invocation and checkpointing.
 
 These tests require CUDA and will be skipped if not available.
 
@@ -11,13 +11,17 @@ import json
 import logging
 import os
 import pathlib
+import random
+import shutil
 import subprocess
+import tempfile
 import time
 import unittest
 
 os.environ["VLLM_BATCH_INVARIANT"] = "1"
 
 import datasets
+import numpy as np
 import ray
 import torch
 from parameterized import parameterized
@@ -25,11 +29,12 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
 
+from open_instruct import grpo_fast
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.tool_utils.tools import PythonCodeTool
-from open_instruct.utils import maybe_update_beaker_description
+from open_instruct.utils import maybe_update_beaker_description, ray_get_with_progress
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
 logging.basicConfig(level=logging.INFO)
@@ -230,6 +235,280 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         self.assertGreater(len(generated_text), 0)
 
         param_prompt_Q.put(None)
+
+
+def create_checkpoint_test_args(
+    checkpoint_dir: str, num_ranks: int = 2, deepspeed_stage: int = 3, seed: int = 42
+) -> grpo_fast.Args:
+    """Create minimal Args for checkpoint testing."""
+    return grpo_fast.Args(
+        model_name_or_path="HuggingFaceTB/SmolLM2-135M",
+        checkpoint_state_dir=checkpoint_dir,
+        checkpoint_state_freq=1,
+        num_learners_per_node=[num_ranks],
+        deepspeed_stage=deepspeed_stage,
+        deepspeed_zpg=1,
+        per_device_train_batch_size=1,
+        num_unique_prompts_rollout=4,
+        num_samples_per_prompt_rollout=1,
+        total_episodes=10,
+        num_training_steps=5,
+        seed=seed,
+        learning_rate=1e-6,
+        response_length=32,
+        temperature=0.7,
+        beta=0.01,
+        num_epochs=1,
+        gradient_checkpointing=True,
+        output_dir=checkpoint_dir,
+        backend_timeout=5,
+        load_ref_policy=False,
+    )
+
+
+class TestCheckpointing(TestGrpoFastBase):
+    """GPU tests for checkpointing with DeepSpeed. Requires 2+ GPUs."""
+
+    def setUp(self):
+        super().setUp()
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+        super().tearDown()
+
+    def _get_num_gpus(self) -> int:
+        return torch.cuda.device_count()
+
+    def _create_model_group(
+        self, checkpoint_dir: str, num_ranks: int, deepspeed_stage: int = 3
+    ) -> tuple[grpo_fast.ModelGroup, grpo_fast.Args]:
+        """Create a ModelGroup for testing."""
+        args = create_checkpoint_test_args(
+            checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=deepspeed_stage
+        )
+
+        pg = placement_group([{"GPU": 1, "CPU": 4}] * num_ranks, strategy="PACK")
+        ray.get(pg.ready())
+
+        policy_cls = ray.remote(grpo_fast.PolicyTrainerRayProcess)
+        model_group = grpo_fast.ModelGroup(
+            pg=pg, ray_process_cls=policy_cls, num_gpus_per_node=[num_ranks], single_gpu_mode=False
+        )
+
+        ray_get_with_progress(
+            [model_group.models[i].from_pretrained.remote(args) for i in range(num_ranks)], desc="Loading models"
+        )
+
+        return model_group, args
+
+    def _cleanup_model_group(self, model_group: grpo_fast.ModelGroup):
+        """Clean up model group actors."""
+        for model in model_group.models:
+            ray.kill(model)
+
+    @unittest.skipUnless(torch.cuda.is_available() and torch.cuda.device_count() >= 2, "Requires 2+ GPUs")
+    @parameterized.expand([(2,), (3,)])
+    def test_checkpoint_save_creates_correct_structure(self, deepspeed_stage: int):
+        """Test that checkpoint save creates the correct directory structure."""
+        num_ranks = min(2, self._get_num_gpus())
+        checkpoint_dir = os.path.join(self.temp_dir, "checkpoints")
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
+        model_group, args = self._create_model_group(
+            checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=deepspeed_stage
+        )
+
+        client_state = {"training_step": 1, "episode": 10, "dataloader_state": {"current_index": 5}}
+
+        ray_get_with_progress(
+            [
+                model_group.models[i].save_checkpoint_state.remote(checkpoint_dir, client_state.copy())
+                for i in range(num_ranks)
+            ],
+            desc="Saving checkpoint",
+        )
+
+        step_dir = os.path.join(checkpoint_dir, "global_step1")
+        self.assertTrue(os.path.exists(step_dir), f"Expected {step_dir} to exist")
+
+        for rank in range(num_ranks):
+            rank_dir = os.path.join(step_dir, f"global_{rank}")
+            self.assertTrue(os.path.exists(rank_dir), f"Expected {rank_dir} to exist")
+
+        self._cleanup_model_group(model_group)
+
+    @unittest.skipUnless(torch.cuda.is_available() and torch.cuda.device_count() >= 2, "Requires 2+ GPUs")
+    @parameterized.expand([(2,), (3,)])
+    def test_checkpoint_load_restores_training_step(self, deepspeed_stage: int):
+        """Test that loading a checkpoint restores the training step."""
+        num_ranks = min(2, self._get_num_gpus())
+        checkpoint_dir = os.path.join(self.temp_dir, "checkpoints")
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
+        model_group, args = self._create_model_group(
+            checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=deepspeed_stage
+        )
+
+        training_step = 5
+        client_state = {"training_step": training_step, "episode": 50, "dataloader_state": {"current_index": 25}}
+
+        ray_get_with_progress(
+            [
+                model_group.models[i].save_checkpoint_state.remote(checkpoint_dir, client_state.copy())
+                for i in range(num_ranks)
+            ],
+            desc="Saving checkpoint",
+        )
+
+        self._cleanup_model_group(model_group)
+
+        model_group2, args2 = self._create_model_group(
+            checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=deepspeed_stage
+        )
+
+        self._cleanup_model_group(model_group2)
+
+    @unittest.skipUnless(torch.cuda.is_available() and torch.cuda.device_count() >= 2, "Requires 2+ GPUs")
+    def test_rng_state_saved_and_restored(self):
+        """Test that RNG states are correctly saved and restored for determinism."""
+        num_ranks = min(2, self._get_num_gpus())
+        checkpoint_dir = os.path.join(self.temp_dir, "checkpoints")
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
+        model_group, args = self._create_model_group(
+            checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=3
+        )
+
+        client_state = {"training_step": 1, "episode": 10, "dataloader_state": {}}
+
+        ray_get_with_progress(
+            [
+                model_group.models[i].save_checkpoint_state.remote(checkpoint_dir, client_state.copy())
+                for i in range(num_ranks)
+            ],
+            desc="Saving checkpoint",
+        )
+
+        step_dir = os.path.join(checkpoint_dir, "global_step1")
+        for rank in range(num_ranks):
+            rank_dir = os.path.join(step_dir, f"global_{rank}")
+            files = os.listdir(rank_dir)
+            self.assertTrue(len(files) > 0, f"Expected files in {rank_dir}")
+
+        self._cleanup_model_group(model_group)
+
+    @unittest.skipUnless(torch.cuda.is_available() and torch.cuda.device_count() >= 2, "Requires 2+ GPUs")
+    def test_multiple_checkpoints_saved(self):
+        """Test saving multiple checkpoints at different steps."""
+        num_ranks = min(2, self._get_num_gpus())
+        checkpoint_dir = os.path.join(self.temp_dir, "checkpoints")
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
+        model_group, args = self._create_model_group(
+            checkpoint_dir=checkpoint_dir, num_ranks=num_ranks, deepspeed_stage=3
+        )
+
+        for step in [1, 2, 3]:
+            client_state = {
+                "training_step": step,
+                "episode": step * 10,
+                "dataloader_state": {"current_index": step * 5},
+            }
+
+            ray_get_with_progress(
+                [
+                    model_group.models[i].save_checkpoint_state.remote(checkpoint_dir, client_state.copy())
+                    for i in range(num_ranks)
+                ],
+                desc=f"Saving checkpoint step {step}",
+            )
+
+        for step in [1, 2, 3]:
+            step_dir = os.path.join(checkpoint_dir, f"global_step{step}")
+            self.assertTrue(os.path.exists(step_dir), f"Expected {step_dir} to exist")
+
+        self._cleanup_model_group(model_group)
+
+
+class TestCheckpointingCPU(unittest.TestCase):
+    """CPU tests for checkpoint utilities (no GPU required)."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_rng_state_serialization_roundtrip(self):
+        """Test that RNG states can be serialized and deserialized correctly."""
+        torch.manual_seed(42)
+        np.random.seed(42)
+        random.seed(42)
+
+        rng_states = {
+            "torch_cpu_rng_state": torch.get_rng_state(),
+            "numpy_rng_state": np.random.get_state(),
+            "python_rng_state": random.getstate(),
+        }
+
+        torch_before = torch.rand(10).tolist()
+        numpy_before = np.random.rand(10).tolist()
+        python_before = [random.random() for _ in range(10)]
+
+        torch.set_rng_state(rng_states["torch_cpu_rng_state"])
+        np.random.set_state(rng_states["numpy_rng_state"])
+        random.setstate(rng_states["python_rng_state"])
+
+        torch_after = torch.rand(10).tolist()
+        numpy_after = np.random.rand(10).tolist()
+        python_after = [random.random() for _ in range(10)]
+
+        self.assertEqual(torch_before, torch_after)
+        self.assertEqual(numpy_before, numpy_after)
+        self.assertEqual(python_before, python_after)
+
+    def test_clean_last_n_checkpoints_deepspeed(self):
+        """Test checkpoint cleanup utility."""
+        from open_instruct.utils import clean_last_n_checkpoints_deepspeed
+
+        checkpoint_dir = self.temp_dir
+        for step in [1, 2, 3, 4, 5]:
+            step_dir = os.path.join(checkpoint_dir, f"global_step{step}")
+            os.makedirs(step_dir)
+            with open(os.path.join(step_dir, "dummy.pt"), "w") as f:
+                f.write("dummy")
+
+        clean_last_n_checkpoints_deepspeed(checkpoint_dir, keep_last_n_checkpoints=2)
+
+        remaining = [d for d in os.listdir(checkpoint_dir) if d.startswith("global_step")]
+        self.assertEqual(len(remaining), 2)
+        self.assertIn("global_step5", remaining)
+        self.assertIn("global_step4", remaining)
+
+    def test_calibrate_checkpoint_state_dir_removes_incomplete(self):
+        """Test that calibrate_checkpoint_state_dir removes incomplete checkpoints."""
+        from open_instruct.utils import calibrate_checkpoint_state_dir
+
+        checkpoint_dir = self.temp_dir
+
+        complete_dir = os.path.join(checkpoint_dir, "global_step1")
+        os.makedirs(complete_dir)
+        for i in range(5):
+            with open(os.path.join(complete_dir, f"file{i}.pt"), "w") as f:
+                f.write("data")
+
+        incomplete_dir = os.path.join(checkpoint_dir, "global_step2")
+        os.makedirs(incomplete_dir)
+        with open(os.path.join(incomplete_dir, "file0.pt"), "w") as f:
+            f.write("data")
+
+        calibrate_checkpoint_state_dir(checkpoint_dir)
+
+        self.assertTrue(os.path.exists(complete_dir))
+        self.assertFalse(os.path.exists(incomplete_dir))
 
 
 if __name__ == "__main__":

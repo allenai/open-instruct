@@ -1,11 +1,16 @@
 import dataclasses
 import gc
+import os
+import random
+import shutil
+import tempfile
 import threading
 import time
 import unittest
 from typing import Any
 from unittest.mock import MagicMock, Mock
 
+import numpy as np
 import ray
 import torch
 from datasets import Dataset
@@ -818,6 +823,179 @@ class TestDataPreparation(TestGrpoFastBase):
                         continue
                     first_pad_idx = padding_mask.nonzero(as_tuple=True)[0][0].item()
                     self.assertTrue(torch.all(row[first_pad_idx:] == pad_token_id))
+
+
+class TestCheckpointUtilities(unittest.TestCase):
+    """CPU tests for checkpoint-related utilities."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_rng_state_serialization_roundtrip(self):
+        """Test that RNG states can be serialized and deserialized correctly."""
+        torch.manual_seed(42)
+        np.random.seed(42)
+        random.seed(42)
+
+        rng_states = {
+            "torch_cpu_rng_state": torch.get_rng_state(),
+            "numpy_rng_state": np.random.get_state(),
+            "python_rng_state": random.getstate(),
+        }
+
+        torch_before = torch.rand(10).tolist()
+        numpy_before = np.random.rand(10).tolist()
+        python_before = [random.random() for _ in range(10)]
+
+        torch.set_rng_state(rng_states["torch_cpu_rng_state"])
+        np.random.set_state(rng_states["numpy_rng_state"])
+        random.setstate(rng_states["python_rng_state"])
+
+        torch_after = torch.rand(10).tolist()
+        numpy_after = np.random.rand(10).tolist()
+        python_after = [random.random() for _ in range(10)]
+
+        self.assertEqual(torch_before, torch_after)
+        self.assertEqual(numpy_before, numpy_after)
+        self.assertEqual(python_before, python_after)
+
+    def test_rng_state_save_load_via_file(self):
+        """Test saving and loading RNG states via a file."""
+        torch.manual_seed(123)
+        np.random.seed(123)
+        random.seed(123)
+
+        rng_states = {
+            "torch_cpu_rng_state": torch.get_rng_state(),
+            "numpy_rng_state": np.random.get_state(),
+            "python_rng_state": random.getstate(),
+        }
+
+        state_file = os.path.join(self.temp_dir, "rng_states.pt")
+        torch.save(rng_states, state_file)
+
+        torch_expected = torch.rand(5).tolist()
+        np_expected = np.random.rand(5).tolist()
+        py_expected = [random.random() for _ in range(5)]
+
+        torch.manual_seed(999)
+        np.random.seed(999)
+        random.seed(999)
+
+        loaded_states = torch.load(state_file, weights_only=False)
+        torch.set_rng_state(loaded_states["torch_cpu_rng_state"])
+        np.random.set_state(loaded_states["numpy_rng_state"])
+        random.setstate(loaded_states["python_rng_state"])
+
+        torch_actual = torch.rand(5).tolist()
+        np_actual = np.random.rand(5).tolist()
+        py_actual = [random.random() for _ in range(5)]
+
+        self.assertEqual(torch_expected, torch_actual)
+        self.assertEqual(np_expected, np_actual)
+        self.assertEqual(py_expected, py_actual)
+
+    def test_clean_last_n_checkpoints_deepspeed_keeps_n(self):
+        """Test that checkpoint cleanup keeps the N most recent checkpoints."""
+        checkpoint_dir = self.temp_dir
+        for step in [1, 2, 3, 4, 5]:
+            step_dir = os.path.join(checkpoint_dir, f"global_step{step}")
+            os.makedirs(step_dir)
+            with open(os.path.join(step_dir, "dummy.pt"), "w") as f:
+                f.write("dummy")
+
+        utils.clean_last_n_checkpoints_deepspeed(checkpoint_dir, keep_last_n_checkpoints=2)
+
+        remaining = [d for d in os.listdir(checkpoint_dir) if d.startswith("global_step")]
+        self.assertEqual(len(remaining), 2)
+        self.assertIn("global_step5", remaining)
+        self.assertIn("global_step4", remaining)
+        self.assertNotIn("global_step1", remaining)
+        self.assertNotIn("global_step2", remaining)
+        self.assertNotIn("global_step3", remaining)
+
+    def test_clean_last_n_checkpoints_deepspeed_handles_fewer_than_n(self):
+        """Test cleanup when fewer checkpoints exist than the limit."""
+        checkpoint_dir = self.temp_dir
+        for step in [1, 2]:
+            step_dir = os.path.join(checkpoint_dir, f"global_step{step}")
+            os.makedirs(step_dir)
+
+        utils.clean_last_n_checkpoints_deepspeed(checkpoint_dir, keep_last_n_checkpoints=5)
+
+        remaining = [d for d in os.listdir(checkpoint_dir) if d.startswith("global_step")]
+        self.assertEqual(len(remaining), 2)
+
+    def test_clean_last_n_checkpoints_deepspeed_preserves_special_files(self):
+        """Test that cleanup preserves special files like zero_to_fp32.py."""
+        checkpoint_dir = self.temp_dir
+        for step in [1, 2, 3]:
+            step_dir = os.path.join(checkpoint_dir, f"global_step{step}")
+            os.makedirs(step_dir)
+
+        with open(os.path.join(checkpoint_dir, "zero_to_fp32.py"), "w") as f:
+            f.write("# script")
+        with open(os.path.join(checkpoint_dir, "latest"), "w") as f:
+            f.write("3")
+
+        utils.clean_last_n_checkpoints_deepspeed(checkpoint_dir, keep_last_n_checkpoints=1)
+
+        self.assertTrue(os.path.exists(os.path.join(checkpoint_dir, "zero_to_fp32.py")))
+        self.assertTrue(os.path.exists(os.path.join(checkpoint_dir, "latest")))
+        self.assertTrue(os.path.exists(os.path.join(checkpoint_dir, "global_step3")))
+
+    def test_calibrate_checkpoint_state_dir_removes_incomplete(self):
+        """Test that calibrate removes incomplete checkpoints."""
+        checkpoint_dir = self.temp_dir
+
+        complete_dir = os.path.join(checkpoint_dir, "global_step1")
+        os.makedirs(complete_dir)
+        for i in range(5):
+            with open(os.path.join(complete_dir, f"file{i}.pt"), "w") as f:
+                f.write("data")
+
+        incomplete_dir = os.path.join(checkpoint_dir, "global_step2")
+        os.makedirs(incomplete_dir)
+        with open(os.path.join(incomplete_dir, "file0.pt"), "w") as f:
+            f.write("data")
+
+        utils.calibrate_checkpoint_state_dir(checkpoint_dir)
+
+        self.assertTrue(os.path.exists(complete_dir))
+        self.assertFalse(os.path.exists(incomplete_dir))
+
+    def test_calibrate_checkpoint_state_dir_updates_latest(self):
+        """Test that calibrate updates the latest file."""
+        checkpoint_dir = self.temp_dir
+
+        for step in [1, 3, 5]:
+            step_dir = os.path.join(checkpoint_dir, f"global_step{step}")
+            os.makedirs(step_dir)
+            for i in range(3):
+                with open(os.path.join(step_dir, f"file{i}.pt"), "w") as f:
+                    f.write("data")
+
+        utils.calibrate_checkpoint_state_dir(checkpoint_dir)
+
+        latest_file = os.path.join(checkpoint_dir, "latest")
+        self.assertTrue(os.path.exists(latest_file))
+        with open(latest_file) as f:
+            latest_step = f.read().strip()
+        self.assertEqual(latest_step, "global_step5")
+
+    def test_calibrate_checkpoint_state_dir_empty_dir(self):
+        """Test calibrate handles empty directories gracefully."""
+        checkpoint_dir = self.temp_dir
+        utils.calibrate_checkpoint_state_dir(checkpoint_dir)
+
+    def test_calibrate_checkpoint_state_dir_nonexistent(self):
+        """Test calibrate handles nonexistent directories gracefully."""
+        nonexistent_dir = os.path.join(self.temp_dir, "nonexistent")
+        utils.calibrate_checkpoint_state_dir(nonexistent_dir)
 
 
 if __name__ == "__main__":
