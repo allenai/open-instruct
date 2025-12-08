@@ -146,5 +146,7 @@ split-on-trailing-comma = false
 include = [
     "open_instruct/data_types.py",
     "open_instruct/logger_utils.py",
+    "open_instruct/data_loader.py",
+    "open_instruct/padding_free_collator.py",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]
