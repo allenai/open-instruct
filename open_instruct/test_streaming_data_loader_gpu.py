@@ -161,7 +161,6 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         self.assertEqual(batches_received, 2)
 
         param_prompt_Q.put(None)
-        ray.get(actor.shutdown.remote())
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_streaming_dataloader_iteration_with_tools(self):
@@ -263,7 +262,6 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         self.assertEqual(batches_received, 2)
 
         param_prompt_Q.put(None)
-        ray.get(actor.shutdown.remote())
 
 
 if __name__ == "__main__":
