@@ -299,9 +299,6 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             self.training_step = step + 1
             yield batch_data
 
-    def shutdown(self):
-        pass
-
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
     padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
@@ -322,58 +319,6 @@ class BatchStatistics:
     percent_solved_hist: np.ndarray
     no_resampled_prompts: int
     total_prompts: int
-
-
-class PendingQueriesMap:
-    def __init__(self):
-        self._map = {}
-        self._lock = threading.Lock()
-
-    def insert(self, dataset_idx, query, ground_truth, dataset, raw_query):
-        with self._lock:
-            if dataset_idx in self._map:
-                existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
-                    dataset_idx
-                ]
-                self._map[dataset_idx] = (
-                    existing_query,
-                    existing_ground_truth,
-                    existing_dataset,
-                    existing_raw_query,
-                    count + 1,
-                )
-            else:
-                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, 1)
-
-    def pop(self, dataset_idx):
-        with self._lock:
-            if dataset_idx not in self._map:
-                raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
-
-            query, ground_truth, dataset, raw_query, count = self._map[dataset_idx]
-
-            if count > 1:
-                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, count - 1)
-            else:
-                del self._map[dataset_idx]
-
-            return query, ground_truth, dataset, raw_query
-
-    def __len__(self):
-        with self._lock:
-            return len(self._map)
-
-    def __contains__(self, dataset_idx):
-        with self._lock:
-            return dataset_idx in self._map
-
-    def __getitem__(self, dataset_idx):
-        with self._lock:
-            return self._map[dataset_idx]
-
-    def keys(self):
-        with self._lock:
-            return list(self._map.keys())
 
 
 def add_prompt_to_generator(
@@ -768,13 +713,6 @@ class DataPreparationActor:
         self._prep_future = self._executor.submit(self._data_preparation_loop)
 
     def _data_preparation_loop(self):
-        try:
-            self._data_preparation_loop_inner()
-        except Exception:
-            logger.exception("[DataPreparationActor] Exception in data preparation loop")
-            raise
-
-    def _data_preparation_loop_inner(self):
         for _ in range(self.config.async_steps * self.global_batch_size):
             add_prompt_to_generator(
                 next(self.iter_dataloader),
@@ -964,10 +902,6 @@ class DataPreparationActor:
             del self.prepared_data[s]
             if s in self.metrics:
                 del self.metrics[s]
-
-    def shutdown(self):
-        self.shutdown_requested = True
-        self._executor.shutdown(wait=True)
 
     def get_state(self) -> dict:
         return {
