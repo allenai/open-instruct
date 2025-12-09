@@ -135,7 +135,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             dp_world_size=1,
             max_possible_score=1.0,
             actor_manager=None,
-            model_dims=self.create_mock_model_dims(),
+            model_dims=self.create_llama7b_model_dims(),
             verbose=True,
             work_dir="/tmp",
         )
@@ -239,7 +239,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             dp_world_size=1,
             max_possible_score=1.0,
             actor_manager=None,
-            model_dims=self.create_mock_model_dims(),
+            model_dims=self.create_llama7b_model_dims(),
             verbose=True,
             work_dir="/tmp",
         )

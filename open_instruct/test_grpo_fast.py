@@ -3,7 +3,6 @@ import os
 import time
 import unittest
 from typing import Any
-from unittest.mock import Mock
 
 import ray
 import torch
@@ -112,21 +111,18 @@ class TestGrpoFastBase(unittest.TestCase):
         raw_queries = [f"{prefix}rawquery_{i}" for i in indices]
         return queries, ground_truths, datasets, raw_queries, indices
 
-    def create_mock_model_dims(self):
-        """Create mock ModelDims object for tests."""
-        mock_dims = Mock(spec=utils.ModelDims)
-        mock_dims.num_layers = 32
-        mock_dims.hidden_size = 4096
-        mock_dims.intermediate_size = 11008
-        mock_dims.vocab_size = 32000
-        mock_dims.num_attn_heads = 32
-        mock_dims.num_kv_heads = 32
-        mock_dims.device_name = "h100"
-        mock_dims.device_flops = 989.5e12
-        mock_dims.device_memory_bandwidth = 3.35e12
-        mock_dims.flops = Mock(return_value=1e12)
-        mock_dims.memory_bytes = Mock(return_value=1e9)
-        return mock_dims
+    def create_llama7b_model_dims(self):
+        """Create ModelDims object with Llama-7B-like dimensions for tests."""
+        return utils.ModelDims(
+            num_layers=32,
+            hidden_size=4096,
+            intermediate_size=11008,
+            vocab_size=32000,
+            num_attn_heads=32,
+            head_dim=128,
+            num_kv_heads=32,
+            device_name="h100",
+        )
 
     def create_mock_packed_sequences(self, batch_size: int, seq_length: int, variable_length: bool = False):
         """Create mock PackedSequences for testing."""
