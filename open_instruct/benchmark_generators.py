@@ -265,6 +265,8 @@ def setup_vllm_engines(
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
         inflight_updates=args.inflight_updates,
+        use_shared_kv_cache=args.vllm_use_shared_kv_cache,
+        kv_cache_sharing_group_size=args.vllm_kv_cache_sharing_group_size,
     )
 
     logger.info("vLLM engines ready")
