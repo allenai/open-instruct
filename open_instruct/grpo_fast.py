@@ -2869,7 +2869,6 @@ def run_training(
             episode,
             eval_dataset,
             generation_configs["eval"],
-            eval_dataset,
             model_dims,
             actor_manager,
         )
