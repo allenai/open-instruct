@@ -1571,6 +1571,26 @@ def create_model_and_optimizer(
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
+    # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
+    # This ensures policy trainer actors are scheduled first, which affects how Ray schedules
+    # the vLLM placement group and prevents port collisions during vLLM initialization.
+    data_prep_actor_name = "data_prep_singleton"
+    wandb_url = wandb.run.get_url() if args.with_tracking else None
+    policy_group = ModelGroup(
+        pg,
+        PolicyTrainerRayProcess,
+        args.num_learners_per_node,
+        args.single_gpu_mode,
+        args=args,
+        data_loader_config=data_loader_config,
+        data_prep_actor_name=data_prep_actor_name,
+        tokenizer=tokenizer,
+    )
+    inits = [
+        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
+        for model in policy_group.models
+    ]
+
     # Create vLLM engines with queues
     vllm_engines = vllm_utils.create_vllm_engines(
         args.vllm_num_engines,
@@ -1624,7 +1644,7 @@ def create_model_and_optimizer(
     else:
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
 
-    data_prep_actor_name = "data_prep_singleton"
+    # Create DataPreparationActor after vLLM engines (needs model_dims)
     _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
         dataset=train_dataset,
         inference_results_Q=inference_results_Q,
@@ -1645,23 +1665,7 @@ def create_model_and_optimizer(
         initial_state=data_prep_actor_state,
     )
 
-    wandb_url = wandb.run.get_url() if args.with_tracking else None
-    policy_group = ModelGroup(
-        pg,
-        PolicyTrainerRayProcess,
-        args.num_learners_per_node,
-        args.single_gpu_mode,
-        args=args,
-        data_loader_config=data_loader_config,
-        data_prep_actor_name=data_prep_actor_name,
-        tokenizer=tokenizer,
-    )
-
-    inits = [
-        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
-        for model in policy_group.models
-    ]
-
+    # Wait for policy models to finish loading
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
     resume_training_step = results[0] + 1
     episode = (
