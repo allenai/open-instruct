@@ -652,6 +652,7 @@ def prepare_collated_data_for_workers(
         f"Total packed sequences ({total_sequences}) must be evenly divisible by world_size ({world_size}). "
         f"This indicates a configuration issue."
     )
+    # Essentially doing `drop_last=True`, which is fine.
     B = total_sequences // world_size
     collated_data = []
     for i in range(world_size):
@@ -662,6 +663,7 @@ def prepare_collated_data_for_workers(
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
 
+        # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
         collated_query_responses = []
         collated_attention_masks = []

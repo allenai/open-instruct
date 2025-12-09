@@ -223,9 +223,8 @@ class TestDataPreparation(TestGrpoFastBase):
         }
 
         expected_samples_per_worker = batch_size // world_size
-        samples_per_worker = batch_size // world_size
         expected_num_microbatches = (
-            samples_per_worker + per_device_train_batch_size - 1
+            expected_samples_per_worker + per_device_train_batch_size - 1
         ) // per_device_train_batch_size
 
         for worker_data in result:
