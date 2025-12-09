@@ -1,125 +1,422 @@
-import contextlib
-import dataclasses
+"""
+DPO training with OLMo-core's Trainer.
+
+This module provides DPO (Direct Preference Optimization) training using
+OLMo-core's native training infrastructure.
+"""
+
 import enum
+import os
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
+from functools import partial
+from typing import Any
 
-from olmo_core import train
-from olmo_core import data
-from olmo_core import config
-from olmo_core import nn
-from olmo_core.internal import experiment
+import torch
+import torch.nn as nn
+from datasets import Dataset
+from olmo_core import config, train
+from olmo_core.data import data_loader
+from olmo_core.nn.transformer import Transformer, TransformerConfig
+from olmo_core.optim import AdamWConfig, OptimConfig
+from olmo_core.train.common import ReduceType
+from olmo_core.train.train_module import TransformerTrainModule
+from tqdm.auto import tqdm
+from transformers import PreTrainedTokenizer
 
-
-@contextlib.contextmanager
-def prepare_dpo_training_environment():
-    train.prepare_training_environment()
-    try:
-        yield
-    finally:
-        train.teardown_training_environment()
+from open_instruct.data_loader import HFDataLoader
+from open_instruct.dataset_transformation import (
+    TOKENIZED_PREFERENCE_DATASET_KEYS,
+    TokenizerConfig,
+    get_cached_dataset_tulu,
+)
+from open_instruct.dpo_utils import (
+    DataCollatorForSeq2SeqDPO,
+    concatenated_forward,
+    dpo_loss,
+    separate_forward,
+    simpo_loss,
+    wpo_loss,
+)
+from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
+from open_instruct.utils import ArgumentParserPlus
 
 
 class DPOLossType(enum.Enum):
-    dpo = 1
-    dpo_norm = 2
-    simpo = 3
-    wpo = 4
-
-class DatasetCacheMode(enum.Enum):
-    LOCAL = 1
-    HF = 2
+    dpo = "dpo"
+    dpo_norm = "dpo_norm"
+    simpo = "simpo"
+    wpo = "wpo"
 
 
-@dataclasses.dataclass
-class DPOExperiment:
-    trainer: train.Trainer
+@dataclass
+class ReferenceLogprobsCache:
+    """Cache for reference model log probabilities.
 
-    def run():
-        with prepare_dpo_training_environment():
-            self.trainer.fit()
+    Stores pre-computed reference model log probabilities for each epoch
+    and batch to avoid keeping the reference model in memory during training.
+    """
+
+    chosen_logps: list[list[torch.Tensor]]
+    rejected_logps: list[list[torch.Tensor]]
+
+    @classmethod
+    def build_cache(
+        cls,
+        model: nn.Module,
+        dataloader: "DPODataLoader",
+        num_epochs: int,
+        average_log_prob: bool,
+        forward_fn: Callable,
+        use_lora: bool = False,
+        device: torch.device | None = None,
+    ) -> "ReferenceLogprobsCache":
+        """Build the reference logprobs cache by iterating through all epochs.
+
+        Args:
+            model: The model to use for computing reference logprobs.
+            dataloader: The data loader to iterate over.
+            num_epochs: Number of training epochs.
+            average_log_prob: Whether to average log probabilities.
+            forward_fn: The forward function to use.
+            use_lora: Whether the model uses LoRA adapters.
+            device: The device to use for computation.
+
+        Returns:
+            A ReferenceLogprobsCache instance with cached logprobs.
+        """
+        model.eval()
+        epoch_chosen_logps: list[list[torch.Tensor]] = []
+        epoch_rejected_logps: list[list[torch.Tensor]] = []
+
+        for epoch in range(num_epochs):
+            dataloader.reshuffle(epoch=epoch)
+            batch_chosen_logps: list[torch.Tensor] = []
+            batch_rejected_logps: list[torch.Tensor] = []
+
+            with torch.no_grad():
+                for batch in tqdm(dataloader, desc=f"Caching reference logprobs (epoch {epoch})"):
+                    if device is not None:
+                        batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+
+                    if use_lora:
+                        with model.disable_adapter():
+                            chosen_logps, rejected_logps, _ = forward_fn(
+                                model, batch, average_log_prob=average_log_prob
+                            )
+                    else:
+                        chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+
+                    batch_chosen_logps.append(chosen_logps.cpu())
+                    batch_rejected_logps.append(rejected_logps.cpu())
+
+            epoch_chosen_logps.append(batch_chosen_logps)
+            epoch_rejected_logps.append(batch_rejected_logps)
+
+        model.train()
+        return cls(chosen_logps=epoch_chosen_logps, rejected_logps=epoch_rejected_logps)
+
+    def get(self, epoch: int, batch_idx: int, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+        """Get cached reference logprobs for a specific epoch and batch.
+
+        Args:
+            epoch: The epoch index (0-based).
+            batch_idx: The batch index within the epoch.
+            device: The device to move tensors to.
+
+        Returns:
+            Tuple of (chosen_logps, rejected_logps) on the specified device.
+        """
+        return (self.chosen_logps[epoch][batch_idx].to(device), self.rejected_logps[epoch][batch_idx].to(device))
 
 
-@dataclasses.dataclass
-class DPOTrainerConfig:
+@dataclass
+class DPODataLoader(data_loader.DataLoaderBase):
+    """DataLoader for DPO preference data.
 
-@dataclasses.dataclass
-class WandbConfig:
-    enabled: bool = True
-    project: str = "open_instruct"
-    entity: str = "ai2-llm"
-    group: str = "dpo_experiments"
+    Wraps HFDataLoader to handle DPO-specific batching with chosen/rejected pairs.
+    """
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        batch_size: int,
+        seed: int,
+        rank: int,
+        world_size: int,
+        work_dir: str,
+        tokenizer: PreTrainedTokenizer,
+        packing: bool = False,
+        automatic_reshuffle: bool = False,
+    ) -> None:
+        """Initialize the DPODataLoader.
+
+        Args:
+            dataset: The HuggingFace Dataset with preference pairs.
+            batch_size: The batch size per device.
+            seed: Random seed for shuffling.
+            rank: The rank of the current process.
+            world_size: Total number of processes.
+            work_dir: Working directory for the data loader.
+            tokenizer: Tokenizer for the collator.
+            packing: Whether to use padding-free packing.
+            automatic_reshuffle: Whether to automatically reshuffle at epoch boundaries.
+        """
+        super().__init__(
+            work_dir=work_dir,
+            global_batch_size=batch_size * world_size,
+            dp_world_size=world_size,
+            dp_rank=rank,
+            fs_local_rank=0,
+        )
+
+        self._base_loader = HFDataLoader(
+            dataset=dataset,
+            batch_size=1,
+            seed=seed,
+            rank=rank,
+            world_size=world_size,
+            work_dir=work_dir,
+            automatic_reshuffle=False,
+        )
+
+        self._batch_size = batch_size
+        self._packing = packing
+        self._automatic_reshuffle = automatic_reshuffle
+        self._epoch = 0
+
+        if packing:
+            self.collator = TensorDataCollatorWithFlatteningDPO(
+                return_position_ids=True, return_flash_attn_kwargs=True
+            )
+        else:
+            self.collator = DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
+
+    def _iter_batches(self) -> Iterable[dict[str, Any]]:
+        """Yield collated batches of preference pairs."""
+        batch_examples: list[dict[str, Any]] = []
+
+        for example in self._base_loader:
+            batch_examples.append(example)
+            if len(batch_examples) == self._batch_size:
+                yield self.collator(batch_examples)
+                batch_examples = []
+
+    @property
+    def total_batches(self) -> int:
+        """Return the total number of batches in an epoch."""
+        return self._base_loader.effective_size // self._batch_size
+
+    def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
+        """Reshuffle the dataset for a new epoch."""
+        self._epoch += 1
+        self.batches_processed = 0
+        self._base_loader.reshuffle(epoch=epoch, **kwargs)
+
+    def state_dict(self) -> dict[str, Any]:
+        """Return a state dictionary for checkpointing."""
+        return {
+            "epoch": self._epoch,
+            "batches_processed": self.batches_processed,
+            "base_loader_state": self._base_loader.state_dict(),
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Load a state dictionary to restore the data loader's state."""
+        self._epoch = state_dict["epoch"]
+        self.batches_processed = state_dict["batches_processed"]
+        self._base_loader.load_state_dict(state_dict["base_loader_state"])
+
+    def get_mock_batch(self) -> dict[str, Any]:
+        """Return a batch with arbitrary data for dry-run testing."""
+        examples = [self._base_loader.dataset[i] for i in range(min(self._batch_size, len(self._base_loader.dataset)))]
+        return self.collator(examples)
 
 
-@dataclasses.dataclass
+@dataclass
+class DPOConfig(config.Config):
+    """Configuration for DPO-specific settings."""
+
+    dpo_beta: float = 0.1
+    dpo_loss_type: DPOLossType = DPOLossType.dpo
+    dpo_gamma_beta_ratio: float = 0.3
+    dpo_label_smoothing: float = 0.0
+    load_balancing_loss: bool = False
+    load_balancing_weight: float = 1e-3
+    concatenated_forward: bool = True
+    packing: bool = False
+
+
+class DPOTrainModule(TransformerTrainModule):
+    """Training module for DPO with OLMo-core's Trainer.
+
+    Extends TransformerTrainModule to override train_batch with DPO loss computation.
+    """
+
+    def __init__(
+        self,
+        model: Transformer,
+        optim: OptimConfig,
+        dpo_config: DPOConfig,
+        reference_cache: ReferenceLogprobsCache,
+        rank_microbatch_size: int,
+        max_sequence_length: int,
+        device: torch.device | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the DPOTrainModule.
+
+        Args:
+            model: The transformer model to train.
+            optim: Optimizer configuration.
+            dpo_config: DPO-specific configuration.
+            reference_cache: Cached reference model log probabilities.
+            rank_microbatch_size: Microbatch size per rank.
+            max_sequence_length: Maximum sequence length.
+            device: Device to train on.
+            **kwargs: Additional arguments for TransformerTrainModule.
+        """
+        super().__init__(
+            model=model,
+            optim=optim,
+            rank_microbatch_size=rank_microbatch_size,
+            max_sequence_length=max_sequence_length,
+            device=device,
+            **kwargs,
+        )
+
+        self.dpo_config = dpo_config
+        self.reference_cache = reference_cache
+        self.average_log_prob = dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
+
+        if dpo_config.concatenated_forward:
+            self._forward_fn = concatenated_forward
+            if dpo_config.packing:
+                self._forward_fn = partial(concatenated_forward, packing=True)
+        else:
+            self._forward_fn = separate_forward
+
+        self._batch_idx = 0
+        self._epoch = 0
+
+    def on_attach(self) -> None:
+        """Called when the trainer is attached."""
+        super().on_attach()
+        self._batch_idx = 0
+        self._epoch = 0
+
+    def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
+        """Train on a single batch using DPO loss.
+
+        Args:
+            batch: The input batch with chosen and rejected pairs.
+            dry_run: If True, skip metric recording.
+        """
+        self._set_model_mode("train")
+
+        if self.device is not None:
+            batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+
+        policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
+            self.model,
+            batch,
+            average_log_prob=self.average_log_prob,
+            output_router_logits=self.dpo_config.load_balancing_loss,
+        )
+
+        if self.dpo_config.dpo_loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm):
+            reference_chosen_logps, reference_rejected_logps = self.reference_cache.get(
+                self._epoch, self._batch_idx, policy_chosen_logps.device
+            )
+            losses, chosen_rewards, rejected_rewards = dpo_loss(
+                policy_chosen_logps,
+                policy_rejected_logps,
+                reference_chosen_logps,
+                reference_rejected_logps,
+                beta=self.dpo_config.dpo_beta,
+                label_smoothing=self.dpo_config.dpo_label_smoothing,
+            )
+        elif self.dpo_config.dpo_loss_type == DPOLossType.simpo:
+            losses, chosen_rewards, rejected_rewards = simpo_loss(
+                policy_chosen_logps,
+                policy_rejected_logps,
+                beta=self.dpo_config.dpo_beta,
+                gamma_beta_ratio=self.dpo_config.dpo_gamma_beta_ratio,
+                label_smoothing=self.dpo_config.dpo_label_smoothing,
+            )
+        elif self.dpo_config.dpo_loss_type == DPOLossType.wpo:
+            reference_chosen_logps, reference_rejected_logps = self.reference_cache.get(
+                self._epoch, self._batch_idx, policy_chosen_logps.device
+            )
+            losses, chosen_rewards, rejected_rewards = wpo_loss(
+                policy_chosen_logps,
+                policy_rejected_logps,
+                reference_chosen_logps,
+                reference_rejected_logps,
+                beta=self.dpo_config.dpo_beta,
+                label_smoothing=self.dpo_config.dpo_label_smoothing,
+                chosen_loss_mask=batch["chosen_labels"] != -100,
+                rejected_loss_mask=batch["rejected_labels"] != -100,
+            )
+        else:
+            raise ValueError(f"Unknown DPO loss type: {self.dpo_config.dpo_loss_type}")
+
+        loss = losses.mean()
+
+        if self.dpo_config.load_balancing_loss and aux_loss is not None:
+            loss = loss + self.dpo_config.load_balancing_weight * aux_loss
+
+        if not dry_run:
+            self.record_metric("train/loss", loss.detach(), ReduceType.mean)
+            self.record_metric("train/logps_chosen", policy_chosen_logps.mean().detach(), ReduceType.mean)
+            self.record_metric("train/logps_rejected", policy_rejected_logps.mean().detach(), ReduceType.mean)
+
+            if self.dpo_config.dpo_loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm, DPOLossType.wpo):
+                accuracy = (chosen_rewards > rejected_rewards).float().mean()
+                margin = (chosen_rewards - rejected_rewards).mean()
+                self.record_metric("train/rewards_chosen", chosen_rewards.mean().detach(), ReduceType.mean)
+                self.record_metric("train/rewards_rejected", rejected_rewards.mean().detach(), ReduceType.mean)
+                self.record_metric("train/rewards_accuracy", accuracy.detach(), ReduceType.mean)
+                self.record_metric("train/rewards_margin", margin.detach(), ReduceType.mean)
+
+            if self.dpo_config.load_balancing_loss and aux_loss is not None:
+                self.record_metric("train/aux_loss", aux_loss.detach(), ReduceType.mean)
+
+        loss.backward()
+        self._batch_idx += 1
+
+    def on_epoch_start(self) -> None:
+        """Called at the start of each epoch."""
+        self._batch_idx = 0
+
+    def on_epoch_end(self) -> None:
+        """Called at the end of each epoch."""
+        self._epoch += 1
+
+
+@dataclass
 class DPOExperimentConfig(config.Config):
-    # Experiment names
-    exp_name: str = "dpo_experiment" # Name of this experiment (e.g. DPO).
-    run_name: str | None = None # Unique name of this run.
+    """Configuration for a DPO training experiment."""
 
-    #
-    checkpoint_every: int | str = 500 # Save a checkpoint every N steps or "epoch" to save at the end of each epoch.
-    keep_last_n_checkpoints: int = 3 # Number of last checkpoints to keep. Older checkpoints will be deleted.
+    exp_name: str = "dpo_experiment"
+    run_name: str | None = None
+    seed: int = 42
 
-    # Model config
-    model_name_or_path: str | None
+    model_name_or_path: str | None = None
     use_flash_attn: bool = True
-    model_revision: str | None = None # Model revision to use (branch, tag, or commit id).
-    additional_model_kwargs: dict[str, config.ConfigField] | None = None # Additional kwargs for model initialization.
+    model_revision: str | None = None
 
-    # DPO loss config
-    dpo_beta: float = 0.1  # DPO beta parameter.
-    dpo_loss_type: DPOLossType # Type of DPO loss to use.
-    dpo_gamma_beta_ratio: float = 0.3 # Ratio for SIMPO loss. Not used for other loss types.
-    dpo_label_smoothing: float = 0.0 # Label smoothing for DPO loss. Default is 0.0 (no smoothing).
+    dpo_config: DPOConfig = field(default_factory=DPOConfig)
 
-    # Optimization config
-    clip_grad_norm: float = 1.0 # Gradient clipping norm.
-    gradient_accumulation_steps: int = 1 # Number of gradient accumulation steps.
-    learning_rate: float = 2e-5
-    lr_scheduler_type: str = "cosine" # Learning rate scheduler type.
-    log_every: int = 10 # Logging frequency (in steps).
     num_epochs: int = 2
     per_device_train_batch_size: int = 8
-    warmup_ratio: float = 0.03 # Warmup ratio for learning rate scheduler.
-    weight_decay: float = 0.01 # Weight decay for AdamW.
-    gradient_checkpointing: bool = False # Whether to use gradient checkpointing.
-    use_liger_kernel: bool = False
-    max_train_steps: int | None = None # Maximum number of training steps. If set, overrides num_epochs.
-    seed: int = 42
-    fused_optimizer: bool = True # Whether to use fused AdamW.
-    load_balancing_loss: bool = False # Whether to include a load balancing loss (for OLMoE).
-    load_balancing_weight: float = 1e-3 # Weight for the load balancing loss.
+    gradient_accumulation_steps: int = 1
+    learning_rate: float = 2e-5
+    warmup_ratio: float = 0.03
+    weight_decay: float = 0.01
+    max_grad_norm: float = 1.0
+    max_seq_length: int = 2048
 
-
-
-
-
-    # LoRA config
-    use_lora: bool = False
-    use_qlora: bool = False
-    lora_rank: int = 64
-    lora_alpha: float = 16
-    lora_dropout: float = 0.1
-
-    # Export config
-    output_dir: str = "output/"
-    save_to_hub: str | None = None # Repository name to save the model to the Hugging Face Hub. E.g. allenai/your-model.
-    push_to_hub: bool = False # Whether to push the model to the Hugging Face Hub.
-    hf_entity: str | None = None # Hugging Face Hub entity (user or organization).
-
-
-    # Checkpoint config
-    checkpoint_config: CheckpointConfig
-
-    # Reporting config
-    report_to: list[str] = dataclasses.field(
-        default_factory=lambda: ["all"]
-    ) # Options are tensorboard, wandb, comet_ml, clearml, all.
-    wandb_config: WandbConfig
-
-
-    # Dataset config
-    dataset_name: str | None = None
-    dataset_mixer: dict[str, float] | None = None
     dataset_mixer_list: list[str] = field(
         default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
     )
@@ -127,211 +424,115 @@ class DPOExperimentConfig(config.Config):
     dataset_transform_fn: list[str] = field(
         default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
     )
+
+    use_lora: bool = False
+    lora_rank: int = 64
+    lora_alpha: float = 16
+    lora_dropout: float = 0.1
+
+    output_dir: str = "output/"
+    save_folder: str | None = None
+    checkpoint_every: int = 500
+    keep_last_n_checkpoints: int = 3
+
+    log_every: int = 10
+    wandb_project: str = "open_instruct"
+    wandb_entity: str | None = None
+
     dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
-    dataset_cache_mode: DatasetCacheMode = DatasetCacheMode.LOCAL
+    dataset_cache_mode: str = "local"
     dataset_local_cache_dir: str = "local_dataset_cache"
-    dataset_config_hash: str | None = None
     dataset_skip_cache: bool = False
-    dataset_mix_dir: str | None = None
-    dataset_config_name: str | None = None
-    max_train_samples: int | None = None
-    max_seq_length: int | None = None
-    overwrite_cache: bool = False
-    timeout_s: int = 1800 # Timeout for the training process. Useful if tokenization is slow.
+    hf_entity: str | None = None
 
 
+def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
+    """Main entry point for DPO training with OLMo-core."""
+    train.prepare_training_environment(seed=args.seed)
 
+    tc.tokenizer_name_or_path = (
+        args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    )
+    tokenizer = tc.tokenizer
 
-    model: nn.transformer.TransformerConfig
-    dataset: data.NumpyDatasetConfig
-    data_loader: data.NumpyDataLoaderConfig
-    trainer_config: train.TrainerConfig
-    train_module: train.TransformerTrainModuleConfig
-    init_seed: int = 123
-    load_path: str | None = None
-    load_trainer_state: bool = False
+    os.makedirs(args.output_dir, exist_ok=True)
 
+    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    dataset = get_cached_dataset_tulu(
+        dataset_mixer_list=args.dataset_mixer_list,
+        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+        tc=tc,
+        dataset_transform_fn=args.dataset_transform_fn,
+        transform_fn_args=transform_fn_args,
+        target_columns=args.dataset_target_columns,
+        dataset_cache_mode=args.dataset_cache_mode,
+        hf_entity=args.hf_entity,
+        dataset_local_cache_dir=args.dataset_local_cache_dir,
+        dataset_skip_cache=args.dataset_skip_cache,
+    )
+    dataset = dataset.shuffle(seed=args.seed)
+    dataset.set_format(type="pt")
 
-@dataclasses.dataclass
-class DPOConfig(train.TransformerTrainModuleConfig):
+    model_config = TransformerConfig.from_pretrained(args.model_name_or_path)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model_config.build(device=device)
 
-    def build(self, model: Transformer,
-              device: torch.device | None = None) -> 'DPOTrainModule':
-        return DPOTrainModule(self)
+    data_loader_instance = DPODataLoader(
+        dataset=dataset,
+        batch_size=args.per_device_train_batch_size,
+        seed=args.seed,
+        rank=0,
+        world_size=1,
+        work_dir=args.output_dir,
+        tokenizer=tokenizer,
+        packing=args.dpo_config.packing,
+    )
 
+    forward_fn = concatenated_forward if args.dpo_config.concatenated_forward else separate_forward
+    if args.dpo_config.packing:
+        forward_fn = partial(concatenated_forward, packing=True)
+    average_log_prob = args.dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
 
-class DPOTrainModule(olmo_core.train.TransformerTrainModule):
-    def __init__(self, model, device, dpo_config: DPOConfig):
-        super().__init__(model, device)
-        self.config = dpo_config
+    print("Caching reference logprobs...")
+    reference_cache = ReferenceLogprobsCache.build_cache(
+        model=model,
+        dataloader=data_loader_instance,
+        num_epochs=args.num_epochs,
+        average_log_prob=average_log_prob,
+        forward_fn=forward_fn,
+        use_lora=args.use_lora,
+        device=device,
+    )
+    print("Reference logprobs cached.")
 
+    optim = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay)
 
-    def train_batch(self, batch: Dict[str, Any], dry_run: bool = False):
-        """This is largely copy/pasted from the base class, with modifications for DPO loss."""
-        # Set model to train mode if it isn't already.
-        self._set_model_mode("train")
+    train_module = DPOTrainModule(
+        model=model,
+        optim=optim,
+        dpo_config=args.dpo_config,
+        reference_cache=reference_cache,
+        rank_microbatch_size=args.per_device_train_batch_size * args.max_seq_length,
+        max_sequence_length=args.max_seq_length,
+        max_grad_norm=args.max_grad_norm,
+        device=device,
+    )
 
-        # Generate labels.
-        if "labels" not in batch:
-            batch["labels"] = get_labels(batch, label_ignore_index=self.label_ignore_index)
-
-        # Record how many instances are going to be skipped (masked out).
-        if (instance_mask := batch.get("instance_mask")) is not None and not dry_run:
-            self.record_metric(
-                "train/masked instances (%)", (~instance_mask).float().mean(), ReduceType.mean
-            )
-
-        # Calculate and record how many tokens are going to be used in the loss.
-        batch_num_tokens = batch["labels"].numel()
-        batch_num_tokens_for_loss = move_to_device(
-            (batch["labels"] != self.label_ignore_index).sum(), self.device
-        )
-        self.record_metric(
-            "train/masked labels (%)",
-            (batch_num_tokens - batch_num_tokens_for_loss) / batch_num_tokens,
-            ReduceType.mean,
-        )
-
-        # Batch losses to record.
-        policy_chosen_ = move_to_device(torch.tensor(0.0), self.device)
-        z_batch_loss: Optional[torch.Tensor] = None
-        if self.z_loss_multiplier is not None:
-            z_batch_loss = move_to_device(torch.tensor(0.0), self.device)
-
-        # Split into micro-batches.
-        if self.rank_microbatch_size < (seq_len := batch["input_ids"].shape[1]):
-            raise RuntimeError(
-                f"Microbatch size ({self.rank_microbatch_size}) is too small relative to sequence length ({seq_len})"
-            )
-        micro_batches = split_batch(batch, self.rank_microbatch_size // seq_len)
-        num_micro_batches = len(micro_batches)
-        batch_loss = move_to_device(torch.tensor(0.0), self.device)
-        aux_loss = move_to_device(torch.tensor(0.0), self.device)
-        # Train one micro-batch at a time.
-        for micro_batch_idx, micro_batch in enumerate(micro_batches):
-            with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
-                input_ids, labels, model_kwargs = self._prepare_batch(micro_batch)
-
-                # Run forward pass, get losses.
-                # `aux_loss` is only used when `args.load_balancing_loss = True`
-                policy_chosen_logps, policy_rejected_logps, aux_loss = forward_fn(
-                    model, batch, average_log_prob=average_log_prob,
-                    output_router_logits=args.load_balancing_loss)
-                losses, _, _ = dpo_utils.dpo_loss(
-                    policy_chosen_logps,
-                    policy_rejected_logps,
-                    reference_chosen_logps,
-                    reference_rejected_logps,
-                    loss_kwargs=self.config.loss_kwargs
-                )
-
-                # Update total batch CE and Z loss.
-                batch_loss += get_local_tensor(losses)
-                del losses
-                if aux_batch_loss is not None:
-                    assert aux_loss is not None
-                    aux_loss += get_local_tensor(aux_batch_loss
-                    del aux_batch_loss
-
-                # Run backward pass.
-                loss.backward()
-
-        del batch  # In case this helps with memory utilization.
-
-        self.model.post_batch(dry_run=dry_run)
-
-        if dry_run:
-            self.model.reset_auxiliary_metrics()
-            return
-
-        # Record loss metrics.
-        if isinstance(self.optim, SkipStepOptimizer):
-            # Need to reduce the loss right away for the SkipStepOptimizer.
-            if is_distributed():
-                ce_batch_loss.div_(self._reduce_divide_factor)
-                dist.all_reduce(ce_batch_loss)
-                ce_batch_loss.div_(self.world_size)
-                ce_batch_loss.mul_(self._reduce_divide_factor)
-            self.record_ce_loss(ce_batch_loss)
-            self.optim.latest_loss = ce_batch_loss
-        else:
-            self.record_ce_loss(ce_batch_loss, ReduceType.mean)
-        if z_batch_loss is not None:
-            assert self.z_loss_multiplier is not None
-            self.record_metric(
-                "Aux batch loss",
-                aux_batch_loss,
-                ReduceType.mean,
-                namespace="train",
-            )
-
-        # And additional metrics.
-        for metric_name, (metric_val, reduction) in self.model.compute_auxiliary_metrics(
-            reset=True
-        ).items():
-            self.record_metric(
-                metric_name,
-                metric_val,
-                reduction,
-                namespace="train",
-            )
-
-
-def build_config(config) -> DPOExperimentConfig:
-    config.wandb_config.config = config.as_dict()
-    run_name = f"{common.run_name}-{datetime.now().astimezone().strftime('%Y%m%dT%H%M%S%z')}"
     trainer_config = train.TrainerConfig(
-        save_folder=f"/weka/oe-adapt-default/checkpoints/{common.run_name}",
-        save_overwrite=True,
-        max_duration=train.Duration.steps(config.steps)
+        save_folder=args.output_dir,
+        max_duration=train.Duration.epochs(args.num_epochs),
+        metrics_collect_interval=args.log_every,
     )
-    .with_callback(
-        "checkpointer",
-        callbacks.CheckpointerCallback(**config.checkpoint_config.as_dict()
-                                       ))
-    .with_callback(
-        "wandb",
-        callbacks.WandbCallback(**config.wandb_config),
-    )
-    model_config = nn.transformer.TransformerConfig.olmo3_7B(
-        vocab_size=common.tokenizer.padded_vocab_size(),
-        attn_backend=AttentionBackendName.flash_2,
-    )
-    dataset_config = data.NumpyDatasetConfig(
-        dataset_name=config.dataset_name,
-        dataset_mixer=config.dataset_mixer,
-        target_columns=config.dataset_target_columns,
-        transform_fn=config.dataset_transform_fn,
-        max_samples=config.max_train_samples,
-        max_seq_length=config.max_seq_length,
-        cache_mode=config.dataset_cache_mode,
-        local_cache_dir=config.dataset_local_cache_dir,
-        config_hash=config.dataset_config_hash,
-        skip_cache=config.dataset_skip_cache,
-        mix_dir=config.dataset_mix_dir,
-        config_name=config.dataset_config_name,
-        overwrite_cache=config.overwrite_cache,
-        timeout_s=config.timeout_s,
-    )
-    return DPOExperimentConfig(
-        exp_name=common.run_name,
-        run_name=run_name,
-        trainer_config=trainer_config,
-        model=model_config,
-        dataset=dataset_config,
+    trainer = trainer_config.build(train_module, data_loader_instance)
 
+    print("Starting training...")
+    trainer.fit()
+    print("Training complete.")
 
+    train.teardown_training_environment()
 
 
 if __name__ == "__main__":
-    config_builder = functools.partial(config_builder = partial(
-        build_config,
-        global_batch_size=GLOBAL_BATCH_SIZE,
-        max_sequence_length=SEQUENCE_LENGTH,
-        model_config_builder=build_model_config,
-        train_module_config_builder=build_train_module_config,
-        trainer_config_builder=build_trainer_config,
-        include_default_evals=False,
-        include_instance_filter=False,  # We use SkipStepOptimizer for this problem.
-    )
-    experiment.main(config_builder=config_builder)
+    parser = ArgumentParserPlus((DPOExperimentConfig, TokenizerConfig))
+    args, tc = parser.parse_args_into_dataclasses()
+    main(args, tc)
