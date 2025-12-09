@@ -466,6 +466,7 @@ def run_benchmark(
                 "num_new_tokens": total_new_tokens,
                 "finish_reasons": collections.Counter(all_finish_reasons),
                 "response_lengths": all_response_lengths,
+                "prompt_lengths": all_prompt_lengths,
                 "dataset_indices": all_dataset_indices,
             }
 

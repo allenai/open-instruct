@@ -215,6 +215,7 @@ class DatasetConfig:
 
     def __post_init__(self):
         if self.sanity_check:
+            self.num_proc = 1
             self.load_from_cache_file = False
 
         if self.chat_template is not None and self.chat_template not in CHAT_TEMPLATES:
@@ -248,34 +249,6 @@ class DatasetProcessor:
             logging.warning("No config provided, skipping filtering")
             return dataset
         raise NotImplementedError
-
-    def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict], features: Optional[list[str]] = None):
-        """Get token length statistics for the dataset"""
-        if features is None:
-            raise NotImplementedError("Subclasses must override this method or provide features")
-        if isinstance(dataset, Dataset):
-            return self._get_token_length_stats(features, dataset)
-        elif isinstance(dataset, DatasetDict):
-            stats = {}
-            for key in dataset:
-                stats[key] = self._get_token_length_stats(features, dataset[key])
-            return stats
-
-    def _get_token_length_stats(self, features: list[str], dataset: Dataset) -> dict[str, float]:
-        stats = {}
-        for key in features:
-            # We can calculate all of these in a single pass.
-            max_length, min_length, mean_length = float("-inf"), float("inf"), 0
-            for x in dataset[key]:
-                max_length = max(max_length, len(x))
-                min_length = min(min_length, len(x))
-                mean_length += len(x)
-            stats[key] = {
-                "max_token_length": max_length,
-                "min_token_length": min_length,
-                "mean_token_length": mean_length // len(dataset[key]),
-            }
-        return stats
 
     def get_token_length_visualization(
         self, features: list[str], dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30
@@ -356,11 +329,6 @@ class PreferenceDatasetProcessor(DatasetProcessor):
                 logging.info(f"Filtered out {filtered_count} samples or {percentage:.2f}% samples from {key}")
         return filtered_dataset
 
-    def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict], features: Optional[list[str]] = None):
-        if features is None:
-            features = [INPUT_IDS_PROMPT_KEY, INPUT_IDS_CHOSEN_KEY, INPUT_IDS_REJECTED_KEY]
-        return super().get_token_length_stats(dataset=dataset, features=features)
-
     def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):  # type: ignore[override]
         return super().get_token_length_visualization(
             features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_CHOSEN_KEY, INPUT_IDS_REJECTED_KEY],
@@ -415,11 +383,6 @@ class SFTDatasetProcessor(DatasetProcessor):
             desc="Filtering SFT data",
         )
 
-    def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict], features: Optional[list[str]] = None):
-        if features is None:
-            features = [INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY]
-        return super().get_token_length_stats(dataset=dataset, features=features)
-
     def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):  # type: ignore[override]
         return super().get_token_length_visualization(
             features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset, save_path=save_path, bins=bins
@@ -472,11 +435,6 @@ class SFTGroundTruthDatasetProcessor(DatasetProcessor):
             load_from_cache_file=self.config.load_from_cache_file,
             desc="Filtering SFT data",
         )
-
-    def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict], features: Optional[list[str]] = None):
-        if features is None:
-            features = [INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY]
-        return super().get_token_length_stats(dataset=dataset, features=features)
 
     def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):  # type: ignore[override]
         return super().get_token_length_visualization(
