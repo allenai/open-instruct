@@ -27,3 +27,4 @@ beaker experiment spec "$EXPERIMENT_ID" > "$YAML_PATH"
 echo "Re-launching experiment in workspace ${WORKSPACE}..."
 NEW_EXPERIMENT_ID=$(beaker experiment create "$YAML_PATH" --workspace "$WORKSPACE" --format json | jq -r '.[0].id')
 echo "New experiment launched: ${NEW_EXPERIMENT_ID}"
+echo "https://beaker.org/ex/${NEW_EXPERIMENT_ID}"
