@@ -24,12 +24,12 @@ import numpy as np
 import ray
 import torch
 import torch.utils.flop_counter
-import vllm
 from ray.util import queue as ray_queue
 
 from open_instruct import dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.queue_types import PromptRequest
+from open_instruct.vllm_utils import SamplingConfig
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -306,7 +306,7 @@ def simulate_weight_sync(
 def submission_thread(
     param_prompt_Q: ray_queue.Queue,
     dataset: datasets.Dataset,
-    generation_config: vllm.SamplingParams,
+    generation_config: SamplingConfig,
     stop_event: threading.Event,
     batch_size: int,
     start_batch_idx: int,
@@ -355,22 +355,13 @@ def run_benchmark(
         f"Starting benchmark with 1 warmup batch + {num_batches - 1} main batches of size {args.num_unique_prompts_rollout}"
     )
 
-    # Create sampling parameters with 'n' for multiple samples per prompt
-    generation_config = vllm.SamplingParams(
+    generation_config = SamplingConfig(
         temperature=args.temperature,
         max_tokens=args.response_length,
-        min_tokens=args.response_length,
         top_p=args.vllm_top_p,
         n=args.num_samples_per_prompt_rollout,
         seed=args.seed,
-        include_stop_str_in_output=True,
-        skip_special_tokens=False,
         logprobs=1,
-        # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
-        # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
-        # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
-        # ensures all n completions are returned together in a single output.
-        output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
     )
 
     stop_event = threading.Event()
