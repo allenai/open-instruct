@@ -182,6 +182,7 @@ class StreamingDataLoaderConfig:
     mask_truncated_completions: bool = False
     pack_length: int = 512
     mask_tool_use: bool = True
+    max_possible_score: float = 1.0
 
     def __post_init__(self):
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
@@ -352,10 +353,13 @@ def accumulate_inference_batches(
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
-    training_step: int = None,
+    training_step: int | None = None,
     verbose: bool = False,
     max_possible_score: float = 1.0,
-) -> tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]:
+) -> (
+    tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
+    | tuple[data_types.ShutdownSentinel | None, None, None, None]
+):
     if no_resampling_pass_rate is not None:
         assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
 
@@ -404,6 +408,8 @@ def accumulate_inference_batches(
         raw_query = example[RAW_PROMPT_KEY]
 
         if replenish_prompts:
+            assert iter_dataloader is not None
+            assert param_prompt_Q is not None
             example = next(iter_dataloader)
             add_prompt_to_generator(example, iter_dataloader._epoch, param_prompt_Q, generation_config, is_eval=False)
 
@@ -422,6 +428,7 @@ def accumulate_inference_batches(
 
         percent_solved = np.mean(result.reward_scores).item() / max_possible_score
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
+            assert iter_dataloader is not None
             iter_dataloader.exclude_index(result.dataset_index)
             total_no_resampled += 1
             logging.debug(
@@ -601,6 +608,9 @@ def prepare_collated_data_for_workers(
     # Essentially doing `drop_last=True`, which is fine.
     B = total_sequences // world_size
     collated_data = []
+    assert packed_sequences.position_ids is not None
+    assert packed_sequences.advantages is not None
+    assert packed_sequences.vllm_logprobs is not None
     for i in range(world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
         per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
@@ -698,7 +708,7 @@ class DataPreparationActor:
             dataset=dataset, batch_size=1, seed=seed, rank=0, world_size=1, work_dir=work_dir, automatic_reshuffle=True
         )
 
-        self.prepared_data: dict[int, list[dict]] = {}
+        self.prepared_data: dict[int, list[data_types.CollatedBatchData]] = {}
         self.metrics: dict[int, dict] = {}
         self.current_prepared_step = -1
         self.lock = threading.Lock()
@@ -767,6 +777,8 @@ class DataPreparationActor:
                     self.current_prepared_step = step
                 continue
 
+            assert batch is not None
+            assert batch_stats is not None
             scores = np.array(batch.scores)
             scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
@@ -797,8 +809,10 @@ class DataPreparationActor:
                 result.responses = [result.responses[i] for i in stop_idxes]
                 result.masks = [result.masks[i] for i in stop_idxes]
                 result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
+                assert result.logprobs is not None
                 result.logprobs = [result.logprobs[i] for i in stop_idxes]
 
+            assert result.logprobs is not None
             packed_sequences = pack_sequences(
                 queries=batch.queries,
                 responses=result.responses,
@@ -876,6 +890,7 @@ class DataPreparationActor:
                     **batch_metrics_prefixed,
                 }
 
+                assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
                 step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
                 step_metrics["time/getting_response"] = result.token_statistics.generation_time

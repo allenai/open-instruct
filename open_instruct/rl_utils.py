@@ -46,7 +46,7 @@ class PackedSequences(Generic[T]):
     """bool response mask for packed sequences (batch_size, pack_length)"""
     original_responses: np.ndarray
     """need the original response for broadcast (batch_size, response_length)"""
-    advantages: Optional[np.ndarray] = None
+    advantages: Optional[list[torch.Tensor]] = None
     """packed advantages (batch_size, pack_length) (to be filled in by the main process)"""
     num_actions: Optional[np.ndarray] = None
     """packed number of actions (batch_size, pack_length)"""
