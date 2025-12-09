@@ -935,7 +935,7 @@ def create_vllm_engines(
     enforce_eager: bool,
     tokenizer_name_or_path: str,
     pretrain: str,
-    revision: str,
+    revision: str | None,
     seed: int,
     enable_prefix_caching: bool,
     max_model_len: int,

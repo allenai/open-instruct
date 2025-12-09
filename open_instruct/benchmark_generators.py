@@ -246,7 +246,6 @@ def setup_vllm_engines(
     tokenizer_name_or_path = tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
     assert tokenizer_name_or_path is not None
     assert model_config.model_name_or_path is not None
-    assert model_config.model_revision is not None
 
     vllm_engines = vllm_utils.create_vllm_engines(
         num_engines=args.vllm_num_engines,
@@ -530,26 +529,16 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     prompt_lengths: list[int] = []
 
     for result in results:
-        for key, value in result.items():
-            if key == "mfu":
-                total_mfu += value
-            elif key == "mbu":
-                total_mbu += value
-            elif key == "tokens_per_second":
-                total_tokens_per_second += value
-            elif key == "generation_time":
-                total_generation_time += value
-            elif key == "weight_sync_time":
-                total_weight_sync_time += value
-            elif key == "num_new_tokens":
-                total_num_new_tokens += value
-            elif key == "finish_reasons":
-                for reason, count in value.items():
-                    finish_reasons[reason] += count
-            elif key == "response_lengths":
-                response_lengths.extend(value)
-            elif key == "prompt_lengths":
-                prompt_lengths.extend(value)
+        total_mfu += result["mfu"]
+        total_mbu += result["mbu"]
+        total_tokens_per_second += result["tokens_per_second"]
+        total_generation_time += result["generation_time"]
+        total_weight_sync_time += result["weight_sync_time"]
+        total_num_new_tokens += result["num_new_tokens"]
+        for reason, count in result["finish_reasons"].items():
+            finish_reasons[reason] += count
+        response_lengths.extend(result["response_lengths"])
+        prompt_lengths.extend(result["prompt_lengths"])
 
     num_results = len(results)
     avg_tokens_per_second = total_num_new_tokens / total_generation_time if total_generation_time > 0 else 0
