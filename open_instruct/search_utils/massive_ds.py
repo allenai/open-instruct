@@ -4,6 +4,7 @@ Assumes you are hosting it yourself somewhere.
 """
 
 import os
+from collections.abc import Collection
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -11,8 +12,11 @@ from urllib3.util.retry import Retry
 
 
 def create_session_with_retries(
-    retries=3, backoff_factor=0.3, status_forcelist=(500, 502, 504), allowed_methods=("GET", "POST")
-):
+    retries: int = 3,
+    backoff_factor: float = 0.3,
+    status_forcelist: Collection[int] = (500, 502, 504),
+    allowed_methods: Collection[str] = ("GET", "POST"),
+) -> requests.Session:
     session = requests.Session()
     retry = Retry(
         total=retries,
@@ -28,7 +32,9 @@ def create_session_with_retries(
     return session
 
 
-def get_snippets_for_query(query, api_endpoint=None, number_of_results=3):
+def get_snippets_for_query(
+    query: str, api_endpoint: str | None = None, number_of_results: int = 3
+) -> list[str] | None:
     if not api_endpoint:
         url = os.environ.get("MASSIVE_DS_URL")
         if not url:

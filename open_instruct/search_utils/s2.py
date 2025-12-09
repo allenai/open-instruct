@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import Collection
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -11,8 +12,11 @@ logger_utils.setup_logger("urllib3").setLevel(logging.DEBUG)
 
 
 def create_session_with_retries(
-    retries=3, backoff_factor=0.3, status_forcelist=(500, 502, 504), allowed_methods=("GET", "POST")
-):
+    retries: int = 3,
+    backoff_factor: float = 0.3,
+    status_forcelist: Collection[int] = (500, 502, 504),
+    allowed_methods: Collection[str] = ("GET", "POST"),
+) -> requests.Session:
     session = requests.Session()
     retry = Retry(
         total=retries,
@@ -28,7 +32,7 @@ def create_session_with_retries(
     return session
 
 
-def get_snippets_for_query(query, number_of_results=10):
+def get_snippets_for_query(query: str, number_of_results: int = 10) -> list[str] | None:
     api_key = os.environ.get("S2_API_KEY")
     if not api_key:
         raise ValueError("Missing S2_API_KEY environment variable.")
