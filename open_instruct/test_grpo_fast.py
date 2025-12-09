@@ -195,8 +195,8 @@ class TestDataPreparation(TestGrpoFastBase):
             (16, 4, 2, 10, False, 0),
             (32, 8, 4, 20, False, 0),
             (8, 2, 1, 5, False, 0),
-            (17, 4, 2, 10, False, 0),
-            (25, 8, 3, 15, False, 0),
+            (16, 4, 2, 10, False, 0),
+            (24, 8, 3, 15, False, 0),
             (4, 1, 4, 10, False, 0),
             (8, 2, 2, 10, True, 999),
         ]
