@@ -330,11 +330,9 @@ def submission_thread(
             param_prompt_Q.put(
                 PromptRequest(
                     prompt=prompt,
-                    dataset_index=dataset_index,
-                    training_step=batch_idx,
-                    epoch_number=batch_idx,
                     generation_config=generation_config,
-                    start_time=time.perf_counter(),
+                    dataset_index=dataset_index,
+                    prompt_id=f"batch_{batch_idx}_prompt_{i}",
                 )
             )
     logger.info(f"[Submission Thread] All {num_batches} batches submitted")
@@ -393,11 +391,9 @@ def run_benchmark(
         param_prompt_Q.put(
             PromptRequest(
                 prompt=prompt,
-                dataset_index=dataset_index,
-                training_step=0,
-                epoch_number=0,
                 generation_config=generation_config,
-                start_time=time.perf_counter(),
+                dataset_index=dataset_index,
+                prompt_id=f"warmup_prompt_{i}",
             )
         )
 
