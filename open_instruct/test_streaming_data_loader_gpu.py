@@ -15,7 +15,6 @@ import unittest
 import datasets
 import ray
 import torch
-import vllm
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
@@ -31,7 +30,7 @@ from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.tool_utils.tools import PythonCodeTool
 from open_instruct.utils import maybe_update_beaker_description
-from open_instruct.vllm_utils import create_vllm_engines
+from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -119,7 +118,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             pack_length=128,
         )
 
-        generation_config = vllm.SamplingParams(temperature=0.7, top_p=1.0, max_tokens=32, n=2)
+        generation_config = SamplingConfig(temperature=0.7, top_p=1.0, max_tokens=32, n=2)
 
         actor = data_loader.DataPreparationActor.options(name="test_no_tools").remote(
             dataset=train_dataset,
@@ -221,9 +220,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             mask_tool_use=True,
         )
 
-        generation_config = vllm.SamplingParams(
-            temperature=0.7, top_p=1.0, max_tokens=128, n=2, stop=list(tools.keys())
-        )
+        generation_config = SamplingConfig(temperature=0.7, top_p=1.0, max_tokens=128, n=2, stop=list(tools.keys()))
 
         actor = data_loader.DataPreparationActor.options(name="test_with_tools").remote(
             dataset=train_dataset,
