@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# Relaunch an existing Beaker job by cloning its YAML spec.
+# Relaunch an existing Beaker experiment by cloning its YAML spec.
 
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
-  echo "Usage: $0 <job-id>" >&2
+  echo "Usage: $0 <experiment-id>" >&2
   exit 1
 fi
 
-JOB_ID="$1"
+EXPERIMENT_ID="$1"
 WORKDIR="$(mktemp -d)"
-YAML_PATH="$WORKDIR/job.yaml"
+YAML_PATH="$WORKDIR/experiment.yaml"
 
 cleanup() {
   rm -rf "$WORKDIR"
 }
 trap cleanup EXIT
 
-echo "Fetching job spec for ${JOB_ID}..."
-beaker job spec "$JOB_ID" > "$YAML_PATH"
+echo "Fetching experiment spec for ${EXPERIMENT_ID}..."
+beaker experiment spec "$EXPERIMENT_ID" > "$YAML_PATH"
 
-echo "Re-launching job..."
-NEW_JOB_ID=$(beaker job create "$YAML_PATH" | tail -n1)
-echo "New job launched: ${NEW_JOB_ID}"
+echo "Re-launching experiment..."
+NEW_EXPERIMENT_ID=$(beaker experiment create "$YAML_PATH" --format json | jq -r '.id')
+echo "New experiment launched: ${NEW_EXPERIMENT_ID}"
