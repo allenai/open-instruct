@@ -1,5 +1,6 @@
 import dataclasses
 import gc
+import os
 import threading
 import time
 import unittest
@@ -70,7 +71,7 @@ class TestGrpoFastBase(unittest.TestCase):
         utils.check_runtime_leaks()
 
         # Initialize Ray for this test
-        ray.init(include_dashboard=False)
+        ray.init(include_dashboard=False, runtime_env={"env_vars": dict(os.environ)})
 
     def _cleanup_ray_queues(self):
         """Clean up all Ray queues created during the test."""
