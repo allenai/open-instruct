@@ -148,5 +148,6 @@ include = [
     "open_instruct/logger_utils.py",
     "open_instruct/data_loader.py",
     "open_instruct/padding_free_collator.py",
+    "open_instruct/search_utils/",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]
