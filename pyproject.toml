@@ -143,19 +143,11 @@ case-sensitive = false
 split-on-trailing-comma = false
 
 [tool.ty.src]
-exclude = [
-    "open_instruct/*.py",
-    "open_instruct/code/",
-    "open_instruct/code_utils/",
-    "open_instruct/experimental/",
-    "open_instruct/IFEvalG/",
-    "open_instruct/olmo_adapter/",
-    "open_instruct/rejection_sampling/",
-    "open_instruct/static/",
-    "open_instruct/test_data/",
-    "open_instruct/tool_utils/",
-    "open_instruct/tools/",
-    "scripts/",
-    "decontamination/",
-    "human_eval/",
+include = [
+    "open_instruct/data_types.py",
+    "open_instruct/logger_utils.py",
+    "open_instruct/data_loader.py",
+    "open_instruct/padding_free_collator.py",
+    "open_instruct/search_utils/",
 ]
+exclude = ["scripts/", "decontamination/", "human_eval/"]
