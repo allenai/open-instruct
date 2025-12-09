@@ -532,10 +532,19 @@ class PolicyTrainerRayProcess(RayProcess):
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
         self.num_mini_batches = args.num_mini_batches
-        self._data_loader_config = data_loader_config
-        self._data_prep_actor_name = data_prep_actor_name
         self._args = args
-        self.dataloader = None
+        self.dataloader = iter(
+            data_loader_config.build_dataloader(
+                data_prep_actor_name=data_prep_actor_name,
+                tokenizer=tokenizer,
+                dp_rank=rank,
+                fs_local_rank=local_rank,
+                num_training_steps=args.num_training_steps,
+                work_dir=args.output_dir,
+                global_batch_size=args.num_unique_prompts_rollout,
+                dp_world_size=world_size,
+            )
+        )
 
     def from_pretrained(
         self,
@@ -700,24 +709,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 else None,
             )
         self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
-
-        # Initialize dataloader here (not in __init__) because the DataPreparationActor
-        # may not exist yet when __init__ runs. The actor is created after vLLM engines
-        # are initialized, but policy_group must be created before vLLM engines to avoid
-        # port collisions during vLLM initialization.
-        self.dataloader = iter(
-            self._data_loader_config.build_dataloader(
-                data_prep_actor_name=self._data_prep_actor_name,
-                tokenizer=self.tokenizer,
-                dp_rank=self.rank,
-                fs_local_rank=self.local_rank,
-                num_training_steps=self._args.num_training_steps,
-                work_dir=self._args.output_dir,
-                global_batch_size=self._args.num_unique_prompts_rollout,
-                dp_world_size=self.world_size,
-            )
-        )
-
         return optimization_steps_done
 
     def forward(
@@ -1581,10 +1572,35 @@ def create_model_and_optimizer(
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
 
+    # Get model_dims early from HuggingFace config (doesn't require vLLM)
+    model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
+
+    # Create DataPreparationActor FIRST so StreamingDataLoader can find it
+    data_prep_actor_name = "data_prep_singleton"
+    _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
+        dataset=train_dataset,
+        inference_results_Q=inference_results_Q,
+        param_prompt_Q=param_prompt_Q,
+        tokenizer=tokenizer,
+        config=data_loader_config,
+        generation_config=generation_config,
+        num_training_steps=args.num_training_steps,
+        seed=args.seed,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        global_batch_size=args.num_unique_prompts_rollout,
+        dp_world_size=args.world_size,
+        max_possible_score=args.max_possible_score,
+        actor_manager=actor_manager,
+        model_dims=model_dims,
+        verbose=args.verbose,
+        work_dir=args.output_dir,
+        initial_state=data_prep_actor_state,
+        allow_world_padding=args.allow_world_padding,
+    )
+
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
     # This ensures policy trainer actors are scheduled first, which affects how Ray schedules
     # the vLLM placement group and prevents port collisions during vLLM initialization.
-    data_prep_actor_name = "data_prep_singleton"
     wandb_url = wandb.run.get_url() if args.with_tracking else None
     policy_group = ModelGroup(
         pg,
@@ -1627,8 +1643,6 @@ def create_model_and_optimizer(
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
     )
-
-    model_dims = ray.get(vllm_engines[0].get_model_dims.remote())
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
     if vllm_engines:
@@ -1653,28 +1667,6 @@ def create_model_and_optimizer(
             )
     else:
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
-
-    # Create DataPreparationActor after vLLM engines (needs model_dims)
-    _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
-        dataset=train_dataset,
-        inference_results_Q=inference_results_Q,
-        param_prompt_Q=param_prompt_Q,
-        tokenizer=tokenizer,
-        config=data_loader_config,
-        generation_config=generation_config,
-        num_training_steps=args.num_training_steps,
-        seed=args.seed,
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        global_batch_size=args.num_unique_prompts_rollout,
-        dp_world_size=args.world_size,
-        max_possible_score=args.max_possible_score,
-        actor_manager=actor_manager,
-        model_dims=model_dims,
-        verbose=args.verbose,
-        work_dir=args.output_dir,
-        initial_state=data_prep_actor_state,
-        allow_world_padding=args.allow_world_padding,
-    )
 
     # Wait for policy models to finish loading
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
