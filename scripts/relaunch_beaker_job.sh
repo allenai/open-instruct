@@ -17,9 +17,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Fetching experiment spec for ${EXPERIMENT_ID}..."
+echo "Fetching experiment info for ${EXPERIMENT_ID}..."
+EXPERIMENT_JSON=$(beaker experiment get "$EXPERIMENT_ID" --format json)
+WORKSPACE=$(echo "$EXPERIMENT_JSON" | jq -r '.[0].workspaceRef.fullName')
+
+echo "Fetching experiment spec..."
 beaker experiment spec "$EXPERIMENT_ID" > "$YAML_PATH"
 
-echo "Re-launching experiment..."
-NEW_EXPERIMENT_ID=$(beaker experiment create "$YAML_PATH" --format json | jq -r '.id')
+echo "Re-launching experiment in workspace ${WORKSPACE}..."
+NEW_EXPERIMENT_ID=$(beaker experiment create "$YAML_PATH" --workspace "$WORKSPACE" --format json | jq -r '.id')
 echo "New experiment launched: ${NEW_EXPERIMENT_ID}"
