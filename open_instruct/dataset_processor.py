@@ -203,7 +203,7 @@ class DatasetConfig:
     sanity_check_max_samples: int = 100
     batched: bool = False
     load_from_cache_file: bool = True
-    
+
     # Beaker specific logic; we may get assigned 15.5 CPU, so we convert it to float (to parse the string) and then int to round down.
     num_proc: int = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
 
@@ -213,7 +213,7 @@ class DatasetConfig:
     # visualization configs
     ncols: int = 2
 
-    def __post_init__(self):        
+    def __post_init__(self):
         if self.sanity_check:
             self.load_from_cache_file = False
 
@@ -270,9 +270,11 @@ class DatasetProcessor:
                 max_length = max(max_length, len(x))
                 min_length = min(min_length, len(x))
                 mean_length += len(x)
-            stats[key] = {"max_token_length": max_length, 
-                          "min_token_length": min_length,
-                          "mean_token_length": mean_length // len(dataset[key])}
+            stats[key] = {
+                "max_token_length": max_length,
+                "min_token_length": min_length,
+                "mean_token_length": mean_length // len(dataset[key]),
+            }
         return stats
 
     def get_token_length_visualization(
