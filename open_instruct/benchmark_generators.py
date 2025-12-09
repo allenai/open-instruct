@@ -237,8 +237,9 @@ def setup_vllm_engines(
     """Set up vLLM engines and queues."""
     ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"], "env_vars": dict(os.environ)})
 
-    param_prompt_Q = ray_queue.Queue(maxsize=10)
-    inference_results_Q = ray_queue.Queue(maxsize=10)
+    queue_size = max(args.num_unique_prompts_rollout + 1, 10)
+    param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    inference_results_Q = ray_queue.Queue(maxsize=queue_size)
 
     queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
