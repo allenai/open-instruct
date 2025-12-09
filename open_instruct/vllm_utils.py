@@ -872,6 +872,12 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         if excess > 0 or current_max_tokens <= 0:
             break
 
+    if output.finish_reason == "stop" and len(response_tokens) == 0:
+        eos_token_id = actor.llm_engine.tokenizer.eos_token_id
+        response_tokens.append(eos_token_id)
+        response_masks.append(1)
+        response_logprobs.append(float("nan"))
+
     complete_output = CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
         token_ids=response_tokens,
