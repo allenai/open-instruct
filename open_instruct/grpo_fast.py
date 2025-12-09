@@ -2926,7 +2926,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
     # all prompts from async_steps + 1 training steps
-    queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
+    num_eval_prompts = len(eval_dataset) if eval_dataset is not None else 0
+    queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.
