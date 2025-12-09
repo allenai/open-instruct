@@ -398,8 +398,6 @@ class Args:
     # Experiment tracking
     verbose: bool = False
     """If toggled, debug output will be shown"""
-    update_progress_every: int = 10
-    """How often to update the progress bar (in steps)."""
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
@@ -1598,13 +1596,6 @@ def accumulate_inference_batches(
         if replenish_prompts:
             add_prompt_to_generator(next(data_loader), param_prompt_Q, generation_config, is_eval=False)
 
-        # TODO(finbarrtimbers): Move this to LLMRayActor.
-        for i in range(len(result.finish_reasons)):
-            if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
-                result.responses[i].append(tokenizer.eos_token_id)
-                result.masks[i].append(1)
-                result.logprobs[i].append(float("nan"))
-
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
         percent_solved = np.mean(result.reward_scores).item() / args.max_possible_score
@@ -2778,20 +2769,14 @@ def run_training(
     else:
         eval_data_loader = None
     training_start_time = time.perf_counter()  # Track overall training start time
+    maybe_update_beaker_description(
+        current_step=resume_training_step - 1,
+        total_steps=args.num_training_steps,
+        start_time=training_start_time,
+        wandb_url=wandb_url,
+    )
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
-
-        if (
-            training_step == resume_training_step
-            or training_step % args.update_progress_every == 0
-            or training_step == args.num_training_steps
-        ):
-            maybe_update_beaker_description(
-                current_step=training_step,
-                total_steps=args.num_training_steps,
-                start_time=training_start_time,
-                wandb_url=wandb_url,
-            )
 
         # Check if any of the threads have raised an exception.
         health_check_start = time.perf_counter()
@@ -2897,6 +2882,13 @@ def run_training(
             len(eval_dataset) if eval_dataset else 0,
             model_dims,
             actor_manager,
+        )
+
+        maybe_update_beaker_description(
+            current_step=training_step,
+            total_steps=args.num_training_steps,
+            start_time=training_start_time,
+            wandb_url=wandb_url,
         )
 
     if resume_training_step > args.num_training_steps:
