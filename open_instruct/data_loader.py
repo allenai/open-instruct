@@ -180,6 +180,7 @@ class StreamingDataLoaderConfig:
     advantage_normalization_type: str = "standard"
     mask_truncated_completions: bool = False
     pack_length: int = 512
+    mask_tool_use: bool = True
 
     def __post_init__(self):
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
@@ -646,7 +647,12 @@ def prepare_collated_data_for_workers(
         for query_responses, attention_masks, position_ids,
         advantages, response_masks, and vllm_logprobs.
     """
-    B = len(packed_sequences.query_responses) // world_size
+    total_sequences = len(packed_sequences.query_responses)
+    assert total_sequences % world_size == 0, (
+        f"Total packed sequences ({total_sequences}) must be evenly divisible by world_size ({world_size}). "
+        f"This indicates a configuration issue."
+    )
+    B = total_sequences // world_size
     collated_data = []
     for i in range(world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
@@ -723,6 +729,7 @@ class DataPreparationActor:
         model_dims: utils.ModelDims,
         verbose: bool,
         work_dir: str,
+        initial_state: dict | None = None,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
@@ -749,6 +756,11 @@ class DataPreparationActor:
         self.lock = threading.Lock()
         self.shutdown_requested = False
         self.training_step = 0
+
+        if initial_state is not None:
+            self.training_step = initial_state["training_step"]
+            self.iter_dataloader.load_state_dict(initial_state["iter_dataloader_state"])
+            logger.info(f"[DataPreparationActor] Restored state: training_step={self.training_step}")
 
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DataPrepActor")
         self._prep_future = self._executor.submit(self._data_preparation_loop)
@@ -853,6 +865,7 @@ class DataPreparationActor:
                 pack_length=self.config.pack_length,
                 pad_token_id=self.tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
+                mask_tool_use=self.config.mask_tool_use,
             )
             lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
             lookup_advantages[1:] = advantages
@@ -924,6 +937,7 @@ class DataPreparationActor:
 
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
                 step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
+                step_metrics["time/getting_response"] = result.token_statistics.generation_time
 
             with self.lock:
                 self.prepared_data[step] = collated_data

@@ -425,8 +425,6 @@ class Args:
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
     max_tool_calls: list[int] = field(default_factory=lambda: [5])
     """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
-    mask_tool_use: bool = True
-    """Whether to mask the tool output. By default on."""
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
 
@@ -497,10 +495,6 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
-            if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
-                assert self.mask_tool_use, (
-                    "Must mask tool use when using vLLM logprobs or truncated importance sampling."
-                )
         if not self.load_ref_policy and self.beta != 0.0:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
@@ -1375,6 +1369,10 @@ def calculate_utilization_metrics(
 
 def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig) -> Args:
     """Set up runtime variables for the experiment."""
+    if args.tools and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
+        assert streaming_config.mask_tool_use, (
+            "Must mask tool use when using vLLM logprobs or truncated importance sampling."
+        )
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
@@ -1500,6 +1498,7 @@ def create_model_and_optimizer(
     eval_dataset,
     reward_config: RewardConfig,
     generation_config,
+    data_prep_actor_state: dict | None = None,
 ) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
@@ -1557,7 +1556,7 @@ def create_model_and_optimizer(
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
-        mask_tool_use=args.mask_tool_use,
+        mask_tool_use=data_loader_config.mask_tool_use,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
@@ -1612,6 +1611,7 @@ def create_model_and_optimizer(
         model_dims=model_dims,
         verbose=args.verbose,
         work_dir=args.output_dir,
+        initial_state=data_prep_actor_state,
     )
 
     wandb_url = wandb.run.get_url() if args.with_tracking else None
@@ -1750,8 +1750,8 @@ def one_training_step(
     chat_template_name: str,
     model_dims: utils.ModelDims,
     actor_manager: ActorManager | None = None,
-) -> None:
-    """Train the model for one step."""
+) -> int:
+    """Train the model for one step. Returns the number of tokens processed."""
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
         results, _ = ray_get_with_progress(
@@ -1761,7 +1761,7 @@ def one_training_step(
         metrics, array_metrics = zip(*results)
         if all(len(m) == 0 for m in metrics):
             logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-            return
+            return 0
         if (
             args.load_ref_policy
             and args.ref_policy_update_freq is not None
@@ -1783,7 +1783,7 @@ def one_training_step(
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
-    total_generation_time = data_thread_metrics.get("time/getting_response", 0.0)
+    total_generation_time = average_metrics["time/getting_response"]
     prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
     response_lengths = array_metrics[0]["batch/response_lengths"]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
@@ -1826,6 +1826,8 @@ def one_training_step(
             if (isinstance(value, (np.ndarray, list))) and len(value) > 0:
                 metrics[key] = wandb.Histogram(value)
         wandb.log(metrics, step=episode)
+
+    return num_step_tokens
 
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
@@ -2163,7 +2165,7 @@ def run_training(
 
         data_thread_metrics["time/health_check"] = health_check_time
 
-        one_training_step(
+        num_step_tokens = one_training_step(
             args,
             streaming_config,
             policy_group,
@@ -2180,6 +2182,7 @@ def run_training(
             model_dims,
             actor_manager,
         )
+        num_total_tokens += num_step_tokens
 
         # Checkpoint after one_training_step (or even if it was skipped)
         # This ensures we checkpoint progress even if the exact checkpoint step has no data
@@ -2198,6 +2201,10 @@ def run_training(
 
                 # Save dataloader state from Ray actor
                 client_state["dataloader_state"] = ray.get(policy_group.models[0].get_dataloader_state.remote())
+
+                # Save DataPreparationActor state
+                data_prep_actor = ray.get_actor("data_prep_singleton")
+                client_state["data_prep_actor_state"] = ray.get(data_prep_actor.get_state.remote())
 
                 ray_get_with_progress(
                     [
@@ -2291,6 +2298,13 @@ def main(
     )
     generation_configs = create_generation_configs(args, streaming_config)
 
+    checkpoint_state = None
+    if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
+        checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
+        if os.path.exists(checkpoint_path):
+            checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+            logger.info(f"Loaded checkpoint state from {checkpoint_path}")
+
     (
         policy_group,
         vllm_engines,
@@ -2315,18 +2329,12 @@ def main(
         eval_dataset,
         reward_config,
         generation_configs["train"],
+        checkpoint_state.get("data_prep_actor_state") if checkpoint_state else None,
     )
 
-    checkpoint_state = None
-    if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
-        # Try to load the checkpoint state from the first rank
-        checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
-        if os.path.exists(checkpoint_path):
-            checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-            logger.info(f"Loaded checkpoint state from {checkpoint_path}")
-
-            episode = checkpoint_state["episode"]
-            logger.info(f"Restored episode count: {episode}")
+    if checkpoint_state:
+        episode = checkpoint_state["episode"]
+        logger.info(f"Restored episode count: {episode}")
 
     # Create additional queues (main queues already created above)
     generate_metrics_Q = Queue(maxsize=streaming_config.async_steps)
