@@ -467,8 +467,9 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
     actor.request_outputs.pop(base_request_id)
     actor.request_metadata.pop(base_request_id, None)
 
-    dataset = actor.eval_dataset if is_eval else actor.train_dataset
-    result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
+    if actor.reward_fn is not None:
+        dataset = actor.eval_dataset if is_eval else actor.train_dataset
+        result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
     results_queue.put(result)
 
