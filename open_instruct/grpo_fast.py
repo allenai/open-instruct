@@ -1596,13 +1596,6 @@ def accumulate_inference_batches(
         if replenish_prompts:
             add_prompt_to_generator(next(data_loader), param_prompt_Q, generation_config, is_eval=False)
 
-        # TODO(finbarrtimbers): Move this to LLMRayActor.
-        for i in range(len(result.finish_reasons)):
-            if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
-                result.responses[i].append(tokenizer.eos_token_id)
-                result.masks[i].append(1)
-                result.logprobs[i].append(float("nan"))
-
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
         percent_solved = np.mean(result.reward_scores).item() / args.max_possible_score
