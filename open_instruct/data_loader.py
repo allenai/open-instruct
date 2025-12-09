@@ -15,7 +15,7 @@
 import logging
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -86,8 +86,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.effective_size = len(self.dataset) - (len(self.dataset) % batch_size)
         self._automatic_reshuffle = automatic_reshuffle
         self._excluded_indices: set[int] = set()
-        self._epoch = 0
-        self._current_iter: Iterable[dict[str, Any]] | None = None
+        self._epoch: int = 0
+        self._current_iter: Iterator[dict[str, Any]] | None = None
 
     def __next__(self) -> dict[str, Any]:
         if self._current_iter is None:
@@ -125,14 +125,14 @@ class HFDataLoader(data_loader.DataLoaderBase):
             "excluded_indices": list(self._excluded_indices),
         }
 
-    def load_state_dict(self, state: dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Load a state dictionary to restore the data loader's state."""
-        self._excluded_indices = set(state.get("excluded_indices", []))
+        self._excluded_indices = set(state_dict.get("excluded_indices", []))
         # Set epoch to one less than target since reshuffle() increments it
-        self._epoch = state["epoch"] - 1
+        self._epoch = state_dict["epoch"] - 1
         self.reshuffle()
-        assert self._epoch == state["epoch"]
-        self.batches_processed = state["batches_processed"]
+        assert self._epoch == state_dict["epoch"]
+        self.batches_processed = state_dict["batches_processed"]
         self._current_iter = None
 
     def exclude_index(self, index: int) -> None:
@@ -143,10 +143,11 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         self._excluded_indices.add(index)
 
-    def reshuffle(self, **kwargs: Any) -> None:
+    def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
         """Reshuffle the dataset for a new epoch.
 
         Args:
+            epoch: The epoch number (unused, for API compatibility).
             **kwargs: Additional keyword arguments (unused, for API compatibility).
         """
         self._epoch += 1
