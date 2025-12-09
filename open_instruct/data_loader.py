@@ -688,7 +688,9 @@ class DataPreparationActor:
         verbose: bool,
         work_dir: str,
         initial_state: dict | None = None,
+        allow_world_padding: bool = False,
     ):
+        self.allow_world_padding = allow_world_padding
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
         self.tokenizer = tokenizer

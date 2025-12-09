@@ -120,7 +120,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
         generation_config = SamplingConfig(temperature=0.7, top_p=1.0, max_tokens=32, n=2)
 
-        actor = data_loader.DataPreparationActor.options(name="test_no_tools").remote(
+        _actor = data_loader.DataPreparationActor.options(name="test_no_tools").remote(
             dataset=train_dataset,
             inference_results_Q=inference_results_Q,
             param_prompt_Q=param_prompt_Q,
@@ -221,7 +221,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
         generation_config = SamplingConfig(temperature=0.7, top_p=1.0, max_tokens=128, n=2, stop=list(tools.keys()))
 
-        actor = data_loader.DataPreparationActor.options(name="test_with_tools").remote(
+        _actor = data_loader.DataPreparationActor.options(name="test_with_tools").remote(
             dataset=train_dataset,
             inference_results_Q=inference_results_Q,
             param_prompt_Q=param_prompt_Q,

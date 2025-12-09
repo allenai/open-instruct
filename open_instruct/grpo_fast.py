@@ -532,18 +532,10 @@ class PolicyTrainerRayProcess(RayProcess):
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
         self.num_mini_batches = args.num_mini_batches
-        self.dataloader = iter(
-            data_loader_config.build_dataloader(
-                data_prep_actor_name=data_prep_actor_name,
-                tokenizer=tokenizer,
-                dp_rank=rank,
-                fs_local_rank=self.local_rank,
-                num_training_steps=args.num_training_steps,
-                work_dir=args.output_dir,
-                global_batch_size=args.num_unique_prompts_rollout,
-                dp_world_size=world_size,
-            )
-        )
+        self._data_loader_config = data_loader_config
+        self._data_prep_actor_name = data_prep_actor_name
+        self._args = args
+        self.dataloader = None
 
     def from_pretrained(
         self,
@@ -708,6 +700,24 @@ class PolicyTrainerRayProcess(RayProcess):
                 else None,
             )
         self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
+
+        # Initialize dataloader here (not in __init__) because the DataPreparationActor
+        # may not exist yet when __init__ runs. The actor is created after vLLM engines
+        # are initialized, but policy_group must be created before vLLM engines to avoid
+        # port collisions during vLLM initialization.
+        self.dataloader = iter(
+            self._data_loader_config.build_dataloader(
+                data_prep_actor_name=self._data_prep_actor_name,
+                tokenizer=self.tokenizer,
+                dp_rank=self.rank,
+                fs_local_rank=self.local_rank,
+                num_training_steps=self._args.num_training_steps,
+                work_dir=self._args.output_dir,
+                global_batch_size=self._args.num_unique_prompts_rollout,
+                dp_world_size=self.world_size,
+            )
+        )
+
         return optimization_steps_done
 
     def forward(
