@@ -388,9 +388,18 @@ def accumulate_inference_batches(
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not verbose,
     )
+    logger.info(
+        f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
+    )
     num_prompts_sampled = 0
     while num_prompts_sampled < num_prompts:
+        logger.info(
+            f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts} from inference_results_Q"
+        )
         result = inference_results_Q.get(timeout=timeout)
+        logger.info(
+            f"[accumulate_inference_batches] Got result {num_prompts_sampled + 1}/{num_prompts}, type: {type(result).__name__}"
+        )
 
         if isinstance(result, data_types.ShutdownSentinel):
             return result, None, None, None
@@ -761,7 +770,10 @@ class DataPreparationActor:
         self._prep_future = self._executor.submit(self._data_preparation_loop)
 
     def _data_preparation_loop(self):
-        for _ in range(self.config.async_steps * self.global_batch_size):
+        logger.info("[DataPreparationActor] Starting _data_preparation_loop")
+        num_initial_prompts = self.config.async_steps * self.global_batch_size
+        logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
+        for i in range(num_initial_prompts):
             add_prompt_to_generator(
                 next(self.iter_dataloader),
                 self.iter_dataloader._epoch,
@@ -769,11 +781,19 @@ class DataPreparationActor:
                 self.generation_config,
                 is_eval=False,
             )
+            if (i + 1) % 10 == 0 or i == num_initial_prompts - 1:
+                logger.info(f"[DataPreparationActor] Pushed {i + 1}/{num_initial_prompts} initial prompts")
+        logger.info(
+            f"[DataPreparationActor] Done pushing initial prompts, starting training loop from step {self.training_step}"
+        )
 
         for step in range(self.training_step, self.num_training_steps):
             if self.shutdown_requested:
                 return
 
+            logger.info(
+                f"[DataPreparationActor] Step {step}: calling accumulate_inference_batches for {self.global_batch_size} prompts"
+            )
             result, batch, reward_metrics, batch_stats = accumulate_inference_batches(
                 self.inference_results_Q,
                 self.generation_config,
@@ -791,6 +811,9 @@ class DataPreparationActor:
                 training_step=step,
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
+            )
+            logger.info(
+                f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
             )
 
             if isinstance(result, data_types.ShutdownSentinel):
@@ -944,13 +967,25 @@ class DataPreparationActor:
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""
+        logger.info(
+            f"[DataPreparationActor.get_data] rank={rank} requesting step={step}, current_prepared_step={self.current_prepared_step}"
+        )
+        wait_count = 0
         while True:
             with self.lock:
                 if step <= self.current_prepared_step:
                     batch_data = self.prepared_data[step][rank]
                     result = {"batch": batch_data, "metrics": self.metrics[step]}
                     self._cleanup_old_steps(step)
+                    logger.info(
+                        f"[DataPreparationActor.get_data] rank={rank} got data for step={step} after {wait_count} waits"
+                    )
                     return result
+            wait_count += 1
+            if wait_count % 1000 == 0:
+                logger.info(
+                    f"[DataPreparationActor.get_data] rank={rank} still waiting for step={step}, current_prepared_step={self.current_prepared_step}, wait_count={wait_count}"
+                )
             time.sleep(0.01)
 
     def _cleanup_old_steps(self, current_step: int):
