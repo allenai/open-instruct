@@ -1,4 +1,5 @@
 import gc
+import os
 import time
 import unittest
 from typing import Any
@@ -27,6 +28,7 @@ class TestGrpoFastBase(unittest.TestCase):
         """Get current resource tracker state for debugging."""
         tracked_resources = {}
         try:
+            # Try to access resource tracker directly
             from multiprocessing.resource_tracker import _resource_tracker
 
             if hasattr(_resource_tracker, "_cache"):
@@ -35,10 +37,13 @@ class TestGrpoFastBase(unittest.TestCase):
                         tracked_resources[rtype] = []
                     tracked_resources[rtype].append(name)
         except Exception:
+            # Alternative approach: check via resource_tracker module
             try:
                 import multiprocessing.resource_tracker as rt
 
                 if hasattr(rt, "getfd"):
+                    # This is a hack to get the cache info
+                    # Try to find the cache in the module
                     for attr_name in dir(rt):
                         attr = getattr(rt, attr_name)
                         if isinstance(attr, dict) and any("semaphore" in str(v) for v in attr.values()):
@@ -52,10 +57,13 @@ class TestGrpoFastBase(unittest.TestCase):
 
     def setUp(self):
         """Initialize Ray and check for pre-existing leaks."""
+        # Record initial resource tracker state
         self._initial_resources = self._get_resource_tracker_state()
+        # Track Ray queues for cleanup
         self._ray_queues = []
         utils.check_runtime_leaks()
-        ray.init(include_dashboard=False)
+        # Initialize Ray for this test
+        ray.init(include_dashboard=False, runtime_env={"env_vars": dict(os.environ)})
 
     def _cleanup_ray_queues(self):
         """Clean up all Ray queues created during the test."""
@@ -68,11 +76,16 @@ class TestGrpoFastBase(unittest.TestCase):
 
     def tearDown(self):
         """Check for leaks and shutdown Ray."""
+        # Clean up Ray queues BEFORE shutting down Ray
         self._cleanup_ray_queues()
+        # Shutdown Ray
         if ray.is_initialized():
             ray.shutdown()
+        # Force garbage collection to clean up any lingering objects
         gc.collect()
+        # Get final resource tracker state
         final_resources = self._get_resource_tracker_state()
+        # Check for new resources that weren't there initially
         new_resources = {}
         for rtype, names in final_resources.items():
             initial_names = set(self._initial_resources.get(rtype, []))
@@ -80,10 +93,13 @@ class TestGrpoFastBase(unittest.TestCase):
             if new_names:
                 new_resources[rtype] = new_names
         utils.check_runtime_leaks()
+        # Check for semaphore leaks
         if new_resources:
+            # Report all new resources, especially semaphores
             leak_msg = f"Resource leaks detected after test {self._testMethodName}:\n"
             for rtype, names in new_resources.items():
                 leak_msg += f"  {rtype}: {names}\n"
+            # Fail if there are semaphore leaks
             if "semaphore" in new_resources:
                 self.fail(leak_msg)
 
@@ -195,7 +211,7 @@ class TestDataPreparation(TestGrpoFastBase):
             (16, 4, 2, 10, False, 0),
             (32, 8, 4, 20, False, 0),
             (8, 2, 1, 5, False, 0),
-            (16, 4, 2, 10, False, 0),
+            (20, 4, 2, 10, False, 0),
             (24, 8, 3, 15, False, 0),
             (4, 1, 4, 10, False, 0),
             (8, 2, 2, 10, True, 999),
