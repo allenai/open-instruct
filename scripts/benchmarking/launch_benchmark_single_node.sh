@@ -28,7 +28,11 @@ if ! [[ "$response_length" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
+max_prompt_token_length=2048
+pack_length=$((max_prompt_token_length + response_length))
+
 echo "Running benchmarks with response length: $response_length"
+echo "Using pack_length: $pack_length (max_prompt_token_length=$max_prompt_token_length + response_length=$response_length)"
 echo "Models to benchmark: $@"
 echo "----------------------------------------"
 
@@ -76,7 +80,7 @@ for model_name_or_path in "$@"; do
             --vllm_use_shared_kv_cache \
             --vllm_kv_cache_sharing_group_size 2 \
             --vllm_gpu_memory_utilization 0.9 \
-            --pack_length 40000 \
+            --pack_length "$pack_length" \
             --chat_template_name "tulu_thinker" \
             --trust_remote_code \
             --seed 42 \
