@@ -1556,7 +1556,7 @@ def accumulate_inference_batches(
 
     if replenish_prompts:
         assert prompt_Q is not None and data_loader is not None and prompt_dataset is not None, (
-            "replenish_prompts requires prompt_Q and iter_dataloader and prompt_dataset"
+            "replenish_prompts requires prompt_Q, data_loader, and prompt_dataset"
         )
     results = []
     all_queries = []
