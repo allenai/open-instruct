@@ -5,6 +5,10 @@ from typing import Any
 import torch
 
 
+class ShutdownSentinel:
+    """Sentinel value to signal thread shutdown via queue."""
+
+
 @dataclass
 class TokenStatistics:
     """Container for token statistics from inference."""
