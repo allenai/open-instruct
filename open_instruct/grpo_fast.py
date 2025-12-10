@@ -135,37 +135,6 @@ logger = logger_utils.setup_logger(__name__)
 
 INVALID_LOGPROB = 1.0
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
-DISK_USAGE_WARNING_THRESHOLD = 0.85
-CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://")
-
-
-def warn_if_low_disk_space(path: str, *, threshold: float, send_slack_alerts: bool) -> None:
-    """Warns when disk usage exceeds the provided threshold.
-
-    Args:
-        path: Filesystem path to check disk usage for.
-        threshold: Usage ratio (0.0-1.0) above which to warn.
-        send_slack_alerts: Whether to also send a Slack alert when warning.
-    """
-    if path.startswith(CLOUD_PATH_PREFIXES):
-        return
-
-    usage = shutil.disk_usage(path)
-    if usage.total == 0:
-        return
-
-    used_ratio = usage.used / usage.total
-    if used_ratio >= threshold:
-        used_percent = used_ratio * 100
-        free_gib = usage.free / (1024**3)
-        total_gib = usage.total / (1024**3)
-        warning_message = (
-            f"Disk usage near capacity for {path}: {used_percent:.1f}% used "
-            f"({free_gib:.1f} GiB free of {total_gib:.1f} GiB). Checkpointing may fail."
-        )
-        logger.warning(warning_message)
-        if send_slack_alerts:
-            utils.send_slack_message(f"{warning_message}")
 
 
 class ShutdownSentinel:
@@ -299,6 +268,8 @@ class Args:
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
+    loss_fn: Literal["dapo", "cispo"] = "dapo"
+    """Whether to use DAPO or CISPO loss function."""
 
     active_sampling: bool = False
     """Whether to continue sampling responses until you get a full batch."""
@@ -458,8 +429,8 @@ class Args:
     # Tool settings
     tools: list[str] | None = None
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: list[int] = field(default_factory=lambda: [5])
-    """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
+    max_tool_calls: tuple[int, ...] = (5,)
+    """Maximum number of tool calls allowed. If a tuple is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
     only_reward_good_outputs: bool = False
@@ -1143,10 +1114,19 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    pg_losses_BT = -data_BT.advantages[i][:, 1:] * ratio_BT
-                    pg_losses2_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
-                        ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher
-                    )
+                    if self.args.loss_fn == "dapo":
+                        pg_losses_BT = -data_BT.advantages[i][:, 1:] * ratio_BT
+                        pg_losses2_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
+                            ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher
+                        )
+                    elif self.args.loss_fn == "cispo":
+                        # cispo: directly clip ratio, no lower bound.
+                        pg_losses_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
+                            ratio_BT, max=1.0 + self.args.clip_higher
+                        )
+                        pg_losses2_BT = pg_losses_BT
+                    else:
+                        raise ValueError(f"Invalid loss function: {self.args.loss_fn}")
 
                     # Apply truncated importance sampling if enabled
                     if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
@@ -2832,11 +2812,7 @@ def run_training(
             and training_step % args.checkpoint_state_freq == 0
             and args.checkpoint_state_dir is not None
         ):
-            warn_if_low_disk_space(
-                args.checkpoint_state_dir,
-                threshold=DISK_USAGE_WARNING_THRESHOLD,
-                send_slack_alerts=args.send_slack_alerts,
-            )
+            utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
             with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
                 # Save comprehensive client state including dataloader state
                 client_state = {
