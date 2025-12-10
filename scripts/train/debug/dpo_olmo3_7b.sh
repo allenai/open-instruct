@@ -18,7 +18,7 @@ uv run python mason.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
     --tokenizer_name_or_path "$MODEL_NAME" \
-    --chat_template_name olmo123 \
+    --chat_template_name olmo \
     --max_seq_length 1024 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
