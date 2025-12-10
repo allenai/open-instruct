@@ -32,6 +32,7 @@ from olmo_core.train.train_module import EvalBatchSpec, TrainModule
 from tqdm.auto import tqdm
 
 from open_instruct import data_types
+from open_instruct.beaker_callback import BeakerCallbackV2
 from open_instruct.data_loader import HFDataLoader
 from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
@@ -547,12 +548,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     )
 
     json_config = config_to_json_serializable(args.as_dict())
-    beaker_experiment_id = os.environ.get("BEAKER_WORKLOAD_ID")
-    trainer_callbacks: dict[str, callbacks.Callback] = {
-        "beaker": callbacks.BeakerCallback(
-            config=json_config, enabled=beaker_experiment_id is not None, experiment_id=beaker_experiment_id
-        )
-    }
+    trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback()
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
