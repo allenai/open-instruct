@@ -382,6 +382,7 @@ class DPOExperimentConfig(config.Config):
     dataset_local_cache_dir: str = "local_dataset_cache"
     dataset_skip_cache: bool = False
     cache_dataset_only: bool = False
+    dataset_config_hash: str | None = None
 
     push_to_hub: bool = True
     hf_entity: str | None = None
@@ -415,6 +416,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         transform_fn_args=transform_fn_args,
         target_columns=args.dataset_target_columns,
         dataset_cache_mode=args.dataset_cache_mode.value,
+        dataset_config_hash=args.dataset_config_hash,
         hf_entity=args.hf_entity,
         dataset_local_cache_dir=args.dataset_local_cache_dir,
         dataset_skip_cache=args.dataset_skip_cache,
