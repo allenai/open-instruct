@@ -8,7 +8,7 @@ uv run python mason.py \
     --cluster ai2/augusta \
     --description "Single GPU DPO run with OLMo3-7B, for debugging purposes." \
     --workspace ai2/open-instruct-dev \
-    --priority urgent \
+    --priority high \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --preemptible \
