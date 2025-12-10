@@ -32,7 +32,7 @@ uv run python mason.py \
     --seed 123 \
     --use_flash_attn \
     --logging_steps 1 \
-    --dpo_config.dpo_loss_type dpo_norm \
-    --dpo_config.dpo_beta 5 \
+    --dpo_loss_type dpo_norm \
+    --dpo_beta 5 \
     --gradient_checkpointing \
     --with_tracking

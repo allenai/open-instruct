@@ -309,7 +309,27 @@ class DPOExperimentConfig(config.Config):
     use_flash_attn: bool = True
     model_revision: str | None = None
 
-    dpo_config: DPOConfig = field(default_factory=DPOConfig)
+    dpo_beta: float = 0.1
+    dpo_loss_type: DPOLossType = DPOLossType.dpo
+    dpo_gamma_beta_ratio: float = 0.3
+    dpo_label_smoothing: float = 0.0
+    load_balancing_loss: bool = False
+    load_balancing_weight: float = 1e-3
+    concatenated_forward: bool = True
+    packing: bool = False
+
+    @property
+    def dpo_config(self) -> DPOConfig:
+        return DPOConfig(
+            dpo_beta=self.dpo_beta,
+            dpo_loss_type=self.dpo_loss_type,
+            dpo_gamma_beta_ratio=self.dpo_gamma_beta_ratio,
+            dpo_label_smoothing=self.dpo_label_smoothing,
+            load_balancing_loss=self.load_balancing_loss,
+            load_balancing_weight=self.load_balancing_weight,
+            concatenated_forward=self.concatenated_forward,
+            packing=self.packing,
+        )
 
     num_epochs: int = 2
     per_device_train_batch_size: int = 8
