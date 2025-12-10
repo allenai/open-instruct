@@ -18,6 +18,7 @@ import peft
 import torch
 import torch.nn as nn
 from olmo_core import config, train
+from olmo_core.train import callbacks
 from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import EvalBatchSpec, TrainModule
 from tqdm.auto import tqdm
@@ -310,6 +311,7 @@ class DPOExperimentConfig(config.Config):
     keep_last_n_checkpoints: int = 3
 
     log_every: int = 10
+    with_tracking: bool = False
     wandb_project: str = "open_instruct"
     wandb_entity: str | None = None
 
@@ -399,10 +401,20 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         device=device,
     )
 
+    trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": callbacks.BeakerCallback(config=args.as_dict())}
+    if args.with_tracking:
+        trainer_callbacks["wandb"] = callbacks.WandBCallback(
+            name=args.run_name or args.exp_name,
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            config=args.as_dict(),
+        )
+
     trainer = train.TrainerConfig(
         save_folder=args.output_dir,
         max_duration=train.Duration.epochs(args.num_epochs),
         metrics_collect_interval=args.log_every,
+        callbacks=trainer_callbacks,
     ).build(train_module, data_loader_instance)
 
     logger.info("Starting training...")
