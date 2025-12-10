@@ -645,11 +645,12 @@ def prepare_collated_data_for_workers(
         advantages, response_masks, and vllm_logprobs.
     """
     total_sequences = len(packed_sequences.query_responses)
-    assert total_sequences % world_size == 0, (
-        f"Total packed sequences ({total_sequences}) must be evenly divisible by world_size ({world_size}). "
-        f"This indicates a configuration issue."
-    )
-    # Essentially doing `drop_last=True`, which is fine.
+    if total_sequences % world_size != 0:
+        new_total = (total_sequences // world_size) * world_size
+        logger.warning(
+            f"Total packed sequences ({total_sequences}) is not evenly divisible by world_size ({world_size}). "
+            f"Truncating to {new_total} sequences (dropping {total_sequences - new_total})."
+        )
     B = total_sequences // world_size
     collated_data = []
     assert packed_sequences.position_ids is not None
