@@ -406,8 +406,6 @@ class Args(DatasetCachingArgs):
     """Where to save the model"""
     save_traces: bool = False
     """Whether to save learning data traces"""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
     keep_last_n_checkpoints: int = 3
     """How many checkpoints to keep in the output directory. -1 for all."""
     checkpoint_state_freq: int = -1
@@ -2900,9 +2898,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         raise ValueError(
             f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
         )
-
-    if args.cache_dataset_only:
-        return
 
     pprint([args, model_config])
 

@@ -321,9 +321,6 @@ class FlatArguments(DatasetCachingArgs):
     """Whether to launch beaker evaluation jobs after training"""
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
-
     packing: bool = field(
         default=False,
         metadata={"help": "Whether to use packing/padding-free collation via DataCollatorWithFlatteningDPO"},
@@ -623,9 +620,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         train_dataset.set_format(type="pt")
     if accelerator.is_main_process:
         visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
-
-    if args.cache_dataset_only:
-        return
 
     # Load pretrained model and tokenizer
     if args.config_name:

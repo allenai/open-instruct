@@ -70,9 +70,6 @@ class Args(DatasetCachingArgs):
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
-
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
@@ -276,9 +273,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
     if accelerator.is_main_process:
         visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
-    if args.cache_dataset_only:
-        return
-
     # ------------------------------------------------------------
     # Runtime setups and quick logging
     if args.total_episodes is None:
