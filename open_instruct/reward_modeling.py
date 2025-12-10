@@ -23,6 +23,7 @@ from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     REJECTED_INPUT_IDS_KEY,
     TOKENIZED_PREFERENCE_DATASET_KEYS,
+    DatasetCachingArgs,
     SimplePreferenceCollator,
     TokenizerConfig,
     get_cached_dataset_tulu,
@@ -51,32 +52,20 @@ api = HfApi()
 
 
 @dataclass
-class Args:
-    # Dataset
+class Args(DatasetCachingArgs):
+    # Override defaults from DatasetCachingArgs for reward modeling
     dataset_mixer_list: list[str] = field(
         default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
     )
     """A list of datasets (local or HF) to sample from."""
     dataset_mixer_eval_list: list[str] = field(default_factory=lambda: [])
     """A list of datasets (local or HF) to sample from for evaluation."""
-    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
-    """The dataset splits to use for training"""
     dataset_mixer_eval_list_splits: list[str] = field(default_factory=lambda: [])
     """The dataset splits to use for evaluation"""
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["preference_tokenize_v1", "preference_filter_v1"])
     """The list of transform functions to apply to the dataset."""
     dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
     """The columns to use for the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "local"
-    """The mode to use for caching the dataset."""
-    dataset_local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
-    dataset_config_hash: str | None = None
-    """The hash of the dataset configuration."""
-    dataset_config_eval_hash: str | None = None
-    """The hash of the dataset configuration for evaluation."""
-    dataset_skip_cache: bool = False
-    """Whether to skip the cache."""
     max_token_length: int = 512
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256

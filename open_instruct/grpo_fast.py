@@ -87,6 +87,7 @@ from open_instruct.dataset_transformation import (
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
+    DatasetCachingArgs,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -173,34 +174,19 @@ class ShutdownSentinel:
 
 
 @dataclass
-class Args:
-    # Dataset
+class Args(DatasetCachingArgs):
+    # Override defaults from DatasetCachingArgs for GRPO
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from."""
     dataset_mixer_eval_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from for evaluation."""
-    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
-    """The dataset splits to use for training"""
-    dataset_mixer_eval_list_splits: list[str] = field(default_factory=lambda: ["test"])
-    """The dataset splits to use for evaluation"""
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"])
     """The list of transform functions to apply to the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "local"
-    """The mode to use for caching the dataset."""
-    dataset_local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
-    dataset_config_hash: str | None = None
-    """The hash of the dataset configuration."""
-    dataset_config_eval_hash: str | None = None
-    """The hash of the dataset configuration for evaluation."""
-    dataset_skip_cache: bool = False
-    """Whether to skip the cache."""
-    shuffle_eval_dataset: bool = False
-    """Whether to shuffle the evaluation dataset."""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
-    system_prompt_override_file: str | None = None
-    """Path to a text file containing a system prompt to override the dataset's system prompts"""
+
+    shuffle_eval_dataset: bool = False
+    """Whether to shuffle the evaluation dataset."""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
