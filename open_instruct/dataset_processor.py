@@ -252,26 +252,6 @@ class DatasetProcessor:
             return dataset
         raise NotImplementedError
 
-    def get_token_length_stats(self, features: list[str], dataset: Union[Dataset, DatasetDict]):
-        """Get token length statistics for the dataset"""
-        if isinstance(dataset, Dataset):
-            return self._get_token_length_stats(features, dataset)
-        elif isinstance(dataset, DatasetDict):
-            stats = {}
-            for key in dataset:
-                stats[key] = self._get_token_length_stats(features, dataset[key])
-            return stats
-
-    def _get_token_length_stats(self, features: list[str], dataset: Dataset):
-        stats = {}
-        for key in features:
-            stats[key] = {
-                "max_token_length": max(len(x) for x in dataset[key]),
-                "min_token_length": min(len(x) for x in dataset[key]),
-                "mean_token_length": sum(len(x) for x in dataset[key]) / len(dataset[key]),
-            }
-        return stats
-
     def get_token_length_visualization(
         self, features: list[str], dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30
     ):
@@ -351,11 +331,6 @@ class PreferenceDatasetProcessor(DatasetProcessor):
                 logging.info(f"Filtered out {filtered_count} samples or {percentage:.2f}% samples from {key}")
         return filtered_dataset
 
-    def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict]):
-        return super().get_token_length_stats(
-            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_CHOSEN_KEY, INPUT_IDS_REJECTED_KEY], dataset=dataset
-        )
-
     def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
         return super().get_token_length_visualization(
             features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_CHOSEN_KEY, INPUT_IDS_REJECTED_KEY],
@@ -410,9 +385,6 @@ class SFTDatasetProcessor(DatasetProcessor):
             desc="Filtering SFT data",
         )
 
-    def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict]):
-        return super().get_token_length_stats(features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset)
-
     def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
         return super().get_token_length_visualization(
             features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset, save_path=save_path, bins=bins
@@ -465,9 +437,6 @@ class SFTGroundTruthDatasetProcessor(DatasetProcessor):
             load_from_cache_file=self.config.load_from_cache_file,
             desc="Filtering SFT data",
         )
-
-    def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict]):
-        return super().get_token_length_stats(features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset)
 
     def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
         return super().get_token_length_visualization(
