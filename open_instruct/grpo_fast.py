@@ -610,7 +610,12 @@ def prepare_collated_data_for_workers(
         for query_responses, attention_masks, position_ids,
         advantages, response_masks, and vllm_logprobs.
     """
-    B = len(packed_sequences.query_responses) // world_size  # essentially doing `drop_last=True`, which is fine.
+    total_sequences = len(packed_sequences.query_responses)
+    assert total_sequences % world_size == 0, (
+        f"Total packed sequences ({total_sequences}) must be evenly divisible by world_size ({world_size}). "
+        f"This indicates a configuration issue."
+    )
+    B = total_sequences // world_size
     collated_data = []
     for i in range(world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
