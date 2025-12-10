@@ -2773,8 +2773,10 @@ def run_training(
             and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
-            for eval_example in iter(eval_data_loader):
-                add_prompt_to_generator(eval_example, prompt_Q, generation_configs["eval"], is_eval=True)
+            for eval_batch in iter(eval_data_loader):
+                # eval_data_loader is created with batch_size=1, so each batch has exactly one example.
+                assert len(eval_batch) == 1
+                add_prompt_to_generator(eval_batch[0], prompt_Q, generation_configs["eval"], is_eval=True)
         if collated_data is None:
             continue
 

@@ -7,13 +7,25 @@ import parameterized
 import open_instruct.data_loader
 
 
+def single_example_collator(examples: list[dict]) -> dict:
+    """Collator for batch_size=1 that extracts the single example."""
+    assert len(examples) == 1
+    return examples[0]
+
+
 class TestHFDataLoader(unittest.TestCase):
     def test_smoke(self):
         data = {"text": [f"example_{i}" for i in range(20)], "label": list(range(20))}
         dataset = datasets.Dataset.from_dict(data)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         batches = list(loader)
@@ -37,11 +49,12 @@ class TestHFDataLoader(unittest.TestCase):
         loaders = [
             open_instruct.data_loader.HFDataLoader(
                 dataset=dataset,
-                batch_size=1,
+                batch_size=world_size,  # batch_size must be >= world_size for per_rank_batch_size >= 1
                 seed=42,
                 rank=rank,
                 world_size=world_size,
                 work_dir=tempfile.gettempdir(),
+                collator=single_example_collator,
             )
             for rank in range(world_size)
         ]
@@ -69,7 +82,13 @@ class TestHFDataLoader(unittest.TestCase):
         dataset = datasets.Dataset.from_dict(data)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         first_pass = [batch["dataset_index"] for batch in loader]
@@ -85,7 +104,13 @@ class TestHFDataLoader(unittest.TestCase):
         dataset = datasets.Dataset.from_dict(data)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         for _ in range(5):
@@ -98,7 +123,13 @@ class TestHFDataLoader(unittest.TestCase):
         state = loader.state_dict()
 
         new_loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
         new_loader.load_state_dict(state)
 
@@ -110,10 +141,22 @@ class TestHFDataLoader(unittest.TestCase):
         dataset = datasets.Dataset.from_dict(data)
 
         loader1 = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
         loader2 = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         indices1 = [batch["dataset_index"] for batch in loader1]
@@ -133,7 +176,13 @@ class TestHFDataLoader(unittest.TestCase):
         dataset = datasets.Dataset.from_dict(data)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         loader.reshuffle(epoch=1)
@@ -149,7 +198,13 @@ class TestHFDataLoader(unittest.TestCase):
             remaining_original.append(next(loader_iter)["dataset_index"])
 
         new_loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
         new_loader.load_state_dict(state)
 
@@ -165,7 +220,13 @@ class TestHFDataLoader(unittest.TestCase):
         dataset = datasets.Dataset.from_dict(data)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         self.assertEqual(loader.batches_processed, 0)
@@ -183,7 +244,13 @@ class TestHFDataLoader(unittest.TestCase):
         dataset = datasets.Dataset.from_dict(data)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         loader.reshuffle(epoch=1)
@@ -195,7 +262,13 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(state["batches_processed"], 10)
 
         new_loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            rank=0,
+            world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
         new_loader.load_state_dict(state)
 
@@ -214,6 +287,7 @@ class TestHFDataLoader(unittest.TestCase):
             world_size=1,
             work_dir=tempfile.gettempdir(),
             automatic_reshuffle=True,
+            collator=single_example_collator,
         )
 
         for batch in loader:
@@ -236,6 +310,7 @@ class TestHFDataLoader(unittest.TestCase):
             world_size=1,
             work_dir=tempfile.gettempdir(),
             automatic_reshuffle=False,
+            collator=single_example_collator,
         )
 
         all_prompt_ids = []

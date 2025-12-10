@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 
 from datasets import Dataset
@@ -10,7 +10,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     This class implements the DataLoaderBase interface, providing iteration over
     a HuggingFace Dataset with support for sharding across distributed workers,
-    shuffling, and checkpointing.
+    shuffling, checkpointing, and optional collation.
     """
 
     def __init__(
@@ -22,6 +22,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         world_size: int,
         work_dir: str,
         automatic_reshuffle: bool = False,
+        collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
     ) -> None:
         """Initialize the HFDataLoader.
 
@@ -33,6 +34,9 @@ class HFDataLoader(data_loader.DataLoaderBase):
             world_size: Total number of processes in the distributed setup.
             work_dir: Working directory for the data loader (required by DataLoaderBase).
             automatic_reshuffle: If True, automatically reshuffle at epoch boundaries.
+            collator: Optional callable that takes a list of examples and returns a
+                collated batch. When provided, _iter_batches() yields collated batches
+                of size batch_size // world_size.
         """
         super().__init__(
             work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=0
@@ -43,7 +47,10 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.dataset = self._original_dataset.shuffle(seed=seed)
         self.seed = seed
         self._batch_size = batch_size
-        self.effective_size = len(self.dataset) - (len(self.dataset) % batch_size)
+        self._per_rank_batch_size = batch_size // world_size
+        # Identity collator returns the list of examples unchanged.
+        self._collator = collator if collator is not None else (lambda x: x)
+        self.effective_size = len(self.dataset) - (len(self.dataset) % self._per_rank_batch_size)
         self._automatic_reshuffle = automatic_reshuffle
         self._excluded_indices: set[int] = set()
         self._epoch: int = 0
@@ -68,14 +75,19 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
-        for i in range(self.batches_processed, self.effective_size):
+        start_example = self.batches_processed * self._per_rank_batch_size
+        batch_examples: list[dict[str, Any]] = []
+        for i in range(start_example, self.effective_size):
             example = self.dataset[i]
-            yield example | {"prompt_id": f"{self._epoch}_{example['dataset_index']}"}
+            batch_examples.append(example | {"prompt_id": f"{self._epoch}_{example['dataset_index']}"})
+            if len(batch_examples) == self._per_rank_batch_size:
+                yield self._collator(batch_examples)
+                batch_examples = []
 
     @property
     def total_batches(self) -> int:
         """Return the total number of batches in an epoch."""
-        return self.effective_size // self._batch_size
+        return self.effective_size // self._per_rank_batch_size
 
     def state_dict(self) -> dict[str, Any]:
         """Return a state dictionary for checkpointing."""
@@ -115,15 +127,14 @@ class HFDataLoader(data_loader.DataLoaderBase):
         shuffled = self._original_dataset.shuffle(seed=self.seed + self._epoch)
         # If this is slow, we can speed it up by making this a boolean mask.
         self.dataset = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
-        self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
+        self.effective_size = len(self.dataset) - (len(self.dataset) % self._per_rank_batch_size)
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
 
         Used by the trainer to do a dry-run of the
         forward and backward pass before training officially starts.
-
-        Returns:
-            The first item from the dataset.
         """
-        return self.dataset[0]
+        num_examples = min(self._per_rank_batch_size, len(self.dataset))
+        examples = [self.dataset[i] for i in range(num_examples)]
+        return self._collator(examples)

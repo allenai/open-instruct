@@ -7,7 +7,7 @@ OLMo-core's native training infrastructure.
 
 import enum
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, cast
@@ -15,13 +15,11 @@ from typing import Any, cast
 import peft
 import torch
 import torch.nn as nn
-from datasets import Dataset
 from olmo_core import config, train
-from olmo_core.data import data_loader
 from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import EvalBatchSpec, TrainModule
 from tqdm.auto import tqdm
-from transformers import AutoModelForCausalLM, PreTrainedTokenizer
+from transformers import AutoModelForCausalLM
 
 from open_instruct import data_types
 from open_instruct.data_loader import HFDataLoader
@@ -64,7 +62,7 @@ class ReferenceLogprobsCache:
     def build_cache(
         cls,
         model: nn.Module,
-        dataloader: "DPODataLoader",
+        dataloader: HFDataLoader,
         num_epochs: int,
         average_log_prob: bool,
         forward_fn: Callable,
@@ -135,109 +133,6 @@ class ReferenceLogprobsCache:
             self.chosen_logps[epoch_idx][batch_idx].to(device),
             self.rejected_logps[epoch_idx][batch_idx].to(device),
         )
-
-
-@dataclass
-class DPODataLoader(data_loader.DataLoaderBase):
-    """DataLoader for DPO preference data.
-
-    Wraps HFDataLoader to handle DPO-specific batching with chosen/rejected pairs.
-    """
-
-    def __init__(
-        self,
-        dataset: Dataset,
-        batch_size: int,
-        seed: int,
-        rank: int,
-        world_size: int,
-        work_dir: str,
-        tokenizer: PreTrainedTokenizer,
-        packing: bool = False,
-        automatic_reshuffle: bool = False,
-    ) -> None:
-        """Initialize the DPODataLoader.
-
-        Args:
-            dataset: The HuggingFace Dataset with preference pairs.
-            batch_size: The batch size per device.
-            seed: Random seed for shuffling.
-            rank: The rank of the current process.
-            world_size: Total number of processes.
-            work_dir: Working directory for the data loader.
-            tokenizer: Tokenizer for the collator.
-            packing: Whether to use padding-free packing.
-            automatic_reshuffle: Whether to automatically reshuffle at epoch boundaries.
-        """
-        super().__init__(
-            work_dir=work_dir,
-            global_batch_size=batch_size * world_size,
-            dp_world_size=world_size,
-            dp_rank=rank,
-            fs_local_rank=0,
-        )
-
-        self._base_loader = HFDataLoader(
-            dataset=dataset,
-            batch_size=1,
-            seed=seed,
-            rank=rank,
-            world_size=world_size,
-            work_dir=work_dir,
-            automatic_reshuffle=False,
-        )
-
-        self._batch_size = batch_size
-        self._packing = packing
-        self._automatic_reshuffle = automatic_reshuffle
-        self._epoch: int = 0
-
-        if packing:
-            self.collator = TensorDataCollatorWithFlatteningDPO(
-                return_position_ids=True, return_flash_attn_kwargs=True
-            )
-        else:
-            self.collator = DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
-
-    def _iter_batches(self) -> Iterable[dict[str, Any]]:
-        """Yield collated batches of preference pairs."""
-        batch_examples: list[dict[str, Any]] = []
-
-        for example in self._base_loader:
-            batch_examples.append(example)
-            if len(batch_examples) == self._batch_size:
-                yield self.collator(batch_examples)
-                batch_examples = []
-
-    @property
-    def total_batches(self) -> int:
-        """Return the total number of batches in an epoch."""
-        return self._base_loader.effective_size // self._batch_size
-
-    def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
-        """Reshuffle the dataset for a new epoch."""
-        self._epoch = self._epoch + 1 if epoch is None else epoch
-        self.batches_processed = 0
-        self._base_loader.reshuffle(epoch=epoch, **kwargs)
-
-    def state_dict(self) -> dict[str, Any]:
-        """Return a state dictionary for checkpointing."""
-        return {
-            "epoch": self._epoch,
-            "batches_processed": self.batches_processed,
-            "base_loader_state": self._base_loader.state_dict(),
-        }
-
-    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Load a state dictionary to restore the data loader's state."""
-        self._epoch = state_dict["epoch"]
-        self.batches_processed = state_dict["batches_processed"]
-        self._base_loader.load_state_dict(state_dict["base_loader_state"])
-
-    def get_mock_batch(self) -> dict[str, Any]:
-        """Return a batch with arbitrary data for dry-run testing."""
-        examples = [self._base_loader.dataset[i] for i in range(min(self._batch_size, len(self._base_loader.dataset)))]
-        return self.collator(examples)
 
 
 @dataclass
@@ -480,15 +375,19 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
     ).to(device)
 
-    data_loader_instance = DPODataLoader(
+    if args.dpo_config.packing:
+        collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
+    else:
+        collator = DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
+
+    data_loader_instance = HFDataLoader(
         dataset=dataset,
         batch_size=args.per_device_train_batch_size,
         seed=args.seed,
         rank=0,
         world_size=1,
         work_dir=args.output_dir,
-        tokenizer=tokenizer,
-        packing=args.dpo_config.packing,
+        collator=collator,
     )
 
     forward_fn = concatenated_forward if args.dpo_config.concatenated_forward else separate_forward
