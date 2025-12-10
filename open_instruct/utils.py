@@ -77,7 +77,7 @@ MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 DISK_USAGE_WARNING_THRESHOLD = 0.85
-CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://")
+CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://", "/filestore")
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -97,7 +97,12 @@ def warn_if_low_disk_space(
     if path.startswith(CLOUD_PATH_PREFIXES):
         return
 
-    usage = shutil.disk_usage(path)
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError as e:
+        logger.debug(f"Skipping disk usage check for {path}, encountered OS error: {e}")
+        return
+
     if usage.total == 0:
         return
 
