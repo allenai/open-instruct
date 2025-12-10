@@ -114,19 +114,20 @@ class ReferenceLogprobsCache:
         model.train()
         return cls(chosen_logps=epoch_chosen_logps, rejected_logps=epoch_rejected_logps)
 
-    def get(self, epoch: int, batch_idx: int, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
-        """Get cached reference logprobs for a specific epoch and batch.
+    def get(self, global_step: int, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+        """Get cached reference logprobs for a given global step.
 
         Args:
-            epoch: The epoch index (0-based).
-            batch_idx: The batch index within the epoch.
+            global_step: The global step number (0-based).
             device: The device to move tensors to.
 
         Returns:
             Tuple of (chosen_logps, rejected_logps) on the specified device.
         """
         num_epochs = len(self.chosen_logps)
-        epoch_idx = epoch % num_epochs
+        batches_per_epoch = len(self.chosen_logps[0])
+        epoch_idx = (global_step // batches_per_epoch) % num_epochs
+        batch_idx = global_step % batches_per_epoch
         return (
             self.chosen_logps[epoch_idx][batch_idx].to(device),
             self.rejected_logps[epoch_idx][batch_idx].to(device),
@@ -278,12 +279,10 @@ class DPOTrainModule(TrainModule):
         else:
             self._forward_fn = separate_forward
 
-        self._batch_idx = 0
-        self._epoch = 0
+        self._global_step = 0
 
     def on_attach(self) -> None:
-        self._batch_idx = 0
-        self._epoch = 0
+        self._global_step = 0
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state_dict: dict[str, Any] = {"model": self.model.state_dict()}
@@ -330,7 +329,7 @@ class DPOTrainModule(TrainModule):
 
         if self.dpo_config.dpo_loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm):
             reference_chosen_logps, reference_rejected_logps = self.reference_cache.get(
-                self._epoch, self._batch_idx, policy_chosen_logps.device
+                self._global_step, policy_chosen_logps.device
             )
             losses, chosen_rewards, rejected_rewards = dpo_loss(
                 policy_chosen_logps,
@@ -350,7 +349,7 @@ class DPOTrainModule(TrainModule):
             )
         elif self.dpo_config.dpo_loss_type == DPOLossType.wpo:
             reference_chosen_logps, reference_rejected_logps = self.reference_cache.get(
-                self._epoch, self._batch_idx, policy_chosen_logps.device
+                self._global_step, policy_chosen_logps.device
             )
             losses, chosen_rewards, rejected_rewards = wpo_loss(
                 policy_chosen_logps,
@@ -387,13 +386,7 @@ class DPOTrainModule(TrainModule):
                 self.record_metric("train/aux_loss", aux_loss.detach(), ReduceType.mean)
 
         loss.backward()
-        self._batch_idx += 1
-
-    def on_epoch_start(self) -> None:
-        self._batch_idx = 0
-
-    def on_epoch_end(self) -> None:
-        self._epoch += 1
+        self._global_step += 1
 
 
 @dataclass

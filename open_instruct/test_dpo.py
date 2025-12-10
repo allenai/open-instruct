@@ -32,11 +32,11 @@ class TestReferenceLogprobsCache(unittest.TestCase):
         cache = dpo.ReferenceLogprobsCache(chosen_logps=chosen_logps, rejected_logps=rejected_logps)
         device = torch.device("cpu")
 
-        chosen, rejected = cache.get(epoch=0, batch_idx=0, device=device)
+        chosen, rejected = cache.get(global_step=0, device=device)
         self.assertTrue(torch.allclose(chosen, torch.tensor([1.0, 2.0])))
         self.assertTrue(torch.allclose(rejected, torch.tensor([0.5, 1.5])))
 
-        chosen, rejected = cache.get(epoch=0, batch_idx=1, device=device)
+        chosen, rejected = cache.get(global_step=1, device=device)
         self.assertTrue(torch.allclose(chosen, torch.tensor([3.0, 4.0])))
         self.assertTrue(torch.allclose(rejected, torch.tensor([2.5, 3.5])))
 
@@ -47,8 +47,8 @@ class TestReferenceLogprobsCache(unittest.TestCase):
         cache = dpo.ReferenceLogprobsCache(chosen_logps=chosen_logps, rejected_logps=rejected_logps)
         device = torch.device("cpu")
 
-        chosen_e0, _ = cache.get(epoch=0, batch_idx=0, device=device)
-        chosen_e1, _ = cache.get(epoch=1, batch_idx=0, device=device)
+        chosen_e0, _ = cache.get(global_step=0, device=device)
+        chosen_e1, _ = cache.get(global_step=1, device=device)
 
         self.assertTrue(torch.allclose(chosen_e0, torch.tensor([1.0])))
         self.assertTrue(torch.allclose(chosen_e1, torch.tensor([2.0])))
