@@ -65,6 +65,7 @@ from ray.util import state as ray_state
 from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
+from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils
 
@@ -75,10 +76,48 @@ INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
+DISK_USAGE_WARNING_THRESHOLD = 0.85
+CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://", "/filestore")
 
 logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+def warn_if_low_disk_space(
+    path: str, *, threshold: float = DISK_USAGE_WARNING_THRESHOLD, send_slack_alerts: bool = False
+) -> None:
+    """Warns when disk usage exceeds the provided threshold.
+
+    Args:
+        path: Filesystem path to check disk usage for.
+        threshold: Usage ratio (0.0-1.0) above which to warn.
+        send_slack_alerts: Whether to also send a Slack alert when warning.
+    """
+    if path.startswith(CLOUD_PATH_PREFIXES):
+        return
+
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError as e:
+        logger.warning(f"Skipping disk usage check for {path}, encountered OS error: {e}")
+        return
+
+    if usage.total == 0:
+        return
+
+    used_ratio = usage.used / usage.total
+    if used_ratio >= threshold:
+        used_percent = used_ratio * 100
+        free_gib = usage.free / (1024**3)
+        total_gib = usage.total / (1024**3)
+        warning_message = (
+            f"Disk usage near capacity for {path}: {used_percent:.1f}% used "
+            f"({free_gib:.1f} GiB free of {total_gib:.1f} GiB). Checkpointing may fail."
+        )
+        logger.warning(warning_message)
+        if send_slack_alerts:
+            send_slack_message(f"{warning_message}")
 
 
 class MetricsTracker:
@@ -157,10 +196,13 @@ def ray_get_with_progress(
     if enable:
         futures_iter = tqdm(futures_iter, total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n")
 
-    for future in futures_iter:
-        idx = fut_to_idx[future]
-        results[idx] = future.result()
-        completion_times[idx] = time.perf_counter() - t0
+    try:
+        for future in futures_iter:
+            idx = fut_to_idx[future]
+            results[idx] = future.result()
+            completion_times[idx] = time.perf_counter() - t0
+    except TimeoutError as e:
+        raise TimeoutError(f"{desc} failed.") from e
 
     return results, completion_times
 
@@ -1030,7 +1072,10 @@ def maybe_update_beaker_description(
         return
 
     if experiment_id not in original_descriptions:
-        original_descriptions[experiment_id] = spec.description or ""
+        raw_description = spec.description or ""
+        if "git_commit:" in raw_description:
+            raw_description = raw_description.split("git_commit:")[0].strip()
+        original_descriptions[experiment_id] = raw_description
 
     # Build description from scratch each time
     description_components = [
@@ -1102,7 +1147,8 @@ def download_from_hf(model_name_or_path: str, revision: str) -> None:
     return output
 
 
-def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
+def download_from_gs_bucket(src_paths: list[str], dest_path: str) -> None:
+    os.makedirs(dest_path, exist_ok=True)
     cmd = [
         "gsutil",
         "-o",
@@ -1112,9 +1158,9 @@ def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
         "-m",
         "cp",
         "-r",
-        src_path,
-        dest_path,
     ]
+    cmd.extend(src_paths)
+    cmd.append(dest_path)
     print(f"Downloading from GS bucket with command: {cmd}")
     live_subprocess_output(cmd)
 
@@ -1396,19 +1442,48 @@ def get_train_ds_config(
     }
 
 
-def get_eval_ds_config(offload, stage=0, bf16=True):
+def get_eval_ds_config(
+    offload: bool, stage: int = 0, bf16: bool = True, per_device_train_batch_size: int = 1
+) -> tuple[dict[str, Any], HfDeepSpeedConfig | None]:
+    """Creates a DeepSpeed configuration for evaluation.
+
+    Args:
+        offload: Whether to offload parameters to CPU.
+        stage: ZeRO optimization stage. Only 0 or 3 are relevant as there's no optimizer for eval.
+        bf16: Whether to enable bfloat16 precision.
+        per_device_train_batch_size: Batch size per GPU.
+
+    Returns:
+        Tuple containing a Dictionary containing DeepSpeed configuration, and the actual HfDeepSpeedConfig object if stage 3 is used, else None. We need to return the HfDeepSpeedConfig object so it doesn't go out of scope as HF accelerate uses it internally via a global weakref.
+
+    Raises:
+        ValueError: If stage is not 0 or 3.
+    """
+    if stage not in (0, 3):
+        raise ValueError(
+            f"stage must be 0 or 3 for evaluation (got {stage}). 1 or 2 only differ from stage 0 by optimizer sharding, which is irrelevant for evaluation."
+        )
     zero_opt_dict = {
         "stage": stage,
         "stage3_param_persistence_threshold": "auto",
         "offload_param": {"device": "cpu" if offload else "none", "pin_memory": True},
     }
-    return {
+    ds_config = {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
         "bf16": {"enabled": bf16},
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
     }
+    ds_config["train_micro_batch_size_per_gpu"] = per_device_train_batch_size
+    ds_config["gradient_accumulation_steps"] = 1
+    if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+        # This is needed as it apparently has mysterious side effects.
+        hf_config = HfDeepSpeedConfig(ds_config)
+        logger.info(f"DeepSpeed config: {hf_config}")
+    else:
+        hf_config = None
+    return ds_config, hf_config
 
 
 def get_optimizer_grouped_parameters(
@@ -2437,19 +2512,27 @@ def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, An
     return combined
 
 
-def send_slack_alert(error: Exception) -> None:
-    """Sends an alert about a training failure to a Slack webhook (if the env var SLACK_WEBHOOK is set)."""
+def send_slack_message(message: str) -> None:
+    """Sends a message to a Slack webhook if configured.
+
+    Args:
+        message: Message body to send to Slack.
+    """
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
     if not slack_webhook_url:
         logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
         return
+
     beaker_url = get_beaker_experiment_url()
-    beaker_message = f"Check it out: {beaker_url}. " if beaker_url else ""
-    message = f"<!here> A RL job has died. {beaker_message}Error message: {str(error)}."
-    payload = {"text": message}
-    response = requests.post(slack_webhook_url, json=payload)
-    if not response.ok:
-        logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
+    beaker_suffix = f" Check it out: {beaker_url}" if beaker_url else ""
+
+    payload = {"text": f"{message}{beaker_suffix}"}
+    try:
+        response = requests.post(slack_webhook_url, json=payload)
+        if not response.ok:
+            logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
+    except requests.RequestException as exc:
+        logger.warning("Failed to send Slack alert due to network error: %s", exc)
 
 
 def get_beaker_experiment_url() -> str | None:
@@ -2461,3 +2544,16 @@ def get_beaker_experiment_url() -> str | None:
         return url
     except Exception:
         return None
+
+
+def get_denominator(loss_denominator: str | float) -> float | str:
+    """
+    Validates and converts the loss_denominator argument.
+    """
+    if loss_denominator == "token":
+        return "token"
+
+    val = float(loss_denominator)
+    if val <= 0:
+        raise ValueError(f"loss_denominator must be greater than 0 if not 'token', got: {loss_denominator}")
+    return val

@@ -14,31 +14,26 @@
 # limitations under the License.
 
 
+import asyncio
 import itertools
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Literal, Union
 
-try:
-    import deepspeed
-    from deepspeed.runtime.engine import DeepSpeedEngine
-except ImportError:
-    pass
-import asyncio
-
+import deepspeed
 import pandas as pd
 import torch
 import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
+from deepspeed.runtime.engine import DeepSpeedEngine
 from huggingface_hub import HfApi
 from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
-from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct import logger_utils
 from open_instruct.ground_truth_utils import VerifierFunction
@@ -153,6 +148,55 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
     for module in model.modules():
         if isinstance(module, torch.nn.Dropout):
             module.p = 0
+
+
+def load_ref_policy(
+    model_config: ModelConfig,
+    ds_config: dict,
+    deepspeed_stage: int,
+    local_rank: int,
+    device: torch.device,
+    rank: int,
+    checkpoint_path: str | None = None,
+) -> transformers.PreTrainedModel:
+    """Loads a reference policy model for evaluation.
+
+    Args:
+        model_config: Configuration containing model name and revision.
+        ds_config: DeepSpeed configuration dictionary.
+        deepspeed_stage: DeepSpeed ZeRO stage.
+        local_rank: Local GPU rank for device mapping.
+        device: Target device for loading checkpoint.
+        rank: Global process rank for logging.
+        checkpoint_path: Optional path to model checkpoint to load.
+
+    Returns:
+        Initialized reference policy model in evaluation mode.
+    """
+    # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+    # stage 2 is optimizer sharding which doesn't apply to inference
+    ref_policy: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
+        model_config.model_name_or_path,
+        revision=model_config.model_revision,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+        use_cache=False,
+        **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
+    )
+    disable_dropout_in_model(ref_policy)
+    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config)
+    ref_policy.eval()
+
+    if checkpoint_path:
+        state_dict = torch.load(checkpoint_path, map_location=device)
+        if hasattr(ref_policy, "module"):
+            # Needed if wrapped by DeepSpeed.
+            ref_policy.module.load_state_dict(state_dict)
+        else:
+            # If a vanilla HF model.
+            ref_policy.load_state_dict(state_dict)
+        logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
+    return ref_policy
 
 
 def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
@@ -459,7 +503,7 @@ def get_olmo3_generation_config(tokenizer):
 def save_with_accelerate(
     accelerator: Accelerator,
     model: torch.nn.Module,
-    tokenizer: PreTrainedTokenizer,
+    tokenizer: transformers.PreTrainedTokenizer,
     output_dir: str,
     use_lora: bool = False,
     model_attribute_to_save: str | None = None,
@@ -478,7 +522,7 @@ def save_with_accelerate(
             temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
         )
 
-    unwrapped_model: PreTrainedModel = accelerator.unwrap_model(model)
+    unwrapped_model: transformers.PreTrainedModel = accelerator.unwrap_model(model)
     if model_attribute_to_save is not None:
         unwrapped_model = getattr(unwrapped_model, model_attribute_to_save)
     # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
@@ -723,3 +767,31 @@ def exact_div(a, b, custom_error_message=""):
     if a != q * b:
         raise ValueError(f"{custom_error_message}, inexact division: {a} / {b} = {a / b}")
     return q
+
+
+def estimate_kl(ref_logprobs_diff: torch.Tensor, ratio: torch.Tensor) -> torch.Tensor:
+    """Compute 4 different KL divergence estimators between current and reference policies.
+
+    Args:
+        ref_logprobs_diff: Log probability difference (new_logprobs - ref_logprobs), clamped
+            to [-40, 40] for numerical stability. Shape: [B, T] or similar.
+        ratio: Importance sampling ratio exp(new_logprobs - old_logprobs) between current
+            policy and the policy at the start of the training step. Shape: [B, T] or similar.
+
+    Returns:
+        Tensor of shape [4, B, T] containing 4 KL estimators stacked along dim 0:
+            [0]: linear approximation (ref_logprobs_diff)
+            [1]: quadratic approximation (ref_logprobs_diff^2 / 2)
+            [2]: numerically stable form (expm1(-ref_logprobs_diff) + ref_logprobs_diff)
+            [3]: importance-weighted (ratio * ref_logprobs_diff)
+
+        We tend to prefer [2] as a reasonable default.
+    """
+    return torch.stack(
+        [
+            ref_logprobs_diff,
+            (ref_logprobs_diff) ** 2 / 2,
+            torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff,
+            ratio * ref_logprobs_diff,
+        ]
+    )
