@@ -28,7 +28,7 @@ uv run mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 8 \
+    --num_nodes 9 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
@@ -62,7 +62,7 @@ uv run mason.py \
     --temperature 1.0 \
     --total_episodes 1024512 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 8 \
+    --num_learners_per_node 8 8 \
     --vllm_num_engines 56 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
