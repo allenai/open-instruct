@@ -100,7 +100,7 @@ def warn_if_low_disk_space(
     try:
         usage = shutil.disk_usage(path)
     except OSError as e:
-        logger.debug(f"Skipping disk usage check for {path}, encountered OS error: {e}")
+        logger.warning(f"Skipping disk usage check for {path}, encountered OS error: {e}")
         return
 
     if usage.total == 0:
