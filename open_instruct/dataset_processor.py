@@ -329,12 +329,11 @@ class PreferenceDatasetProcessor(DatasetProcessor):
                 logging.info(f"Filtered out {filtered_count} samples or {percentage:.2f}% samples from {key}")
         return filtered_dataset
 
-    def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
+    def get_token_length_visualization(
+        self, features: list[str], dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30
+    ):
         return super().get_token_length_visualization(
-            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_CHOSEN_KEY, INPUT_IDS_REJECTED_KEY],
-            dataset=dataset,
-            save_path=save_path,
-            bins=bins,
+            features=features, dataset=dataset, save_path=save_path, bins=bins
         )
 
 
@@ -383,9 +382,11 @@ class SFTDatasetProcessor(DatasetProcessor):
             desc="Filtering SFT data",
         )
 
-    def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
+    def get_token_length_visualization(
+        self, features: list[str], dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30
+    ):
         return super().get_token_length_visualization(
-            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset, save_path=save_path, bins=bins
+            features=features, dataset=dataset, save_path=save_path, bins=bins
         )
 
 
@@ -436,9 +437,11 @@ class SFTGroundTruthDatasetProcessor(DatasetProcessor):
             desc="Filtering SFT data",
         )
 
-    def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
+    def get_token_length_visualization(
+        self, features: list[str], dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30
+    ):
         return super().get_token_length_visualization(
-            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset, save_path=save_path, bins=bins
+            features=features, dataset=dataset, save_path=save_path, bins=bins
         )
 
 
