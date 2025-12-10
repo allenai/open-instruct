@@ -363,6 +363,7 @@ def get_env_vars(
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
                     beaker.BeakerEnvVar(name="NCCL_TUNER_PLUGIN", value="libnccl-tuner.so"),
+                    beaker.BeakerEnvVar(name="OLMO_SHARED_FS", value="1"),
                     beaker.BeakerEnvVar(
                         name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto"
                     ),
