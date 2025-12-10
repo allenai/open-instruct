@@ -465,7 +465,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
 
                 filtered_command = build_command_without_args(command[idx:], CACHE_EXCLUDED_ARGS)
                 filtered_command = maybe_download_tokenizer_from_gs_bucket(
-                    filtered_command, args.auto_output_dir, whoami
+                    filtered_command, args.auto_output_dir_path, whoami
                 )
                 caching_command = "python " + " ".join(filtered_command) + " --cache_dataset_only"
                 console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
