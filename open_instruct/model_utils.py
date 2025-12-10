@@ -628,13 +628,13 @@ def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.T
 
 @retry_on_exception()
 def push_folder_to_hub(
-    accelerator: Accelerator,
+    accelerator: Accelerator | None,
     output_dir: str,
     hf_repo_id: str | None = None,
     hf_repo_revision: str | None = None,
     private: bool = True,
 ):
-    if accelerator.is_main_process:
+    if accelerator is None or accelerator.is_main_process:
         hf_repo_url = f"https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}"
         api = HfApi()
         if not api.repo_exists(hf_repo_id):
