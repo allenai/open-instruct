@@ -479,9 +479,10 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     else:
         collator = DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
+    global_batch_size = args.per_device_train_batch_size * world_size
     data_loader_instance = HFDataLoader(
         dataset=dataset,
-        batch_size=args.per_device_train_batch_size,
+        batch_size=global_batch_size,
         seed=args.seed,
         rank=rank,
         world_size=world_size,
@@ -546,7 +547,14 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     )
 
     json_config = config_to_json_serializable(args.as_dict())
-    trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": callbacks.BeakerCallback(config=json_config)}
+    beaker_experiment_id = os.environ.get("BEAKER_WORKLOAD_ID")
+    trainer_callbacks: dict[str, callbacks.Callback] = {
+        "beaker": callbacks.BeakerCallback(
+            config=json_config,
+            enabled=beaker_experiment_id is not None,
+            experiment_id=beaker_experiment_id,
+        )
+    }
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback()
     if args.with_tracking:
         trainer_callbacks["wandb"] = callbacks.WandBCallback(
