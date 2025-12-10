@@ -1326,14 +1326,20 @@ class PolicyTrainerRayProcess(RayProcess):
                         max_diff = masked_diff.max()
                         std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
 
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item() if isinstance(mean_diff, torch.Tensor) else mean_diff
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = (
+                            mean_diff.item() if isinstance(mean_diff, torch.Tensor) else mean_diff
+                        )
                         self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = std_diff.item() if isinstance(std_diff, torch.Tensor) else std_diff
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = (
+                            std_diff.item() if isinstance(std_diff, torch.Tensor) else std_diff
+                        )
 
                         reverse_kl = torch.exp(mb_vllm_logprobs) * (mb_vllm_logprobs - mb_local_logprobs)
                         masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
                         mean_reverse_kl = masked_reverse_kl.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
-                        self.local_metrics["debug/vllm_local_reverse_kl"] = mean_reverse_kl.item() if isinstance(mean_reverse_kl, torch.Tensor) else mean_reverse_kl
+                        self.local_metrics["debug/vllm_local_reverse_kl"] = (
+                            mean_reverse_kl.item() if isinstance(mean_reverse_kl, torch.Tensor) else mean_reverse_kl
+                        )
 
                     mb_new_logprobs = mb_local_logprobs
 
@@ -1422,8 +1428,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         loss = masked_mean(pg_loss_max, mb_response_masks_bool, None, loss_denominator)
 
                     # we already took world size into account via the tokens
+                    # divide by sequence parallel to total sp size
+                    # TODO: is this correct?
                     if dist.is_available() and dist.is_initialized():
-                        loss *= dist.get_world_size()
+                        loss *= dist.get_world_size() // args.sequence_parallel_size
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
@@ -1435,26 +1443,17 @@ class PolicyTrainerRayProcess(RayProcess):
                         if args.sequence_parallel_size == 1:
                             if args.load_ref_policy:
                                 # NOTE: in packed implementation, kl calculation are averages over response tokens
-                                kl_stats_4M[:, i] = masked_mean(
-                                    kl_4BT, mb_response_masks_bool
-                                ).float()
+                                kl_stats_4M[:, i] = masked_mean(kl_4BT, mb_response_masks_bool).float()
                                 kl_loss_stats[i] = kl_stats_4M[args.kl_estimator, i] * args.beta
                             pg_clipfrac_stats[i] = masked_mean(
-                                (pg_losses2 > pg_losses).float(),
-                                mb_response_masks_bool,
+                                (pg_losses2 > pg_losses).float(), mb_response_masks_bool
                             )
-                            pg_loss_stats[i] = masked_mean(
-                                pg_loss_max, mb_response_masks_bool
-                            )
+                            pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool)
                             loss_stats[i] = loss
-                            ratio_stats[i] = masked_mean(
-                                ratio, mb_response_masks_bool
-                            )
+                            ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool)
                             if args.record_entropy:
                                 # Calculate entropy statistics
-                                entropy_stats[i] = masked_mean(
-                                    mb_entropy, mb_response_masks_bool
-                                ).float()
+                                entropy_stats[i] = masked_mean(mb_entropy, mb_response_masks_bool).float()
                         else:
                             # do the rank gather thing like for the main loss.
                             # this is because we have to pad out to the max length
@@ -1476,6 +1475,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                     return total_stats_sum / total_good_tokens
                                 else:
                                     return torch.tensor(0.0, device=local_stats_sum.device)
+
                             if args.load_ref_policy:
                                 for j in range(4):
                                     kl_stats_4M[j, i] = gather_mean_stats(kl_4BT[j], mb_response_masks_bool)
@@ -2263,6 +2263,7 @@ def data_preparation_thread(
                     dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
                     dummy_response_mask = torch.zeros_like(dummy_qr)
                     dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
+                    dummy_vllm_logprobs = torch.zeros_like(dummy_qr, dtype=torch.float)
                     # pad out the world size
                     for _ in range(shortfall):
                         packed_sequences.query_responses.append(dummy_qr)
@@ -2271,6 +2272,7 @@ def data_preparation_thread(
                         packed_sequences.position_ids.append(dummy_position_ids)
                         packed_sequences.response_masks.append(dummy_response_mask)
                         packed_sequences.advantages.append(dummy_advantage)
+                        packed_sequences.vllm_logprobs.append(dummy_vllm_logprobs)
 
         collated_data = prepare_collated_data_for_workers(
             packed_sequences, args.world_size, args.per_device_train_batch_size, tokenizer.pad_token_id
