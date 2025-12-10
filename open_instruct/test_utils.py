@@ -14,6 +14,7 @@
 # Copied from https://github.com/huggingface/alignment-handbook/blob/main/tests/test_data.py
 import json
 import pathlib
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -358,6 +359,37 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
         with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
             grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
             mock_warning.assert_not_called()
+
+
+class TestDownloadFromGsBucket(unittest.TestCase):
+    def test_download_from_gs_bucket(self):
+        src_paths = ["gs://bucket/data1", "gs://bucket/data2"]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest_path = pathlib.Path(tmp_dir) / "downloads"
+            captured_cmd: dict[str, list[str]] = {}
+
+            def mock_live_subprocess_output(cmd):
+                captured_cmd["cmd"] = cmd
+
+            with mock.patch.object(utils, "live_subprocess_output", side_effect=mock_live_subprocess_output):
+                utils.download_from_gs_bucket(src_paths=src_paths, dest_path=str(dest_path))
+
+            expected_cmd = [
+                "gsutil",
+                "-o",
+                "GSUtil:parallel_thread_count=1",
+                "-o",
+                "GSUtil:sliced_object_download_threshold=150",
+                "-m",
+                "cp",
+                "-r",
+                *src_paths,
+                str(dest_path),
+            ]
+
+            self.assertEqual(captured_cmd["cmd"], expected_cmd)
+            self.assertTrue(dest_path.exists())
 
 
 class TestUtilityFunctions(unittest.TestCase):
