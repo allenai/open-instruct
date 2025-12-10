@@ -17,6 +17,7 @@ dependencies = [
     "matplotlib>=3.9.3",
     "nltk>=3.9.1",
     "numpy<2",
+    "ai2-olmo-core==2.3.0",
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
@@ -81,6 +82,7 @@ dev = [
     "mkdocs-material>=9.6.8",
     "pytest>=8.3.4",
     "ruff>=0.11.13",
+    "ty>=0.0.1a13",
     "parameterized>=0.9.0",
     "rich>=13.7.0",
     "responses>=0.25.8",
@@ -139,3 +141,17 @@ known-first-party = ["open-instruct"]
 case-sensitive = false
 # Disable split-on-trailing-comma to work with skip-magic-trailing-comma
 split-on-trailing-comma = false
+
+[tool.ty.src]
+include = [
+    "open_instruct/actor_manager.py",
+    "open_instruct/benchmark_generators.py",
+    "open_instruct/context_window_checker.py",
+    "open_instruct/dataset_processor.py",
+    "open_instruct/data_types.py",
+    "open_instruct/logger_utils.py",
+    "open_instruct/data_loader.py",
+    "open_instruct/padding_free_collator.py",
+    "open_instruct/search_utils/",
+]
+exclude = ["scripts/", "decontamination/", "human_eval/"]

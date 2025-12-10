@@ -24,7 +24,7 @@ python mason.py \
         --learning_rate 1e-6 \
         --per_device_train_batch_size 1 \
         --output_dir /output \
-        --kl_estimator kl3 \
+        --kl_estimator 2 \
         --dataset_mixer_list allenai/Dolci-Think-RL-7B 1.0 \
         --dataset_mixer_list_splits train \
         --dataset_mixer_eval_list allenai/Dolci-Think-RL-7B 8 \
@@ -61,7 +61,6 @@ python mason.py \
         --llm_judge_max_context_length 32768 \
         --clip_higher 0.272 \
         --allow_world_padding False \
-        --use_fp8_kv_cache False \
         --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
         --code_pass_rate_reward_threshold 0.99 \
         --oe_eval_max_length 32768 \

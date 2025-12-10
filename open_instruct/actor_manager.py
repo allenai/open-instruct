@@ -44,7 +44,7 @@ class ActorManager:
     def __init__(self, queues: dict, args):
         self._should_stop = False
         self._last_updated = datetime.now()
-        self._dashboard_port = None
+        self._dashboard_port: int | None = None
         self._queues = queues or {}
         self._queue_sizes = {}
         self._queue_info = {}
@@ -84,6 +84,7 @@ class ActorManager:
             self._dashboard_port = find_free_port()
         else:
             self._dashboard_port = self._args.queue_dashboard_port
+        assert self._dashboard_port is not None
         app = FastAPI(title="ActorManager Dashboard")
 
         static_dir = Path(__file__).parent / "static"
@@ -116,6 +117,7 @@ class ActorManager:
             }
 
         def run_server():
+            assert self._dashboard_port is not None
             uvicorn.run(app, host="0.0.0.0", port=self._dashboard_port, log_level="error")
 
         self._server_thread = threading.Thread(target=run_server, daemon=True)

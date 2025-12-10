@@ -27,7 +27,7 @@ uv run python mason.py \
         --num_epochs 1 \
         --learning_rate 5e-7 \
         --per_device_train_batch_size 1 \
-        --kl_estimator kl3 \
+        --kl_estimator 2 \
         --dataset_mixer_list saurabh5/rlvr_acecoder_filtered ${num_prompts} saurabh5/open-code-reasoning-rlvr-stdio ${num_prompts} \
         --dataset_mixer_list_splits train \
         --dataset_mixer_eval_list saurabh5/rlvr_acecoder_filtered 8 saurabh5/open-code-reasoning-rlvr-stdio 8 \
@@ -57,7 +57,6 @@ uv run python mason.py \
         --gradient_checkpointing \
         --try_launch_beaker_eval_jobs_on_weka True \
         --with_tracking \
-	--update_progress_every 1 \
         --vllm_enable_prefix_caching \
         --oe_eval_max_length 32768 \
         --oe_eval_tasks "codex_humanevalplus:0-shot-chat-v1::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \

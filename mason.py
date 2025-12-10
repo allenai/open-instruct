@@ -15,7 +15,7 @@ import requests
 from rich.console import Console
 from rich.text import Text
 
-from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS
+from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS, download_from_gs_bucket
 
 console = Console()
 
@@ -71,10 +71,10 @@ def build_command_without_args(command, args_to_remove):
     return result
 
 
-def parse_beaker_dataset(dataset_str):
+def parse_beaker_dataset(dataset_str: str) -> dict[str, str]:
     splt = dataset_str.split(":")
     if len(splt) != 2:
-        raise argparse.ArgumentError()
+        raise argparse.ArgumentTypeError(f"Invalid dataset format: {dataset_str}. Expected 'mount_path:beaker_id'")
 
     return {"mount_path": splt[0], "beaker": splt[1]}
 
@@ -464,6 +464,9 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     continue
 
                 filtered_command = build_command_without_args(command[idx:], CACHE_EXCLUDED_ARGS)
+                filtered_command = maybe_download_tokenizer_from_gs_bucket(
+                    filtered_command, args.auto_output_dir_path, whoami
+                )
                 caching_command = "python " + " ".join(filtered_command) + " --cache_dataset_only"
                 console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
                 import subprocess
@@ -476,6 +479,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 stdout_data, stderr_data = [], []
 
                 # Set up select to monitor both stdout and stderr
+                assert process.stdout is not None and process.stderr is not None
                 streams = [process.stdout, process.stderr]
                 while True:
                     # Wait for output on either stream
@@ -500,7 +504,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     "SubprocessResult",
                     (),
                     {"returncode": process.returncode, "stdout": "".join(stdout_data), "stderr": "".join(stderr_data)},
-                )
+                )()
                 stdout = result.stdout
                 # Extract the cached dataset path from stdout if it exists
                 for line in stdout.splitlines():
@@ -586,6 +590,9 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     model_revision = command[idx + 1]
                     break
 
+            if model_name_or_path is None:
+                raise ValueError("--model_name_or_path is required for GCP clusters")
+
             if model_name_or_path.startswith("gs://"):
                 gs_saved_path = model_name_or_path
             else:
@@ -596,6 +603,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         "for local models to upload to gs, you must set --gs_model_name"
                     )
                     model_name_or_path = args.gs_model_name
+                    # get the short commit hash (first 8 chars)
                     commit_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
                     console.log(
                         f"Local model is already downloaded, using gs_model_name {model_name_or_path}, with hash of model path {commit_hash}"
@@ -608,7 +616,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     gs_saved_path
                 )  # race condition exists, but it's fine since we are launching mason sequentially
                 if not gs_folder:
-                    upload_to_gs_bucket(path, gs_saved_path)
+                    upload_to_gs_bucket(path, gs_saved_path)  # ty: ignore[invalid-argument-type]
 
             download_path = gs_saved_path.replace("gs://", "/gs/")
             download_path_without_last_folder = download_path.rsplit("/", 1)[0]
@@ -720,7 +728,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
     return full_command
 
 
-def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami: str, resumable: bool):
+def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], whoami: str, resumable: bool):
     # Add a check to ensure that the user is using the correct clusters for multi-node jobs
     if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
         confirmation = False
@@ -780,6 +788,37 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
     return spec
 
 
+def maybe_download_tokenizer_from_gs_bucket(filtered_command: str, auto_output_dir_path: str, whoami: str):
+    """if model is only on gs, download tokenizer from gs to local cache folder for dataset preprocessing"""
+
+    if "--model_name_or_path" not in filtered_command:
+        return filtered_command
+
+    model_arg_idx = filtered_command.index("--model_name_or_path")
+    model_name_idx = model_arg_idx + 1
+    model_name_or_path = filtered_command[model_name_idx].rstrip("/")
+
+    if not model_name_or_path.startswith("gs://"):
+        return filtered_command
+
+    model_name_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
+    local_cache_folder = f"{auto_output_dir_path}/{whoami}/tokenizer_{model_name_hash}/"
+
+    if not os.path.exists(local_cache_folder):
+        download_from_gs_bucket(
+            [
+                f"{model_name_or_path}/tokenizer.json",
+                f"{model_name_or_path}/tokenizer_config.json",
+                f"{model_name_or_path}/config.json",
+            ],
+            local_cache_folder,
+        )
+
+    filtered_command[model_name_idx] = local_cache_folder
+
+    return filtered_command
+
+
 def main():
     args, commands = get_args()
     # If the user is not in Ai2, we run the command as is
@@ -797,7 +836,7 @@ def main():
         whoami = beaker_client.user.get().name
 
         # Increase timeout to 300s for large experiment specs.
-        beaker_client.TIMEOUT = 300
+        beaker.Beaker.TIMEOUT = 300
 
     full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
     if is_external_user:
