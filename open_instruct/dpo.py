@@ -125,7 +125,12 @@ class ReferenceLogprobsCache:
         Returns:
             Tuple of (chosen_logps, rejected_logps) on the specified device.
         """
-        return (self.chosen_logps[epoch][batch_idx].to(device), self.rejected_logps[epoch][batch_idx].to(device))
+        num_epochs = len(self.chosen_logps)
+        epoch_idx = epoch % num_epochs
+        return (
+            self.chosen_logps[epoch_idx][batch_idx].to(device),
+            self.rejected_logps[epoch_idx][batch_idx].to(device),
+        )
 
 
 @dataclass
