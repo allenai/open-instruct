@@ -1488,8 +1488,8 @@ class BatchStatistics:
     percent_solved_mean: float
     no_resampled_prompts: int
     total_prompts: int
-    staleness_queue_steps: list[int | None] = field(default_factory=list)
-    staleness_generation_start_steps: list[int | None] = field(default_factory=list)
+    staleness_queue_steps: list[int] = field(default_factory=list)
+    staleness_generation_start_steps: list[int] = field(default_factory=list)
     staleness_consumed_step: int | None = None
 
 
@@ -1509,6 +1509,7 @@ def accumulate_inference_batches(
     filter_zero_std_samples: bool = False,
     replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
+    training_step: int = None,
 ) -> tuple[GenerationResult, Batch, dict, BatchStatistics]:
     """Accumulate multiple inference results into a single training batch.
 
@@ -1558,8 +1559,8 @@ def accumulate_inference_batches(
     filtered_prompt_solved = 0
     filtered_prompt_nonzero = 0
     total_no_resampled = 0
-    staleness_queue_steps: list[int | None] = []
-    staleness_generation_start_steps: list[int | None] = []
+    staleness_queue_steps: list[int] = []
+    staleness_generation_start_steps: list[int] = []
     progress_bar = tqdm(
         total=num_prompts,
         desc=f"Accumulating Responses and Rewarding {num_prompts} prompts",
@@ -1573,10 +1574,8 @@ def accumulate_inference_batches(
         if isinstance(result, ShutdownSentinel):
             return result, None, None, None
 
-        queued_step = result.queued_training_step
-        generation_started_step = result.generation_started_training_step
-        staleness_queue_steps.append(queued_step)
-        staleness_generation_start_steps.append(generation_started_step)
+        staleness_queue_steps.append(result.queued_training_step)
+        staleness_generation_start_steps.append(result.generation_started_training_step)
 
         # Validate that each individual result has the expected number of responses
         assert len(result.responses) == generation_config.n, (
@@ -1745,8 +1744,8 @@ def accumulate_inference_batches(
         percent_solved_mean=percent_solved_mean,
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
-        staleness_queue_steps=staleness_queue_steps if staleness_queue_steps else [],
-        staleness_generation_start_steps=staleness_generation_start_steps if staleness_generation_start_steps else [],
+        staleness_queue_steps=staleness_queue_steps,
+        staleness_generation_start_steps=staleness_generation_start_steps,
         staleness_consumed_step=training_step,
     )
     return combined_result, batch, combined_reward_metrics, batch_stats
@@ -1784,6 +1783,7 @@ def data_preparation_thread(
                 filter_zero_std_samples=args.filter_zero_std_samples,
                 replenish_prompts=True,
                 no_resampling_pass_rate=args.no_resampling_pass_rate,
+                training_step=training_step,
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
