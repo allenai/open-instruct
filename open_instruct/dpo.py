@@ -381,6 +381,7 @@ class DPOExperimentConfig(config.Config):
     dataset_cache_mode: data_types.DatasetCacheMode = data_types.DatasetCacheMode.local
     dataset_local_cache_dir: str = "local_dataset_cache"
     dataset_skip_cache: bool = False
+    cache_dataset_only: bool = False
 
     push_to_hub: bool = True
     hf_entity: str | None = None
@@ -454,6 +455,10 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     )
     dataset = dataset.shuffle(seed=args.seed)
     dataset.set_format(type="pt")
+
+    if args.cache_dataset_only:
+        logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
+        return
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if args.model_name_or_path is None:
