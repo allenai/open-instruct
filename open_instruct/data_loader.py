@@ -39,7 +39,7 @@ from open_instruct.dataset_transformation import (
     VERIFIER_SOURCE_KEY,
 )
 from open_instruct.model_utils import Batch
-from open_instruct.rl_utils import PackedSequences, pack_sequences
+from open_instruct.rl_utils import PackedSequences, pack_sequences, prepend_packed_sequences, slice_packed_sequences
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
@@ -788,6 +788,8 @@ class DataPreparationActor:
             f"[DataPreparationActor] Done pushing initial prompts, starting training loop from step {self.training_step}"
         )
 
+        leftover_packed = None
+
         for step in range(self.training_step, self.num_training_steps):
             if self.shutdown_requested:
                 return
@@ -890,6 +892,24 @@ class DataPreparationActor:
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
+
+            if leftover_packed is not None:
+                packed_sequences = prepend_packed_sequences(leftover_packed, packed_sequences)
+                logger.info(f"Prepended {len(leftover_packed.query_responses)} leftover sequences")
+                leftover_packed = None
+
+            num_packed = len(packed_sequences.query_responses)
+            usable_count = (num_packed // self.dp_world_size) * self.dp_world_size
+
+            if usable_count == 0:
+                leftover_packed = packed_sequences
+                logger.warning(f"Only {num_packed} sequences, need {self.dp_world_size}. Carrying all to next step.")
+                continue
+
+            if usable_count < num_packed:
+                leftover_packed = slice_packed_sequences(packed_sequences, usable_count, num_packed)
+                packed_sequences = slice_packed_sequences(packed_sequences, 0, usable_count)
+                logger.info(f"Carrying over {num_packed - usable_count} sequences to next step")
 
             if self.allow_world_padding:
                 pad_sequences_for_world_size(
