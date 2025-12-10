@@ -17,9 +17,8 @@ import torch.nn as nn
 from datasets import Dataset
 from olmo_core import config, train
 from olmo_core.data import data_loader
-from olmo_core.optim import AdamWConfig, OptimConfig
 from olmo_core.train.common import ReduceType
-from olmo_core.train.train_module import TransformerTrainModule
+from olmo_core.train.train_module import TrainModule
 from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedTokenizer
 
@@ -246,46 +245,25 @@ class DPOConfig(config.Config):
     packing: bool = False
 
 
-class DPOTrainModule(TransformerTrainModule):
-    """Training module for DPO with OLMo-core's Trainer.
-
-    Extends TransformerTrainModule to override train_batch with DPO loss computation.
-    """
+class DPOTrainModule(TrainModule):
+    """Training module for DPO with OLMo-core's Trainer."""
 
     def __init__(
         self,
         model: nn.Module,
-        optim: OptimConfig,
+        optim: torch.optim.Optimizer,
         dpo_config: DPOConfig,
         reference_cache: ReferenceLogprobsCache,
-        rank_microbatch_size: int,
-        max_sequence_length: int,
         device: torch.device | None = None,
-        **kwargs: Any,
+        max_grad_norm: float | None = None,
     ) -> None:
-        """Initialize the DPOTrainModule.
-
-        Args:
-            model: The transformer model to train.
-            optim: Optimizer configuration.
-            dpo_config: DPO-specific configuration.
-            reference_cache: Cached reference model log probabilities.
-            rank_microbatch_size: Microbatch size per rank.
-            max_sequence_length: Maximum sequence length.
-            device: Device to train on.
-            **kwargs: Additional arguments for TransformerTrainModule.
-        """
-        super().__init__(
-            model=model,
-            optim=optim,
-            rank_microbatch_size=rank_microbatch_size,
-            max_sequence_length=max_sequence_length,
-            device=device,
-            **kwargs,
-        )
-
+        super().__init__()
+        self.model = model
+        self.optim = optim
         self.dpo_config = dpo_config
         self.reference_cache = reference_cache
+        self.device = device
+        self.max_grad_norm = max_grad_norm
         self.average_log_prob = dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
 
         if dpo_config.concatenated_forward:
@@ -299,19 +277,30 @@ class DPOTrainModule(TransformerTrainModule):
         self._epoch = 0
 
     def on_attach(self) -> None:
-        """Called when the trainer is attached."""
-        super().on_attach()
         self._batch_idx = 0
         self._epoch = 0
 
-    def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
-        """Train on a single batch using DPO loss.
+    def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
+        state_dict: dict[str, Any] = {"model": self.model.state_dict()}
+        if optim is not False:
+            state_dict["optim"] = self.optim.state_dict()
+        return state_dict
 
-        Args:
-            batch: The input batch with chosen and rejected pairs.
-            dry_run: If True, skip metric recording.
-        """
-        self._set_model_mode("train")
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.model.load_state_dict(state_dict["model"])
+        if "optim" in state_dict:
+            self.optim.load_state_dict(state_dict["optim"])
+
+    def zero_grads(self) -> None:
+        self.optim.zero_grad()
+
+    def optim_step(self) -> None:
+        if self.max_grad_norm is not None:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+        self.optim.step()
+
+    def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
+        self.model.train()
 
         if self.device is not None:
             batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
@@ -385,11 +374,9 @@ class DPOTrainModule(TransformerTrainModule):
         self._batch_idx += 1
 
     def on_epoch_start(self) -> None:
-        """Called at the start of each epoch."""
         self._batch_idx = 0
 
     def on_epoch_end(self) -> None:
-        """Called at the end of each epoch."""
         self._epoch += 1
 
 
@@ -505,15 +492,13 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     )
     print("Reference logprobs cached.")
 
-    optim = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay)
+    optim = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 
     train_module = DPOTrainModule(
         model=model,
         optim=optim,
         dpo_config=args.dpo_config,
         reference_cache=reference_cache,
-        rank_microbatch_size=args.per_device_train_batch_size * args.max_seq_length,
-        max_sequence_length=args.max_seq_length,
         max_grad_norm=args.max_grad_norm,
         device=device,
     )

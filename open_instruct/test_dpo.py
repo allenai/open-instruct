@@ -165,33 +165,18 @@ class TestDPOTrainModuleInit(unittest.TestCase):
 
     def test_average_log_prob_for_simpo(self):
         config = dpo.DPOConfig(dpo_loss_type=dpo.DPOLossType.simpo)
-
-        with mock.patch.object(dpo.TransformerTrainModule, "__init__", return_value=None):
-            module = dpo.DPOTrainModule.__new__(dpo.DPOTrainModule)
-            module.dpo_config = config
-            module.average_log_prob = config.dpo_loss_type in (dpo.DPOLossType.simpo, dpo.DPOLossType.dpo_norm)
-
-        self.assertTrue(module.average_log_prob)
+        average_log_prob = config.dpo_loss_type in (dpo.DPOLossType.simpo, dpo.DPOLossType.dpo_norm)
+        self.assertTrue(average_log_prob)
 
     def test_average_log_prob_for_dpo_norm(self):
         config = dpo.DPOConfig(dpo_loss_type=dpo.DPOLossType.dpo_norm)
-
-        with mock.patch.object(dpo.TransformerTrainModule, "__init__", return_value=None):
-            module = dpo.DPOTrainModule.__new__(dpo.DPOTrainModule)
-            module.dpo_config = config
-            module.average_log_prob = config.dpo_loss_type in (dpo.DPOLossType.simpo, dpo.DPOLossType.dpo_norm)
-
-        self.assertTrue(module.average_log_prob)
+        average_log_prob = config.dpo_loss_type in (dpo.DPOLossType.simpo, dpo.DPOLossType.dpo_norm)
+        self.assertTrue(average_log_prob)
 
     def test_average_log_prob_for_dpo(self):
         config = dpo.DPOConfig(dpo_loss_type=dpo.DPOLossType.dpo)
-
-        with mock.patch.object(dpo.TransformerTrainModule, "__init__", return_value=None):
-            module = dpo.DPOTrainModule.__new__(dpo.DPOTrainModule)
-            module.dpo_config = config
-            module.average_log_prob = config.dpo_loss_type in (dpo.DPOLossType.simpo, dpo.DPOLossType.dpo_norm)
-
-        self.assertFalse(module.average_log_prob)
+        average_log_prob = config.dpo_loss_type in (dpo.DPOLossType.simpo, dpo.DPOLossType.dpo_norm)
+        self.assertFalse(average_log_prob)
 
 
 if __name__ == "__main__":
