@@ -314,25 +314,26 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
             ("s3", "s3://bucket/path"),
             ("azure", "az://container/path"),
             ("hdfs", "hdfs://cluster/path"),
+            ("gcs localpath", "/filestore/path"),
         ]
     )
     def test_cloud_paths_skipped(self, name, path):
         with mock.patch("shutil.disk_usage") as mock_disk_usage:
-            grpo_fast.warn_if_low_disk_space(path, threshold=0.5, send_slack_alerts=False)
+            utils.warn_if_low_disk_space(path)
             mock_disk_usage.assert_not_called()
 
     @mock.patch("shutil.disk_usage")
     def test_no_warning_below_threshold(self, mock_disk_usage):
         mock_disk_usage.return_value = mock.Mock(total=100, used=50, free=50)
-        with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
-            grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/tmp/test", threshold=0.85)
             mock_warning.assert_not_called()
 
     @mock.patch("shutil.disk_usage")
     def test_warning_above_threshold(self, mock_disk_usage):
         mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
-        with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
-            grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/tmp/test", threshold=0.85)
             mock_warning.assert_called_once()
             self.assertIn("90.0%", mock_warning.call_args[0][0])
 
@@ -347,7 +348,7 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
         mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
         responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
 
-        grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=True)
+        utils.warn_if_low_disk_space("/tmp/test", send_slack_alerts=True)
 
         self.assertEqual(len(responses.calls), 1)
         request_body = json.loads(responses.calls[0].request.body)
@@ -356,9 +357,14 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
     @mock.patch("shutil.disk_usage")
     def test_zero_total_disk_space_returns_early(self, mock_disk_usage):
         mock_disk_usage.return_value = mock.Mock(total=0, used=0, free=0)
-        with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
-            grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/tmp/test")
             mock_warning.assert_not_called()
+
+    def test_disk_usage_warns_for_failing_path(self):
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/non/existant/path")
+            mock_warning.assert_called()
 
 
 class TestDownloadFromGsBucket(unittest.TestCase):
