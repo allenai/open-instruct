@@ -1145,12 +1145,12 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    if args.loss_fn == "dapo":
+                    if self.args.loss_fn == "dapo":
                         pg_losses_BT = -data_BT.advantages[i][:, 1:] * ratio_BT
                         pg_losses2_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
                             ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher
                         )
-                    elif args.loss_fn == "cispo":
+                    elif self.args.loss_fn == "cispo":
                         # cispo: directly clip ratio, no lower bound.
                         pg_losses_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
                             ratio_BT, max=1.0 + self.args.clip_higher
