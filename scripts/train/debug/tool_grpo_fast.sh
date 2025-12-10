@@ -62,13 +62,12 @@ uv run python mason.py \
     --push_to_hub false \
     --single_gpu_mode \
     --output_dir /output \
-    --kl_estimator kl3 \
+    --kl_estimator 2 \
     --non_stop_penalty True \
     --non_stop_penalty_value 0.0 \
     --num_mini_batches 1 \
     --lr_scheduler_type constant \
     --save_freq 100 \
-    --update_progress_every 1 \
     --try_launch_beaker_eval_jobs_on_weka False \
     --vllm_num_engines 1 \
     --max_tool_calls 5 \
