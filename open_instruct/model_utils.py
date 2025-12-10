@@ -16,6 +16,7 @@
 
 import asyncio
 import itertools
+import pathlib
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -40,6 +41,53 @@ from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
+
+
+@dataclass
+class TensorCache:
+    """A cache for tensors indexed by dataset indices.
+
+    Supports indexing with torch.Tensor to retrieve cached values.
+    Can be saved to and loaded from disk.
+    """
+
+    tensors: dict[str, torch.Tensor]
+
+    def __getitem__(self, indices: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Get cached tensors for the given indices.
+
+        Args:
+            indices: Tensor of indices to retrieve.
+
+        Returns:
+            Dictionary of tensors indexed by the given indices, on the same device as indices.
+        """
+        device = indices.device
+        idx = indices.cpu().long()
+        return {k: v[idx].to(device) for k, v in self.tensors.items()}
+
+    def to_disk(self, path: str | pathlib.Path) -> None:
+        """Save the cache to disk.
+
+        Args:
+            path: Path to save the cache file.
+        """
+        path = pathlib.Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(self.tensors, path)
+
+    @classmethod
+    def from_disk(cls, path: str | pathlib.Path) -> "TensorCache":
+        """Load a cache from disk.
+
+        Args:
+            path: Path to the cache file.
+
+        Returns:
+            A TensorCache instance.
+        """
+        data = torch.load(path, weights_only=True)
+        return cls(tensors=data)
 
 
 @dataclass

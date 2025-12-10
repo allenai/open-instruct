@@ -6,7 +6,9 @@ OLMo-core's native training infrastructure.
 """
 
 import enum
+import logging
 import os
+import pathlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
@@ -36,6 +38,7 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
+from open_instruct.model_utils import TensorCache
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import ArgumentParserPlus
 
@@ -47,92 +50,74 @@ class DPOLossType(enum.Enum):
     wpo = "wpo"
 
 
-@dataclass
-class ReferenceLogprobsCache:
-    """Cache for reference model log probabilities.
+logger = logging.getLogger(__name__)
 
-    Stores pre-computed reference model log probabilities for each epoch
-    and batch to avoid keeping the reference model in memory during training.
+
+def build_reference_logprobs_cache(
+    model: nn.Module,
+    dataloader: HFDataLoader,
+    average_log_prob: bool,
+    forward_fn: Callable,
+    use_lora: bool = False,
+    device: torch.device | None = None,
+    cache_path: str | pathlib.Path | None = None,
+) -> TensorCache:
+    """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
+
+    Args:
+        model: The model to use for computing reference logprobs.
+        dataloader: The data loader to iterate over.
+        average_log_prob: Whether to average log probabilities.
+        forward_fn: The forward function to use.
+        use_lora: Whether the model uses LoRA adapters.
+        device: The device to use for computation.
+        cache_path: Optional path to save/load the cache.
+
+    Returns:
+        A TensorCache instance with cached logprobs.
     """
+    if cache_path is not None:
+        cache_path = pathlib.Path(cache_path)
+        if cache_path.exists():
+            logger.info(f"Loading reference logprobs cache from {cache_path}")
+            return TensorCache.from_disk(cache_path)
 
-    chosen_logps: list[list[torch.Tensor]]
-    rejected_logps: list[list[torch.Tensor]]
+    model.eval()
+    chosen_logps_list: list[tuple[int, torch.Tensor]] = []
+    rejected_logps_list: list[tuple[int, torch.Tensor]] = []
 
-    @classmethod
-    def build_cache(
-        cls,
-        model: nn.Module,
-        dataloader: HFDataLoader,
-        num_epochs: int,
-        average_log_prob: bool,
-        forward_fn: Callable,
-        use_lora: bool = False,
-        device: torch.device | None = None,
-    ) -> "ReferenceLogprobsCache":
-        """Build the reference logprobs cache by iterating through all epochs.
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc="Caching reference logprobs"):
+            if device is not None:
+                batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
-        Args:
-            model: The model to use for computing reference logprobs.
-            dataloader: The data loader to iterate over.
-            num_epochs: Number of training epochs.
-            average_log_prob: Whether to average log probabilities.
-            forward_fn: The forward function to use.
-            use_lora: Whether the model uses LoRA adapters.
-            device: The device to use for computation.
+            if use_lora:
+                assert isinstance(model, peft.PeftModel)
+                with model.disable_adapter():
+                    chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+            else:
+                chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
 
-        Returns:
-            A ReferenceLogprobsCache instance with cached logprobs.
-        """
-        model.eval()
-        epoch_chosen_logps: list[list[torch.Tensor]] = []
-        epoch_rejected_logps: list[list[torch.Tensor]] = []
+            dataset_indices = batch["dataset_index"]
+            for i, idx in enumerate(dataset_indices):
+                idx_int = idx.item() if isinstance(idx, torch.Tensor) else idx
+                chosen_logps_list.append((idx_int, chosen_logps[i].cpu()))
+                rejected_logps_list.append((idx_int, rejected_logps[i].cpu()))
 
-        for epoch in range(num_epochs):
-            dataloader.reshuffle(epoch=epoch)
-            batch_chosen_logps: list[torch.Tensor] = []
-            batch_rejected_logps: list[torch.Tensor] = []
+    chosen_logps_list.sort(key=lambda x: x[0])
+    rejected_logps_list.sort(key=lambda x: x[0])
 
-            with torch.no_grad():
-                for batch in tqdm(dataloader, desc=f"Caching reference logprobs (epoch {epoch})"):
-                    if device is not None:
-                        batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+    chosen_tensor = torch.stack([lp for _, lp in chosen_logps_list])
+    rejected_tensor = torch.stack([lp for _, lp in rejected_logps_list])
 
-                    if use_lora:
-                        assert isinstance(model, peft.PeftModel)
-                        with model.disable_adapter():
-                            chosen_logps, rejected_logps, _ = forward_fn(
-                                model, batch, average_log_prob=average_log_prob
-                            )
-                    else:
-                        chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+    model.train()
+    cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
 
-                    batch_chosen_logps.append(chosen_logps.cpu())
-                    batch_rejected_logps.append(rejected_logps.cpu())
+    if cache_path is not None:
+        logger.info(f"Saving reference logprobs cache to {cache_path}")
+        cache.to_disk(cache_path)
 
-            epoch_chosen_logps.append(batch_chosen_logps)
-            epoch_rejected_logps.append(batch_rejected_logps)
-
-        model.train()
-        return cls(chosen_logps=epoch_chosen_logps, rejected_logps=epoch_rejected_logps)
-
-    def get(self, global_step: int, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
-        """Get cached reference logprobs for a given global step.
-
-        Args:
-            global_step: The global step number (0-based).
-            device: The device to move tensors to.
-
-        Returns:
-            Tuple of (chosen_logps, rejected_logps) on the specified device.
-        """
-        num_epochs = len(self.chosen_logps)
-        batches_per_epoch = len(self.chosen_logps[0])
-        epoch_idx = (global_step // batches_per_epoch) % num_epochs
-        batch_idx = global_step % batches_per_epoch
-        return (
-            self.chosen_logps[epoch_idx][batch_idx].to(device),
-            self.rejected_logps[epoch_idx][batch_idx].to(device),
-        )
+    return cache
 
 
 @dataclass
@@ -157,7 +142,7 @@ class DPOTrainModule(TrainModule):
         model: nn.Module,
         optim: torch.optim.Optimizer,
         dpo_config: DPOConfig,
-        reference_cache: ReferenceLogprobsCache,
+        reference_cache: TensorCache,
         device: torch.device | None = None,
         max_grad_norm: float | None = None,
     ) -> None:
@@ -226,14 +211,12 @@ class DPOTrainModule(TrainModule):
         )
 
         if self.dpo_config.dpo_loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm):
-            reference_chosen_logps, reference_rejected_logps = self.reference_cache.get(
-                self._global_step, policy_chosen_logps.device
-            )
+            ref_logps = self.reference_cache[batch["dataset_index"]]
             losses, chosen_rewards, rejected_rewards = dpo_loss(
                 policy_chosen_logps,
                 policy_rejected_logps,
-                reference_chosen_logps,
-                reference_rejected_logps,
+                ref_logps["chosen_logps"],
+                ref_logps["rejected_logps"],
                 beta=self.dpo_config.dpo_beta,
                 label_smoothing=self.dpo_config.dpo_label_smoothing,
             )
@@ -246,14 +229,12 @@ class DPOTrainModule(TrainModule):
                 label_smoothing=self.dpo_config.dpo_label_smoothing,
             )
         elif self.dpo_config.dpo_loss_type == DPOLossType.wpo:
-            reference_chosen_logps, reference_rejected_logps = self.reference_cache.get(
-                self._global_step, policy_chosen_logps.device
-            )
+            ref_logps = self.reference_cache[batch["dataset_index"]]
             losses, chosen_rewards, rejected_rewards = wpo_loss(
                 policy_chosen_logps,
                 policy_rejected_logps,
-                reference_chosen_logps,
-                reference_rejected_logps,
+                ref_logps["chosen_logps"],
+                ref_logps["rejected_logps"],
                 beta=self.dpo_config.dpo_beta,
                 label_smoothing=self.dpo_config.dpo_label_smoothing,
                 chosen_loss_mask=batch["chosen_labels"] != -100,
@@ -396,10 +377,9 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     average_log_prob = args.dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
 
     print("Caching reference logprobs...")
-    reference_cache = ReferenceLogprobsCache.build_cache(
+    reference_cache = build_reference_logprobs_cache(
         model=model,
         dataloader=data_loader_instance,
-        num_epochs=args.num_epochs,
         average_log_prob=average_log_prob,
         forward_fn=forward_fn,
         use_lora=args.use_lora,
