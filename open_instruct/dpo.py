@@ -554,6 +554,12 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         )
     }
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback()
+    trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
+    if slack_webhook_url:
+        trainer_callbacks["slack"] = callbacks.SlackNotifierCallback(
+            name=args.run_name or args.exp_name, webhook_url=slack_webhook_url
+        )
     if args.with_tracking:
         trainer_callbacks["wandb"] = callbacks.WandBCallback(
             name=args.run_name or args.exp_name,
