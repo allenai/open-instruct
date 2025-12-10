@@ -401,6 +401,31 @@ class DPOExperimentConfig(config.Config):
 
 def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     """Main entry point for DPO training with OLMo-core."""
+    tc.tokenizer_name_or_path = (
+        args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    )
+    tokenizer = tc.tokenizer
+
+    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    dataset = get_cached_dataset_tulu(
+        dataset_mixer_list=args.dataset_mixer_list,
+        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+        tc=tc,
+        dataset_transform_fn=args.dataset_transform_fn,
+        transform_fn_args=transform_fn_args,
+        target_columns=args.dataset_target_columns,
+        dataset_cache_mode=args.dataset_cache_mode.value,
+        hf_entity=args.hf_entity,
+        dataset_local_cache_dir=args.dataset_local_cache_dir,
+        dataset_skip_cache=args.dataset_skip_cache,
+    )
+    dataset = dataset.shuffle(seed=args.seed)
+    dataset.set_format(type="pt")
+
+    if args.cache_dataset_only:
+        logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
+        return
+
     train.prepare_training_environment(seed=args.seed)
 
     rank = get_rank() if is_distributed() else 0
@@ -433,32 +458,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     if args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
 
-    tc.tokenizer_name_or_path = (
-        args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
-    )
-    tokenizer = tc.tokenizer
-
     os.makedirs(args.output_dir, exist_ok=True)
-
-    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
-    dataset = get_cached_dataset_tulu(
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
-        tc=tc,
-        dataset_transform_fn=args.dataset_transform_fn,
-        transform_fn_args=transform_fn_args,
-        target_columns=args.dataset_target_columns,
-        dataset_cache_mode=args.dataset_cache_mode.value,
-        hf_entity=args.hf_entity,
-        dataset_local_cache_dir=args.dataset_local_cache_dir,
-        dataset_skip_cache=args.dataset_skip_cache,
-    )
-    dataset = dataset.shuffle(seed=args.seed)
-    dataset.set_format(type="pt")
-
-    if args.cache_dataset_only:
-        logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
-        return
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if args.model_name_or_path is None:
