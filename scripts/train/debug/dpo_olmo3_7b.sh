@@ -1,0 +1,38 @@
+#!/bin/bash
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+MODEL_NAME=allenai/Olmo-3-1025-7B
+LR=1e-6
+EXP_NAME=olmo3-7b-DPO-debug-${LR}
+
+uv run python mason.py \
+    --cluster ai2/augusta \
+    --description "Single GPU DPO run with OLMo3-7B, for debugging purposes." \
+    --workspace ai2/open-instruct-dev \
+    --priority urgent \
+    --image "$BEAKER_IMAGE" \
+    --pure_docker_mode \
+    --preemptible \
+    --num_nodes 4 \
+    --budget ai2/oe-adapt \
+    --gpus 8 -- source /var/lib/tcpxo/lib64/nccl-env-profile.sh \&\& torchrun --nproc_per_node=8 open_instruct/dpo.py \
+    --exp_name "$EXP_NAME" \
+    --model_name_or_path "$MODEL_NAME" \
+    --tokenizer_name_or_path "$MODEL_NAME" \
+    --chat_template_name olmo123 \
+    --max_seq_length 1024 \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 4 \
+    --learning_rate "$LR" \
+    --lr_scheduler_type linear \
+    --warmup_ratio 0.1 \
+    --weight_decay 0.0 \
+    --num_epochs 1 \
+    --output_dir output/dpo_olmo3_debug/ \
+    --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
+    --seed 123 \
+    --use_flash_attn \
+    --logging_steps 1 \
+    --dpo_config.dpo_loss_type dpo_norm \
+    --dpo_config.dpo_beta 5 \
+    --gradient_checkpointing \
+    --with_tracking
