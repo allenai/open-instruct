@@ -68,6 +68,16 @@ class DPOLossType(enum.Enum):
 logger = logging.getLogger(__name__)
 
 
+def config_to_json_serializable(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: config_to_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [config_to_json_serializable(v) for v in obj]
+    if isinstance(obj, enum.Enum):
+        return obj.value
+    return obj
+
+
 def build_reference_logprobs_cache(
     model: nn.Module,
     dataloader: HFDataLoader,
@@ -507,14 +517,15 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         scheduler=scheduler,
     )
 
-    trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": callbacks.BeakerCallback(config=args.as_dict())}
+    json_config = config_to_json_serializable(args.as_dict())
+    trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": callbacks.BeakerCallback(config=json_config)}
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback()
     if args.with_tracking:
         trainer_callbacks["wandb"] = callbacks.WandBCallback(
             name=args.run_name or args.exp_name,
             project=args.wandb_project,
             entity=args.wandb_entity,
-            config=args.as_dict(),
+            config=json_config,
         )
 
     metrics_collect_interval = args.logging_steps if args.logging_steps is not None else args.log_every
