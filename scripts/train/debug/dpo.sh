@@ -19,7 +19,8 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --learning_rate 5e-07 \
     --warmup_ratio 0.1 \
-    --num_epochs 1 \
+    --num_epochs 3 \
     --output_dir output/dpo_olmo_debug/ \
     --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
-    --seed 123
+    --seed 123 \
+    --with_tracking
