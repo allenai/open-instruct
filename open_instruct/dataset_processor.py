@@ -25,25 +25,18 @@
 
 import copy
 import logging
-import math
 import multiprocessing
 import os
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Optional, Union
 
-import matplotlib.pyplot as plt
 import torch
 from datasets import Dataset, DatasetDict
-from rich.console import Console
-from rich.text import Text
-from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
 logging.basicConfig(level=logging.INFO)
 
 
-COLORS = ["on red", "on green", "on blue", "on yellow", "on magenta"]
 # Preference dataset
 INPUT_IDS_CHOSEN_KEY = "input_ids_chosen"
 ATTENTION_MASK_CHOSEN_KEY = "attention_mask_chosen"
@@ -74,10 +67,6 @@ SFT_MESSAGE_KEY = "messages"
 INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
-
-# Binary dataset
-BINARY_LABEL_KEY = "binary_labels"
-BINARY_DATASET_KEYS = [INPUT_IDS_KEY, LABELS_KEY, BINARY_LABEL_KEY]
 
 # Chat templates
 # flake8: noqa
@@ -188,12 +177,6 @@ class DatasetConfig:
     # columns name for dataset source
     dataset_source_key: str = VERIFIER_SOURCE_KEY
 
-    # columns names for binary dataset
-    binary_messages_key: str = SFT_MESSAGE_KEY
-    label: str = BINARY_LABEL_KEY
-    # extra setting for binary dataset
-    convert_preference_to_binary_dataset: bool = False
-
     # filter config
     max_token_length: Optional[int] = None
     max_prompt_token_length: Optional[int] = None
@@ -207,9 +190,6 @@ class DatasetConfig:
 
     # other config
     train_only_on_prompt: bool = False
-
-    # visualization configs
-    ncols: int = 2
 
     def __post_init__(self):
         if self.sanity_check:
@@ -229,11 +209,6 @@ def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_p
     return min(num_required_cpus, num_available_cpus, dataset_len)
 
 
-def select_nested(dataset: DatasetDict, max_examples_per_split: int):
-    """select the dataset nested in a DatasetDict"""
-    return {key: dataset[key].select(range(min(max_examples_per_split, len(dataset[key])))) for key in dataset}
-
-
 class DatasetProcessor:
     def __init__(self, tokenizer: PreTrainedTokenizer, config: DatasetConfig) -> None:
         self.tokenizer = tokenizer
@@ -251,36 +226,6 @@ class DatasetProcessor:
             logging.warning("No config provided, skipping filtering")
             return dataset
         raise NotImplementedError
-
-    def get_token_length_visualization(
-        self, features: list[str], dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30
-    ):
-        """Visualize the token length distribution of the dataset"""
-        num_splits = len(dataset)
-        cols = min(3, num_splits)  # Maximum 3 columns
-        rows = math.ceil(num_splits / cols)
-
-        fig, axs = plt.subplots(rows, cols, figsize=(6 * cols, 5 * rows), squeeze=False)
-        fig.suptitle("Token Length Distribution", fontsize=16)
-
-        for idx, (split_name, item) in enumerate(dataset.items()):
-            row = idx // cols
-            col = idx % cols
-            ax = axs[row, col]
-
-            for feature in features:
-                token_lengths = [len(x) for x in item[feature]]
-                ax.hist(token_lengths, bins=bins, alpha=0.5, label=feature, edgecolor="black")
-
-            ax.set_title(f"{split_name} split")
-            ax.set_xlabel("Token Length")
-            ax.set_ylabel("Frequency")
-            ax.legend(loc="upper right")
-
-        plt.tight_layout()
-        plt.savefig(save_path)
-        logging.info(f"Saved token length distribution plot to {save_path}")
-        plt.close(fig)  # Close the figure to free up memory
 
 
 class PreferenceDatasetProcessor(DatasetProcessor):
@@ -331,14 +276,6 @@ class PreferenceDatasetProcessor(DatasetProcessor):
                 logging.info(f"Filtered out {filtered_count} samples or {percentage:.2f}% samples from {key}")
         return filtered_dataset
 
-    def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
-        return super().get_token_length_visualization(
-            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_CHOSEN_KEY, INPUT_IDS_REJECTED_KEY],
-            dataset=dataset,
-            save_path=save_path,
-            bins=bins,
-        )
-
 
 class SFTDatasetProcessor(DatasetProcessor):
     def tokenize(self, dataset: Dataset):
@@ -383,11 +320,6 @@ class SFTDatasetProcessor(DatasetProcessor):
             num_proc=get_num_proc(len(dataset), self.config.num_proc, FILTER_EXAMPLE_PER_SECOND_PER_CPU),
             load_from_cache_file=self.config.load_from_cache_file,
             desc="Filtering SFT data",
-        )
-
-    def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
-        return super().get_token_length_visualization(
-            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset, save_path=save_path, bins=bins
         )
 
 
@@ -437,103 +369,3 @@ class SFTGroundTruthDatasetProcessor(DatasetProcessor):
             load_from_cache_file=self.config.load_from_cache_file,
             desc="Filtering SFT data",
         )
-
-    def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
-        return super().get_token_length_visualization(
-            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset, save_path=save_path, bins=bins
-        )
-
-
-def convert_preference_dataset_to_binary_dataset(ds: Dataset):
-    binary_ds = defaultdict(list)
-    for i in tqdm(range(len(ds))):
-        binary_ds[SFT_MESSAGE_KEY].append(ds[i]["chosen"])
-        binary_ds[BINARY_LABEL_KEY].append(True)
-        binary_ds[SFT_MESSAGE_KEY].append(ds[i]["rejected"])
-        binary_ds[BINARY_LABEL_KEY].append(False)
-    return Dataset.from_dict(binary_ds)
-
-
-def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
-    i = 0
-    console = Console()
-    rich_text = Text()
-    for i, token in enumerate(tokens):
-        color = COLORS[i % len(COLORS)]
-        decoded_token = tokenizer.decode(token)
-        rich_text.append(f"{decoded_token}", style=color)
-    console.print(rich_text)
-
-
-class SimpleGenerateCollator:
-    """Simple collator for generation task (always pad from the LEFT)"""
-
-    def __init__(self, pad_token_id: int):
-        self.pad_token_id = pad_token_id
-
-    def __call__(self, batch: list[dict]):
-        """the input will have input_ids_prompt"""
-        # Find max length in the batch
-        max_length = -1
-        for i in range(len(batch)):
-            max_length = max(max_length, len(batch[i][INPUT_IDS_PROMPT_KEY]))
-        assert max_length > 0, "the dataset is empty"
-
-        # Initialize lists to store padded sequences and attention masks
-        padded_sequences = []
-
-        for i in range(len(batch)):
-            # Calculate padding length
-            pad_length = max_length - len(batch[i][INPUT_IDS_PROMPT_KEY])
-
-            # Pad from the left
-            padding = [self.pad_token_id] * pad_length
-            padded_sequence = padding + batch[i][INPUT_IDS_PROMPT_KEY]
-            padded_sequences.append(padded_sequence)
-
-        # Convert to tensors
-        padded_sequences = torch.tensor(padded_sequences)
-
-        return {INPUT_IDS_PROMPT_KEY: padded_sequences}
-
-
-class SimpleGenerateCollatorWithGroundTruth:
-    """Simple collator for generation task (always pad from the LEFT)"""
-
-    def __init__(self, pad_token_id: int):
-        self.pad_token_id = pad_token_id
-
-    def __call__(self, batch: list[dict]):
-        """the input will have input_ids_prompt"""
-        # Find max length in the batch
-        max_length = -1
-        for i in range(len(batch)):
-            max_length = max(max_length, len(batch[i][INPUT_IDS_PROMPT_KEY]))
-        assert max_length > 0, "the dataset is empty"
-
-        # Initialize lists to store padded sequences and attention masks
-        padded_sequences = []
-
-        for i in range(len(batch)):
-            # Calculate padding length
-            pad_length = max_length - len(batch[i][INPUT_IDS_PROMPT_KEY])
-
-            # Pad from the left
-            padding = [self.pad_token_id] * pad_length
-            padded_sequence = padding + batch[i][INPUT_IDS_PROMPT_KEY]
-            padded_sequences.append(padded_sequence)
-
-        # Convert to tensors
-        padded_sequences = torch.tensor(padded_sequences)
-
-        # ground truths
-        ground_truths = [x[GROUND_TRUTHS_KEY] for x in batch]
-
-        # datasets
-        datasets = [x[VERIFIER_SOURCE_KEY] for x in batch]
-
-        return {
-            INPUT_IDS_PROMPT_KEY: padded_sequences,
-            GROUND_TRUTHS_KEY: ground_truths,
-            VERIFIER_SOURCE_KEY: datasets,
-        }
