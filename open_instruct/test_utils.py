@@ -360,7 +360,7 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
             utils.warn_if_low_disk_space("/tmp/test")
             mock_warning.assert_not_called()
 
-    def test_disk_usage_warns_for_failing_path(self, mock_disk_usage):
+    def test_disk_usage_warns_for_failing_path(self):
         with mock.patch.object(utils.logger, "warning") as mock_warning:
             utils.warn_if_low_disk_space("/non/existant/path")
             mock_warning.assert_called()
