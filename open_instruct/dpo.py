@@ -376,7 +376,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         forward_fn = partial(concatenated_forward, packing=True)
     average_log_prob = args.dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
 
-    print("Caching reference logprobs...")
+    logger.info("Caching reference logprobs...")
     reference_cache = build_reference_logprobs_cache(
         model=model,
         dataloader=data_loader_instance,
@@ -385,7 +385,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         use_lora=args.use_lora,
         device=device,
     )
-    print("Reference logprobs cached.")
+    logger.info("Reference logprobs cached.")
     data_loader_instance.reshuffle(epoch=0)
 
     optim = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -399,16 +399,15 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         device=device,
     )
 
-    trainer_config = train.TrainerConfig(
+    trainer = train.TrainerConfig(
         save_folder=args.output_dir,
         max_duration=train.Duration.epochs(args.num_epochs),
         metrics_collect_interval=args.log_every,
-    )
-    trainer = trainer_config.build(train_module, data_loader_instance)
+    ).build(train_module, data_loader_instance)
 
-    print("Starting training...")
+    logger.info("Starting training...")
     trainer.fit()
-    print("Training complete.")
+    logger.info("Training complete.")
 
     train.teardown_training_environment()
 

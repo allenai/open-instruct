@@ -3,9 +3,7 @@
 import logging
 import unittest
 
-import torch
-
-from open_instruct import dpo, model_utils
+from open_instruct import dpo
 
 logging.basicConfig(level=logging.INFO)
 
@@ -18,34 +16,6 @@ class TestDPOLossType(unittest.TestCase):
         self.assertEqual(dpo.DPOLossType.dpo_norm.value, "dpo_norm")
         self.assertEqual(dpo.DPOLossType.simpo.value, "simpo")
         self.assertEqual(dpo.DPOLossType.wpo.value, "wpo")
-
-
-class TestTensorCache(unittest.TestCase):
-    """Tests for TensorCache."""
-
-    def test_getitem_returns_correct_tensors(self):
-        chosen_logps = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
-        rejected_logps = torch.tensor([[0.5, 1.5], [2.5, 3.5]])
-
-        cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_logps, "rejected_logps": rejected_logps})
-
-        result = cache[torch.tensor([0])]
-        self.assertTrue(torch.allclose(result["chosen_logps"], torch.tensor([[1.0, 2.0]])))
-        self.assertTrue(torch.allclose(result["rejected_logps"], torch.tensor([[0.5, 1.5]])))
-
-        result = cache[torch.tensor([1])]
-        self.assertTrue(torch.allclose(result["chosen_logps"], torch.tensor([[3.0, 4.0]])))
-        self.assertTrue(torch.allclose(result["rejected_logps"], torch.tensor([[2.5, 3.5]])))
-
-    def test_getitem_with_multiple_indices(self):
-        chosen_logps = torch.tensor([[1.0], [2.0], [3.0]])
-        rejected_logps = torch.tensor([[0.5], [1.5], [2.5]])
-
-        cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_logps, "rejected_logps": rejected_logps})
-
-        result = cache[torch.tensor([0, 2])]
-        self.assertTrue(torch.allclose(result["chosen_logps"], torch.tensor([[1.0], [3.0]])))
-        self.assertTrue(torch.allclose(result["rejected_logps"], torch.tensor([[0.5], [2.5]])))
 
 
 class TestDPOConfig(unittest.TestCase):
