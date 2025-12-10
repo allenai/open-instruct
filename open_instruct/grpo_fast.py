@@ -1156,6 +1156,8 @@ class PolicyTrainerRayProcess(RayProcess):
                             ratio_BT, max=1.0 + self.args.clip_higher
                         )
                         pg_losses2_BT = pg_losses_BT
+                    else:
+                        raise ValueError(f"Invalid loss function: {self.args.loss_fn}")
 
                     # Apply truncated importance sampling if enabled
                     if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
