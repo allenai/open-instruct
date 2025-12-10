@@ -10,8 +10,9 @@ import os
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
+import peft
 import torch
 import torch.nn as nn
 from datasets import Dataset
@@ -22,6 +23,7 @@ from olmo_core.train.train_module import EvalBatchSpec, TrainModule
 from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedTokenizer
 
+from open_instruct import data_types
 from open_instruct.data_loader import HFDataLoader
 from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
@@ -98,6 +100,7 @@ class ReferenceLogprobsCache:
                         batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
                     if use_lora:
+                        assert isinstance(model, peft.PeftModel)
                         with model.disable_adapter():
                             chosen_logps, rejected_logps, _ = forward_fn(
                                 model, batch, average_log_prob=average_log_prob
@@ -187,7 +190,7 @@ class DPODataLoader(data_loader.DataLoaderBase):
         self._batch_size = batch_size
         self._packing = packing
         self._automatic_reshuffle = automatic_reshuffle
-        self._epoch = 0
+        self._epoch: int = 0
 
         if packing:
             self.collator = TensorDataCollatorWithFlatteningDPO(
@@ -435,7 +438,7 @@ class DPOExperimentConfig(config.Config):
     wandb_entity: str | None = None
 
     dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
-    dataset_cache_mode: str = "local"
+    dataset_cache_mode: data_types.DatasetCacheMode = data_types.DatasetCacheMode.local
     dataset_local_cache_dir: str = "local_dataset_cache"
     dataset_skip_cache: bool = False
     hf_entity: str | None = None
@@ -460,7 +463,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         dataset_transform_fn=args.dataset_transform_fn,
         transform_fn_args=transform_fn_args,
         target_columns=args.dataset_target_columns,
-        dataset_cache_mode=args.dataset_cache_mode,
+        dataset_cache_mode=args.dataset_cache_mode.value,
         hf_entity=args.hf_entity,
         dataset_local_cache_dir=args.dataset_local_cache_dir,
         dataset_skip_cache=args.dataset_skip_cache,
@@ -469,6 +472,8 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     dataset.set_format(type="pt")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if args.model_name_or_path is None:
+        raise ValueError("model_name_or_path must be specified")
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2"
     ).to(device)
@@ -527,6 +532,6 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((DPOExperimentConfig, TokenizerConfig))
-    args, tc = parser.parse_args_into_dataclasses()
+    parser = ArgumentParserPlus([DPOExperimentConfig, TokenizerConfig])
+    args, tc = cast(tuple[DPOExperimentConfig, TokenizerConfig], parser.parse_args_into_dataclasses())
     main(args, tc)
