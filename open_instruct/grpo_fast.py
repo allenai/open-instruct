@@ -299,6 +299,8 @@ class Args:
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
+    loss_fn: Literal["dapo", "cispo"] = "dapo"
+    """Whether to use DAPO or CISPO loss function."""
 
     active_sampling: bool = False
     """Whether to continue sampling responses until you get a full batch."""
@@ -1143,10 +1145,19 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    pg_losses_BT = -data_BT.advantages[i][:, 1:] * ratio_BT
-                    pg_losses2_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
-                        ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher
-                    )
+                    if self.args.loss_fn == "dapo":
+                        pg_losses_BT = -data_BT.advantages[i][:, 1:] * ratio_BT
+                        pg_losses2_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
+                            ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher
+                        )
+                    elif self.args.loss_fn == "cispo":
+                        # cispo: directly clip ratio, no lower bound.
+                        pg_losses_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
+                            ratio_BT, max=1.0 + self.args.clip_higher
+                        )
+                        pg_losses2_BT = pg_losses_BT
+                    else:
+                        raise ValueError(f"Invalid loss function: {self.args.loss_fn}")
 
                     # Apply truncated importance sampling if enabled
                     if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
