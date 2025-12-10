@@ -17,10 +17,15 @@ uv run python mason.py \
     --chat_template_name olmo \
     --max_seq_length 1024 \
     --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 4 \
     --learning_rate 5e-07 \
+    --lr_scheduler_type cosine \
     --warmup_ratio 0.1 \
+    --weight_decay 0.0 \
     --num_epochs 3 \
     --output_dir output/dpo_olmo_debug/ \
     --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --seed 123 \
+    --use_flash_attn \
+    --logging_steps 10 \
     --with_tracking

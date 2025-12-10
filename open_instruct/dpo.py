@@ -9,20 +9,27 @@ import enum
 import logging
 import os
 import pathlib
+import shutil
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import peft
 import torch
 import torch.nn as nn
+from huggingface_hub import HfApi
 from olmo_core import config, train
+from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
+from olmo_core.nn.hf.checkpoint import load_hf_model
+from olmo_core.nn.transformer import TransformerConfig
+from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
+from olmo_core.optim.scheduler import Scheduler
 from olmo_core.train import callbacks
 from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import EvalBatchSpec, TrainModule
 from tqdm.auto import tqdm
-from transformers import AutoModelForCausalLM
 
 from open_instruct import data_types
 from open_instruct.data_loader import HFDataLoader
@@ -39,9 +46,16 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
-from open_instruct.model_utils import TensorCache
+from open_instruct.model_utils import TensorCache, push_folder_to_hub
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
-from open_instruct.utils import ArgumentParserPlus
+from open_instruct.utils import (
+    ArgumentParserPlus,
+    is_beaker_job,
+    launch_ai2_evals_on_weka,
+    maybe_get_beaker_config,
+    maybe_use_ai2_hf_entity,
+    maybe_use_ai2_wandb_entity,
+)
 
 
 class DPOLossType(enum.Enum):
@@ -136,7 +150,10 @@ class DPOConfig(config.Config):
 
 
 class DPOTrainModule(TrainModule):
-    """Training module for DPO with OLMo-core's Trainer."""
+    """Training module for DPO with OLMo-core's Trainer.
+
+    Uses OLMo-core's scheduler.set_lr() pattern for learning rate scheduling.
+    """
 
     def __init__(
         self,
@@ -144,6 +161,7 @@ class DPOTrainModule(TrainModule):
         optim: torch.optim.Optimizer,
         dpo_config: DPOConfig,
         reference_cache: TensorCache,
+        scheduler: Scheduler,
         device: torch.device | None = None,
         max_grad_norm: float | None = None,
     ) -> None:
@@ -152,6 +170,7 @@ class DPOTrainModule(TrainModule):
         self.optim = optim
         self.dpo_config = dpo_config
         self.reference_cache = reference_cache
+        self.scheduler = scheduler
         self.device = device
         self.max_grad_norm = max_grad_norm
         self.average_log_prob = dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
@@ -162,11 +181,6 @@ class DPOTrainModule(TrainModule):
             self._forward_fn = concatenated_forward
         else:
             self._forward_fn = separate_forward
-
-        self._global_step = 0
-
-    def on_attach(self) -> None:
-        self._global_step = 0
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state_dict: dict[str, Any] = {"model": self.model.state_dict()}
@@ -184,7 +198,11 @@ class DPOTrainModule(TrainModule):
 
     def optim_step(self) -> None:
         if self.max_grad_norm is not None:
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+            self.trainer.record_metric("total grad norm", grad_norm, reduce_type=None, namespace="optim")
+        for group_idx, group in enumerate(self.optim.param_groups):
+            new_lr = self.scheduler.set_lr(group, self.trainer)
+            self.trainer.record_metric(f"LR (group {group_idx})", new_lr, namespace="optim")
         self.optim.step()
 
     @property
@@ -266,7 +284,6 @@ class DPOTrainModule(TrainModule):
                 self.record_metric("train/aux_loss", aux_loss.detach(), ReduceType.mean)
 
         loss.backward()
-        self._global_step += 1 if not dry_run else 0
 
 
 @dataclass
@@ -276,6 +293,7 @@ class DPOExperimentConfig(config.Config):
     exp_name: str = "dpo_experiment"
     run_name: str | None = None
     seed: int = 42
+    add_seed_and_date_to_exp_name: bool = True
 
     model_name_or_path: str | None = None
     use_flash_attn: bool = True
@@ -288,9 +306,20 @@ class DPOExperimentConfig(config.Config):
     gradient_accumulation_steps: int = 1
     learning_rate: float = 2e-5
     warmup_ratio: float = 0.03
-    weight_decay: float = 0.01
+    weight_decay: float = 0.0
     max_grad_norm: float = 1.0
     max_seq_length: int = 2048
+
+    lr_scheduler_type: Literal["linear", "cosine", "constant"] = "linear"
+    max_train_steps: int | None = None
+    checkpointing_steps: str | None = None
+    clip_grad_norm: float = -1
+
+    use_8bit_optimizer: bool = False
+    dpo_use_paged_optimizer: bool = False
+    gradient_checkpointing: bool = False
+    fused_optimizer: bool = True
+    low_cpu_mem_usage: bool = False
 
     dataset_mixer_list: list[str] = field(
         default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
@@ -309,22 +338,68 @@ class DPOExperimentConfig(config.Config):
     save_folder: str | None = None
     checkpoint_every: int = 500
     keep_last_n_checkpoints: int = 3
+    resume_from_checkpoint: str | None = None
 
     log_every: int = 10
+    logging_steps: int | None = None
     with_tracking: bool = False
-    wandb_project: str = "open_instruct"
+    wandb_project: str = "open_instruct_internal"
     wandb_entity: str | None = None
+    report_to: str | list[str] = "all"
 
     dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
     dataset_cache_mode: data_types.DatasetCacheMode = data_types.DatasetCacheMode.local
     dataset_local_cache_dir: str = "local_dataset_cache"
     dataset_skip_cache: bool = False
+
+    push_to_hub: bool = True
     hf_entity: str | None = None
+    hf_repo_id: str | None = None
+    hf_repo_revision: str | None = None
+    hf_repo_url: str | None = None
+
+    try_launch_beaker_eval_jobs: bool = True
+    try_auto_save_to_beaker: bool = True
+    oe_eval_tasks: list[str] | None = None
+    oe_eval_max_length: int = 4096
+    oe_eval_gpu_multiplier: int | None = None
+    eval_workspace: str | None = "ai2/tulu-3-results"
+    eval_priority: str | None = "high"
+    gs_bucket_path: str | None = None
 
 
 def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     """Main entry point for DPO training with OLMo-core."""
     train.prepare_training_environment(seed=args.seed)
+
+    rank = get_rank() if is_distributed() else 0
+    world_size = get_world_size() if is_distributed() else 1
+    is_main_process = rank == 0
+
+    if args.add_seed_and_date_to_exp_name:
+        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.exp_name)
+
+    if is_beaker_job():
+        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+
+    beaker_config = None
+    if args.push_to_hub and is_main_process:
+        if args.hf_repo_id is None:
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:
+            args.hf_entity = HfApi().whoami()["name"]
+        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.hf_repo_revision is None:
+            args.hf_repo_revision = args.exp_name
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+        if is_beaker_job():
+            beaker_config = maybe_get_beaker_config()
+
+    if args.wandb_entity is None:
+        args.wandb_entity = maybe_use_ai2_wandb_entity()
 
     tc.tokenizer_name_or_path = (
         args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
@@ -352,11 +427,14 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if args.model_name_or_path is None:
         raise ValueError("model_name_or_path must be specified")
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_name_or_path,
-        torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
-    ).to(device)
+
+    logger.info(f"Building OLMo-core model with vocab_size={tokenizer.vocab_size}")
+    model_config = TransformerConfig.olmo3_7B(vocab_size=tokenizer.vocab_size)
+    model = model_config.build(init_device="cpu")
+
+    logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
+    load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
+    model = model.to(device)
 
     if args.dpo_config.packing:
         collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
@@ -367,8 +445,8 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         dataset=dataset,
         batch_size=args.per_device_train_batch_size,
         seed=args.seed,
-        rank=0,
-        world_size=1,
+        rank=rank,
+        world_size=world_size,
         work_dir=args.output_dir,
         collator=collator,
     )
@@ -390,7 +468,34 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     logger.info("Reference logprobs cached.")
     data_loader_instance.reshuffle(epoch=0)
 
-    optim = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    no_decay = ["bias", "layer_norm.weight"]
+    optimizer_grouped_parameters = [
+        {
+            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+            "weight_decay": args.weight_decay,
+        },
+        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
+    ]
+    if args.dpo_use_paged_optimizer:
+        from bitsandbytes.optim import AdamW  # type: ignore[import-unresolved]
+
+        optim = AdamW(
+            optimizer_grouped_parameters,
+            lr=args.learning_rate,
+            optim_bits=8 if args.use_8bit_optimizer else 32,
+            is_paged=True,
+        )
+    else:
+        optim = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
+
+    num_training_steps = len(data_loader_instance) * args.num_epochs
+    warmup_steps = int(num_training_steps * args.warmup_ratio)
+    if args.lr_scheduler_type == "cosine":
+        scheduler = CosWithWarmup(warmup_steps=warmup_steps)
+    elif args.lr_scheduler_type == "linear":
+        scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
+    else:
+        scheduler = ConstantWithWarmup(warmup_steps=warmup_steps)
 
     train_module = DPOTrainModule(
         model=model,
@@ -399,9 +504,11 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         reference_cache=reference_cache,
         max_grad_norm=args.max_grad_norm,
         device=device,
+        scheduler=scheduler,
     )
 
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": callbacks.BeakerCallback(config=args.as_dict())}
+    trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback()
     if args.with_tracking:
         trainer_callbacks["wandb"] = callbacks.WandBCallback(
             name=args.run_name or args.exp_name,
@@ -410,16 +517,49 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
             config=args.as_dict(),
         )
 
+    metrics_collect_interval = args.logging_steps if args.logging_steps is not None else args.log_every
     trainer = train.TrainerConfig(
         save_folder=args.output_dir,
         max_duration=train.Duration.epochs(args.num_epochs),
-        metrics_collect_interval=args.log_every,
+        metrics_collect_interval=metrics_collect_interval,
         callbacks=trainer_callbacks,
     ).build(train_module, data_loader_instance)
 
     logger.info("Starting training...")
     trainer.fit()
     logger.info("Training complete.")
+
+    if (
+        args.try_auto_save_to_beaker
+        and is_main_process
+        and is_beaker_job()
+        and beaker_config is not None
+        and len(beaker_config.beaker_dataset_id_urls) > 0
+        and args.output_dir.rstrip("/") != "/output"
+    ):
+        shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
+
+    if is_beaker_job() and is_main_process and args.try_launch_beaker_eval_jobs:
+        wandb_url = None
+        if args.with_tracking:
+            wandb_tracker = trainer_callbacks.get("wandb")
+            if wandb_tracker is not None and hasattr(wandb_tracker, "run") and wandb_tracker.run is not None:
+                wandb_url = wandb_tracker.run.get_url()  # type: ignore[union-attr]
+        if args.hf_repo_revision is not None:
+            launch_ai2_evals_on_weka(
+                path=args.output_dir,
+                leaderboard_name=args.hf_repo_revision,
+                oe_eval_max_length=args.oe_eval_max_length,
+                wandb_url=wandb_url,
+                oe_eval_tasks=args.oe_eval_tasks,
+                gs_bucket_path=args.gs_bucket_path,
+                eval_workspace=args.eval_workspace,
+                eval_priority=args.eval_priority,
+                oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
+            )
+
+    if args.push_to_hub and is_main_process:
+        push_folder_to_hub(None, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
     train.teardown_training_environment()
 

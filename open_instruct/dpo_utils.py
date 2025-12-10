@@ -231,24 +231,17 @@ def concatenated_forward(
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
     We do this to avoid doing two forward passes, because it's faster for FSDP.
+
+    Uses OLMo-core Transformer interface: model(input_ids) returns LMOutputWithLoss with .logits
     """
     if not packing:
         concatenated_batch = concatenated_inputs(batch)
     else:
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
-    inputs = {
-        k.replace("concatenated_", ""): v
-        for k, v in concatenated_batch.items()
-        if k.startswith("concatenated_") and not k.endswith("labels")
-    }
-    if output_router_logits:
-        outputs = model(**inputs, output_router_logits=True)
-        logits = outputs.logits.to(torch.float32)
-        aux_loss = outputs.aux_loss
-    else:
-        logits = model(**inputs).logits.to(torch.float32)
-        aux_loss = None
+    output = model(concatenated_batch["concatenated_input_ids"])
+    logits = output.logits.to(torch.float32)
+    aux_loss = None
 
     if not packing:
         all_logps = _get_batch_logps(
@@ -259,7 +252,7 @@ def concatenated_forward(
         all_logps = pf_get_batch_logps(
             logits,
             concatenated_batch["concatenated_labels"],
-            inputs["cu_seq_lens_k"],  # assume same as q
+            concatenated_batch["concatenated_cu_seq_lens"],
             average_log_prob=average_log_prob,
         )
     chosen_logps = all_logps[:bs]
@@ -275,60 +268,33 @@ def separate_forward(
 ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor | None]:
     """Run the model on chosen and rejected inputs separately.
 
+    Uses OLMo-core Transformer interface: model(input_ids) returns LMOutputWithLoss with .logits
+    Note: OLMo-core handles MoE aux loss via compute_auxiliary_metrics() in the train module.
+
     Args:
         model: The model to run
         batch: Dictionary containing chosen and rejected inputs
         average_log_prob: Whether to average the log probabilities
-        output_router_logits: Whether to output router logits for MoE models
+        output_router_logits: Whether to output router logits for MoE models (kept for API compat)
 
     Returns:
         Tuple of (chosen_logps, rejected_logps, aux_loss)
     """
-    # Process chosen inputs
     chosen_batch = process_batch(batch, "chosen")
-
-    if output_router_logits:
-        chosen_outputs = model(
-            input_ids=chosen_batch["input_ids"],
-            attention_mask=chosen_batch["attention_mask"],
-            output_router_logits=True,
-        )
-        chosen_logits = chosen_outputs.logits.to(torch.float32)
-        chosen_aux_loss = chosen_outputs.aux_loss
-        del chosen_outputs
-    else:
-        chosen_logits = model(
-            input_ids=chosen_batch["input_ids"], attention_mask=chosen_batch["attention_mask"]
-        ).logits.to(torch.float32)
+    chosen_output = model(chosen_batch["input_ids"])
+    chosen_logits = chosen_output.logits.to(torch.float32)
 
     chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
-    del chosen_batch, chosen_logits
+    del chosen_batch, chosen_logits, chosen_output
     torch.cuda.empty_cache()
 
-    # Process rejected inputs
     rejected_batch = process_batch(batch, "rejected")
-
-    if output_router_logits:
-        rejected_outputs = model(
-            input_ids=rejected_batch["input_ids"],
-            attention_mask=rejected_batch["attention_mask"],
-            output_router_logits=True,
-        )
-        rejected_logits = rejected_outputs.logits.to(torch.float32)
-        rejected_aux_loss = rejected_outputs.aux_loss
-        del rejected_outputs
-    else:
-        rejected_logits = model(
-            input_ids=rejected_batch["input_ids"], attention_mask=rejected_batch["attention_mask"]
-        ).logits.to(torch.float32)
+    rejected_output = model(rejected_batch["input_ids"])
+    rejected_logits = rejected_output.logits.to(torch.float32)
 
     rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
-    del rejected_batch, rejected_logits
+    del rejected_batch, rejected_logits, rejected_output
     torch.cuda.empty_cache()
-
-    if output_router_logits:
-        aux_loss = (chosen_aux_loss + rejected_aux_loss) / 2
-        return chosen_logps, rejected_logps, aux_loss
 
     return chosen_logps, rejected_logps, None
 
