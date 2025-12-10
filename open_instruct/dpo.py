@@ -18,7 +18,7 @@ from datasets import Dataset
 from olmo_core import config, train
 from olmo_core.data import data_loader
 from olmo_core.train.common import ReduceType
-from olmo_core.train.train_module import TrainModule
+from olmo_core.train.train_module import EvalBatchSpec, TrainModule
 from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedTokenizer
 
@@ -298,6 +298,17 @@ class DPOTrainModule(TrainModule):
         if self.max_grad_norm is not None:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
         self.optim.step()
+
+    @property
+    def eval_batch_spec(self) -> EvalBatchSpec:
+        return EvalBatchSpec(rank_batch_size=1)
+
+    def eval_batch(self, batch: dict[str, Any], labels: Any | None = None) -> Any:
+        self.model.eval()
+        with torch.no_grad():
+            if self.device is not None:
+                batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+            return self.model(**batch)
 
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
         self.model.train()
