@@ -603,6 +603,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         "for local models to upload to gs, you must set --gs_model_name"
                     )
                     model_name_or_path = args.gs_model_name
+                    # get the short commit hash (first 8 chars)
                     commit_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
                     console.log(
                         f"Local model is already downloaded, using gs_model_name {model_name_or_path}, with hash of model path {commit_hash}"
@@ -797,21 +798,23 @@ def maybe_download_tokenizer_from_gs_bucket(filtered_command: str, auto_output_d
     model_name_idx = model_arg_idx + 1
     model_name_or_path = filtered_command[model_name_idx].rstrip("/")
 
-    if model_name_or_path.startswith("gs://"):
-        model_name_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
-        local_cache_folder = f"{auto_output_dir_path}/{whoami}/tokenizer_{model_name_hash}/"
+    if not model_name_or_path.startswith("gs://"):
+        return filtered_command
 
-        if not os.path.exists(local_cache_folder):
-            download_from_gs_bucket(
-                [
-                    f"{model_name_or_path}/tokenizer.json",
-                    f"{model_name_or_path}/tokenizer_config.json",
-                    f"{model_name_or_path}/config.json",
-                ],
-                local_cache_folder,
-            )
+    model_name_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
+    local_cache_folder = f"{auto_output_dir_path}/{whoami}/tokenizer_{model_name_hash}/"
 
-        filtered_command[model_name_idx] = local_cache_folder
+    if not os.path.exists(local_cache_folder):
+        download_from_gs_bucket(
+            [
+                f"{model_name_or_path}/tokenizer.json",
+                f"{model_name_or_path}/tokenizer_config.json",
+                f"{model_name_or_path}/config.json",
+            ],
+            local_cache_folder,
+        )
+
+    filtered_command[model_name_idx] = local_cache_folder
 
     return filtered_command
 
