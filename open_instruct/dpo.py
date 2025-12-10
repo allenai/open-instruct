@@ -414,6 +414,9 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
 
     beaker_config = None
+    if is_beaker_job() and is_main_process:
+        beaker_config = maybe_get_beaker_config()
+
     if args.push_to_hub and is_main_process:
         if args.hf_repo_id is None:
             args.hf_repo_id = "open_instruct_dev"
@@ -425,8 +428,6 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         if args.hf_repo_revision is None:
             args.hf_repo_revision = args.exp_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-        if is_beaker_job():
-            beaker_config = maybe_get_beaker_config()
 
     if args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
@@ -577,8 +578,11 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
             if wandb_tracker is not None and hasattr(wandb_tracker, "run") and wandb_tracker.run is not None:
                 wandb_url = wandb_tracker.run.get_url()  # type: ignore[union-attr]
         if args.hf_repo_revision is not None:
+            eval_path = args.output_dir
+            if beaker_config is not None and beaker_config.beaker_dataset_ids:
+                eval_path = beaker_config.beaker_dataset_ids[-1]
             launch_ai2_evals_on_weka(
-                path=args.output_dir,
+                path=eval_path,
                 leaderboard_name=args.hf_repo_revision,
                 oe_eval_max_length=args.oe_eval_max_length,
                 wandb_url=wandb_url,
