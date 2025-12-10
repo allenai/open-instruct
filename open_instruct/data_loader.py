@@ -107,10 +107,10 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Reshuffle the dataset for a new epoch.
 
         Args:
-            epoch: The epoch number (unused, for API compatibility).
+            epoch: The epoch number to use for shuffling seed. If None, increments internal counter.
             **kwargs: Additional keyword arguments (unused, for API compatibility).
         """
-        self._epoch += 1
+        self._epoch = self._epoch + 1 if epoch is None else epoch
         self.batches_processed = 0
         shuffled = self._original_dataset.shuffle(seed=self.seed + self._epoch)
         # If this is slow, we can speed it up by making this a boolean mask.

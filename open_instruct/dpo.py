@@ -216,7 +216,7 @@ class DPODataLoader(data_loader.DataLoaderBase):
 
     def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
         """Reshuffle the dataset for a new epoch."""
-        self._epoch += 1
+        self._epoch = self._epoch + 1 if epoch is None else epoch
         self.batches_processed = 0
         self._base_loader.reshuffle(epoch=epoch, **kwargs)
 
@@ -275,10 +275,10 @@ class DPOTrainModule(TrainModule):
         self.max_grad_norm = max_grad_norm
         self.average_log_prob = dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
 
-        if dpo_config.concatenated_forward:
+        if dpo_config.packing:
+            self._forward_fn = partial(concatenated_forward, packing=True)
+        elif dpo_config.concatenated_forward:
             self._forward_fn = concatenated_forward
-            if dpo_config.packing:
-                self._forward_fn = partial(concatenated_forward, packing=True)
         else:
             self._forward_fn = separate_forward
 
@@ -389,7 +389,7 @@ class DPOTrainModule(TrainModule):
                 self.record_metric("train/aux_loss", aux_loss.detach(), ReduceType.mean)
 
         loss.backward()
-        self._global_step += 1
+        self._global_step += 1 if not dry_run else 0
 
 
 @dataclass
@@ -475,7 +475,9 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     if args.model_name_or_path is None:
         raise ValueError("model_name_or_path must be specified")
     model = AutoModelForCausalLM.from_pretrained(
-        args.model_name_or_path, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2"
+        args.model_name_or_path,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
     ).to(device)
 
     data_loader_instance = DPODataLoader(
@@ -505,6 +507,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         device=device,
     )
     print("Reference logprobs cached.")
+    data_loader_instance.reshuffle(epoch=0)
 
     optim = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 

@@ -294,17 +294,15 @@ def separate_forward(
             output_router_logits=True,
         )
         chosen_logits = chosen_outputs.logits.to(torch.float32)
-        aux_loss = chosen_outputs.aux_loss
+        chosen_aux_loss = chosen_outputs.aux_loss
+        del chosen_outputs
     else:
         chosen_logits = model(
             input_ids=chosen_batch["input_ids"], attention_mask=chosen_batch["attention_mask"]
         ).logits.to(torch.float32)
-        aux_loss = None
 
     chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
     del chosen_batch, chosen_logits
-    if output_router_logits:
-        del chosen_outputs
     torch.cuda.empty_cache()
 
     # Process rejected inputs
@@ -317,22 +315,22 @@ def separate_forward(
             output_router_logits=True,
         )
         rejected_logits = rejected_outputs.logits.to(torch.float32)
-        aux_loss = rejected_outputs.aux_loss
+        rejected_aux_loss = rejected_outputs.aux_loss
+        del rejected_outputs
     else:
         rejected_logits = model(
             input_ids=rejected_batch["input_ids"], attention_mask=rejected_batch["attention_mask"]
         ).logits.to(torch.float32)
-        aux_loss = None
 
     rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
     del rejected_batch, rejected_logits
-    if output_router_logits:
-        del rejected_outputs
     torch.cuda.empty_cache()
-    if output_router_logits:
-        aux_loss = torch.cat([chosen_outputs.aux_loss, rejected_outputs.aux_loss], dim=0)
 
-    return chosen_logps, rejected_logps, aux_loss
+    if output_router_logits:
+        aux_loss = (chosen_aux_loss + rejected_aux_loss) / 2
+        return chosen_logps, rejected_logps, aux_loss
+
+    return chosen_logps, rejected_logps, None
 
 
 def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float, dim: int = -1) -> torch.Tensor:
