@@ -17,12 +17,11 @@ import torch.nn as nn
 from datasets import Dataset
 from olmo_core import config, train
 from olmo_core.data import data_loader
-from olmo_core.nn.transformer import Transformer, TransformerConfig
 from olmo_core.optim import AdamWConfig, OptimConfig
 from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import TransformerTrainModule
 from tqdm.auto import tqdm
-from transformers import PreTrainedTokenizer
+from transformers import AutoModelForCausalLM, PreTrainedTokenizer
 
 from open_instruct.data_loader import HFDataLoader
 from open_instruct.dataset_transformation import (
@@ -255,7 +254,7 @@ class DPOTrainModule(TransformerTrainModule):
 
     def __init__(
         self,
-        model: Transformer,
+        model: nn.Module,
         optim: OptimConfig,
         dpo_config: DPOConfig,
         reference_cache: ReferenceLogprobsCache,
@@ -473,9 +472,10 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     dataset = dataset.shuffle(seed=args.seed)
     dataset.set_format(type="pt")
 
-    model_config = TransformerConfig.from_pretrained(args.model_name_or_path)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model_config.build(device=device)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name_or_path, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2"
+    ).to(device)
 
     data_loader_instance = DPODataLoader(
         dataset=dataset,
