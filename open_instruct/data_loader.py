@@ -972,6 +972,8 @@ class DataPreparationActor:
         )
         wait_count = 0
         while True:
+            if self._prep_future.done():
+                self._prep_future.result()
             with self.lock:
                 if step <= self.current_prepared_step:
                     batch_data = self.prepared_data[step][rank]
