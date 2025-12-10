@@ -251,7 +251,7 @@ def calculate_sequence_length_metrics(results: list[GenerationResult], scores: l
     - mean, hist of correct lengths
     - mean, hist of incorrect results
     """
-    sequence_lengths = np.array([len(response) for response in result.responses])
+    sequence_lengths = np.array([len(response) for response in results.responses])
     sequence_length_solved = sequence_lengths[scores == max_possible_score]
     sequence_length_unsolved = sequence_lengths[scores < max_possible_score]
     return {
