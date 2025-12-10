@@ -341,6 +341,8 @@ def get_env_vars(
                 [
                     # NOTE: For single-node training we still need all of these settings and we also
                     # need host networking enabled so that the ethernet interface names don't change.
+                    beaker.BeakerEnvVar(name="NCCL_LIB_DIR", value="/var/lib/tcpxo/lib64"),
+                    beaker.BeakerEnvVar(name="LD_LIBRARY_PATH", value="/var/lib/tcpxo/lib64"),
                     beaker.BeakerEnvVar(name="NCCL_CROSS_NIC", value="0"),
                     beaker.BeakerEnvVar(name="NCCL_PROTO", value="Simple,LL128"),
                     beaker.BeakerEnvVar(name="NCCL_MIN_NCHANNELS", value="4"),
