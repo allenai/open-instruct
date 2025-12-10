@@ -550,9 +550,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     beaker_experiment_id = os.environ.get("BEAKER_WORKLOAD_ID")
     trainer_callbacks: dict[str, callbacks.Callback] = {
         "beaker": callbacks.BeakerCallback(
-            config=json_config,
-            enabled=beaker_experiment_id is not None,
-            experiment_id=beaker_experiment_id,
+            config=json_config, enabled=beaker_experiment_id is not None, experiment_id=beaker_experiment_id
         )
     }
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback()
