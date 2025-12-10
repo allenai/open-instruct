@@ -232,15 +232,14 @@ def concatenated_forward(
 
     We do this to avoid doing two forward passes, because it's faster for FSDP.
 
-    Uses OLMo-core Transformer interface: model(input_ids) returns LMOutputWithLoss with .logits
+    Uses OLMo-core Transformer interface: model(input_ids) returns logits tensor directly
     """
     if not packing:
         concatenated_batch = concatenated_inputs(batch)
     else:
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
-    output = model(concatenated_batch["concatenated_input_ids"])
-    logits = output.logits.to(torch.float32)
+    logits = model(concatenated_batch["concatenated_input_ids"]).to(torch.float32)
     aux_loss = None
 
     if not packing:
@@ -268,7 +267,7 @@ def separate_forward(
 ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor | None]:
     """Run the model on chosen and rejected inputs separately.
 
-    Uses OLMo-core Transformer interface: model(input_ids) returns LMOutputWithLoss with .logits
+    Uses OLMo-core Transformer interface: model(input_ids) returns logits tensor directly
     Note: OLMo-core handles MoE aux loss via compute_auxiliary_metrics() in the train module.
 
     Args:
@@ -281,19 +280,17 @@ def separate_forward(
         Tuple of (chosen_logps, rejected_logps, aux_loss)
     """
     chosen_batch = process_batch(batch, "chosen")
-    chosen_output = model(chosen_batch["input_ids"])
-    chosen_logits = chosen_output.logits.to(torch.float32)
+    chosen_logits = model(chosen_batch["input_ids"]).to(torch.float32)
 
     chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
-    del chosen_batch, chosen_logits, chosen_output
+    del chosen_batch, chosen_logits
     torch.cuda.empty_cache()
 
     rejected_batch = process_batch(batch, "rejected")
-    rejected_output = model(rejected_batch["input_ids"])
-    rejected_logits = rejected_output.logits.to(torch.float32)
+    rejected_logits = model(rejected_batch["input_ids"]).to(torch.float32)
 
     rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
-    del rejected_batch, rejected_logits, rejected_output
+    del rejected_batch, rejected_logits
     torch.cuda.empty_cache()
 
     return chosen_logps, rejected_logps, None
