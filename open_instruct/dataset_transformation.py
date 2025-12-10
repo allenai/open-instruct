@@ -914,6 +914,52 @@ class TokenizerConfig:
         return GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
 
 
+@dataclass
+class DatasetCachingArgs:
+    """Base class with common dataset caching arguments.
+
+    This class consolidates the dataset-related arguments shared across training scripts
+    (finetune.py, dpo_tune_cache.py, grpo_fast.py, ppo.py, reward_modeling.py).
+    """
+
+    dataset_mixer_list: List[str] = field(default_factory=list)
+    """A list of datasets (local or HF) to sample from."""
+    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
+    """The dataset splits to use for training"""
+    dataset_transform_fn: List[str] = field(default_factory=list)
+    """The list of transform functions to apply to the dataset."""
+    dataset_target_columns: Optional[List[str]] = None
+    """The columns to use for the dataset."""
+    dataset_cache_mode: Literal["hf", "local"] = "local"
+    """The mode to use for caching the dataset."""
+    dataset_local_cache_dir: str = "local_dataset_cache"
+    """The directory to save the local dataset cache to."""
+    dataset_config_hash: Optional[str] = None
+    """The hash of the dataset configuration."""
+    dataset_skip_cache: bool = False
+    """Whether to skip the cache."""
+    hf_entity: Optional[str] = None
+    """The HuggingFace entity for uploading datasets."""
+    seed: int = 42
+    """Seed for shuffling."""
+
+    max_seq_length: Optional[int] = None
+    """Maximum sequence length (used by SFT and DPO)."""
+    max_token_length: Optional[int] = None
+    """Maximum token length (used by PPO and reward_modeling)."""
+    max_prompt_token_length: Optional[int] = None
+    """Maximum prompt token length (used by GRPO, PPO, reward_modeling)."""
+    system_prompt_override_file: Optional[str] = None
+    """Path to a file containing a system prompt override (used by GRPO)."""
+
+    dataset_mixer_eval_list: List[str] = field(default_factory=list)
+    """A list of datasets for evaluation."""
+    dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: ["test"])
+    """The dataset splits to use for evaluation."""
+    dataset_config_eval_hash: Optional[str] = None
+    """The hash of the evaluation dataset configuration."""
+
+
 # TODO: for testing, we should load the tokenizer from the sft / dpo / rl and make sure they are all the same.
 
 
@@ -1938,3 +1984,101 @@ def get_cached_dataset_tulu(
         dataset_config_seed=dataset_config_seed,
         system_prompt_override=system_prompt_override,
     )[0]
+
+
+SCRIPT_DEFAULT_TRANSFORM_FNS = {
+    "sft": ["sft_tokenize_v2", "sft_filter_v2"],
+    "dpo": ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"],
+    "grpo": ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"],
+    "ppo": ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"],
+    "reward_modeling": ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"],
+}
+
+
+def cache_dataset(
+    args: DatasetCachingArgs, tc: TokenizerConfig, script_type: Literal["sft", "dpo", "grpo", "ppo", "reward_modeling"]
+) -> Tuple[str, str]:
+    """Cache dataset for a training script without running the full training.
+
+    This function consolidates the dataset caching logic that was previously duplicated
+    across training scripts. It can be called directly from mason.py without spawning
+    a subprocess.
+
+    Args:
+        args: Dataset caching arguments.
+        tc: Tokenizer configuration.
+        script_type: Type of training script (determines transform_fn_args structure).
+
+    Returns:
+        Tuple of (dataset_cache_path, dataset_config_hash).
+    """
+    dataset_transform_fn = args.dataset_transform_fn
+    if not dataset_transform_fn:
+        dataset_transform_fn = SCRIPT_DEFAULT_TRANSFORM_FNS.get(script_type, [])
+
+    system_prompt_override = None
+    if args.system_prompt_override_file and script_type == "grpo":
+        with open(args.system_prompt_override_file) as f:
+            system_prompt_override = f.read().strip()
+
+    if script_type in ("sft", "dpo"):
+        transform_fn_args: List[Dict[str, Any]] = [{"max_seq_length": args.max_seq_length}, {}]
+    elif script_type == "grpo":
+        transform_fn_args = [
+            {"system_prompt_override": system_prompt_override},
+            {"max_prompt_token_length": args.max_prompt_token_length},
+        ]
+    else:
+        transform_fn_args = [
+            {},
+            {"max_token_length": args.max_token_length, "max_prompt_token_length": args.max_prompt_token_length},
+        ]
+
+    dcs = load_dataset_configs(
+        args.dataset_mixer_list,
+        args.dataset_mixer_list_splits,
+        dataset_transform_fn,
+        transform_fn_args,
+        args.dataset_target_columns,
+        args.seed,
+    )
+    config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
+
+    get_cached_dataset_tulu(
+        dataset_mixer_list=args.dataset_mixer_list,
+        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+        tc=tc,
+        dataset_transform_fn=dataset_transform_fn,
+        transform_fn_args=transform_fn_args,
+        target_columns=args.dataset_target_columns,
+        dataset_cache_mode=args.dataset_cache_mode,
+        hf_entity=args.hf_entity,
+        dataset_local_cache_dir=args.dataset_local_cache_dir,
+        dataset_skip_cache=args.dataset_skip_cache,
+        system_prompt_override=system_prompt_override,
+    )
+
+    if args.dataset_mixer_eval_list:
+        eval_dcs = load_dataset_configs(
+            args.dataset_mixer_eval_list,
+            args.dataset_mixer_eval_list_splits,
+            dataset_transform_fn,
+            transform_fn_args,
+            args.dataset_target_columns,
+            args.seed,
+        )
+        eval_config_hash = args.dataset_config_eval_hash or compute_config_hash(eval_dcs, tc)
+        get_cached_dataset_tulu(
+            dataset_mixer_list=args.dataset_mixer_eval_list,
+            dataset_mixer_list_splits=args.dataset_mixer_eval_list_splits,
+            tc=tc,
+            dataset_transform_fn=dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            dataset_cache_mode=args.dataset_cache_mode,
+            hf_entity=args.hf_entity,
+            dataset_local_cache_dir=args.dataset_local_cache_dir,
+            dataset_skip_cache=args.dataset_skip_cache,
+        )
+
+    cache_path = os.path.join(args.dataset_local_cache_dir, config_hash)
+    return cache_path, config_hash

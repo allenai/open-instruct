@@ -4,9 +4,7 @@ import os
 import random
 import re
 import secrets
-import select
 import string
-import sys
 import time
 
 import backoff
@@ -15,7 +13,9 @@ import requests
 from rich.console import Console
 from rich.text import Text
 
-from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS
+from open_instruct.dataset_transformation import DatasetCachingArgs, TokenizerConfig, cache_dataset
+from open_instruct.model_utils import ModelConfig
+from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS, ArgumentParserPlus
 
 console = Console()
 
@@ -37,6 +37,14 @@ CACHE_EXCLUDED_ARGS = {
     "--checkpoint_state_freq": True,
     "--checkpoint_state_dir": True,
     "--gs_checkpoint_state_dir": True,
+}
+
+SCRIPT_TYPE_MAP = {
+    "open_instruct/finetune.py": "sft",
+    "open_instruct/dpo_tune_cache.py": "dpo",
+    "open_instruct/grpo_fast.py": "grpo",
+    "open_instruct/ppo.py": "ppo",
+    "open_instruct/reward_modeling.py": "reward_modeling",
 }
 
 
@@ -463,58 +471,28 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 except ValueError:
                     continue
 
+                script_type = SCRIPT_TYPE_MAP.get(file)
+                if script_type is None:
+                    continue
+
                 filtered_command = build_command_without_args(command[idx:], CACHE_EXCLUDED_ARGS)
-                caching_command = "python " + " ".join(filtered_command) + " --cache_dataset_only"
-                console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
-                import subprocess
+                console.log("📦📦📦 Running dataset caching...")
 
-                # Use Popen to get real-time output while also capturing it
-                process = subprocess.Popen(
-                    caching_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+                parser = ArgumentParserPlus((DatasetCachingArgs, TokenizerConfig, ModelConfig))
+                caching_args, tc, model_config, _ = parser.parse_args_into_dataclasses(
+                    args=filtered_command[1:], return_remaining_strings=True
                 )
+                if tc.tokenizer_name_or_path is None and model_config.model_name_or_path is not None:
+                    tc.tokenizer_name_or_path = model_config.model_name_or_path
+                if tc.tokenizer_revision is None and model_config.model_revision is not None:
+                    tc.tokenizer_revision = model_config.model_revision
 
-                stdout_data, stderr_data = [], []
+                dataset_cache_path, dataset_config_hash = cache_dataset(caching_args, tc, script_type)
 
-                # Set up select to monitor both stdout and stderr
-                assert process.stdout is not None and process.stderr is not None
-                streams = [process.stdout, process.stderr]
-                while True:
-                    # Wait for output on either stream
-                    reads = select.select(streams, [], [])[0]
-
-                    done = True
-                    for stream in reads:
-                        line = stream.readline()
-                        if line:
-                            done = False
-                            is_stdout = stream == process.stdout
-                            print(line.rstrip(), file=sys.stdout if is_stdout else sys.stderr)
-                            if is_stdout:
-                                stdout_data.append(line)
-                            else:
-                                stderr_data.append(line)
-
-                    if done and process.poll() is not None:
-                        break
-
-                result = type(
-                    "SubprocessResult",
-                    (),
-                    {"returncode": process.returncode, "stdout": "".join(stdout_data), "stderr": "".join(stderr_data)},
-                )()
-                stdout = result.stdout
-                # Extract the cached dataset path from stdout if it exists
-                for line in stdout.splitlines():
-                    if "✅ Found cached dataset at" in line:
-                        dataset_cache_path = line.split("✅ Found cached dataset at")[1].strip()
-                        dataset_config_hash = dataset_cache_path.split("/")[-1]
-                        console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
-                        console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
-                        dataset_cache_paths.append(dataset_cache_path)
-                        dataset_config_hashes.append(dataset_config_hash)
-                return_code = result.returncode
-                if return_code != 0:
-                    raise Exception(f"Error code {return_code} when creating cached dataset")
+                console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
+                console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
+                dataset_cache_paths.append(dataset_cache_path)
+                dataset_config_hashes.append(dataset_config_hash)
                 console.log("✅✅✅ Finished running the caching command")
 
                 if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:

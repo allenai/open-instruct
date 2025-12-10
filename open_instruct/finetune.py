@@ -27,7 +27,6 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Literal
 
 import datasets
 import torch
@@ -48,6 +47,7 @@ from open_instruct import logger_utils, utils
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
     TOKENIZED_SFT_DATASET_KEYS,
+    DatasetCachingArgs,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -71,7 +71,7 @@ logger = get_logger(__name__)
 
 
 @dataclass
-class FlatArguments:
+class FlatArguments(DatasetCachingArgs):
     """
     Full arguments class for all fine-tuning jobs.
     """
@@ -82,6 +82,16 @@ class FlatArguments:
     # Important: These should be typed with Optional[Union[dict,str,...]]
     # Note: the suggested ellipses typing above causes errors on python 3.10, so they are omitted.
     _VALID_DICT_FIELDS = ["additional_model_arguments"]
+
+    # Override defaults from DatasetCachingArgs for SFT
+    dataset_mixer_list: list[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-personas-algebra", "1.0"])
+    """A list of datasets (local or HF) to sample from."""
+    dataset_transform_fn: list[str] = field(
+        default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
+    )
+    """The list of transform functions to apply to the dataset."""
+    dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
+    """The columns to use for the dataset."""
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
@@ -124,24 +134,6 @@ class FlatArguments:
     dataset_mixer: dict | None = field(
         default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
     )
-    dataset_mixer_list: list[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-personas-algebra", "1.0"])
-    """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
-    """The dataset splits to use for training"""
-    dataset_transform_fn: list[str] = field(
-        default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
-    )
-    """The list of transform functions to apply to the dataset."""
-    dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
-    """The columns to use for the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "local"
-    """The mode to use for caching the dataset."""
-    dataset_local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
-    dataset_config_hash: str | None = None
-    """The hash of the dataset configuration."""
-    dataset_skip_cache: bool = False
-    """Whether to skip the cache."""
     dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
@@ -295,8 +287,6 @@ class FlatArguments:
     """Whether to launch beaker evaluation jobs after training"""
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
     add_seed_and_date_to_exp_name: bool = True
     """Append the seed and date to exp_name"""
 
@@ -486,9 +476,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         train_dataset.set_format(type="pt")
     if accelerator.is_main_process:
         visualize_token(train_dataset[0][INPUT_IDS_KEY], tokenizer)
-
-    if args.cache_dataset_only:
-        return
 
     # Load pretrained model and tokenizer
     if args.config_name:

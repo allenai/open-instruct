@@ -80,6 +80,7 @@ from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
+    DatasetCachingArgs,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -98,12 +99,11 @@ from open_instruct.model_utils import (
     get_olmo3_generation_config,
     load_ref_policy,
     log_softmax_and_gather,
-    masked_mean,
     print_rich_single_line_metrics,
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.rl_utils import Timer, calculate_advantages_packed, pack_sequences
+from open_instruct.rl_utils import Timer, calculate_advantages_packed, masked_mean, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -130,34 +130,21 @@ INVALID_VALUE = 0.0  # to play nicely with debugging output
 
 
 @dataclass
-class Args:
-    # Dataset
+class Args(DatasetCachingArgs):
+    # Override defaults from DatasetCachingArgs for PPO
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from."""
     dataset_mixer_eval_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from for evaluation."""
-    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
-    """The dataset splits to use for training"""
-    dataset_mixer_eval_list_splits: list[str] = field(default_factory=lambda: ["test"])
-    """The dataset splits to use for evaluation"""
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
     """The list of transform functions to apply to the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "local"
-    """The mode to use for caching the dataset."""
-    dataset_local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
-    dataset_config_hash: str | None = None
-    """The hash of the dataset configuration."""
-    dataset_config_eval_hash: str | None = None
-    """The hash of the dataset configuration for evaluation."""
-    dataset_skip_cache: bool = False
-    """Whether to skip the cache."""
-    shuffle_eval_dataset: bool = False
-    """Whether to shuffle the evaluation dataset."""
     max_token_length: int = 512
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
+
+    shuffle_eval_dataset: bool = False
+    """Whether to shuffle the evaluation dataset."""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -344,9 +331,6 @@ class Args:
     """Where to save the model"""
     save_traces: bool = False
     """Whether to save learning data traces"""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
-
     # Ai2 specific settings
     try_launch_beaker_eval_jobs_on_weka: bool = False
     """Whether to launch beaker evaluation jobs after training on weka"""
@@ -1495,8 +1479,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         if args.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
-    if args.cache_dataset_only:
-        return
 
     # ------------------------------------------------------------
     # Runtime setups and quick logging

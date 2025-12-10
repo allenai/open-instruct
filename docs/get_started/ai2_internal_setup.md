@@ -91,7 +91,7 @@ so during runtime we issue fewer HF API calls, which sometimes could fail due to
 
 **Auto caching datasets:**
 
-mason.py will auto call `--cache_dataset_only` for you, so you do the tokenization locally instead of in the jobs, which saves idle GPU time in the actual jobs.
+mason.py will automatically cache and tokenize datasets locally before submitting jobs, which saves idle GPU time in the actual jobs.
 
 
 **Auto upload to Google Cloud Storage:**
