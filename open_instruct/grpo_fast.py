@@ -147,10 +147,16 @@ def warn_if_low_disk_space(path: str, *, threshold: float, send_slack_alerts: bo
         threshold: Usage ratio (0.0-1.0) above which to warn.
         send_slack_alerts: Whether to also send a Slack alert when warning.
     """
-    if path.startswith(CLOUD_PATH_PREFIXES):
+    if path.startswith("/weka") or path.startswith("/filestore/weka"):
+        mount_point = "/filestore"
+    else:
+        mount_point = path
+        
+    try:
+        usage = shutil.disk_usage(mount_point)
+    except FileNotFoundError:
+        logger.debug(f"Skipping disk usage check; filesystem path does not exist ({mount_point})")
         return
-
-    usage = shutil.disk_usage(path)
     if usage.total == 0:
         return
 
