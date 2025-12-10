@@ -1,6 +1,8 @@
 #!/bin/bash
 
-MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
+EXP_NAME="olmo3_7b_rlzero_math_restart2k"
+# MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
+MODEL_NAME_OR_PATH="gs://ai2-llm/post-training//michaeln/output/olmo3_7b_rlzero_math__1__1763966683_checkpoints/step_2000"
 DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
 LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 16"
@@ -8,21 +10,25 @@ LOCAL_EVAL_SPLITS="train train"
 
 EVALS="aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero"
 
-EXP_NAME="olmo3_7b_rlzero_math"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
-shift
+BEAKER_IMAGE="nathanl/open_instruct_auto"
+
+# Check if the first argument starts with the value of $BEAKER_NAME
+if [[ "$1" == "$BEAKER_USER"* ]]; then
+    BEAKER_IMAGE="$1"
+    shift
+fi
 
 cluster=ai2/augusta
-python mason.py \
+uv run mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/olmo-instruct \
-    --priority high \
+    --priority urgent \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 9 \
+    --num_nodes 8 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
@@ -54,9 +60,9 @@ python mason.py \
     --chat_template_name olmo_thinker_rlzero \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 2049024 \
+    --total_episodes 1024512 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 8 8 \
+    --num_learners_per_node 8 \
     --vllm_num_engines 56 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
@@ -75,5 +81,4 @@ python mason.py \
     --eval_priority high \
     --eval_on_step_0 True \
     --oe_eval_tasks $EVALS \
-    --oe_eval_gpu_multiplier 4 \
-    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/michaeln/1763966603_748601 $@
+    --oe_eval_gpu_multiplier 4 $@
