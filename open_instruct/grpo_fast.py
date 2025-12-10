@@ -1153,7 +1153,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     elif args.loss_fn == "cispo":
                         # cispo: directly clip ratio, no lower bound.
                         pg_losses_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
-                            ratio_BT, max=1.0 + args.clip_higher
+                            ratio_BT, max=1.0 + self.args.clip_higher
                         )
                         pg_losses2_BT = pg_losses_BT
 
