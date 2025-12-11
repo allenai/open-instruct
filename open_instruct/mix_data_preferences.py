@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from open_instruct.dpo_tune import FlatArguments
+from open_instruct.dpo_tune_cache import FlatArguments
 
 # script for mixing and saving data
 from open_instruct.utils import ArgumentParserPlus, get_datasets
@@ -24,16 +24,18 @@ from open_instruct.utils import ArgumentParserPlus, get_datasets
 # note that = is needed with our argparser
 
 
-def main():
-    parser = ArgumentParserPlus(FlatArguments)
-    args = parser.parse()
+def main() -> None:
+    parser = ArgumentParserPlus((FlatArguments,))  # type: ignore[arg-type]
+    (args,) = parser.parse()  # type: ignore[misc]
+    assert isinstance(args, FlatArguments)
 
     # assert that data_mixer is not none in config
     assert args.dataset_mixer is not None, "data_mixer is required in config"
+    configs = [args.dataset_config_name] if args.dataset_config_name else None
 
     raw_datasets = get_datasets(
         args.dataset_mixer,
-        configs=args.dataset_config_name,
+        configs=configs,
         splits=["train"],
         save_data_dir=args.dataset_mix_dir,  # location where dataset is saved as json
         columns_to_keep=["chosen", "rejected", "chosen_model", "rejected_model"],

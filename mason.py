@@ -257,6 +257,9 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     continue
 
                 filtered_command = build_command_without_args(command[idx:], CACHE_EXCLUDED_ARGS)
+                filtered_command = maybe_download_tokenizer_from_gs_bucket(
+                    filtered_command, args.auto_output_dir_path, whoami
+                )
                 caching_command = "python " + " ".join(filtered_command) + " --cache_dataset_only"
                 console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
                 import subprocess
@@ -393,6 +396,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         "for local models to upload to gs, you must set --gs_model_name"
                     )
                     model_name_or_path = args.gs_model_name
+                    # get the short commit hash (first 8 chars)
                     commit_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
                     console.log(
                         f"Local model is already downloaded, using gs_model_name {model_name_or_path}, with hash of model path {commit_hash}"
@@ -576,6 +580,37 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         spec.host_networking = True
 
     return spec
+
+
+def maybe_download_tokenizer_from_gs_bucket(filtered_command: str, auto_output_dir_path: str, whoami: str):
+    """if model is only on gs, download tokenizer from gs to local cache folder for dataset preprocessing"""
+
+    if "--model_name_or_path" not in filtered_command:
+        return filtered_command
+
+    model_arg_idx = filtered_command.index("--model_name_or_path")
+    model_name_idx = model_arg_idx + 1
+    model_name_or_path = filtered_command[model_name_idx].rstrip("/")
+
+    if not model_name_or_path.startswith("gs://"):
+        return filtered_command
+
+    model_name_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]
+    local_cache_folder = f"{auto_output_dir_path}/{whoami}/tokenizer_{model_name_hash}/"
+
+    if not os.path.exists(local_cache_folder):
+        download_from_gs_bucket(
+            [
+                f"{model_name_or_path}/tokenizer.json",
+                f"{model_name_or_path}/tokenizer_config.json",
+                f"{model_name_or_path}/config.json",
+            ],
+            local_cache_folder,
+        )
+
+    filtered_command[model_name_idx] = local_cache_folder
+
+    return filtered_command
 
 
 def main():
