@@ -251,8 +251,9 @@ class TestGrpoFastBase(unittest.TestCase):
             dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
         )
 
-        for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, prompt_Q, mock_generation_config, False)
+        for batch in data_loader:
+            assert len(batch) == 1
+            grpo_fast.add_prompt_to_generator(batch[0], prompt_Q, mock_generation_config, False)
 
         return prompt_Q, inference_results_Q, mock_dataset
 
@@ -579,8 +580,9 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
         )
 
-        for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, prompt_Q, mock_generation_config, False)
+        for batch in data_loader:
+            assert len(batch) == 1
+            grpo_fast.add_prompt_to_generator(batch[0], prompt_Q, mock_generation_config, False)
 
         self.assertEqual(prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries")
 
@@ -610,8 +612,9 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
         )
 
-        for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, prompt_Q, mock_generation_config, False)
+        for batch in data_loader:
+            assert len(batch) == 1
+            grpo_fast.add_prompt_to_generator(batch[0], prompt_Q, mock_generation_config, False)
 
         request_count = 0
         while not prompt_Q.empty():
