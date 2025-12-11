@@ -10,7 +10,7 @@ uv run python mason.py \
        --description "GPU tests for test_grpo_fast_gpu.py" \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
-       --priority normal \
+       --priority urgent \
        --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
