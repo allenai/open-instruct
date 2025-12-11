@@ -53,7 +53,7 @@ class BeakerCallbackV2(Callback):
                     self.enabled = False
                     return
 
-            self._start_time = time.time()
+            self._start_time = time.perf_counter()
             log.info(f"Running in Beaker workload {self.workload_id}")
 
             result_dir = Path(self.result_dir) / "olmo-core"
@@ -110,6 +110,7 @@ class BeakerCallbackV2(Callback):
             op_name="beaker_set_description",
             allow_multiple=False,
             distributed=False,
+            cb=lambda _: None,
         )
         self._last_update = time.monotonic()
 
