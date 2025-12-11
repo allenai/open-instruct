@@ -17,7 +17,7 @@ dependencies = [
     "matplotlib>=3.9.3",
     "nltk>=3.9.1",
     "numpy<2",
-    "ai2-olmo-core==2.3.0",
+    "ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@finbarr/gpu-memory-prefix",
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
@@ -32,7 +32,7 @@ dependencies = [
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
-    "ai2-olmo-core==2.3.0",
+    "ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@finbarr/gpu-memory-prefix",
     "beaker-py>=2.5.3",
 ]
 
