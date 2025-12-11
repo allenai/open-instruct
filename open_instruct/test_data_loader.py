@@ -3,6 +3,7 @@ import unittest
 
 import datasets
 import parameterized
+import torch
 
 import open_instruct.data_loader
 
@@ -325,6 +326,23 @@ class TestHFDataLoader(unittest.TestCase):
         all_prompt_ids.extend([batch["prompt_id"] for batch in second_pass])
 
         self.assertEqual(len(all_prompt_ids), len(set(all_prompt_ids)))
+
+    def test_global_num_tokens_in_batch(self):
+        data = {"text": [f"example_{i}" for i in range(10)], "label": list(range(10))}
+        dataset = datasets.Dataset.from_dict(data)
+
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset, batch_size=2, seed=42, rank=0, world_size=2, work_dir=tempfile.gettempdir()
+        )
+
+        batch_with_input_ids = {"input_ids": torch.zeros(4, 128)}
+        self.assertEqual(loader.global_num_tokens_in_batch(batch_with_input_ids), 4 * 128 * 2)
+
+        batch_with_dpo = {"chosen_input_ids": torch.zeros(2, 64), "rejected_input_ids": torch.zeros(2, 64)}
+        self.assertEqual(loader.global_num_tokens_in_batch(batch_with_dpo), (2 * 64 + 2 * 64) * 2)
+
+        batch_without_tokens = {"labels": torch.zeros(4, 128)}
+        self.assertIsNone(loader.global_num_tokens_in_batch(batch_without_tokens))
 
 
 if __name__ == "__main__":
