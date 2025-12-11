@@ -116,8 +116,8 @@ class BeakerCallbackV2(Callback):
 
     def _set_description(self, progress: TrainingProgress) -> None:
         maybe_update_beaker_description(
-            current_step=progress.step,
-            total_steps=progress.num_steps,
+            current_step=progress.current_step,
+            total_steps=progress.total_steps,
             start_time=self._start_time,
             wandb_url=self._url,
         )
