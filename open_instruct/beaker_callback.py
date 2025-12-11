@@ -6,7 +6,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 from olmo_core.distributed.utils import get_rank
 from olmo_core.train.callbacks.callback import Callback
@@ -14,8 +14,7 @@ from olmo_core.train.callbacks.comet import CometCallback
 from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.common import TrainingProgress
 
-if TYPE_CHECKING:
-    from beaker import Beaker
+from open_instruct.utils import maybe_update_beaker_description
 
 log = logging.getLogger(__name__)
 
@@ -33,23 +32,13 @@ class BeakerCallbackV2(Callback):
     priority: ClassVar[int] = min(CometCallback.priority - 1, WandBCallback.priority - 1)
     workload_id: str | None = None
     update_interval: int | None = None
-    description: str | None = None
     enabled: bool | None = None
     config: dict[str, Any] | None = None
     result_dir: str = BEAKER_RESULT_DIR
 
-    _client: "Beaker | None" = field(default=None, repr=False)
-    _workload: Any = field(default=None, repr=False)
     _url: str | None = field(default=None, repr=False)
     _last_update: float | None = field(default=None, repr=False)
-
-    @property
-    def client(self) -> "Beaker":
-        return self._client  # type: ignore
-
-    @client.setter
-    def client(self, client: "Beaker") -> None:
-        self._client = client
+    _start_time: float | None = field(default=None, repr=False)
 
     def post_attach(self) -> None:
         if self.enabled is None and BEAKER_WORKLOAD_ID_ENV_VAR in os.environ:
@@ -64,11 +53,8 @@ class BeakerCallbackV2(Callback):
                     self.enabled = False
                     return
 
-            from beaker import Beaker
-
-            self.client = Beaker.from_env()
-            self._workload = self.client.workload.get(self.workload_id)
-            log.info(f"Running in Beaker workload {self.client.workload.url(self.workload_id)}")
+            self._start_time = time.time()
+            log.info(f"Running in Beaker workload {self.workload_id}")
 
             result_dir = Path(self.result_dir) / "olmo-core"
             result_dir.mkdir(parents=True, exist_ok=True)
@@ -128,19 +114,9 @@ class BeakerCallbackV2(Callback):
         self._last_update = time.monotonic()
 
     def _set_description(self, progress: TrainingProgress) -> None:
-        from grpc import RpcError
-        from requests.exceptions import RequestException
-
-        if self._workload is None:
-            return
-
-        description = f"[{progress}] "
-        if self.description is not None:
-            description = f"{description}{self.description}\n"
-        if self._url is not None:
-            description = f"{description}{self._url} "
-
-        try:
-            self._workload = self.client.workload.update(self._workload, description=description.strip())
-        except (RequestException, RpcError) as e:
-            log.warning(f"Failed to update Beaker workload description: {e}")
+        maybe_update_beaker_description(
+            current_step=progress.step,
+            total_steps=progress.num_steps,
+            start_time=self._start_time,
+            wandb_url=self._url,
+        )
