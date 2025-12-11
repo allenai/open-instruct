@@ -50,7 +50,9 @@ from open_instruct.dpo_utils import (
 from open_instruct.model_utils import TensorCache, push_folder_to_hub
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
+    GPU_SPECS,
     ArgumentParserPlus,
+    get_device_name,
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
@@ -549,8 +551,10 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
 
     json_config = config_to_json_serializable(args.as_dict())
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
+    device_name = get_device_name(torch.cuda.get_device_name(0))
+    device_peak_flops = int(GPU_SPECS[device_name]["flops"])
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback(
-        num_flops_per_token=model.num_flops_per_token(args.max_seq_length)
+        num_flops_per_token=model.num_flops_per_token(args.max_seq_length), device_peak_flops=device_peak_flops
     )
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
