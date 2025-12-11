@@ -153,6 +153,7 @@ def get_args():
     parser.add_argument(
         "--no_auto_dataset_cache", action="store_true", help="If given, don't cache the dataset automatically"
     )
+    parser.add_argument("--no_result", action="store_true", help="If given, skip uploading results to Beaker")
     parser.add_argument(
         "--auto_output_dir_path",
         type=str,
@@ -760,7 +761,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         image=beaker.BeakerImageSource(beaker=args.image),
         command=["/bin/bash", "-c"],
         arguments=[full_command],
-        result=beaker.BeakerResultSpec(path="/output"),
+        result=None if args.no_result else beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster),
         context=beaker.BeakerTaskContext(
             priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
