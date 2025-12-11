@@ -2257,9 +2257,14 @@ def data_preparation_thread(
                         f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
                     )
                     # construct "dummy" sequences for padding out the world size
-                    dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
+                    # Ensure dummy sequence is long enough for Sequence Parallelism
+                    # Each rank needs at least 2 tokens (so slicing [:-1] leaves 1)
+                    min_seq_len = max(2, 2 * args.sequence_parallel_size)
+
+                    dummy_tokens = [tokenizer.pad_token_id] * (min_seq_len - 1) + [tokenizer.eos_token_id]
+                    dummy_qr = torch.tensor(dummy_tokens, dtype=torch.long)
                     dummy_tool_mask = torch.zeros_like(dummy_qr)
-                    dummy_attention = torch.tensor([1, 1], dtype=torch.long)
+                    dummy_attention = torch.ones_like(dummy_qr)
                     dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
                     dummy_response_mask = torch.zeros_like(dummy_qr)
                     dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
