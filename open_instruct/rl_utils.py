@@ -65,6 +65,44 @@ class PackedSequences(Generic[T]):
     """packed rewards (batch_size, pack_length)"""
 
 
+def prepend_packed_sequences(prefix: PackedSequences, main: PackedSequences) -> PackedSequences:
+    """Prepend leftover sequences from previous batch to current batch."""
+    return PackedSequences(
+        query_responses=prefix.query_responses + main.query_responses,
+        attention_masks=prefix.attention_masks + main.attention_masks,
+        response_masks=prefix.response_masks + main.response_masks,
+        original_responses=prefix.original_responses + main.original_responses,
+        advantages=(prefix.advantages + main.advantages) if prefix.advantages and main.advantages else None,
+        num_actions=(prefix.num_actions + main.num_actions) if prefix.num_actions and main.num_actions else None,
+        position_ids=(prefix.position_ids + main.position_ids) if prefix.position_ids and main.position_ids else None,
+        packed_seq_lens=(prefix.packed_seq_lens + main.packed_seq_lens)
+        if prefix.packed_seq_lens and main.packed_seq_lens
+        else None,
+        vllm_logprobs=(prefix.vllm_logprobs + main.vllm_logprobs)
+        if prefix.vllm_logprobs and main.vllm_logprobs
+        else None,
+        dones=(prefix.dones + main.dones) if prefix.dones and main.dones else None,
+        rewards=(prefix.rewards + main.rewards) if prefix.rewards and main.rewards else None,
+    )
+
+
+def slice_packed_sequences(packed: PackedSequences, start: int, end: int) -> PackedSequences:
+    """Extract sequences from start to end indices."""
+    return PackedSequences(
+        query_responses=packed.query_responses[start:end],
+        attention_masks=packed.attention_masks[start:end],
+        response_masks=packed.response_masks[start:end],
+        original_responses=packed.original_responses[start:end],
+        advantages=packed.advantages[start:end] if packed.advantages else None,
+        num_actions=packed.num_actions[start:end] if packed.num_actions else None,
+        position_ids=packed.position_ids[start:end] if packed.position_ids else None,
+        packed_seq_lens=packed.packed_seq_lens[start:end] if packed.packed_seq_lens else None,
+        vllm_logprobs=packed.vllm_logprobs[start:end] if packed.vllm_logprobs else None,
+        dones=packed.dones[start:end] if packed.dones else None,
+        rewards=packed.rewards[start:end] if packed.rewards else None,
+    )
+
+
 def reset_position_ids(attention_mask):
     position_ids = torch.zeros_like(attention_mask, dtype=torch.long)
     for i in range(attention_mask.size(0)):
