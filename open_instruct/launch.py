@@ -313,6 +313,7 @@ def launch_on_beaker(
     setup_command: str = "source configs/beaker_configs/ray_node_setup.sh",
     script_path: str = "open_instruct/grpo_fast.py",
 ) -> str:
+    experiment_config.cache_dataset()
     wandb_id = generate_id()
 
     config_dict = serialize_experiment_config(experiment_config)

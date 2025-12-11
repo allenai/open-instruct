@@ -178,6 +178,12 @@ class ExperimentConfig:
     tokenizer_config: TokenizerConfig
     model_config: ModelConfig
 
+    def __post_init__(self):
+        if self.tokenizer_config.tokenizer_name_or_path is None:
+            self.tokenizer_config.tokenizer_name_or_path = self.model_config.model_name_or_path
+        if self.tokenizer_config.tokenizer_revision is None:
+            self.tokenizer_config.tokenizer_revision = self.model_config.model_revision
+
     @classmethod
     def from_file(cls, path: str) -> "ExperimentConfig":
         with open(path) as f:
@@ -187,6 +193,44 @@ class ExperimentConfig:
             tokenizer_config=TokenizerConfig(**data["tokenizer_config"]),
             model_config=ModelConfig(**data["model_config"]),
         )
+
+    def cache_dataset(self) -> None:
+        system_prompt_override = None
+        if self.args.system_prompt_override_file is not None:
+            with open(self.args.system_prompt_override_file) as f:
+                system_prompt_override = f.read().strip()
+
+        transform_fn_args = [
+            {"system_prompt_override": system_prompt_override},
+            {"max_prompt_token_length": self.args.max_prompt_token_length},
+        ]
+        get_cached_dataset_tulu(
+            dataset_mixer_list=self.args.dataset_mixer_list,
+            dataset_mixer_list_splits=self.args.dataset_mixer_list_splits,
+            tc=self.tokenizer_config,
+            dataset_transform_fn=self.args.dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            dataset_cache_mode=self.args.dataset_cache_mode,
+            dataset_config_hash=self.args.dataset_config_hash,
+            hf_entity=self.args.hf_entity,
+            dataset_local_cache_dir=self.args.dataset_local_cache_dir,
+            dataset_skip_cache=self.args.dataset_skip_cache,
+            system_prompt_override=system_prompt_override,
+        )
+        if len(self.args.dataset_mixer_eval_list) > 0:
+            get_cached_dataset_tulu(
+                dataset_mixer_list=self.args.dataset_mixer_eval_list,
+                dataset_mixer_list_splits=self.args.dataset_mixer_eval_list_splits,
+                tc=self.tokenizer_config,
+                dataset_transform_fn=self.args.dataset_transform_fn,
+                transform_fn_args=transform_fn_args,
+                hf_entity=self.args.hf_entity,
+                dataset_cache_mode=self.args.dataset_cache_mode,
+                dataset_config_hash=self.args.dataset_config_eval_hash,
+                dataset_local_cache_dir=self.args.dataset_local_cache_dir,
+                dataset_skip_cache=self.args.dataset_skip_cache,
+                system_prompt_override=system_prompt_override,
+            )
 
 
 @dataclass
