@@ -42,6 +42,16 @@ CACHE_EXCLUDED_ARGS = {
 # ----------------------------------------------------------------------
 # Mason logic
 def build_command_without_args(command, args_to_remove):
+    """Build new command list excluding specified arguments.
+
+    Args:
+        command: List of command arguments
+        args_to_remove: Dict mapping argument names to boolean indicating if they have values
+                       e.g., {"--with_tracking": False, "--checkpoint_state_dir": True}
+
+    Returns:
+        New command list with specified arguments removed
+    """
     result = []
     skip_next = False
 
