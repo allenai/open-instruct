@@ -328,5 +328,16 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             result["rejected_" + k] = rejected_features[k]
         if "dataset_index" in features[0]:
             result["dataset_index"] = torch.tensor([f["dataset_index"] for f in features])
-        result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
+        max_len = max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
+        chosen_padded = torch.nn.functional.pad(
+            result["chosen_input_ids"],
+            (0, max_len - result["chosen_input_ids"].shape[1]),
+            value=self.tokenizer.pad_token_id,
+        )
+        rejected_padded = torch.nn.functional.pad(
+            result["rejected_input_ids"],
+            (0, max_len - result["rejected_input_ids"].shape[1]),
+            value=self.tokenizer.pad_token_id,
+        )
+        result["input_ids"] = torch.cat([chosen_padded, rejected_padded], dim=0)
         return result
