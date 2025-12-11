@@ -47,7 +47,7 @@ class TestGeneration(TestGrpoFastBase):
     def setUpClass(cls):
         super().setUpClass()
         cls.server_process = subprocess.Popen(
-            ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1212"],
+            ["uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1212"],
             cwd="open_instruct/tool_utils",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
