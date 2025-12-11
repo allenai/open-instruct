@@ -40,6 +40,7 @@ with contextlib.suppress(Exception):
 from open_instruct import utils
 
 # isort: on
+import argparse
 import asyncio
 import dataclasses
 import json
@@ -107,7 +108,6 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
 from open_instruct.utils import (
-    ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
     _z3_params_to_fetch,
@@ -170,6 +170,23 @@ def warn_if_low_disk_space(path: str, *, threshold: float, send_slack_alerts: bo
 
 class ShutdownSentinel:
     """Sentinel value to signal thread shutdown via queue."""
+
+
+@dataclass
+class ExperimentConfig:
+    args: "Args"
+    tokenizer_config: TokenizerConfig
+    model_config: ModelConfig
+
+    @classmethod
+    def from_file(cls, path: str) -> "ExperimentConfig":
+        with open(path) as f:
+            data = json.load(f)
+        return cls(
+            args=Args(**data["args"]),
+            tokenizer_config=TokenizerConfig(**data["tokenizer_config"]),
+            model_config=ModelConfig(**data["model_config"]),
+        )
 
 
 @dataclass
@@ -1232,7 +1249,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
-                        if args.load_ref_policy:
+                        if self.args.load_ref_policy:
                             # NOTE: in packed implementation, kl calculation are averages over response tokens
                             loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
                             loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
@@ -1246,7 +1263,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
 
             with torch.no_grad():
-                if args.load_ref_policy:
+                if self.args.load_ref_policy:
                     for j in range(4):
                         self.local_metrics[f"objective/kl{j}_avg"] = loss_stats_B["kl"][j].mean()
                     self.local_metrics["loss/kl_avg"] = loss_stats_B["kl_loss"].mean()
@@ -2897,7 +2914,10 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+def main(config: ExperimentConfig):
+    args = config.args
+    tc = config.tokenizer_config
+    model_config = config.model_config
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
 
@@ -3061,10 +3081,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
-    args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
-    assert isinstance(args, Args)
-    assert isinstance(tokenizer_config, TokenizerConfig)
-    assert isinstance(model_config, ModelConfig)
-
-    main(args, tokenizer_config, model_config)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config_file", type=str, required=True)
+    main(ExperimentConfig.from_file(parser.parse_args().config_file))

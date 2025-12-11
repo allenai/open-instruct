@@ -55,4 +55,10 @@ uv sync
 # Run the provided script with the image name and all remaining arguments
 script="$1"
 shift
-bash "$script" "$beaker_user/$image_name" "$@"
+
+# Check if the script is a Python file or shell script
+if [[ "$script" == *.py ]]; then
+    uv run python "$script" "$beaker_user/$image_name" "$@"
+else
+    bash "$script" "$beaker_user/$image_name" "$@"
+fi

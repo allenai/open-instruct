@@ -3,9 +3,7 @@ import hashlib
 import os
 import random
 import re
-import secrets
 import select
-import string
 import sys
 import time
 
@@ -15,6 +13,7 @@ import requests
 from rich.console import Console
 from rich.text import Text
 
+from open_instruct.launch import generate_id, get_datasets, get_env_vars, parse_beaker_dataset, parse_env_var
 from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS
 
 console = Console()
@@ -43,16 +42,6 @@ CACHE_EXCLUDED_ARGS = {
 # ----------------------------------------------------------------------
 # Mason logic
 def build_command_without_args(command, args_to_remove):
-    """Build new command list excluding specified arguments.
-
-    Args:
-        command: List of command arguments
-        args_to_remove: Dict mapping argument names to boolean indicating if they have values
-                       e.g., {"--with_tracking": False, "--checkpoint_state_dir": True}
-
-    Returns:
-        New command list with specified arguments removed
-    """
     result = []
     skip_next = False
 
@@ -69,37 +58,6 @@ def build_command_without_args(command, args_to_remove):
         result.append(item)
 
     return result
-
-
-def parse_beaker_dataset(dataset_str: str) -> dict[str, str]:
-    splt = dataset_str.split(":")
-    if len(splt) != 2:
-        raise argparse.ArgumentTypeError(f"Invalid dataset format: {dataset_str}. Expected 'mount_path:beaker_id'")
-
-    return {"mount_path": splt[0], "beaker": splt[1]}
-
-
-def parse_env_var(env_var_str: str) -> dict[str, str]:
-    """Parse environment variable string in the format 'name=value'"""
-    if "=" not in env_var_str:
-        raise argparse.ArgumentTypeError(f"Environment variable must be in format 'name=value', got: {env_var_str}")
-    name, value = env_var_str.split("=", 1)
-    if not name:
-        raise argparse.ArgumentTypeError("Environment variable name cannot be empty")
-    return {"name": name, "value": value}
-
-
-# by default, we turn off vllm compile cache
-# torch compile caching seems consistently broken, but the actual compiling isn't.
-# Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
-DEFAULT_ENV_VARS = {
-    "RAY_CGRAPH_get_timeout": "300",
-    "VLLM_DISABLE_COMPILE_CACHE": "1",
-    "NCCL_DEBUG": "ERROR",
-    "VLLM_LOGGING_LEVEL": "WARNING",
-    "VLLM_USE_V1": "1",
-    "VLLM_ALLOW_INSECURE_SERIALIZATION": "1",
-}
 
 
 def get_args():
@@ -219,14 +177,6 @@ def get_args():
     return mason_args, commands
 
 
-def generate_id(length: int = 8) -> str:
-    """Generate a random base-36 string of `length` digits."""
-    # There are ~2.8T base-36 8-digit strings. If we generate 210k ids,
-    # we'll have a ~1% chance of collision.
-    alphabet = string.ascii_lowercase + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(length))
-
-
 global_wandb_id = generate_id()
 
 
@@ -251,173 +201,6 @@ def parse_commands(command_args: list[str]) -> list[list[str]]:
     if command:
         commands.append(command)
     return commands
-
-
-def get_env_vars(
-    pure_docker_mode: bool,
-    cluster: list[str],
-    beaker_secrets: list[str],
-    whoami: str,
-    resumable: bool,
-    num_nodes: int,
-    additional_env_vars: list[dict[str, str]],
-    additional_secrets: list[dict[str, str]],
-):
-    additional_env_var_names = {var["name"] for var in additional_env_vars}
-
-    env_vars = [
-        beaker.BeakerEnvVar(name=name, value=value)
-        for name, value in DEFAULT_ENV_VARS.items()
-        if name not in additional_env_var_names
-    ]
-
-    env_vars.extend(
-        [beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]) for env_var in additional_env_vars]
-    )
-
-    # add user-specific secrets
-    env_vars.extend(
-        [beaker.BeakerEnvVar(name=secret["name"], secret=secret["value"]) for secret in additional_secrets]
-    )
-
-    useful_secrets = [
-        "HF_TOKEN",
-        "WANDB_API_KEY",
-        "BEAKER_TOKEN",
-        "OPENAI_API_KEY",
-        # litellm expects these env vars
-        "AZURE_API_KEY",
-        "AZURE_API_BASE",
-        "ANTHROPIC_API_KEY",
-    ]
-    for useful_secret in useful_secrets:
-        if f"{whoami}_{useful_secret}" in beaker_secrets:
-            env_vars.append(beaker.BeakerEnvVar(name=useful_secret, secret=f"{whoami}_{useful_secret}"))
-        elif useful_secret in beaker_secrets:
-            env_vars.append(beaker.BeakerEnvVar(name=useful_secret, secret=useful_secret))
-
-    # use the user's PATH; including the conda / python PATH
-    if not pure_docker_mode:
-        env_vars.extend([beaker.BeakerEnvVar(name="PATH", value=os.getenv("PATH"))])
-
-    # if all cluster is in weka, we mount the weka
-    if all(c in WEKA_CLUSTERS for c in cluster):
-        env_vars.extend(
-            [
-                beaker.BeakerEnvVar(name="HF_HOME", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"),
-                beaker.BeakerEnvVar(
-                    name="HF_DATASETS_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"
-                ),
-                beaker.BeakerEnvVar(name="HF_HUB_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/hub"),
-                beaker.BeakerEnvVar(
-                    name="CHECKPOINT_OUTPUT_DIR",
-                    value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{global_wandb_id}",
-                ),
-            ]
-        )
-        if num_nodes > 1:
-            env_vars.extend(
-                [
-                    beaker.BeakerEnvVar(name="NCCL_SOCKET_IFNAME", value="ib"),
-                    beaker.BeakerEnvVar(name="NCCL_IB_HCA", value="^=mlx5_bond_0"),
-                ]
-            )
-    # if all cluster is in gcp we add the following env
-
-    elif all(c in GCP_CLUSTERS for c in cluster):
-        env_vars.extend(
-            [
-                beaker.BeakerEnvVar(name="HF_HOME", value="/filestore/.cache/huggingface"),
-                beaker.BeakerEnvVar(name="HF_DATASETS_CACHE", value="/filestore/.cache/huggingface"),
-                beaker.BeakerEnvVar(name="HF_HUB_CACHE", value="/filestore/.cache/hub"),
-                beaker.BeakerEnvVar(
-                    name="HF_HUB_ENABLE_HF_TRANSFER",
-                    value="0",  # we disable it because GCP is weird on uploading to the hub
-                ),
-            ]
-        )
-        if num_nodes > 1:
-            env_vars.extend(
-                [
-                    # NOTE: For single-node training we still need all of these settings and we also
-                    # need host networking enabled so that the ethernet interface names don't change.
-                    beaker.BeakerEnvVar(name="NCCL_CROSS_NIC", value="0"),
-                    beaker.BeakerEnvVar(name="NCCL_PROTO", value="Simple,LL128"),
-                    beaker.BeakerEnvVar(name="NCCL_MIN_NCHANNELS", value="4"),
-                    beaker.BeakerEnvVar(name="NCCL_P2P_NET_CHUNKSIZE", value="524288"),
-                    beaker.BeakerEnvVar(name="NCCL_P2P_PCI_CHUNKSIZE", value="524288"),
-                    beaker.BeakerEnvVar(name="NCCL_P2P_NVL_CHUNKSIZE", value="1048576"),
-                    beaker.BeakerEnvVar(name="NCCL_NVLSTREE_MAX_CHUNKSIZE", value="131072"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_NUM_FLOWS", value="2"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL", value="0"),
-                    beaker.BeakerEnvVar(name="NCCL_BUFFSIZE", value="8388608"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_SNAP", value="1"),
-                    beaker.BeakerEnvVar(name="CUDA_VISIBLE_DEVICES", value="0,1,2,3,4,5,6,7"),
-                    beaker.BeakerEnvVar(name="NCCL_NET_GDR_LEVEL", value="PIX"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING", value="0"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS", value="600000"),
-                    beaker.BeakerEnvVar(name="NCCL_USE_SNAP", value="1"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
-                    beaker.BeakerEnvVar(name="NCCL_TUNER_PLUGIN", value="libnccl-tuner.so"),
-                    beaker.BeakerEnvVar(
-                        name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto"
-                    ),
-                    beaker.BeakerEnvVar(
-                        name="NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE",
-                        value="/var/lib/tcpxo/lib64/a3plus_guest_config_ll128.textproto",
-                    ),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_CTRL_DEV", value="enp0s12"),
-                    beaker.BeakerEnvVar(
-                        name="NCCL_FASTRAK_IFNAME",
-                        value="enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
-                    ),
-                    beaker.BeakerEnvVar(name="NCCL_SOCKET_IFNAME", value="enp0s12"),
-                    # Add COLL here to log all collective operations. Extreamly verbose, dont use for production.
-                    beaker.BeakerEnvVar(name="NCCL_DEBUG_SUBSYS", value="INIT,NET"),
-                ]
-            )
-    # don't mount anything; assume no cache
-    else:
-        pass
-
-    if resumable:
-        env_vars.extend(
-            [
-                beaker.BeakerEnvVar(name="WANDB_RUN_ID", value=global_wandb_id),
-                beaker.BeakerEnvVar(name="WANDB_RESUME", value="allow"),
-            ]
-        )
-
-    return env_vars
-
-
-def get_datasets(beaker_datasets, cluster: list[str]):
-    """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
-    res = []
-    # if all cluster is in weka, we mount the weka
-    if all(c in WEKA_CLUSTERS for c in cluster):
-        res = [
-            beaker.BeakerDataMount(
-                source=beaker.BeakerDataSource(weka="oe-adapt-default"), mount_path="/weka/oe-adapt-default"
-            ),
-            beaker.BeakerDataMount(
-                source=beaker.BeakerDataSource(weka="oe-training-default"), mount_path="/weka/oe-training-default"
-            ),
-        ]
-    elif all(c in GCP_CLUSTERS for c in cluster):
-        res = [
-            beaker.BeakerDataMount(
-                source=beaker.BeakerDataSource(host_path="/mnt/filestore_1"), mount_path="/filestore"
-            )
-        ]
-    for beaker_dataset in beaker_datasets:
-        to_append = beaker.BeakerDataMount(
-            source=beaker.BeakerDataSource(beaker=beaker_dataset["beaker"]), mount_path=beaker_dataset["mount_path"]
-        )
-        res.append(to_append)
-
-    return res
 
 
 def make_internal_command(command: list[str], args: argparse.Namespace, whoami: str, is_external_user: bool) -> str:
@@ -767,6 +550,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
             args.num_nodes,
             args.env,
             args.secret,
+            global_wandb_id,
         ),
         resources=beaker.BeakerTaskResources(gpu_count=args.gpus, shared_memory=args.shared_memory),
         replicas=args.num_nodes,
