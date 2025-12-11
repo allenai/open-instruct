@@ -199,29 +199,30 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
 
 
-def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation.TokenizerConfig) -> datasets.Dataset:
+def setup_dataset(
+    args: grpo_fast.Args,
+    tokenizer_config: dataset_transformation.TokenizerConfig,
+    dataset_config: grpo_fast.DatasetConfig,
+) -> datasets.Dataset:
     """Set up the dataset using the same pipeline as grpo_fast.py."""
     logger.info("Loading and processing dataset...")
 
-    # Transform function arguments
     transform_fn_args = [
         {},  # For rlvr_tokenize_v1
-        {"max_prompt_token_length": args.max_prompt_token_length},  # For rlvr_filter_v1
+        {"max_prompt_token_length": dataset_config.max_prompt_token_length},  # For rlvr_filter_v1
     ]
 
-    # Load dataset
     dataset = dataset_transformation.get_cached_dataset_tulu(
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+        dataset_mixer_list=dataset_config.dataset_mixer_list,
+        dataset_mixer_list_splits=dataset_config.dataset_mixer_list_splits,
         tc=tokenizer_config,
-        dataset_transform_fn=args.dataset_transform_fn,
+        dataset_transform_fn=dataset_config.dataset_transform_fn,
         transform_fn_args=transform_fn_args,
-        dataset_cache_mode=args.dataset_cache_mode,
-        dataset_local_cache_dir=args.dataset_local_cache_dir,
-        dataset_skip_cache=args.dataset_skip_cache,
+        dataset_cache_mode=dataset_config.dataset_cache_mode,
+        dataset_local_cache_dir=dataset_config.dataset_local_cache_dir,
+        dataset_skip_cache=dataset_config.dataset_skip_cache,
     )
 
-    # Shuffle dataset
     dataset = dataset.shuffle(seed=args.seed)
     logger.info(f"Dataset loaded with {len(dataset)} samples")
 
@@ -645,28 +646,26 @@ def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: ray.actor.
 
 def main() -> None:
     """Main benchmark function."""
-    # Parse arguments using ArgumentParserPlus
     parser = utils.ArgumentParserPlus(
-        (grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig)  # type: ignore[arg-type]
+        (grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig, grpo_fast.DatasetConfig)  # type: ignore[arg-type]
     )
 
-    args, tokenizer_config, model_config = cast(
-        tuple[grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig],
+    args, tokenizer_config, model_config, dataset_config = cast(
+        tuple[
+            grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig, grpo_fast.DatasetConfig
+        ],
         parser.parse_args_into_dataclasses(),
     )
 
-    # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Calculate flops per token before starting vLLM
     logger.info("Calculating model FLOPs per token...")
 
-    # Free GPU memory after calculating FLOPs and before starting vLLM
     logger.info("Freeing GPU memory before starting vLLM...")
     free_all_gpu_memory()
 
-    dataset = setup_dataset(args, tokenizer_config)
-    max_model_len = args.max_prompt_token_length + args.response_length
+    dataset = setup_dataset(args, tokenizer_config, dataset_config)
+    max_model_len = dataset_config.max_prompt_token_length + args.response_length
     vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
         args, tokenizer_config, model_config, max_model_len
     )

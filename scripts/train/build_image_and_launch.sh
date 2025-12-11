@@ -58,7 +58,7 @@ shift
 
 # Check if the script is a Python file or shell script
 if [[ "$script" == *.py ]]; then
-    uv run python "$script" "$beaker_user/$image_name" "$@"
+    uv run python "$script" --beaker_image="$beaker_user/$image_name" "$@"
 else
     bash "$script" "$beaker_user/$image_name" "$@"
 fi

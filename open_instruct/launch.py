@@ -320,11 +320,15 @@ def serialize_experiment_config(config: "ExperimentConfig") -> dict:
         else:
             return obj
 
-    return {
+    result = {
         "args": serialize_dataclass(config.args),
         "tokenizer_config": serialize_dataclass(config.tokenizer_config),
         "model_config": serialize_dataclass(config.model_config),
+        "dataset_config": serialize_dataclass(config.dataset_config),
     }
+    if config.eval_dataset_config is not None:
+        result["eval_dataset_config"] = serialize_dataclass(config.eval_dataset_config)
+    return result
 
 
 def launch_on_beaker(
