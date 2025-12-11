@@ -83,7 +83,6 @@ class FlatArguments(DatasetCachingArgs):
     # Note: the suggested ellipses typing above causes errors on python 3.10, so they are omitted.
     _VALID_DICT_FIELDS = ["additional_model_arguments"]
 
-    # Override defaults from DatasetCachingArgs for SFT
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-personas-algebra", "1.0"])
     """A list of datasets (local or HF) to sample from."""
     dataset_transform_fn: list[str] = field(

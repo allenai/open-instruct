@@ -916,11 +916,7 @@ class TokenizerConfig:
 
 @dataclass
 class DatasetCachingArgs:
-    """Base class with common dataset caching arguments.
-
-    This class consolidates the dataset-related arguments shared across training scripts
-    (finetune.py, dpo_tune_cache.py, grpo_fast.py, ppo.py, reward_modeling.py).
-    """
+    """Common dataset caching arguments shared across training scripts."""
 
     dataset_mixer_list: List[str] = field(default_factory=list)
     """A list of datasets (local or HF) to sample from."""
@@ -1997,21 +1993,8 @@ SCRIPT_DEFAULT_TRANSFORM_FNS = {
 
 def cache_dataset(
     args: DatasetCachingArgs, tc: TokenizerConfig, script_type: Literal["sft", "dpo", "grpo", "ppo", "reward_modeling"]
-) -> Tuple[str, str]:
-    """Cache dataset for a training script without running the full training.
-
-    This function consolidates the dataset caching logic that was previously duplicated
-    across training scripts. It can be called directly from mason.py without spawning
-    a subprocess.
-
-    Args:
-        args: Dataset caching arguments.
-        tc: Tokenizer configuration.
-        script_type: Type of training script (determines transform_fn_args structure).
-
-    Returns:
-        Tuple of (dataset_cache_path, dataset_config_hash).
-    """
+) -> List[Tuple[str, str]]:
+    """Cache dataset for a training script and return list of (cache_path, config_hash) tuples."""
     dataset_transform_fn = args.dataset_transform_fn
     if not dataset_transform_fn:
         dataset_transform_fn = SCRIPT_DEFAULT_TRANSFORM_FNS.get(script_type, [])
@@ -2058,6 +2041,8 @@ def cache_dataset(
         system_prompt_override=system_prompt_override,
     )
 
+    results = [(os.path.join(args.dataset_local_cache_dir, config_hash), config_hash)]
+
     if args.dataset_mixer_eval_list:
         eval_dcs = load_dataset_configs(
             args.dataset_mixer_eval_list,
@@ -2079,6 +2064,6 @@ def cache_dataset(
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
         )
+        results.append((os.path.join(args.dataset_local_cache_dir, eval_config_hash), eval_config_hash))
 
-    cache_path = os.path.join(args.dataset_local_cache_dir, config_hash)
-    return cache_path, config_hash
+    return results

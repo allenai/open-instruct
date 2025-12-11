@@ -175,7 +175,6 @@ class ShutdownSentinel:
 
 @dataclass
 class Args(DatasetCachingArgs):
-    # Override defaults from DatasetCachingArgs for GRPO
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from."""
     dataset_mixer_eval_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])

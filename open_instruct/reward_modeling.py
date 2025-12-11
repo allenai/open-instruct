@@ -53,7 +53,6 @@ api = HfApi()
 
 @dataclass
 class Args(DatasetCachingArgs):
-    # Override defaults from DatasetCachingArgs for reward modeling
     dataset_mixer_list: list[str] = field(
         default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
     )

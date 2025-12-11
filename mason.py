@@ -487,12 +487,13 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 if tc.tokenizer_revision is None and model_config.model_revision is not None:
                     tc.tokenizer_revision = model_config.model_revision
 
-                dataset_cache_path, dataset_config_hash = cache_dataset(caching_args, tc, script_type)
+                cached_datasets = cache_dataset(caching_args, tc, script_type)
 
-                console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
-                console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
-                dataset_cache_paths.append(dataset_cache_path)
-                dataset_config_hashes.append(dataset_config_hash)
+                for dataset_cache_path, dataset_config_hash in cached_datasets:
+                    console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
+                    console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
+                    dataset_cache_paths.append(dataset_cache_path)
+                    dataset_config_hashes.append(dataset_config_hash)
                 console.log("✅✅✅ Finished running the caching command")
 
                 if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:

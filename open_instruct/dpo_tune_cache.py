@@ -100,7 +100,6 @@ class FlatArguments(DatasetCachingArgs):
     # Important: These should be typed with Optional[Union[dict,str,...]]
     _VALID_DICT_FIELDS = ["additional_model_arguments"]
 
-    # Override defaults from DatasetCachingArgs for DPO
     dataset_mixer_list: list[str] = field(
         default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
     )
