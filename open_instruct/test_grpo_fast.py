@@ -237,11 +237,11 @@ class TestGrpoFastBase(unittest.TestCase):
         """Setup queues and add prompts to generator - common pattern."""
         # Queue size must be at least as large as the number of queries to avoid blocking
         queue_size = max(len(queries), num_engines * 2)
-        param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
+        prompt_Q = ray_queue.Queue(maxsize=queue_size)
         inference_results_Q = ray_queue.Queue(maxsize=queue_size)
 
         # Track queues for cleanup
-        self._ray_queues.extend([param_prompt_Q, inference_results_Q])
+        self._ray_queues.extend([prompt_Q, inference_results_Q])
 
         mock_generation_config = MagicMock()
         mock_generation_config.n = 4
@@ -252,9 +252,9 @@ class TestGrpoFastBase(unittest.TestCase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, param_prompt_Q, mock_generation_config, False)
+            grpo_fast.add_prompt_to_generator(example, prompt_Q, mock_generation_config, False)
 
-        return param_prompt_Q, inference_results_Q, mock_dataset
+        return prompt_Q, inference_results_Q, mock_dataset
 
 
 class TestGrpoFastVLLM(TestGrpoFastBase):
@@ -267,17 +267,17 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, mock_dataset = self.setup_and_add_prompts_to_generator(
+        prompt_Q, inference_results_Q, mock_dataset = self.setup_and_add_prompts_to_generator(
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
         # Verify that we have the expected number of items in the queue (one per prompt)
-        self.assertEqual(param_prompt_Q.qsize(), num_unique_prompts_rollout)
+        self.assertEqual(prompt_Q.qsize(), num_unique_prompts_rollout)
 
         # Simulate vLLM processing
         batch_idx = 0
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
             self.assertIsInstance(request, PromptRequest)
             self.assertIsInstance(request.dataset_index, int)
             self.assertIsInstance(request.prompt_id, str)
@@ -351,14 +351,14 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, mock_dataset = self.setup_and_add_prompts_to_generator(
+        prompt_Q, inference_results_Q, mock_dataset = self.setup_and_add_prompts_to_generator(
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
         # Simulate vLLM processing
         batch_idx = 0
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
             mock_result = self.create_mock_result_from_request(request)
             inference_results_Q.put(mock_result)
             batch_idx += 1
@@ -399,14 +399,14 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         )
 
         # Setup and split batch
-        param_prompt_Q, inference_results_Q, mock_dataset = self.setup_and_add_prompts_to_generator(
+        prompt_Q, inference_results_Q, mock_dataset = self.setup_and_add_prompts_to_generator(
             queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
         )
 
         # Simulate vLLM processing with multiple samples
         batch_idx = 0
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
             mock_result = self.create_mock_result_from_request(request, num_samples_per_prompt)
             inference_results_Q.put(mock_result)
             batch_idx += 1
@@ -474,13 +474,13 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         tokenizer, reward_fn = self.create_mock_tokenizer_and_reward_fn()
 
-        param_prompt_Q, inference_results_Q, mock_dataset = self.setup_and_add_prompts_to_generator(
+        prompt_Q, inference_results_Q, mock_dataset = self.setup_and_add_prompts_to_generator(
             queries, ground_truths, datasets, raw_queries, indices, num_engines
         )
 
         requests = []
-        while not param_prompt_Q.empty():
-            requests.append(param_prompt_Q.get())
+        while not prompt_Q.empty():
+            requests.append(prompt_Q.get())
 
         for request in reversed(requests):
             mock_result = self.create_mock_result_from_request(request, num_samples_per_prompt)
@@ -567,9 +567,9 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         num_queries = 4
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
-        param_prompt_Q = ray_queue.Queue(maxsize=num_queries)
+        prompt_Q = ray_queue.Queue(maxsize=num_queries)
 
-        self._ray_queues.append(param_prompt_Q)
+        self._ray_queues.append(prompt_Q)
 
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
@@ -580,15 +580,13 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, param_prompt_Q, mock_generation_config, False)
+            grpo_fast.add_prompt_to_generator(example, prompt_Q, mock_generation_config, False)
 
-        self.assertEqual(
-            param_prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries"
-        )
+        self.assertEqual(prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries")
 
         prompt_count = 0
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
             self.assertIsInstance(request, PromptRequest)
             self.assertIsNotNone(request.prompt, "Each request should have a prompt")
             prompt_count += 1
@@ -600,9 +598,9 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         num_queries = 7
 
         queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
-        param_prompt_Q = ray_queue.Queue(maxsize=num_queries)
+        prompt_Q = ray_queue.Queue(maxsize=num_queries)
 
-        self._ray_queues.append(param_prompt_Q)
+        self._ray_queues.append(prompt_Q)
 
         mock_generation_config = MagicMock()
         mock_generation_config.n = 1
@@ -613,11 +611,11 @@ class TestStreamingAccumulation(TestGrpoFastBase):
         )
 
         for example in data_loader:
-            grpo_fast.add_prompt_to_generator(example, param_prompt_Q, mock_generation_config, False)
+            grpo_fast.add_prompt_to_generator(example, prompt_Q, mock_generation_config, False)
 
         request_count = 0
-        while not param_prompt_Q.empty():
-            request = param_prompt_Q.get()
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
             self.assertIsInstance(request, PromptRequest)
             self.assertIsNotNone(request.prompt, "Each request should have a prompt")
             request_count += 1

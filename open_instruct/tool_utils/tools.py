@@ -18,7 +18,7 @@ class ToolOutput:
 
 
 class Tool:
-    def __init__(self, start_str: str, end_str: str):
+    def __init__(self, start_str: str, end_str: str) -> None:
         self.start_str = start_str
         self.end_str = end_str
 
@@ -35,9 +35,9 @@ class PythonCodeTool(Tool):
     """@vwxyzjn: I recommend using something like a FastAPI for this kind of stuff; 1) you
     won't accidentally block the main vLLM process and 2) way easier to parallelize via load balancing."""
 
-    def __init__(self, api_endpoint: str, *args, **kwargs):
+    def __init__(self, api_endpoint: str, start_str: str, end_str: str) -> None:
         self.api_endpoint = api_endpoint
-        super().__init__(*args, **kwargs)
+        super().__init__(start_str, end_str)
 
     def __call__(self, prompt: str) -> ToolOutput:
         r"""

@@ -14,6 +14,7 @@
 # Copied from https://github.com/huggingface/alignment-handbook/blob/main/tests/test_data.py
 import json
 import pathlib
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -239,6 +240,53 @@ class TestBeakerDescription(unittest.TestCase):
         self.assertIn("https://wandb.ai/team/project/runs/xyz789", desc)
         self.assertNotIn("% complete", desc)
 
+    @mock.patch("os.environ.get")
+    @mock.patch("beaker.Beaker.from_env")
+    @mock.patch("open_instruct.utils.is_beaker_job")
+    def test_description_does_not_duplicate_on_restart(
+        self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get
+    ):
+        """Test that description doesn't duplicate when job restarts (fresh original_descriptions dict)."""
+        env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
+
+        previous_run_description = (
+            "Single GPU on Beaker with tool use test script. "
+            "git_commit: e6df3c9c git_branch: finbarr/async-reward "
+            "https://wandb.ai/ai2-llm/open_instruct_internal/runs/n53oxnzb "
+            "[5.0% complete (step 1/20), eta 0m]"
+        )
+        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+            mock_beaker_from_env, mock_is_beaker_job, previous_run_description
+        )
+
+        wandb_url = "https://wandb.ai/ai2-llm/open_instruct_internal/runs/n53oxnzb"
+        original_descriptions = {}
+
+        utils.maybe_update_beaker_description(
+            current_step=2,
+            total_steps=20,
+            start_time=time.time(),
+            wandb_url=wandb_url,
+            original_descriptions=original_descriptions,
+        )
+
+        self.assertEqual(len(description_history), 1)
+        desc = description_history[0]
+
+        git_commit_count = desc.count("git_commit:")
+        git_branch_count = desc.count("git_branch:")
+        wandb_count = desc.count("wandb.ai")
+
+        self.assertEqual(
+            git_commit_count, 1, f"git_commit should appear once, but appears {git_commit_count} times in: {desc}"
+        )
+        self.assertEqual(
+            git_branch_count, 1, f"git_branch should appear once, but appears {git_branch_count} times in: {desc}"
+        )
+        self.assertEqual(wandb_count, 1, f"wandb URL should appear once, but appears {wandb_count} times in: {desc}")
+        self.assertIn("Single GPU on Beaker with tool use test script.", desc)
+
 
 class TestSlackMessage(unittest.TestCase):
     @responses.activate
@@ -266,25 +314,26 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
             ("s3", "s3://bucket/path"),
             ("azure", "az://container/path"),
             ("hdfs", "hdfs://cluster/path"),
+            ("gcs localpath", "/filestore/path"),
         ]
     )
     def test_cloud_paths_skipped(self, name, path):
         with mock.patch("shutil.disk_usage") as mock_disk_usage:
-            grpo_fast.warn_if_low_disk_space(path, threshold=0.5, send_slack_alerts=False)
+            utils.warn_if_low_disk_space(path)
             mock_disk_usage.assert_not_called()
 
     @mock.patch("shutil.disk_usage")
     def test_no_warning_below_threshold(self, mock_disk_usage):
         mock_disk_usage.return_value = mock.Mock(total=100, used=50, free=50)
-        with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
-            grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/tmp/test", threshold=0.85)
             mock_warning.assert_not_called()
 
     @mock.patch("shutil.disk_usage")
     def test_warning_above_threshold(self, mock_disk_usage):
         mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
-        with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
-            grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/tmp/test", threshold=0.85)
             mock_warning.assert_called_once()
             self.assertIn("90.0%", mock_warning.call_args[0][0])
 
@@ -299,7 +348,7 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
         mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
         responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
 
-        grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=True)
+        utils.warn_if_low_disk_space("/tmp/test", send_slack_alerts=True)
 
         self.assertEqual(len(responses.calls), 1)
         request_body = json.loads(responses.calls[0].request.body)
@@ -308,9 +357,45 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
     @mock.patch("shutil.disk_usage")
     def test_zero_total_disk_space_returns_early(self, mock_disk_usage):
         mock_disk_usage.return_value = mock.Mock(total=0, used=0, free=0)
-        with mock.patch.object(grpo_fast.logger, "warning") as mock_warning:
-            grpo_fast.warn_if_low_disk_space("/tmp/test", threshold=0.85, send_slack_alerts=False)
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/tmp/test")
             mock_warning.assert_not_called()
+
+    def test_disk_usage_warns_for_failing_path(self):
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/non/existant/path")
+            mock_warning.assert_called()
+
+
+class TestDownloadFromGsBucket(unittest.TestCase):
+    def test_download_from_gs_bucket(self):
+        src_paths = ["gs://bucket/data1", "gs://bucket/data2"]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest_path = pathlib.Path(tmp_dir) / "downloads"
+            captured_cmd: dict[str, list[str]] = {}
+
+            def mock_live_subprocess_output(cmd):
+                captured_cmd["cmd"] = cmd
+
+            with mock.patch.object(utils, "live_subprocess_output", side_effect=mock_live_subprocess_output):
+                utils.download_from_gs_bucket(src_paths=src_paths, dest_path=str(dest_path))
+
+            expected_cmd = [
+                "gsutil",
+                "-o",
+                "GSUtil:parallel_thread_count=1",
+                "-o",
+                "GSUtil:sliced_object_download_threshold=150",
+                "-m",
+                "cp",
+                "-r",
+                *src_paths,
+                str(dest_path),
+            ]
+
+            self.assertEqual(captured_cmd["cmd"], expected_cmd)
+            self.assertTrue(dest_path.exists())
 
 
 class TestUtilityFunctions(unittest.TestCase):

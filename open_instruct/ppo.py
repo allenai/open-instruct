@@ -364,8 +364,8 @@ class Args:
     # Tool settings
     tools: list[str] | None = None
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: list[int] = field(default_factory=lambda: [5])
-    """Maximum number of tool calls allowed. Can be either a single integer (applies to all tools) or a list of integers
+    max_tool_calls: tuple[int, ...] = (5,)
+    """Maximum number of tool calls allowed. Can be either a single integer (applies to all tools) or a tuple of integers
     with length 1 (applies to all tools) or matching the length of the tools list (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
@@ -1649,21 +1649,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     num_total_tokens = 0
     start_time = time.time()
     training_start_time = time.time()  # Track overall training start time
+    maybe_update_beaker_description(
+        current_step=resume_training_step - 1,
+        total_steps=args.num_training_steps,
+        start_time=training_start_time,
+        wandb_url=wandb_url,
+    )
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            # Update Beaker progress every 10 steps or on first/last step
-            if (
-                training_step == resume_training_step
-                or training_step % 10 == 0
-                or training_step == args.num_training_steps
-            ):
-                maybe_update_beaker_description(
-                    current_step=training_step,
-                    total_steps=args.num_training_steps,
-                    start_time=training_start_time,
-                    wandb_url=wandb_url,
-                )
-
             print("-" * 100)
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
@@ -1828,6 +1821,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 del table
             except Empty:
                 print("[Main Thread] 🙈 Evaluation responses not received")
+
+            maybe_update_beaker_description(
+                current_step=training_step,
+                total_steps=args.num_training_steps,
+                start_time=training_start_time,
+                wandb_url=wandb_url,
+            )
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):

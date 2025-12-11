@@ -434,7 +434,7 @@ def _create_server_args(model_path: str) -> argparse.Namespace:
     return args
 
 
-def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> None:
+def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.Future | None:
     base_request_id = sub_request["base_request_id"]
     expected_n = sub_request["expected_n"]
 
@@ -448,7 +448,9 @@ def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> None:
     actor.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
 
     if len(actor.request_outputs[base_request_id]["outputs"]) == expected_n:
-        asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
+        return asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
+
+    return None
 
 
 async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str) -> None:
@@ -650,7 +652,7 @@ class LLMRayActor:
 
     def _init_openai_client(self) -> None:
         base_url = f"http://127.0.0.1:{self.server_port}/v1"
-        self.client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=60.0)
+        self.client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=3600)
         self.model_name = self.llm_engine.vllm_config.model_config.model
 
         logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
@@ -676,8 +678,15 @@ class LLMRayActor:
         return self._should_stop_value
 
     def process_from_queue(self) -> None:
+        finalize_futures: list[futures.Future] = []
         while True:
-            accumulate_completions(self, self.completion_queue.get())
+            completion_future = accumulate_completions(self, self.completion_queue.get())
+            if completion_future is not None:
+                finalize_futures.append(completion_future)
+
+            done, not_done = futures.wait(finalize_futures, timeout=0)
+            [future.result() for future in done]
+            finalize_futures = list(not_done)
 
     def init_process_group(
         self,
@@ -863,6 +872,12 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         if excess > 0 or current_max_tokens <= 0:
             break
 
+    if output.finish_reason == "stop" and len(response_tokens) == 0:
+        eos_token_id = actor.llm_engine.tokenizer.eos_token_id
+        response_tokens.append(eos_token_id)
+        response_masks.append(1)
+        response_logprobs.append(float("nan"))
+
     complete_output = CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
         token_ids=response_tokens,
@@ -920,7 +935,7 @@ def create_vllm_engines(
     enforce_eager: bool,
     tokenizer_name_or_path: str,
     pretrain: str,
-    revision: str,
+    revision: str | None,
     seed: int,
     enable_prefix_caching: bool,
     max_model_len: int,
@@ -934,12 +949,11 @@ def create_vllm_engines(
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
-    use_fp8_kv_cache=False,
     inflight_updates: bool = False,
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
-) -> list[LLMRayActor]:
+) -> list[ray.actor.ActorHandle]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
         assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
@@ -1018,8 +1032,6 @@ def create_vllm_engines(
                 max_tool_calls=max_tool_calls_dict,
                 mask_tool_use=mask_tool_use,
                 inflight_updates=inflight_updates,
-                kv_cache_dtype="auto" if not use_fp8_kv_cache else "fp8",
-                calculate_kv_scales=use_fp8_kv_cache,
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
