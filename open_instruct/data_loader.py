@@ -647,9 +647,9 @@ def prepare_collated_data_for_workers(
     total_sequences = len(packed_sequences.query_responses)
     if total_sequences % world_size != 0:
         new_total = (total_sequences // world_size) * world_size
-        logger.warning(
-            f"Total packed sequences ({total_sequences}) is not evenly divisible by world_size ({world_size}). "
-            f"Truncating to {new_total} sequences (dropping {total_sequences - new_total})."
+        logger.info(
+            f"Total packed sequences ({total_sequences}) not divisible by world_size ({world_size}). "
+            f"Using {new_total} sequences, {total_sequences - new_total} will carry over."
         )
     B = total_sequences // world_size
     collated_data = []
@@ -906,11 +906,6 @@ class DataPreparationActor:
                 logger.warning(f"Only {num_packed} sequences, need {self.dp_world_size}. Carrying all to next step.")
                 continue
 
-            if usable_count < num_packed:
-                leftover_packed = slice_packed_sequences(packed_sequences, usable_count, num_packed)
-                packed_sequences = slice_packed_sequences(packed_sequences, 0, usable_count)
-                logger.info(f"Carrying over {num_packed - usable_count} sequences to next step")
-
             if self.allow_world_padding:
                 pad_sequences_for_world_size(
                     packed_sequences, self.dp_world_size, self.tokenizer.pad_token_id, self.tokenizer.eos_token_id
@@ -919,6 +914,10 @@ class DataPreparationActor:
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id
             )
+
+            if usable_count < num_packed:
+                leftover_packed = slice_packed_sequences(packed_sequences, usable_count, num_packed)
+                logger.info(f"Carrying over {num_packed - usable_count} sequences to next step")
 
             if len(result.responses) == 0:
                 step_metrics = {}
