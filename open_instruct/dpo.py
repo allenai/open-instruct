@@ -549,7 +549,9 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
 
     json_config = config_to_json_serializable(args.as_dict())
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
-    trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback()
+    trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback(
+        num_flops_per_token=model.num_flops_per_token(args.max_seq_length)
+    )
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if slack_webhook_url:

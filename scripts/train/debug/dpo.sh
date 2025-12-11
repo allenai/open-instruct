@@ -28,4 +28,5 @@ uv run python mason.py \
     --seed 123 \
     --use_flash_attn \
     --logging_steps 10 \
-    --with_tracking
+    --with_tracking \
+    --push_to_hub False
