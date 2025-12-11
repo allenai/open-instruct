@@ -354,7 +354,8 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
     """
 
     def __call__(self, features, return_tensors=None):
-        # call the original collator on chosen and rejected separately, then combine
+        dataset_indices = [f.get("dataset_index") for f in features]
+
         def filter_batch(match_string, features):
             return [{k.replace(match_string, ""): v for k, v in f.items() if match_string in k} for f in features]
 
@@ -365,4 +366,8 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             result["chosen_" + k] = chosen_features[k]
         for k in rejected_features:
             result["rejected_" + k] = rejected_features[k]
+
+        if dataset_indices[0] is not None:
+            result["dataset_index"] = dataset_indices
+
         return result
