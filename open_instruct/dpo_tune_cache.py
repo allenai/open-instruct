@@ -23,6 +23,7 @@ import os
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
+
 # isort: on
 import json
 import math
