@@ -39,7 +39,7 @@ wheels = [
 [[package]]
 name = "ai2-olmo-core"
 version = "2.4.0"
-source = { git = "https://github.com/allenai/OLMo-core.git?rev=finbarr%2Fgpu-memory-prefix#eb691fa88603760e7ce8b30c743e3003ede34dd4" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bettermap" },
     { name = "cached-path" },
@@ -52,6 +52,10 @@ dependencies = [
     { name = "safetensors" },
     { name = "torch", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.8.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform != 'darwin'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/88/8b/9cae912f67625116d8fda3e979f84173249b257fdd014c66a17904d322b7/ai2_olmo_core-2.4.0.tar.gz", hash = "sha256:25f48abeedb3befddfe5c711138b094c151801f0b8fcde42c57677ddf932b6e6", size = 496584, upload-time = "2025-11-20T19:15:10.62Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/16/d85b676c5ab5fec197e1c9de6d990a24d16ba3f94e04bbb784929cec62dd/ai2_olmo_core-2.4.0-py3-none-any.whl", hash = "sha256:82a61146c49d41ebe42b6a3d7611bdbf6f50973e085feb62267bc31a9517f5d6", size = 582441, upload-time = "2025-11-20T19:15:08.393Z" },
 ]
 
 [[package]]
@@ -1990,7 +1994,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.10.1" },
-    { name = "ai2-olmo-core", git = "https://github.com/allenai/OLMo-core.git?rev=finbarr%2Fgpu-memory-prefix" },
+    { name = "ai2-olmo-core", specifier = "==2.4.0" },
     { name = "antlr4-python3-runtime", specifier = "==4.11" },
     { name = "backoff", specifier = ">=2.2.1" },
     { name = "beaker-py", specifier = ">=2.5.3" },
