@@ -8,8 +8,7 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - 'open_instruct/**'
+  merge_group:
 
 jobs:
   changelog:
@@ -24,4 +23,30 @@ jobs:
 
     - name: Check that CHANGELOG has been updated
       run: |
-        git diff --name-only $(git merge-base origin/main HEAD) | grep '^CHANGELOG.md$' && echo "Thanks for helping keep our CHANGELOG up-to-date!"
+        # Only require changelog for open_instruct/** changes
+        if git diff --name-only $(git merge-base origin/main HEAD) | grep -q '^open_instruct/'; then
+          git diff --name-only $(git merge-base origin/main HEAD) | grep '^CHANGELOG.md$' && echo "Thanks for helping keep our CHANGELOG up-to-date!"
+        else
+          echo "No open_instruct/ changes detected, skipping CHANGELOG check"
+        fi
+
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "0.8.8"
+
+    - name: Style check
+      run: make style-check
+
+    - name: Quality check
+      run: make quality-check
