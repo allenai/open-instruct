@@ -719,12 +719,9 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     break
 
             if output_dir_value and not output_dir_value.startswith("gs://"):
-                gs_output_dir = f"gs://ai2-llm/post-training/deletable_checkpoint/{whoami}/{output_dir_value}"
-                for idx, cmd in enumerate(command):
-                    if cmd == "--output_dir":
-                        command[idx + 1] = gs_output_dir
-                        break
-                console.log(f"Overriding --output_dir to GCS: {gs_output_dir}")
+                gs_save_folder = f"gs://ai2-llm/post-training/deletable_checkpoint/{whoami}/{output_dir_value}"
+                command.extend(["--save_folder", gs_save_folder])
+                console.log(f"Adding --save_folder for GCS: {gs_save_folder}")
 
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'

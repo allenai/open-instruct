@@ -572,7 +572,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
 
     metrics_collect_interval = args.logging_steps if args.logging_steps is not None else args.log_every
     trainer = train.TrainerConfig(
-        save_folder=args.output_dir,
+        save_folder=args.save_folder if args.save_folder else args.output_dir,
         max_duration=train.Duration.epochs(args.num_epochs),
         metrics_collect_interval=metrics_collect_interval,
         callbacks=trainer_callbacks,
