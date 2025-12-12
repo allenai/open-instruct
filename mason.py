@@ -14,7 +14,7 @@ from rich.console import Console
 from rich.text import Text
 
 from open_instruct.launch import generate_id, get_datasets, get_env_vars, parse_beaker_dataset, parse_env_var
-from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS
+from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS, download_from_gs_bucket
 
 console = Console()
 
