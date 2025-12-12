@@ -18,9 +18,12 @@ from typing import Any, Literal, cast
 
 import peft
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from huggingface_hub import HfApi
 from olmo_core import config, train
+from olmo_core.config import DType
+from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
 from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.transformer import TransformerConfig
@@ -29,6 +32,10 @@ from olmo_core.optim.scheduler import Scheduler
 from olmo_core.train import callbacks
 from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import EvalBatchSpec, TrainModule
+from olmo_core.train.train_module.transformer import (
+    TransformerDataParallelConfig,
+    TransformerDataParallelWrappingStrategy,
+)
 from tqdm.auto import tqdm
 
 from open_instruct import data_types
@@ -86,17 +93,22 @@ def build_reference_logprobs_cache(
     dataloader: HFDataLoader,
     average_log_prob: bool,
     forward_fn: Callable,
+    full_dataset_size: int,
     use_lora: bool = False,
     device: torch.device | None = None,
     cache_path: str | pathlib.Path | None = None,
 ) -> TensorCache:
     """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
 
+    Each rank computes logprobs for its shard, then all_reduce combines them into
+    a full cache on every rank.
+
     Args:
         model: The model to use for computing reference logprobs.
         dataloader: The data loader to iterate over.
         average_log_prob: Whether to average log probabilities.
         forward_fn: The forward function to use.
+        full_dataset_size: Total size of the full dataset (before sharding).
         use_lora: Whether the model uses LoRA adapters.
         device: The device to use for computation.
         cache_path: Optional path to save/load the cache.
@@ -111,8 +123,8 @@ def build_reference_logprobs_cache(
             return TensorCache.from_disk(cache_path)
 
     model.eval()
-    chosen_logps_list: list[tuple[int, torch.Tensor]] = []
-    rejected_logps_list: list[tuple[int, torch.Tensor]] = []
+    chosen_tensor = torch.zeros(full_dataset_size, dtype=torch.float32, device=device)
+    rejected_tensor = torch.zeros(full_dataset_size, dtype=torch.float32, device=device)
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Caching reference logprobs"):
@@ -129,17 +141,14 @@ def build_reference_logprobs_cache(
             dataset_indices = batch["dataset_index"]
             for i, idx in enumerate(dataset_indices):
                 idx_int = idx.item() if isinstance(idx, torch.Tensor) else idx
-                chosen_logps_list.append((idx_int, chosen_logps[i].cpu()))
-                rejected_logps_list.append((idx_int, rejected_logps[i].cpu()))
+                chosen_tensor[idx_int] = chosen_logps[i]
+                rejected_tensor[idx_int] = rejected_logps[i]
 
-    chosen_logps_list.sort(key=lambda x: x[0])
-    rejected_logps_list.sort(key=lambda x: x[0])
-
-    chosen_tensor = torch.stack([lp for _, lp in chosen_logps_list])
-    rejected_tensor = torch.stack([lp for _, lp in rejected_logps_list])
+    dist.all_reduce(chosen_tensor, op=dist.ReduceOp.SUM)
+    dist.all_reduce(rejected_tensor, op=dist.ReduceOp.SUM)
 
     model.train()
-    cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
+    cache = TensorCache(tensors={"chosen_logps": chosen_tensor.cpu(), "rejected_logps": rejected_tensor.cpu()})
 
     if cache_path is not None:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
@@ -477,6 +486,24 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
     model = model.to(device=device, dtype=torch.bfloat16)
 
+    dp_config = TransformerDataParallelConfig(
+        name=DataParallelType.hsdp,
+        num_replicas=None,
+        shard_degree=None,
+        param_dtype=DType.bfloat16,
+        reduce_dtype=DType.float32,
+        wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
+    )
+    world_mesh = build_world_mesh(dp=dp_config, device_type=device.type)
+    dp_mesh = get_dp_model_mesh(world_mesh)
+    logger.info(f"Applying HSDP with dp_mesh: {dp_mesh}")
+    model.apply_fsdp(
+        dp_mesh=dp_mesh,
+        param_dtype=torch.bfloat16,
+        reduce_dtype=torch.float32,
+        wrapping_strategy=dp_config.wrapping_strategy,
+    )
+
     if args.dpo_config.packing:
         collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
@@ -504,6 +531,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         dataloader=data_loader_instance,
         average_log_prob=average_log_prob,
         forward_fn=forward_fn,
+        full_dataset_size=len(dataset),
         use_lora=args.use_lora,
         device=device,
     )

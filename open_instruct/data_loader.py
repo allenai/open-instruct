@@ -51,19 +51,17 @@ class HFDataLoader(data_loader.DataLoaderBase):
             fs_local_rank=fs_local_rank,
         )
 
-        dataset_with_indices = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
-        self._original_dataset = dataset_with_indices.shard(num_shards=world_size, index=rank)
-        self.dataset = self._original_dataset.shuffle(seed=seed)
+        self._full_dataset = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
         self.seed = seed
         self._batch_size = batch_size
         self._per_rank_batch_size = batch_size // world_size
-        # Identity collator returns the list of examples unchanged.
         self._collator = collator if collator is not None else (lambda x: x)
-        self.effective_size = len(self.dataset) - (len(self.dataset) % self._per_rank_batch_size)
         self._automatic_reshuffle = automatic_reshuffle
         self._excluded_indices: set[int] = set()
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
+
+        self._reshard(epoch=0)
 
     def __next__(self) -> dict[str, Any]:
         if self._current_iter is None:
@@ -125,7 +123,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._excluded_indices.add(index)
 
     def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
-        """Reshuffle the dataset for a new epoch.
+        """Reshuffle and reshard the dataset for a new epoch.
 
         Args:
             epoch: The epoch number to use for shuffling seed. If None, increments internal counter.
@@ -133,9 +131,16 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         self._epoch = self._epoch + 1 if epoch is None else epoch
         self.batches_processed = 0
-        shuffled = self._original_dataset.shuffle(seed=self.seed + self._epoch)
-        # If this is slow, we can speed it up by making this a boolean mask.
-        self.dataset = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
+        self._reshard(self._epoch)
+
+    def _reshard(self, epoch: int) -> None:
+        """Reshard the dataset for a given epoch.
+
+        Shuffles the full dataset with an epoch-based seed, then shards to this rank.
+        """
+        shuffled = self._full_dataset.shuffle(seed=self.seed + epoch)
+        sharded = shuffled.shard(num_shards=self.dp_world_size, index=self.dp_rank)
+        self.dataset = sharded.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
         self.effective_size = len(self.dataset) - (len(self.dataset) % self._per_rank_batch_size)
 
     def get_mock_batch(self) -> dict[str, Any]:
