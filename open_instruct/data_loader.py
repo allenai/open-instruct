@@ -38,9 +38,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
                 collated batch. When provided, _iter_batches() yields collated batches
                 of size batch_size // world_size.
         """
-        super().__init__(
-            work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=0
-        )
+        super().__init__(work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank)
 
         dataset_with_indices = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
         self._original_dataset = dataset_with_indices.shard(num_shards=world_size, index=rank)
