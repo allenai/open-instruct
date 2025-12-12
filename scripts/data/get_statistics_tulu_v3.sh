@@ -10,7 +10,7 @@ datasets=(
     ai2-adapt-dev/tulu_v3.9_wildchat_100k
     ai2-adapt-dev/personahub_math_v5_regen_149960
     allenai/tulu-3-sft-personas-math-grade
-    ai2-adapt-dev/tulu_v3.9_open_math_2_gsm8k_50k 
+    ai2-adapt-dev/tulu_v3.9_open_math_2_gsm8k_50k
     ai2-adapt-dev/numinamath_tir_math_decontaminated
     ai2-adapt-dev/tulu_v3.9_personahub_math_interm_algebra_20k
     ai2-adapt-dev/personahub_code_v2_34999
@@ -27,7 +27,7 @@ datasets=(
 # For every dataset, get the statistics if the output directory doesn't exist
 for dataset in "${datasets[@]}"; do
     output_file="data/processed/${dataset}_statistics.json"
-    
+
     if [ ! -f "$output_file" ]; then
         echo "Getting statistics for $dataset..."
         python scripts/data/get_statistics.py --data_path ${dataset} --save_path ${output_file}
@@ -47,7 +47,7 @@ datasets_pref=(
 # For every dataset, get the statistics if the output directory doesn't exist
 for dataset in "${datasets_pref[@]}"; do
     output_file="data/processed/${dataset}_statistics.json"
-    
+
     if [ ! -f "$output_file" ]; then
         echo "Getting statistics for $dataset..."
         python scripts/data/get_statistics.py --data_path ${dataset} --save_path ${output_file} --messages_key chosen

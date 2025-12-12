@@ -20,17 +20,14 @@ import numpy as np
 import pandas as pd
 import tqdm
 from datasets import load_dataset
-import open_instruct.utils as open_instruct_utils
 from huggingface_hub import repo_exists
 from transformers import AutoTokenizer
 
+import open_instruct.utils as open_instruct_utils
+
 
 def get_statistics_for_messages_data(
-    data_path,
-    dataset=None,
-    split="train",
-    messages_key="messages",
-    tokenizer="philschmid/meta-llama-3-tokenizer",
+    data_path, dataset=None, split="train", messages_key="messages", tokenizer="philschmid/meta-llama-3-tokenizer"
 ):
     if dataset is None:
         # load dataset
@@ -100,11 +97,7 @@ def get_statistics_for_messages_data(
 
 
 def get_statistics_for_prompt_completion_data(
-    data_path,
-    dataset=None,
-    split="train",
-    response_key="completion",
-    tokenizer="philschmid/meta-llama-3-tokenizer",
+    data_path, dataset=None, split="train", response_key="completion", tokenizer="philschmid/meta-llama-3-tokenizer"
 ):
     if dataset is None:
         # load dataset
@@ -157,12 +150,11 @@ if __name__ == "__main__":
 
     # Check if the data_path is a dataset id, only check if /
     if "json" in args.data_path:
-        with open(args.data_path, "r") as f:
+        with open(args.data_path) as f:
             sample = json.loads(f.readline())
         dataset = None
 
     elif repo_exists(args.data_path, repo_type="dataset"):
-
         dataset = load_dataset(args.data_path, num_proc=open_instruct_utils.max_num_processes())
         sample = dataset[args.split][0]
     else:

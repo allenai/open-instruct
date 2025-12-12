@@ -169,4 +169,3 @@ python update_command_args.py scripts/train/olmo2/grpo_fast_13b_zero.sh \
     --wandb_project_name open_instruct_public \
     --priority urgent \
     --image costah/open_instruct_dev0327_4 | uv run bash
-
