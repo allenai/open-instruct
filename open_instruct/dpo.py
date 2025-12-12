@@ -61,7 +61,7 @@ from open_instruct.utils import (
 )
 
 
-class DPOLossType(enum.Enum):
+class DPOLossType(enum.StrEnum):
     dpo = "dpo"
     dpo_norm = "dpo_norm"
     simpo = "simpo"
