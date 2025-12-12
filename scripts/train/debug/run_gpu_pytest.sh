@@ -1,4 +1,5 @@
 #!/bin/bash
+set -eo pipefail
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
