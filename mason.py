@@ -17,6 +17,18 @@ from rich.text import Text
 
 from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS, download_from_gs_bucket
 
+# Suppress multiprocess ResourceTracker cleanup warnings (Python 3.12 compatibility issue)
+_original_unraisablehook = sys.unraisablehook
+
+
+def _custom_unraisablehook(unraisable):
+    if "ResourceTracker" in str(unraisable.object) and "_recursion_count" in str(unraisable.exc_value):
+        return
+    _original_unraisablehook(unraisable)
+
+
+sys.unraisablehook = _custom_unraisablehook
+
 console = Console()
 
 
