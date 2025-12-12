@@ -15,13 +15,13 @@ Example:
         --output-dataset your-hf-username/new-dataset \
         --split split_0
 """
+
 import argparse
 import copy
 import json
 import os
 import pathlib
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 
 import datasets
 import openai
@@ -37,8 +37,10 @@ class TokenUsage:
 
     @property
     def cost(self) -> float:
-        cost = (self.prompt_tokens * MODEL_COSTS_PER_1M_TOKENS["o3-batch"]["input"] +
-                self.completion_tokens  * MODEL_COSTS_PER_1M_TOKENS["o3-batch"]["output"]) / 1_000_000
+        cost = (
+            self.prompt_tokens * MODEL_COSTS_PER_1M_TOKENS["o3-batch"]["input"]
+            + self.completion_tokens * MODEL_COSTS_PER_1M_TOKENS["o3-batch"]["output"]
+        ) / 1_000_000
         return cost
 
 
@@ -50,8 +52,7 @@ class BatchResult:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Create a new dataset with updated completions "
-        "from an Azure OpenAI batch run."
+        description="Create a new dataset with updated completions " "from an Azure OpenAI batch run."
     )
     p.add_argument("batch_id", help="Azure batch job ID(s) to process (comma-separated for multiple)")
     p.add_argument(
@@ -64,20 +65,10 @@ def parse_args() -> argparse.Namespace:
         default="finbarr/tulu-3-sft-personas-code-o3",
         help="Target HF dataset to push the updated rows",
     )
+    p.add_argument("--split", default="train", help="Split name in the source dataset (and for the output dataset)")
+    p.add_argument("--no-upload", action="store_true", help="Skip pushing to the Hub (dry-run)")
     p.add_argument(
-        "--split",
-        default="train",
-        help="Split name in the source dataset (and for the output dataset)",
-    )
-    p.add_argument(
-        "--no-upload",
-        action="store_true",
-        help="Skip pushing to the Hub (dry-run)",
-    )
-    p.add_argument(
-        "--max-rows",
-        type=int,
-        help="Limit the number of rows in the output dataset (for testing purposes)",
+        "--max-rows", type=int, help="Limit the number of rows in the output dataset (for testing purposes)"
     )
     return p.parse_args()
 
@@ -85,7 +76,7 @@ def parse_args() -> argparse.Namespace:
 client = openai.AzureOpenAI(
     azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
-    api_version="2024-07-01-preview"
+    api_version="2024-07-01-preview",
 )
 
 
@@ -101,7 +92,7 @@ def check_batch_status(batch_id: str) -> bool:
         return False
 
 
-def get_batch_results(batch_id: str) -> Tuple[dict[str, str], TokenUsage]:
+def get_batch_results(batch_id: str) -> tuple[dict[str, str], TokenUsage]:
     """Returns a dictionary of result_id -> content and token usage statistics.
 
     Args:
@@ -156,15 +147,10 @@ def get_batch_results(batch_id: str) -> Tuple[dict[str, str], TokenUsage]:
         total_completion_tokens += usage["completion_tokens"]
         total_tokens += usage["total_tokens"]
 
-        results[result_id] = BatchResult(
-            result_id=result_id,
-            content=content,
-        )
+        results[result_id] = BatchResult(result_id=result_id, content=content)
 
     token_usage = TokenUsage(
-        prompt_tokens=total_prompt_tokens,
-        completion_tokens=total_completion_tokens,
-        total_tokens=total_tokens
+        prompt_tokens=total_prompt_tokens, completion_tokens=total_completion_tokens, total_tokens=total_tokens
     )
 
     return results, token_usage
@@ -175,11 +161,7 @@ def download_file(file_id: str, dest: pathlib.Path) -> None:
     endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
     url = f"{endpoint}/openai/files/{file_id}/content?api-version=2024-07-01-preview"
 
-    response = requests.get(
-        url,
-        headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]},
-        timeout=120
-    )
+    response = requests.get(url, headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]}, timeout=120)
     response.raise_for_status()
 
     with dest.open("wb") as f:
@@ -192,13 +174,13 @@ def load_jsonl(file_path: pathlib.Path) -> list[dict]:
         return [json.loads(line) for line in f]
 
 
-def process_single_batch(batch_id: str, id_lookup: dict) -> Tuple[dict[str, BatchResult], TokenUsage]:
+def process_single_batch(batch_id: str, id_lookup: dict) -> tuple[dict[str, BatchResult], TokenUsage]:
     """Process a single batch and return its results and token usage.
-    
+
     Args:
         batch_id: The ID of the batch to process
         id_lookup: Dictionary mapping IDs to original dataset rows
-        
+
     Returns:
         Tuple containing:
         - Dictionary of result_id -> BatchResult
@@ -211,11 +193,7 @@ def process_single_batch(batch_id: str, id_lookup: dict) -> Tuple[dict[str, Batc
     # Get batch details to check for errors
     endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
     url = f"{endpoint}/openai/batches/{batch_id}?api-version=2024-07-01-preview"
-    r = requests.get(
-        url,
-        headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]},
-        timeout=30,
-    )
+    r = requests.get(url, headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]}, timeout=30)
     r.raise_for_status()
     job = r.json()
 
@@ -236,7 +214,7 @@ def process_single_batch(batch_id: str, id_lookup: dict) -> Tuple[dict[str, Batc
             for i, error in enumerate(errors):
                 if i > 3:
                     break
-                request_id = error['custom_id']
+                request_id = error["custom_id"]
                 error_id = extract_id_from_custom_id(request_id)
                 original_row = id_lookup.get(error_id)
 
@@ -269,12 +247,12 @@ def process_single_batch(batch_id: str, id_lookup: dict) -> Tuple[dict[str, Batc
 
 def process_batch_results(
     *,
-    batch_ids: List[str],
+    batch_ids: list[str],
     input_dataset: str,
     output_dataset: str,
     split: str,
     push: bool,
-    max_rows: Optional[int] = None,
+    max_rows: int | None = None,
 ):
     # Load the original dataset first so we can look up failed prompts
     original_ds = datasets.load_dataset(input_dataset, split=split, num_proc=max_num_processes())
@@ -327,9 +305,11 @@ def process_batch_results(
     print(f"New dataset has {len(all_batch_results)} examples.")
 
     if abs(len(all_batch_results) - len(original_ds)) > 0.01 * len(original_ds):
-        raise ValueError(f"New dataset has {len(all_batch_results)} examples, but "
-                         f"original dataset had {len(original_ds)} examples."
-                          "We automatically reject if there's more than a 1% difference.")
+        raise ValueError(
+            f"New dataset has {len(all_batch_results)} examples, but "
+            f"original dataset had {len(original_ds)} examples."
+            "We automatically reject if there's more than a 1% difference."
+        )
 
     if not new_rows:
         return
@@ -363,7 +343,7 @@ def process_batch_results(
 def main():
     args = parse_args()
     # Split batch_id into list if comma-separated
-    batch_ids = args.batch_id.split(',')
+    batch_ids = args.batch_id.split(",")
     process_batch_results(
         batch_ids=batch_ids,
         input_dataset=args.input_dataset,

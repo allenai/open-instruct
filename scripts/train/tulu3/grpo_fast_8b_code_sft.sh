@@ -49,7 +49,7 @@ python mason.py \
     --local_eval_every 125 \
     --save_freq 200 \
     --gradient_checkpointing \
-    --with_tracking 
+    --with_tracking
 
 
 # --oe_eval_tasks gsm8k::tulu,bbh:cot-v1::tulu,codex_humanevalplus:0-shot-chat-n5,mbppplus::openinstruct,truthfulqa::tulu,cruxeval_input:pass@5,cruxeval_output:pass@5,ifeval::tulu \

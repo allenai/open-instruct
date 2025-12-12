@@ -4,7 +4,7 @@ We are using the Ai2 Safety Evaluation suite for safety evals. This contains a b
 
 ## Running at Ai2
 
-This should be the most relevant thing for internal Ai2 users of open-instruct. To run evals, use the task suite `SAFETY_EVAL` or `SAFETY_EVAL_REASONING` when calling `submit_eval_jobs.py`. This will create a job that uploads and runs the safety evaluations (and uploads to the leaderboard if the appropriate flag is set). 
+This should be the most relevant thing for internal Ai2 users of open-instruct. To run evals, use the task suite `SAFETY_EVAL` or `SAFETY_EVAL_REASONING` when calling `submit_eval_jobs.py`. This will create a job that uploads and runs the safety evaluations (and uploads to the leaderboard if the appropriate flag is set).
 
 An example command on a reasoning model would be:
 ```bash
@@ -78,7 +78,7 @@ gantry run --workspace {workspace} --budget ai2/oe-adapt --beaker-image kavelr/o
 
 You can freely add any additional arguments to give to Beaker, such as a `--priority` tag which can be set to preemptible, normal, high, or urgent. AI2 policies may restrict the priorities that are available to users on certain clusters.
 
-In the examples below, text within {} tags should be replaced with your own values. 
+In the examples below, text within {} tags should be replaced with your own values.
 
 As a convenience, you can use the `evaluation/gantry_run.sh` script which includes some necessary arguments. You can use it the same way as `gantry run`, but excluding these boilerplate arguments (take a look at the script to see what it includes). Example usage:
 
