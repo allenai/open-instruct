@@ -162,6 +162,7 @@ class TestExperimentSpec(unittest.TestCase):
                 args.num_nodes,
                 args.env,
                 args.secret,
+                mason.global_wandb_id,
             ),
             resources=beaker.BeakerTaskResources(gpu_count=args.gpus, shared_memory=args.shared_memory),
             replicas=args.num_nodes,

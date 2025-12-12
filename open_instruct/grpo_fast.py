@@ -195,11 +195,26 @@ class ExperimentConfig:
         assert self.args.pack_length >= self.dataset_config.max_prompt_token_length + self.args.response_length, (
             f"pack_length ({self.args.pack_length}) must be >= max_prompt_token_length ({self.dataset_config.max_prompt_token_length}) + response_length ({self.args.response_length})"
         )
+        if self.eval_dataset_config is not None:
+            assert (
+                self.args.pack_length >= self.eval_dataset_config.max_prompt_token_length + self.args.response_length
+            ), (
+                f"pack_length ({self.args.pack_length}) must be >= eval max_prompt_token_length ({self.eval_dataset_config.max_prompt_token_length}) + response_length ({self.args.response_length})"
+            )
 
     @classmethod
     def from_file(cls, path: str) -> "ExperimentConfig":
+        def deserialize(obj):
+            if isinstance(obj, dict):
+                if obj.get("__tuple__"):
+                    return tuple(deserialize(item) for item in obj["items"])
+                return {k: deserialize(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [deserialize(item) for item in obj]
+            return obj
+
         with open(path) as f:
-            data = json.load(f)
+            data = deserialize(json.load(f))
         eval_dataset_config = None
         if "eval_dataset_config" in data:
             eval_dataset_config = DatasetConfig(**data["eval_dataset_config"])
@@ -3097,5 +3112,15 @@ if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file", type=str, required=True)
-    main(ExperimentConfig.from_file(parser.parse_args().config_file))
+    parser.add_argument("--config_file", type=str, required=False, default=None)
+    known_args, remaining = parser.parse_known_args()
+
+    if known_args.config_file is not None:
+        main(ExperimentConfig.from_file(known_args.config_file))
+    else:
+        cli_parser = utils.ArgumentParserPlus((Args, TokenizerConfig, ModelConfig, DatasetConfig))
+        args, tokenizer_config, model_config, dataset_config = cli_parser.parse_args_into_dataclasses()
+        config = ExperimentConfig(
+            args=args, tokenizer_config=tokenizer_config, model_config=model_config, dataset_config=dataset_config
+        )
+        main(config)

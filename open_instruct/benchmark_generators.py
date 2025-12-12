@@ -207,9 +207,14 @@ def setup_dataset(
     """Set up the dataset using the same pipeline as grpo_fast.py."""
     logger.info("Loading and processing dataset...")
 
+    system_prompt_override = None
+    if dataset_config.system_prompt_override_file is not None:
+        with open(dataset_config.system_prompt_override_file) as f:
+            system_prompt_override = f.read().strip()
+
     transform_fn_args = [
-        {},  # For rlvr_tokenize_v1
-        {"max_prompt_token_length": dataset_config.max_prompt_token_length},  # For rlvr_filter_v1
+        {"system_prompt_override": system_prompt_override},
+        {"max_prompt_token_length": dataset_config.max_prompt_token_length},
     ]
 
     dataset = dataset_transformation.get_cached_dataset_tulu(
@@ -219,8 +224,11 @@ def setup_dataset(
         dataset_transform_fn=dataset_config.dataset_transform_fn,
         transform_fn_args=transform_fn_args,
         dataset_cache_mode=dataset_config.dataset_cache_mode,
+        dataset_config_hash=dataset_config.dataset_config_hash,
+        hf_entity=dataset_config.hf_entity,
         dataset_local_cache_dir=dataset_config.dataset_local_cache_dir,
         dataset_skip_cache=dataset_config.dataset_skip_cache,
+        system_prompt_override=system_prompt_override,
     )
 
     dataset = dataset.shuffle(seed=args.seed)

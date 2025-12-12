@@ -313,6 +313,8 @@ def serialize_experiment_config(config: "ExperimentConfig") -> dict:
                 value = getattr(obj, f.name)
                 result[f.name] = serialize_dataclass(value)
             return result
+        elif isinstance(obj, tuple):
+            return {"__tuple__": True, "items": [serialize_dataclass(item) for item in obj]}
         elif isinstance(obj, list):
             return [serialize_dataclass(item) for item in obj]
         elif isinstance(obj, dict):
@@ -337,7 +339,11 @@ def launch_on_beaker(
     setup_command: str = "source configs/beaker_configs/ray_node_setup.sh",
     script_path: str = "open_instruct/grpo_fast.py",
 ) -> str:
-    experiment_config.cache_dataset()
+    if not launch_config.no_auto_dataset_cache:
+        experiment_config.cache_dataset()
+    experiment_config.dataset_config.system_prompt_override_file = None
+    if experiment_config.eval_dataset_config is not None:
+        experiment_config.eval_dataset_config.system_prompt_override_file = None
     wandb_id = generate_id()
 
     config_dict = serialize_experiment_config(experiment_config)
