@@ -638,6 +638,13 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
             download_path = gs_saved_path.replace("gs://", "/gs/")
             download_path_without_last_folder = download_path.rsplit("/", 1)[0]
             gs_download_command = [
+                "if",
+                "[",
+                "!",
+                "-f",
+                f"{download_path}/config.json",
+                "];",
+                "then",
                 "mkdir",
                 "-p",
                 download_path,
@@ -652,6 +659,8 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 "-r",
                 gs_saved_path,
                 download_path_without_last_folder,
+                ";",
+                "fi",
                 "&&",
                 "ls",
                 download_path_without_last_folder,
