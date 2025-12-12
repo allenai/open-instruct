@@ -97,6 +97,7 @@ class TestExperimentSpec(unittest.TestCase):
                     "budget": "ai2/oe-adapt",
                     "gpus": 1,
                     "no_host_networking": False,
+                    "no_result": False,
                     "beaker_datasets": [],
                     "secret": [],
                     "shared_memory": "10.24gb",
@@ -121,6 +122,7 @@ class TestExperimentSpec(unittest.TestCase):
                     "budget": "ai2/oe-adapt",
                     "gpus": 8,
                     "no_host_networking": False,
+                    "no_result": False,
                     "beaker_datasets": [],
                     "secret": [],
                     "shared_memory": "10.24gb",
@@ -177,6 +179,52 @@ class TestExperimentSpec(unittest.TestCase):
             expected_spec.host_networking = True
 
         self.assertEqual(actual_spec, expected_spec)
+
+
+class TestTorchrunMultiNodeTransformation(unittest.TestCase):
+    @parameterized.parameterized.expand(
+        [
+            (
+                "transform_c10d_to_static",
+                "torchrun --nnodes 4 --nproc_per_node 8 --rdzv_backend c10d --rdzv_endpoint $BEAKER_LEADER_REPLICA_HOSTNAME:29500 script.py",
+                2,
+                "--rdzv_backend=static",
+            ),
+            (
+                "add_node_rank",
+                "torchrun --nnodes 4 --nproc_per_node 8 script.py",
+                2,
+                "--node_rank $BEAKER_REPLICA_RANK",
+            ),
+            ("add_rdzv_id", "torchrun --nnodes 4 --nproc_per_node 8 script.py", 2, "--rdzv_id=12347"),
+            ("add_rdzv_conf", "torchrun --nnodes 4 --nproc_per_node 8 script.py", 2, "--rdzv_conf='read_timeout=420'"),
+            (
+                "no_transform_single_node",
+                "torchrun --nproc_per_node 8 --rdzv_backend c10d script.py",
+                1,
+                "--rdzv_backend c10d",
+            ),
+        ]
+    )
+    def test_torchrun_transformation(self, name, input_command, num_nodes, expected_substring):
+        import re
+
+        join_full_command = input_command
+        if num_nodes > 1 and "torchrun" in join_full_command:
+            join_full_command = re.sub(r"--rdzv_backend\s+c10d", "--rdzv_backend=static", join_full_command)
+            if "--node_rank" not in join_full_command:
+                join_full_command = re.sub(r"(torchrun\s+)", r"\1--node_rank $BEAKER_REPLICA_RANK ", join_full_command)
+            if "--rdzv_id" not in join_full_command:
+                join_full_command = re.sub(r"(torchrun\s+)", r"\1--rdzv_id=12347 ", join_full_command)
+            if "--rdzv_conf" not in join_full_command:
+                join_full_command = re.sub(r"(torchrun\s+)", r"\1--rdzv_conf='read_timeout=420' ", join_full_command)
+            join_full_command = re.sub(
+                r"--rdzv_endpoint\s+(\$BEAKER_LEADER_REPLICA_HOSTNAME):(\d+)",
+                r"--rdzv_endpoint \1:29400",
+                join_full_command,
+            )
+
+        self.assertIn(expected_substring, join_full_command)
 
 
 if __name__ == "__main__":
