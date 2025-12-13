@@ -995,32 +995,37 @@ class PolicyTrainerRayProcess(RayProcess):
         refss = []
         if self.args.gather_whole_model:
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
+                # First pass: collect metadata
+                params_metadata = []
                 for name, param in model.named_parameters():
-                    count += 1  # empty_cache at last param
-                    # Fire all vllm engines for broadcast
-                    if torch.distributed.get_rank() == 0:
-                        shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
-                        refs = [
-                            engine.update_weight.remote(
-                                name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
-                            )
-                            for engine in self.vllm_engines
-                        ]
-                        refss.extend(refs)
+                    shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
+                    params_metadata.append((name, str(param.dtype), shape))
+
+                # Fire all vllm engines for broadcast
+                if torch.distributed.get_rank() == 0:
+                    refss = [
+                        engine.update_weights.remote(params_metadata, empty_cache=True) for engine in self.vllm_engines
+                    ]
+
+                # Second pass: broadcast data
+                for name, param in model.named_parameters():
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         else:  # broadcast each parameter independently
+            # First pass: collect metadata
+            params_metadata = []
             for name, param in model.named_parameters():
-                count += 1
-                if torch.distributed.get_rank() == 0:
-                    shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
-                    refs = [
-                        engine.update_weight.remote(
-                            name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
-                        )
-                        for engine in self.vllm_engines
-                    ]
-                    refss.extend(refs)
+                shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
+                params_metadata.append((name, str(param.dtype), shape))
+
+            # Fire all vllm engines for broadcast
+            if torch.distributed.get_rank() == 0:
+                refss = [
+                    engine.update_weights.remote(params_metadata, empty_cache=True) for engine in self.vllm_engines
+                ]
+
+            # Second pass: broadcast data
+            for name, param in model.named_parameters():
                 with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)

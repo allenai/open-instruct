@@ -702,6 +702,11 @@ class LLMRayActor:
         self._prepare_weight_update(name, dtype)
         return self._run_async(self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
 
+    def update_weights(self, params_list: list[tuple[str, str, tuple[int, ...]]], empty_cache: bool = False) -> None:
+        for name, dtype, _ in params_list:
+            self._prepare_weight_update(name, dtype)
+        return self._run_async(self.llm_engine.collective_rpc("update_weights", args=(params_list, empty_cache)))
+
     def update_weight_cuda_ipc(
         self, name: str, dtype: str, shape: tuple[int, ...], ipc_handles: list[Any], empty_cache: bool = False
     ) -> None:
