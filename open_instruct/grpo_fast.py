@@ -1488,6 +1488,9 @@ class BatchStatistics:
     percent_solved_mean: float
     no_resampled_prompts: int
     total_prompts: int
+    staleness_queue_steps: list[int] = field(default_factory=list)
+    staleness_generation_start_steps: list[int] = field(default_factory=list)
+    staleness_consumed_step: int | None = None
 
 
 def accumulate_inference_batches(
@@ -1506,6 +1509,7 @@ def accumulate_inference_batches(
     filter_zero_std_samples: bool = False,
     replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
+    training_step: int = None,
 ) -> tuple[GenerationResult, Batch, dict, BatchStatistics]:
     """Accumulate multiple inference results into a single training batch.
 
@@ -1555,6 +1559,8 @@ def accumulate_inference_batches(
     filtered_prompt_solved = 0
     filtered_prompt_nonzero = 0
     total_no_resampled = 0
+    staleness_queue_steps: list[int] = []
+    staleness_generation_start_steps: list[int] = []
     progress_bar = tqdm(
         total=num_prompts,
         desc=f"Accumulating Responses and Rewarding {num_prompts} prompts",
@@ -1567,6 +1573,9 @@ def accumulate_inference_batches(
 
         if isinstance(result, ShutdownSentinel):
             return result, None, None, None
+
+        staleness_queue_steps.append(result.queued_training_step)
+        staleness_generation_start_steps.append(result.generation_started_training_step)
 
         # Validate that each individual result has the expected number of responses
         assert len(result.responses) == generation_config.n, (
@@ -1735,6 +1744,9 @@ def accumulate_inference_batches(
         percent_solved_mean=percent_solved_mean,
         no_resampled_prompts=total_no_resampled,
         total_prompts=len(results),
+        staleness_queue_steps=staleness_queue_steps,
+        staleness_generation_start_steps=staleness_generation_start_steps,
+        staleness_consumed_step=training_step,
     )
     return combined_result, batch, combined_reward_metrics, batch_stats
 
@@ -1771,6 +1783,7 @@ def data_preparation_thread(
                 filter_zero_std_samples=args.filter_zero_std_samples,
                 replenish_prompts=True,
                 no_resampling_pass_rate=args.no_resampling_pass_rate,
+                training_step=training_step,
             )
             if isinstance(result, ShutdownSentinel):
                 logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
@@ -1914,8 +1927,26 @@ def data_preparation_thread(
             )
 
             batch_metrics = asdict(batch_stats)
-            batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics.items()}
 
+            # calculate staleness metrics
+            queue_steps = batch_stats.pop("staleness_queue_steps", [])
+            generation_steps = batch_stats.pop("staleness_generation_start_steps", [])
+            consumed_steps = batch_stats.pop("staleness_consumed_step", [])
+
+            queue_to_generation = []
+            generation_to_consume = []
+            for queue_step, generation_step, consume_step in zip(queue_steps, generation_steps, consumed_steps):
+                queue_to_generation.append(generation_step - queue_step)
+                generation_to_consume.append(consume_step - generation_step)
+
+            staleness_metrics = {
+                "staleness/queue_to_generation": queue_to_generation,
+                "staleness/queue_to_generation_mean": np.mean(queue_to_generation),
+                "staleness/generation_to_consume": generation_to_consume,
+                "staleness/generation_to_consume_mean": np.mean(generation_to_consume),
+            }
+
+            batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics.items()}
             metrics = {
                 "scores": scores.mean(),
                 "real_batch_size_ratio": real_num_responses / expected_num_responses,
@@ -1948,6 +1979,7 @@ def data_preparation_thread(
                 "time/getting_response": getting_response_time,
                 **reward_metrics,
                 **batch_metrics_prefixed,
+                **staleness_metrics,
             }
 
             total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
@@ -2751,6 +2783,7 @@ def run_training(
         wandb_url=wandb_url,
     )
     for training_step in range(resume_training_step, args.num_training_steps + 1):
+        actor_manager.set_current_training_step.remote(training_step)
         start_time = time.perf_counter()
 
         # Check if any of the threads have raised an exception.

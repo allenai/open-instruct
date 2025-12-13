@@ -87,6 +87,7 @@ class TestVllmUtils3(unittest.TestCase):
             request_id: {
                 "is_eval": False,
                 "dataset_index": 43039,
+                "generation_started_training_step": 2,
                 "prompt_id": "test_prompt_1",
                 "prompt_token_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                 "start_time": 1000.0,
@@ -123,6 +124,8 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_outputs, ["result1", "result2"])
         self.assertEqual(result.request_info.tool_runtimes, [0.5, 0.3])
         self.assertEqual(result.request_info.tool_calleds, [True, True])
+        self.assertEqual(result.queued_training_step, 1)
+        self.assertEqual(result.generation_started_training_step, 2)
 
     def test_process_outputs_without_tools(self):
         """Test that process_completed_request correctly handles outputs without tool attributes."""
@@ -156,6 +159,7 @@ class TestVllmUtils3(unittest.TestCase):
             request_id: {
                 "is_eval": True,
                 "dataset_index": 200,
+                "generation_started_training_step": 3,
                 "prompt_id": "test_prompt_2",
                 "prompt_token_ids": [1, 2, 3, 4, 5],
                 "start_time": 2000.0,
@@ -195,6 +199,8 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_outputs, ["", ""])
         self.assertEqual(result.request_info.tool_runtimes, [0.0, 0.0])
         self.assertEqual(result.request_info.tool_calleds, [False, False])
+        self.assertEqual(result.queued_training_step, 2)
+        self.assertEqual(result.generation_started_training_step, 3)
 
 
 if __name__ == "__main__":

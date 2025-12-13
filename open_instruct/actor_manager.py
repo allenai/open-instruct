@@ -54,6 +54,7 @@ class ActorManager:
         self._total_decode_tokens = 0
         self._training_step_history = collections.deque(maxlen=self._sample_window)
         self._generation_batch_history = collections.deque(maxlen=self._sample_window)
+        self._current_training_step = 0
         self._kv_cache_max_concurrency = None
         self._args = args
         if self._args.enable_queue_dashboard:
@@ -172,6 +173,14 @@ class ActorManager:
     def report_batch_generation_time(self, duration: float):
         """Report the time taken to generate a batch of data."""
         self._generation_batch_history.append(duration)
+
+    def set_current_training_step(self, training_step: int):
+        """Record the most recent training step observed by the learner."""
+        self._current_training_step = training_step
+
+    def get_current_training_step(self) -> int:
+        """Return the latest training step recorded by the learner."""
+        return self._current_training_step
 
     def set_kv_cache_max_concurrency(self, max_concurrency: int):
         """Set the KV cache max concurrency value."""
