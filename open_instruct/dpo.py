@@ -395,6 +395,7 @@ class DPOExperimentConfig(config.Config):
     dataset_skip_cache: bool = False
     cache_dataset_only: bool = False
     dataset_config_hash: str | None = None
+    reference_logprobs_cache_path: str | None = None
 
     push_to_hub: bool = True
     hf_entity: str | None = None
@@ -534,6 +535,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         full_dataset_size=len(dataset),
         use_lora=args.use_lora,
         device=device,
+        cache_path=args.reference_logprobs_cache_path,
     )
     logger.info("Reference logprobs cached.")
     data_loader_instance.reshuffle(epoch=0)

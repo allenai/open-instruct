@@ -30,4 +30,5 @@ uv run python mason.py \
     --use_flash_attn \
     --logging_steps 10 \
     --with_tracking \
-    --push_to_hub False
+    --push_to_hub False \
+    --reference_logprobs_cache_path /weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache/dpo_debug.pt
