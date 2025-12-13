@@ -82,6 +82,7 @@ client = AsyncOpenAI(
     api_key=os.environ.get("OPENAI_API_KEY")  # Set your API key as an environment variable
 )
 
+
 async def get_completion(prompt):
     """Get a completion for a single prompt."""
     try:
@@ -89,21 +90,14 @@ async def get_completion(prompt):
             model="gpt-4o",  # You can change the model as needed
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that can write code in Python."},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ],
             max_tokens=8192,
         )
-        return {
-            "original_prompt": prompt,
-            "openai_response": response.choices[0].message.content,
-            "success": True
-        }
+        return {"original_prompt": prompt, "openai_response": response.choices[0].message.content, "success": True}
     except Exception as e:
-        return {
-            "original_prompt": prompt,
-            "openai_response": str(e),
-            "success": False
-        }
+        return {"original_prompt": prompt, "openai_response": str(e), "success": False}
+
 
 async def process_prompts(prompts):
     """Process multiple prompts concurrently."""
@@ -111,9 +105,9 @@ async def process_prompts(prompts):
     results = await tqdm_asyncio.gather(*tasks)
     return results
 
+
 # Example usage
 async def main():
-
     # List of files to process
     # files = [
     #     "Python/backtracking/all_combinations.py",
@@ -131,7 +125,7 @@ async def main():
             if file.endswith(".py") and file != "__init__.py":
                 file_path = os.path.join(root, file)
                 try:
-                    with open(file_path, "r") as f:
+                    with open(file_path) as f:
                         content = f.read()
                         file_contents.append(content)
                 except Exception as e:
@@ -177,42 +171,36 @@ If you don't think the file is a good candidate for this dataset, you can set th
     for i, result in enumerate(results):
         print(f"\n--- Result {i+1} ---")
         try:
-            openai_response = json.loads(result['openai_response'])
-            reference_solution = openai_response['reference_solution']
-            test_cases = openai_response['test_cases']
-
+            openai_response = json.loads(result["openai_response"])
+            reference_solution = openai_response["reference_solution"]
+            test_cases = openai_response["test_cases"]
 
             # Test data
-            payload = {
-                "program": reference_solution,
-                "tests": test_cases,
-                "max_execution_time": 2.0
-            }
+            payload = {"program": reference_solution, "tests": test_cases, "max_execution_time": 2.0}
             # Send POST request
             response = requests.post(url, json=payload)
             response_json = response.json()
-            if sum(response_json['results']) == len(test_cases):
-                new_results.append({
-                    "messages": [{
-                        "role": "user",
-                        "content": openai_response["prompt"]
-                    }],
-                    "ground_truth": test_cases,
-                    "dataset": "vwxyzjn/the-algorithm-python",
-                    "reference_solution": reference_solution,
-                    "good_program": openai_response["good_program"]
-                })
+            if sum(response_json["results"]) == len(test_cases):
+                new_results.append(
+                    {
+                        "messages": [{"role": "user", "content": openai_response["prompt"]}],
+                        "ground_truth": test_cases,
+                        "dataset": "vwxyzjn/the-algorithm-python",
+                        "reference_solution": reference_solution,
+                        "good_program": openai_response["good_program"],
+                    }
+                )
         except Exception as e:
             print(f"Error parsing response: {e}")
             print(f"Response: {result['openai_response']}")
 
     print(f"Filtered {len(new_results)} results out of {len(results)}")
 
-
     dataset = Dataset.from_list(new_results)
     dataset.push_to_hub("vwxyzjn/the-algorithm-python")
 
     print("all done")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

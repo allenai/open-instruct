@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 
-import sys
 import argparse
 import re
-from pathlib import Path
 
-from datasets import load_dataset
-import open_instruct.utils as open_instruct_utils
-from huggingface_hub import hf_hub_download, list_repo_files
-import pyarrow.parquet as pq
 import pandas as pd
+from datasets import load_dataset
+from huggingface_hub import hf_hub_download, list_repo_files
+
+import open_instruct.utils as open_instruct_utils
 
 """
 Script to remove examples containing Chinese characters from our datasets.
@@ -30,7 +28,7 @@ def has_chinese_characters(text):
     Uses the main CJK Unified Ideographs block (\u4e00-\u9fff) which covers
     ~20,000 of the most commonly used Chinese characters.
     """
-    chinese_pattern = re.compile(r'[\u4e00-\u9fff]')
+    chinese_pattern = re.compile(r"[\u4e00-\u9fff]")
     return bool(chinese_pattern.search(text))
 
 
@@ -42,7 +40,7 @@ def get_chinese_character_ratio(text):
     if not text:
         return 0.0
 
-    chinese_pattern = re.compile(r'[\u4e00-\u9fff]')
+    chinese_pattern = re.compile(r"[\u4e00-\u9fff]")
     chinese_chars = chinese_pattern.findall(text)
     return len(chinese_chars) / len(text)
 
@@ -51,9 +49,9 @@ def extract_chinese_characters(text):
     """
     Extract Chinese characters from text for debugging purposes.
     """
-    chinese_pattern = re.compile(r'[\u4e00-\u9fff]')
+    chinese_pattern = re.compile(r"[\u4e00-\u9fff]")
     matches = chinese_pattern.findall(text)
-    return ''.join(matches)
+    return "".join(matches)
 
 
 def should_be_filtered_by_chinese(example, verbose=False, filter_user_turns=False, threshold=None):
@@ -102,7 +100,7 @@ def load_dataset_from_parquet(dataset_name):
     """Load dataset directly from parquet files."""
     # List all files in the repo
     files = list_repo_files(dataset_name, repo_type="dataset")
-    parquet_files = [f for f in files if f.endswith('.parquet')]
+    parquet_files = [f for f in files if f.endswith(".parquet")]
 
     if not parquet_files:
         raise ValueError(f"No parquet files found in {dataset_name}")
@@ -110,11 +108,7 @@ def load_dataset_from_parquet(dataset_name):
     # Download and load parquet files
     dfs = []
     for file in parquet_files:
-        local_file = hf_hub_download(
-            repo_id=dataset_name,
-            filename=file,
-            repo_type="dataset"
-        )
+        local_file = hf_hub_download(repo_id=dataset_name, filename=file, repo_type="dataset")
         df = pd.read_parquet(local_file)
         dfs.append(df)
 
@@ -123,17 +117,30 @@ def load_dataset_from_parquet(dataset_name):
 
     # Convert to HF Dataset
     from datasets import Dataset
+
     return Dataset.from_pandas(combined_df)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Filter a dataset by removing examples with Chinese characters")
     parser.add_argument("--input-dataset", required=True, help="Input dataset name")
-    parser.add_argument("--filter-user-turns", action="store_true",
-                       help="Also filter based on user messages (default: only filter assistant messages)")
+    parser.add_argument(
+        "--filter-user-turns",
+        action="store_true",
+        help="Also filter based on user messages (default: only filter assistant messages)",
+    )
 
-    parser.add_argument("--threshold", type=float, default=0.05, help="Minimum ratio of Chinese characters to trigger filtering (0.0-1.0)")
-    parser.add_argument("--output-entity", type=str, help="Output entity (org/user) for the filtered dataset. If not provided, uses the same entity as the input dataset.")
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.05,
+        help="Minimum ratio of Chinese characters to trigger filtering (0.0-1.0)",
+    )
+    parser.add_argument(
+        "--output-entity",
+        type=str,
+        help="Output entity (org/user) for the filtered dataset. If not provided, uses the same entity as the input dataset.",
+    )
 
     args = parser.parse_args()
 
@@ -201,7 +208,7 @@ def main():
             raise
 
     print(f"Dataset loaded with {len(dataset)} examples")
-    print(f"Using standard Chinese character detection (CJK Unified Ideographs)")
+    print("Using standard Chinese character detection (CJK Unified Ideographs)")
     if threshold is not None:
         print(f"Using threshold: {threshold:.3f} (minimum ratio of Chinese characters)")
 
@@ -219,7 +226,9 @@ def main():
     def filter_fn(example):
         nonlocal filtered_count, user_filtered, assistant_filtered
 
-        should_filter = should_be_filtered_by_chinese(example, verbose=False, filter_user_turns=filter_user_turns, threshold=threshold)
+        should_filter = should_be_filtered_by_chinese(
+            example, verbose=False, filter_user_turns=filter_user_turns, threshold=threshold
+        )
 
         if should_filter:
             filtered_count += 1
@@ -296,7 +305,7 @@ def main():
         print("--- End of examples ---\n")
 
     # Print statistics
-    print(f"\n--- Filtering Statistics ---")
+    print("\n--- Filtering Statistics ---")
     print(f"Total examples: {total_examples}")
     print(f"Examples removed: {filtered_count}")
     print(f"Removal rate: {filtered_count/total_examples*100:.2f}%")
@@ -304,7 +313,7 @@ def main():
         print(f"  - User messages filtered: {user_filtered}")
         print(f"  - Assistant messages filtered: {assistant_filtered}")
     if chinese_ratios:
-        print(f"Chinese character ratios in filtered examples:")
+        print("Chinese character ratios in filtered examples:")
         print(f"  - Min: {min(chinese_ratios):.3f}")
         print(f"  - Max: {max(chinese_ratios):.3f}")
         print(f"  - Mean: {sum(chinese_ratios)/len(chinese_ratios):.3f}")

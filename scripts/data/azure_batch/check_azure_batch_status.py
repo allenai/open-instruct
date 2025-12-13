@@ -11,6 +11,7 @@ Usage:
 ./check_batch.py batch_abc --watch
 ./check_batch.py batch_abc,batch_def,batch_ghi --watch
 """
+
 from __future__ import annotations
 
 import json
@@ -19,7 +20,6 @@ import pathlib
 import sys
 import time
 from argparse import ArgumentParser, Namespace
-from typing import List
 
 import requests
 
@@ -32,11 +32,7 @@ def download_file(file_id: str, dest: pathlib.Path) -> None:
     endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
     url = f"{endpoint}/openai/files/{file_id}/content?api-version=2024-07-01-preview"
 
-    response = requests.get(
-        url,
-        headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]},
-        timeout=120
-    )
+    response = requests.get(url, headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]}, timeout=120)
     response.raise_for_status()
 
     with dest.open("wb") as f:
@@ -46,9 +42,9 @@ def download_file(file_id: str, dest: pathlib.Path) -> None:
 def print_status(job: dict) -> None:
     c = job.get("request_counts", {})
     errors = job.get("errors", [])
-    print(f'{errors=}')
-    error_str = "-" if not errors else ";".join(
-        f"{e.get('code') or e.get('error_code')}:{e.get('message')}" for e in errors
+    print(f"{errors=}")
+    error_str = (
+        "-" if not errors else ";".join(f"{e.get('code') or e.get('error_code')}:{e.get('message')}" for e in errors)
     )
     line = (
         f"{job['status']}"
@@ -60,7 +56,7 @@ def print_status(job: dict) -> None:
     print(line, flush=True)
 
 
-def load_jsonl(file_path: pathlib.Path) -> List[dict]:
+def load_jsonl(file_path: pathlib.Path) -> list[dict]:
     """Load a JSONL file into a list of dictionaries."""
     with file_path.open() as f:
         return [json.loads(line) for line in f]
@@ -130,11 +126,7 @@ def check_batch_status(batch_id: str) -> tuple[bool, bool]:
     """
     endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
     url = f"{endpoint}/openai/batches/{batch_id}?api-version=2024-07-01-preview"
-    r = requests.get(
-        url,
-        headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]},
-        timeout=30,
-    )
+    r = requests.get(url, headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]}, timeout=30)
     r.raise_for_status()
     job = r.json()
 

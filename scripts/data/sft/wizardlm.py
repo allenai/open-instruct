@@ -6,11 +6,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Process WizardLM evol instruct dataset and optionally upload to Hugging Face Hub."
     )
-    parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Upload the dataset to Hugging Face Hub",
-    )
+    parser.add_argument("--push_to_hub", action="store_true", help="Upload the dataset to Hugging Face Hub")
     parser.add_argument(
         "--hf_entity",
         type=str,
@@ -38,21 +34,13 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "--apply_empty_message_filters",
-        action="store_true",
-        help="Apply empty message filters to the dataset.",
+        "--apply_empty_message_filters", action="store_true", help="Apply empty message filters to the dataset."
     )
     args = parser.parse_args()
 
-    role_map = {
-        "gpt": "assistant",
-        "human": "user",
-        "system": "system",
-    }
+    role_map = {"gpt": "assistant", "human": "user", "system": "system"}
     conversion_func = lambda example: {
-        "messages": [
-            {"role": role_map[it["from"]], "content": it["value"]} for it in example["conversations"]
-        ]
+        "messages": [{"role": role_map[it["from"]], "content": it["value"]} for it in example["conversations"]]
     }
 
     readme_content = (

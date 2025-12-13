@@ -259,10 +259,7 @@ def parser(responses: str, aspect: str):
                     rating_search = re.findall(r"\b\d+\b", matches.group(1))
                     rating = rating_search[0] if len(rating_search) > 0 else "1"
                     annotation.append(
-                        {
-                            "Rating": (rating if matches.group(1) != "N/A" else "N/A"),
-                            "Rationale": matches.group(2),
-                        }
+                        {"Rating": (rating if matches.group(1) != "N/A" else "N/A"), "Rationale": matches.group(2)}
                     )
                 else:
                     annotation.append({"Rating": "1", "Rationale": ""})
@@ -276,9 +273,7 @@ def parser(responses: str, aspect: str):
                     annotation.append(
                         {
                             "Type": (
-                                re.findall(r"\b\d+\b", matches.group(1))
-                                if matches.group(1) != "None"
-                                else "None"
+                                re.findall(r"\b\d+\b", matches.group(1)) if matches.group(1) != "None" else "None"
                             ),
                             "Rationale": matches.group(2),
                             "Rating": rating,
@@ -287,12 +282,7 @@ def parser(responses: str, aspect: str):
                     )
                 else:
                     annotation.append(
-                        {
-                            "Type": "None",
-                            "Rationale": "None",
-                            "Rating": "1",
-                            "Rationale For Rating": "None",
-                        }
+                        {"Type": "None", "Rationale": "None", "Rating": "1", "Rationale For Rating": "None"}
                     )
 
     except ValueError as e:

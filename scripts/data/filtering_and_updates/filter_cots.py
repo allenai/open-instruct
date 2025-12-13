@@ -5,10 +5,14 @@ token format and answer token format.
 Example usage for Olmo 3 dataset filtering:
 python filter_cots.py --input_dataset_name allenai/oasst1-r1 --output_dataset_name allenai/oasst1-r1-format-filtered --filter think --output_format no_answer
 """
+
 import argparse
 import re
-from datasets import load_dataset, Features, Sequence, Value
+
+from datasets import load_dataset
+
 import open_instruct.utils as open_instruct_utils
+
 
 # ----------------------- filter functions ----------------------- #
 def is_think_answer(elem):
@@ -17,12 +21,13 @@ def is_think_answer(elem):
     <think>...</think><answer>...</answer>, False otherwise.
     Also returns false if 'messages' or last message's 'content' is None
     """
-    pattern = re.compile(r'^<think>[\s\S]*?</think><answer>[\s\S]*?</answer>$')
+    pattern = re.compile(r"^<think>[\s\S]*?</think><answer>[\s\S]*?</answer>$")
     try:
         return bool(pattern.fullmatch(elem["messages"][-1]["content"]))
     except Exception:
-        print(f"KeyError: 'messages' or 'content' not found in element")
+        print("KeyError: 'messages' or 'content' not found in element")
         return False
+
 
 def is_think(elem):
     """
@@ -30,12 +35,13 @@ def is_think(elem):
     <think>...</think>, False otherwise.
     Also returns false if 'messages' or last message's 'content' is None
     """
-    pattern = re.compile(r'^<think>[\s\S]*?</think>[\s\S]*?$')
+    pattern = re.compile(r"^<think>[\s\S]*?</think>[\s\S]*?$")
     try:
         return bool(pattern.fullmatch(elem["messages"][-1]["content"]))
     except Exception:
-        print(f"KeyError: 'messages' or 'content' not found in element")
+        print("KeyError: 'messages' or 'content' not found in element")
         return False
+
 
 # ----------------------- map functions ----------------------- #
 def add_answer(elem):
@@ -52,13 +58,16 @@ def add_answer(elem):
         elem["messages"][-1]["content"] = elem["messages"][-1]["content"] + "\n</answer>"
     return elem
 
+
 def remove_answer(elem):
     """
     Modifies the last assistant turn to not include
     <answer></answer> tags if they exist
     """
     assert elem["messages"][-1]["role"] == "assistant", "Expected the last message to be from the assistant."
-    elem["messages"][-1]["content"] = elem["messages"][-1]["content"].replace("<answer>", "").replace("</answer>", "").strip()
+    elem["messages"][-1]["content"] = (
+        elem["messages"][-1]["content"].replace("<answer>", "").replace("</answer>", "").strip()
+    )
     if "</think>\n" not in elem["messages"][-1]["content"]:
         elem["messages"][-1]["content"] = elem["messages"][-1]["content"].replace("</think>", "</think>\n")
     return elem
@@ -70,20 +79,26 @@ def main() -> None:
         description="Filter a Hugging Face dataset by message tag pattern and push the result to the Hub."
     )
     parser.add_argument(
-        "-i", "--input_dataset_name", required=True,
-        help="Name or path of the input dataset (e.g. 'username/dataset_name')."
+        "-i",
+        "--input_dataset_name",
+        required=True,
+        help="Name or path of the input dataset (e.g. 'username/dataset_name').",
     )
     parser.add_argument(
-        "-o", "--output_dataset_name", required=True,
-        help="Name of the destination dataset repo on the Hub."
+        "-o", "--output_dataset_name", required=True, help="Name of the destination dataset repo on the Hub."
     )
     parser.add_argument(
-        "-f", "--filter", choices=["think_answer", "think"], default="think",
-        help="Which filter function to apply (default: think)."
+        "-f",
+        "--filter",
+        choices=["think_answer", "think"],
+        default="think",
+        help="Which filter function to apply (default: think).",
     )
     parser.add_argument(
-        "--output_format", choices=["answer", "keep", "no_answer"], default="no_answer",
-        help="Whether to include <answer></answer> tags in the final model response (default: no_answer)."
+        "--output_format",
+        choices=["answer", "keep", "no_answer"],
+        default="no_answer",
+        help="Whether to include <answer></answer> tags in the final model response (default: no_answer).",
     )
     args = parser.parse_args()
 
@@ -92,7 +107,7 @@ def main() -> None:
 
     # Helper: count rows across splits
     def count_rows(dset):
-        if hasattr(dset, "values"):   # DatasetDict
+        if hasattr(dset, "values"):  # DatasetDict
             return sum(len(split) for split in dset.values())
         return len(dset)
 
@@ -126,6 +141,7 @@ def main() -> None:
     filtered_out_ds.push_to_hub(filtered_repo, private=True)
     print(f"Pushed kept rows to      : {args.output_dataset_name}")
     print(f"Pushed filtered-out rows : {filtered_repo}")
+
 
 if __name__ == "__main__":
     main()

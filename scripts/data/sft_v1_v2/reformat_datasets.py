@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
 """
 Warning: this is a legacy script that was used for Tulu v1 and v2.
 Please consider using the new script `convert_datasets.py` for Tulu v3 and beyond.
@@ -100,10 +99,7 @@ def encode_instruction_example(instruction, input, output, random_template=True,
             prompt = instruction.strip() + "\n\n"
             completion = output.strip()
 
-    data = {
-        "prompt": prompt,
-        "completion": completion + eos_token if eos_token else completion,
-    }
+    data = {"prompt": prompt, "completion": completion + eos_token if eos_token else completion}
     return data
 
 
@@ -116,10 +112,7 @@ def encode_few_shot_example(instruction, examplars, input, output, eos_token=Non
     prompt += "Input:\n" + input.strip() + "\n"
     prompt += "Output:\n"
 
-    data = {
-        "prompt": prompt,
-        "completion": output.strip() + eos_token if eos_token else output.strip(),
-    }
+    data = {"prompt": prompt, "completion": output.strip() + eos_token if eos_token else output.strip()}
     return data
 
 
@@ -128,13 +121,13 @@ def convert_super_ni_data(
 ):
     os.makedirs(output_dir, exist_ok=True)
     train_tasks = []
-    with open(os.path.join(data_dir, "splits", "xlingual", "train_tasks.txt"), "r") as fin:
+    with open(os.path.join(data_dir, "splits", "xlingual", "train_tasks.txt")) as fin:
         for line in fin:
             if "_mmmlu_" not in line:  # skip mmlu to avoid test leakage
                 train_tasks.append(line.strip())
     with open(os.path.join(output_dir, "super_ni_data.jsonl"), "w") as fout:
         for task in train_tasks:
-            with open(os.path.join(data_dir, "tasks", f"{task}.json"), "r") as fin:
+            with open(os.path.join(data_dir, "tasks", f"{task}.json")) as fin:
                 task_data = json.load(fin)
             instruction = task_data["Definition"][0]
             if zero_shot_examples_per_task + few_shot_examples_per_task < len(task_data["Instances"]):
@@ -195,13 +188,13 @@ def convert_cot_data(data_dir, output_dir, num_zero_shot_examples=50000, num_few
     os.makedirs(output_dir, exist_ok=True)
     examples = []
     if num_zero_shot_examples > 0:
-        with open(os.path.join(data_dir, "cot_zsopt.jsonl"), "r") as fin:
+        with open(os.path.join(data_dir, "cot_zsopt.jsonl")) as fin:
             zero_shot_examples = [json.loads(line) for line in fin]
             if num_zero_shot_examples < len(zero_shot_examples):
                 zero_shot_examples = random.sample(zero_shot_examples, k=num_zero_shot_examples)
             examples.extend(zero_shot_examples)
     if num_few_shot_examples > 0:
-        with open(os.path.join(data_dir, "cot_fsopt.jsonl"), "r") as fin:
+        with open(os.path.join(data_dir, "cot_fsopt.jsonl")) as fin:
             few_shot_examples = [json.loads(line) for line in fin]
             if num_few_shot_examples < len(few_shot_examples):
                 few_shot_examples = random.sample(few_shot_examples, k=num_few_shot_examples)
@@ -231,7 +224,7 @@ def convert_cot_data(data_dir, output_dir, num_zero_shot_examples=50000, num_few
 def convert_flan_v2_data(data_dir, output_dir, data_file="tulu_v1_resampled_flan_100k.jsonl"):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    with open(os.path.join(data_dir, data_file), "r") as fin:
+    with open(os.path.join(data_dir, data_file)) as fin:
         for line in fin:
             examples.append(json.loads(line))
     output_path = os.path.join(output_dir, "flan_v2_data.jsonl")
@@ -259,7 +252,7 @@ def convert_flan_v2_data(data_dir, output_dir, data_file="tulu_v1_resampled_flan
 def convert_dolly_data(data_dir, output_dir, number_examples=None):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    with open(os.path.join(data_dir, "databricks-dolly-15k.jsonl"), "r") as fin:
+    with open(os.path.join(data_dir, "databricks-dolly-15k.jsonl")) as fin:
         for line in fin:
             examples.append(json.loads(line))
     if number_examples:
@@ -292,7 +285,7 @@ def convert_dolly_data(data_dir, output_dir, number_examples=None):
 def convert_self_instruct_data(data_dir, output_dir, number_examples=None):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    with open(os.path.join(data_dir, "all_instances_82K.jsonl"), "r") as fin:
+    with open(os.path.join(data_dir, "all_instances_82K.jsonl")) as fin:
         for line in fin:
             examples.append(json.loads(line))
     if number_examples:
@@ -325,7 +318,7 @@ def convert_self_instruct_data(data_dir, output_dir, number_examples=None):
 def convert_unnatural_instructions_data(data_dir, output_dir, num_examples=None):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    with open(os.path.join(data_dir, "core_data.jsonl"), "r") as fin:
+    with open(os.path.join(data_dir, "core_data.jsonl")) as fin:
         for line in fin:
             task_data = json.loads(line)
             instruction = task_data["instruction"]
@@ -364,7 +357,7 @@ def convert_unnatural_instructions_data(data_dir, output_dir, num_examples=None)
 def convert_stanford_alpaca_data(data_dir, output_dir, num_examples=None):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    with open(os.path.join(data_dir, "alpaca_data.json"), "r") as fin:
+    with open(os.path.join(data_dir, "alpaca_data.json")) as fin:
         examples.extend(json.load(fin))
     if num_examples:
         examples = random.sample(examples, k=num_examples)
@@ -396,7 +389,7 @@ def convert_stanford_alpaca_data(data_dir, output_dir, num_examples=None):
 def convert_code_alpaca_data(data_dir, output_dir, num_examples=None):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    with open(os.path.join(data_dir, "code_alpaca_20k.json"), "r") as fin:
+    with open(os.path.join(data_dir, "code_alpaca_20k.json")) as fin:
         examples.extend(json.load(fin))
     if num_examples:
         examples = random.sample(examples, k=num_examples)
@@ -429,10 +422,10 @@ def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False, 
     os.makedirs(output_dir, exist_ok=True)
     examples = []
     if load_en:
-        with open(os.path.join(data_dir, "alpaca_gpt4_data.json"), "r") as fin:
+        with open(os.path.join(data_dir, "alpaca_gpt4_data.json")) as fin:
             examples.extend(json.load(fin))
     if load_zh:
-        with open(os.path.join(data_dir, "alpaca_gpt4_data_zh.json"), "r") as fin:
+        with open(os.path.join(data_dir, "alpaca_gpt4_data_zh.json")) as fin:
             examples.extend(json.load(fin))
     if num_examples:
         examples = random.sample(examples, k=num_examples)
@@ -466,7 +459,7 @@ def convert_sharegpt_data(
 ):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    with open(os.path.join(data_dir, data_file), "r") as fin:
+    with open(os.path.join(data_dir, data_file)) as fin:
         examples.extend(json.load(fin))
     if num_examples:
         examples = random.sample(examples, k=num_examples)
@@ -482,11 +475,7 @@ def convert_sharegpt_data(
                     messages.append({"role": "user", "content": message["value"]})
                 elif message["from"] == "gpt" or message["from"] == "chatgpt":
                     messages.append({"role": "assistant", "content": message["value"]})
-                elif message["from"] == "system":
-                    valid = False
-                    invalid_cnt += 1
-                    break
-                elif message["from"] == "bing":
+                elif message["from"] == "system" or message["from"] == "bing":
                     valid = False
                     invalid_cnt += 1
                     break
@@ -504,7 +493,7 @@ def convert_baize_data(data_dir, output_dir, num_examples=None):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
     for source in ["alpaca", "medical", "quora", "stackoverflow"]:
-        with open(os.path.join(data_dir, f"{source}_chat_data.json"), "r") as fin:
+        with open(os.path.join(data_dir, f"{source}_chat_data.json")) as fin:
             examples.extend(json.load(fin))
     if num_examples:
         examples = random.sample(examples, k=num_examples)
@@ -535,7 +524,7 @@ def convert_oasst1_data(data_dir, output_dir, top_k_reply=None):
     """
     os.makedirs(output_dir, exist_ok=True)
     conversations = []
-    with open(os.path.join(data_dir, "2023-04-12_oasst_ready.trees.jsonl"), "r") as fin:
+    with open(os.path.join(data_dir, "2023-04-12_oasst_ready.trees.jsonl")) as fin:
         for line in fin:
             conversations.append(json.loads(line))
 
@@ -553,10 +542,7 @@ def convert_oasst1_data(data_dir, output_dir, top_k_reply=None):
                 child_replies = [child for child in reply["replies"] if not child["deleted"]]
                 for child in child_replies:
                     if "quality" not in child["labels"]:
-                        child["labels"]["quality"] = {
-                            "value": 0.0,
-                            "count": 0,
-                        }
+                        child["labels"]["quality"] = {"value": 0.0, "count": 0}
                 child_replies = (
                     child_replies
                     if top_k_reply is None
@@ -572,10 +558,7 @@ def convert_oasst1_data(data_dir, output_dir, top_k_reply=None):
             child_replies = [child for child in reply["replies"] if not child["deleted"]]
             for child in child_replies:
                 if "quality" not in child["labels"]:
-                    child["labels"]["quality"] = {
-                        "value": 0.0,
-                        "count": 0,
-                    }
+                    child["labels"]["quality"] = {"value": 0.0, "count": 0}
             child_replies = (
                 child_replies
                 if top_k_reply is None
@@ -602,7 +585,7 @@ def convert_oasst1_data(data_dir, output_dir, top_k_reply=None):
 def convert_lima_data(data_dir, output_dir, num_examples=None):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    with open(os.path.join(data_dir, "train.jsonl"), "r") as fin:
+    with open(os.path.join(data_dir, "train.jsonl")) as fin:
         for line in fin:
             examples.append(json.loads(line))
     if num_examples:
@@ -611,23 +594,14 @@ def convert_lima_data(data_dir, output_dir, num_examples=None):
     with open(output_path, "w") as fout:
         for idx, example in enumerate(examples):
             messages = []
-            if not len(example["conversations"]) % 2 == 0:
+            if len(example["conversations"]) % 2 != 0:
                 print(f"Waring: example {idx} in LIMA has odd number of messages. Cutting off the last message.")
                 example["conversations"] = example["conversations"][:-1]
 
             for i in range(0, len(example["conversations"]), 2):
                 messages.append({"role": "user", "content": example["conversations"][i]})
                 messages.append({"role": "assistant", "content": example["conversations"][i + 1]})
-            fout.write(
-                json.dumps(
-                    {
-                        "dataset": "lima",
-                        "id": f"lima_{idx}",
-                        "messages": messages,
-                    }
-                )
-                + "\n"
-            )
+            fout.write(json.dumps({"dataset": "lima", "id": f"lima_{idx}", "messages": messages}) + "\n")
 
 
 def convert_wizardlm_data(data_dir, output_dir, num_examples=30000):
@@ -636,7 +610,7 @@ def convert_wizardlm_data(data_dir, output_dir, num_examples=30000):
     # check if the original json file exists
     if os.path.exists(os.path.join(data_dir, "WizardLM_evol_instruct_V2_143k.json")):
         # proceed as normally
-        with open(os.path.join(data_dir, "WizardLM_evol_instruct_V2_143k.json"), "r") as fin:
+        with open(os.path.join(data_dir, "WizardLM_evol_instruct_V2_143k.json")) as fin:
             examples = json.load(fin)
     else:  # try other data train-00000-of-00001-004cd1ba9dc05e6c.parquet
         df = pd.read_parquet(os.path.join(data_dir, "train-00000-of-00001-004cd1ba9dc05e6c.parquet"))
@@ -655,14 +629,7 @@ def convert_wizardlm_data(data_dir, output_dir, num_examples=30000):
                 messages.append({"role": "user", "content": example["conversations"][i]["value"]})
                 messages.append({"role": "assistant", "content": example["conversations"][i + 1]["value"]})
             fout.write(
-                json.dumps(
-                    {
-                        "dataset": "wizardlm",
-                        "id": f"wizardlm_{example['idx']}",
-                        "messages": messages,
-                    }
-                )
-                + "\n"
+                json.dumps({"dataset": "wizardlm", "id": f"wizardlm_{example['idx']}", "messages": messages}) + "\n"
             )
 
 
@@ -689,14 +656,7 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gp
                 {"role": "assistant", "content": example["response"]},
             ]
             fout.write(
-                json.dumps(
-                    {
-                        "dataset": "open_orca",
-                        "id": f"open_orca_{example['id']}",
-                        "messages": messages,
-                    }
-                )
-                + "\n"
+                json.dumps({"dataset": "open_orca", "id": f"open_orca_{example['id']}", "messages": messages}) + "\n"
             )
 
 
@@ -725,7 +685,7 @@ def convert_hard_coded_data(data_dir, output_dir, repeat=1):
 def convert_science_data(data_dir, output_dir, num_examples=None):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    with open(os.path.join(data_dir, "science_train.jsonl"), "r") as fin:
+    with open(os.path.join(data_dir, "science_train.jsonl")) as fin:
         for line in fin:
             examples.append(json.loads(line))
     if num_examples:
@@ -852,9 +812,7 @@ if __name__ == "__main__":
             with open(os.path.join(args.output_dir, "tulu_v1", "tulu_v1_data.jsonl"), "w") as fout:
                 for subset in all_subsets:
                     dataset_name = subset[: -len("_subset")]
-                    with open(
-                        os.path.join(args.output_dir, "tulu_v1", subset, f"{dataset_name}_data.jsonl"), "r"
-                    ) as fin:
+                    with open(os.path.join(args.output_dir, "tulu_v1", subset, f"{dataset_name}_data.jsonl")) as fin:
                         for line in fin:
                             fout.write(line)
         elif dataset == "tulu_v2":
@@ -927,9 +885,7 @@ if __name__ == "__main__":
             with open(tulu_v2_path, "w") as fout, open(tulu_v2_filtered_path, "w") as fout_filtered:
                 for subset in all_subsets:
                     dataset_name = subset[: -len("_subset")]
-                    with open(
-                        os.path.join(args.output_dir, "tulu_v2", subset, f"{dataset_name}_data.jsonl"), "r"
-                    ) as fin:
+                    with open(os.path.join(args.output_dir, "tulu_v2", subset, f"{dataset_name}_data.jsonl")) as fin:
                         for line in fin:
                             example = json.loads(line)
                             if subset not in ["hard_coded_subset"] and should_be_filtered(example):

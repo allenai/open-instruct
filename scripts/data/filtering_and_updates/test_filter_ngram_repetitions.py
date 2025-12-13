@@ -4,27 +4,25 @@ Comprehensive test suite for filter_ngram_repetitions.py
 Merges all existing test functionality and ensures good coverage.
 """
 
-import sys
 import os
+import sys
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from filter_ngram_repetitions import (
     detect_exact_block_repetition,
+    find_all_repetitions,
+    find_consecutive_repetitions,
+    find_ngram_repetitions,
+    is_code_import_or_return,
+    is_math_or_code,
+    is_short_phrase,
     process_example,
     should_be_filtered_by_repetition,
     split_into_paragraphs,
     split_into_sentences,
-    is_math_or_code,
-    is_code_import_or_return,
-    is_short_phrase,
-    is_complex_math_expression,
-    is_structured_list,
-    is_multi_line_paragraph,
-    is_common_transition_word,
-    find_consecutive_repetitions,
-    find_all_repetitions,
-    find_ngram_repetitions
 )
+
 
 def test_utility_functions():
     """Test utility functions for text processing and detection."""
@@ -78,6 +76,7 @@ def test_utility_functions():
     # Note: is_short_phrase checks if any short phrase is contained within the text
     # So "This is a longer phrase" contains "is" which is in the short phrases list
     assert is_short_phrase(long_phrase) == True  # Contains "is" which is a short phrase
+
 
 def test_2x_repetitions():
     """Test 2x repetitions (minimum threshold)."""
@@ -197,6 +196,7 @@ Would you like me to dive deeper into any specific area?
     print(f"Result: {has_rep} (should be False)")
     print(f"Reason: {reason}")
 
+
 def test_consecutive_repetitions():
     """Test consecutive vs non-consecutive repetitions."""
     print("\nTesting consecutive vs non-consecutive repetitions...")
@@ -289,13 +289,16 @@ Final different content."""
 This line repeats.
 This line repeats.
 This line repeats."""
-    has_rep, reason, details = detect_exact_block_repetition(simple_text, min_repetitions=2, min_sentence_repetitions=2, min_consecutive_sentence_repetitions=2)
+    has_rep, reason, details = detect_exact_block_repetition(
+        simple_text, min_repetitions=2, min_sentence_repetitions=2, min_consecutive_sentence_repetitions=2
+    )
     print(f"Result: {has_rep}")
     print(f"Reason: {reason}")
     if details:
         print(f"Total count: {details['total_count']}")
         print(f"Consecutive count: {details['consecutive_count']}")
         print(f"Positions: {details['positions']}")
+
 
 def test_exact_repetition_examples():
     """Test specific examples of exact block repetition."""
@@ -398,6 +401,7 @@ Here's another paragraph with different content. This paragraph talks about some
     if details:
         print(f"Details: {details}")
 
+
 def test_main_functions():
     """Test the main processing functions with mock dataset examples."""
     print("\nTesting main filtering functions...")
@@ -409,15 +413,20 @@ def test_main_functions():
             "id": "normal_example",
             "messages": [
                 {"role": "user", "content": "What is the weather like today?"},
-                {"role": "assistant", "content": "I don't have access to real-time weather data, but I can help you find weather information through various methods."}
+                {
+                    "role": "assistant",
+                    "content": "I don't have access to real-time weather data, but I can help you find weather information through various methods.",
+                },
             ],
-            "source": "normal_conversation"
+            "source": "normal_conversation",
         },
         {
             "id": "repetitive_example",
             "messages": [
                 {"role": "user", "content": "Help me with this issue."},
-                {"role": "assistant", "content": """I'll help you solve this problem step by step.
+                {
+                    "role": "assistant",
+                    "content": """I'll help you solve this problem step by step.
 
 First, let's check your configuration settings.
 
@@ -427,24 +436,28 @@ First, let's check your configuration settings.
 
 I'll help you solve this problem step by step.
 
-First, let's check your configuration settings."""}
+First, let's check your configuration settings.""",
+                },
             ],
-            "source": "problematic_dataset"
+            "source": "problematic_dataset",
         },
         {
             "id": "consecutive_repetition",
             "messages": [
                 {"role": "user", "content": "Explain this concept."},
-                {"role": "assistant", "content": """Here's the explanation you requested about this important concept:
+                {
+                    "role": "assistant",
+                    "content": """Here's the explanation you requested about this important concept:
 
 The same line repeats here with detailed information.
 The same line repeats here with detailed information.
 The same line repeats here with detailed information.
 
-I hope this comprehensive explanation helps you understand the concept better!"""}
+I hope this comprehensive explanation helps you understand the concept better!""",
+                },
             ],
-            "source": "another_dataset"
-        }
+            "source": "another_dataset",
+        },
     ]
 
     for i, example in enumerate(test_examples):
@@ -466,6 +479,7 @@ I hope this comprehensive explanation helps you understand the concept better!""
         processed = process_example(example, "messages", index=i, filter_user_turns=False, min_repetitions=2)
         print(f"Has repetition: {processed['has_repetition']}")
         print(f"Repetition reason: {processed['repetition_reason']}")
+
 
 def test_edge_cases():
     """Test edge cases and boundary conditions."""
@@ -517,6 +531,7 @@ not sure"""
     print(f"Result: {has_rep}")
     print(f"Reason: {reason}")
 
+
 def test_ngram_functions():
     """Test the n-gram repetition detection functions."""
     print("\nTesting n-gram repetition detection functions...")
@@ -541,6 +556,7 @@ def test_ngram_functions():
     print(f"Text: {text}")
     print(f"N-gram repetitions: {ngrams}")
 
+
 def run_all_tests():
     """Run all test functions."""
     print("🧪 COMPREHENSIVE TEST SUITE FOR FILTER_NGRAM_REPETITIONS")
@@ -562,10 +578,12 @@ def run_all_tests():
     except Exception as e:
         print(f"\n❌ TEST FAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
     return True
+
 
 if __name__ == "__main__":
     success = run_all_tests()

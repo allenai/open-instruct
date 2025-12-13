@@ -4,10 +4,11 @@ Test runner for filtering scripts
 Runs all available tests in the filtering_and_updates directory.
 """
 
-import os
-import sys
-import subprocess
 import glob
+import os
+import subprocess
+import sys
+
 
 def run_test_file(test_file):
     """Run a single test file and return success status."""
@@ -16,8 +17,7 @@ def run_test_file(test_file):
     print(f"{'='*80}")
 
     try:
-        result = subprocess.run([sys.executable, test_file],
-                              capture_output=True, text=True, cwd=os.getcwd())
+        result = subprocess.run([sys.executable, test_file], capture_output=True, text=True, cwd=os.getcwd())
 
         if result.returncode == 0:
             print("✅ TEST PASSED")
@@ -33,10 +33,11 @@ def run_test_file(test_file):
         print(f"❌ ERROR RUNNING TEST: {e}")
         return False
 
+
 def main():
     """Run all test files in the directory."""
     print("🧪 FILTERING SCRIPTS TEST RUNNER")
-    print("="*80)
+    print("=" * 80)
 
     # Find all test files
     test_files = glob.glob("test_*.py")
@@ -73,6 +74,7 @@ def main():
     else:
         print(f"\n⚠️  {failed} test(s) failed!")
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

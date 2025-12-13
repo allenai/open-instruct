@@ -50,33 +50,15 @@ def make_parser():
                       --table_file metrics.tsv
                       --print_table""",
     )
+    parser.add_argument("--experiment_id", type=str, help="ID of the Beaker experiment for which to collect metrics.")
     parser.add_argument(
-        "--experiment_id",
-        type=str,
-        help="ID of the Beaker experiment for which to collect metrics.",
+        "--job_suffix", type=str, help="Suffix of job name; remove this from the job name to get the eval task."
     )
     parser.add_argument(
-        "--job_suffix",
-        type=str,
-        help="Suffix of job name; remove this from the job name to get the eval task.",
+        "--output_file", type=Path, default=None, help="If given, dump a .json with all metrics to this file."
     )
-    parser.add_argument(
-        "--output_file",
-        type=Path,
-        default=None,
-        help="If given, dump a .json with all metrics to this file.",
-    )
-    parser.add_argument(
-        "--table_file",
-        type=Path,
-        default=None,
-        help="If given, save table of summary results.",
-    )
-    parser.add_argument(
-        "--print_table",
-        action="store_true",
-        help="If given, print summary metrics to console.",
-    )
+    parser.add_argument("--table_file", type=Path, default=None, help="If given, save table of summary results.")
+    parser.add_argument("--print_table", action="store_true", help="If given, print summary metrics to console.")
     parser.add_argument(
         "--task_order",
         nargs="+",
@@ -107,11 +89,7 @@ def get_summary_metric(metrics, eval_task):
     }
 
     # These tasks are scaled 0-100 instead of 0-1; rescale for final summary.
-    tasks_scaled_to_100 = [
-        "tydiqa_goldp_1shot",
-        "tydiqa_no_context_1shot",
-        "alpaca_eval",
-    ]
+    tasks_scaled_to_100 = ["tydiqa_goldp_1shot", "tydiqa_no_context_1shot", "alpaca_eval"]
 
     # Get summary metric if available.
     if eval_task not in summary_lookup:
@@ -157,9 +135,7 @@ def main():
 
     for job in experiment.jobs:
         # Skip unfinished jobs.
-        eval_task = job.name.replace(args.job_suffix, "").replace(
-            "open_instruct_eval_", ""
-        )
+        eval_task = job.name.replace(args.job_suffix, "").replace("open_instruct_eval_", "")
 
         if not job.is_done:
             print(f"Eval for {eval_task} not finished. Skipping.")
@@ -183,9 +159,7 @@ def main():
         if args.print_table:
             print(summary_table)
         if args.table_file is not None:
-            summary_table.to_csv(
-                args.table_file, sep="\t", index=True, float_format="%0.4f"
-            )
+            summary_table.to_csv(args.table_file, sep="\t", index=True, float_format="%0.4f")
 
     if args.output_file is not None:
         json.dump(metrics_all, open(args.output_file, "w"), indent=2)
