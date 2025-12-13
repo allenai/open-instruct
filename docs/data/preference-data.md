@@ -19,7 +19,7 @@ python scripts/data/preferences/hh-helpful.py --push_to_hub --hf_entity=ai2-adap
 * [ai2-adapt-dev/hh-rlhf-harmless](https://huggingface.co/datasets/ai2-adapt-dev/hh-rlhf-harmless)
 * [ai2-adapt-dev/hh-rlhf-helpful](https://huggingface.co/datasets/ai2-adapt-dev/hh-rlhf-helpful)
 
-Next, Nvidia's recent HelpSteer 2. 
+Next, Nvidia's recent HelpSteer 2.
 They are created with:
 ```
 python scripts/data/preferences/helpsteer2.py --push_to_hub --min_score 2.5 --hf_entity=ai2-adapt-dev
@@ -34,7 +34,7 @@ python scripts/data/preferences/helpsteer2_nvidia.py --push_to_hub --hf_entity a
 Some examples include:
 * [ai2-adapt-dev/helpsteer-2-binarized-above-2.0-margin-0.5-ignore-verbosity](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer-2-binarized-above-2.0-margin-0.5-ignore-verbosity)
 * [ai2-adapt-dev/helpsteer-2-binarized-ignore-verbosity](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer-2-binarized-ignore-verbosity): This ignores verbosity aspect, which is unclear in the paper.
-* [ai2-adapt-dev/helpsteer2-binarized-nvidia-spec](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer2-binarized-nvidia-spec): This uses the specific weighting that Nvidia converged on in their HelpSteer2 paper training multiple types of reward models. 
+* [ai2-adapt-dev/helpsteer2-binarized-nvidia-spec](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer2-binarized-nvidia-spec): This uses the specific weighting that Nvidia converged on in their HelpSteer2 paper training multiple types of reward models.
 
 Also, specific splits of Nectar (randomly binarized from top 3 completions and a bottom completion) are included with:
 ```
@@ -136,4 +136,3 @@ Split from [this dataset](https://huggingface.co/datasets/allenai/tulu-2.5-prefe
 * [ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_top_10k](https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_top_10k)
 * [ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_truthful_qa](https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_truthful_qa)
 * [ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_ultrachat](https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_ultrachat)
-

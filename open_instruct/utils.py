@@ -926,10 +926,7 @@ def get_beaker_experiment_info(experiment_id: str) -> dict | None:
 
 def beaker_experiment_succeeded(experiment_id: str) -> bool:
     experiment = get_beaker_experiment_info(experiment_id)
-    if "replicas" in experiment["jobs"][0]["execution"]["spec"]:
-        num_replicas = experiment["jobs"][0]["execution"]["spec"]["replicas"]
-    else:
-        num_replicas = 1
+    num_replicas = experiment["jobs"][0]["execution"]["spec"].get("replicas", 1)
     if not experiment:
         return False
     pprint(experiment)

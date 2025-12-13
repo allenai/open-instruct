@@ -79,7 +79,7 @@ python -m eval.MATH.run_eval \
     --save_dir results/MATH/gpt4-cot \
     --openai_engine "gpt-4-0314" \
     --eval_batch_size 20 \
-    --n_shot 4 
+    --n_shot 4
 
 
 # Evaluating gpt4 using direct answering (no chain-of-thought)

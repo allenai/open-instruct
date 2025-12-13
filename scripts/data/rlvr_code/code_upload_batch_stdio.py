@@ -48,23 +48,22 @@ The script updates the target HuggingFace dataset with validated code solutions.
 - `rewritten_solution`: The validated stdio-based code solution.
 - `rewritten_input`: The stdio-based problem description.
 """
+
 import hashlib
 import json
 import os
 import sys
 import traceback
-from typing import List
 
 import requests
 from datasets import Dataset
-import open_instruct.utils as open_instruct_utils
 from openai import AzureOpenAI
 from pydantic import BaseModel
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
     azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
-    api_version="2024-12-01-preview"
+    api_version="2024-12-01-preview",
 )
 
 OUTPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr-2"
@@ -72,26 +71,30 @@ SPLIT = "python"
 
 
 def get_input(row):
-    return row['input'][0]['content']
+    return row["input"][0]["content"]
+
 
 def get_id(row):
     input_str = get_input(row)
     if input_str:
-        id = hashlib.sha256(input_str.encode('utf-8')).hexdigest()
+        id = hashlib.sha256(input_str.encode("utf-8")).hexdigest()
         return id
     return None
 
+
 def extract_id_from_custom_id(custom_id: str) -> str:
     # get rid of the timestamp
-    if '_' in custom_id:
-        return '_'.join(custom_id.split('_')[1:])
+    if "_" in custom_id:
+        return "_".join(custom_id.split("_")[1:])
     return custom_id
+
 
 class OpenAIStructuredOutput(BaseModel):
     rewritten_input: str
     rewritten_solution: str
-    test_cases: List[str]
+    test_cases: list[str]
     good_program: bool
+
 
 def check_batch_status(batch_id: str) -> bool:
     """Check if the batch job is complete."""
@@ -104,6 +107,7 @@ def check_batch_status(batch_id: str) -> bool:
     except Exception as e:
         print(f"Error checking batch status: {e}")
         return False
+
 
 def get_batch_results(batch_id: str) -> list:
     """Retrieve and process batch results."""
@@ -122,16 +126,16 @@ def get_batch_results(batch_id: str) -> list:
 
         # Process each line of the output
         results = []
-        for line in content_str.split('\n'):
+        for line in content_str.split("\n"):
             if line.strip():
                 try:
                     result = json.loads(line)
-                    if 'response' in result and 'body' in result['response']:
-                        content = result['response']['body']['choices'][0]['message']['content']
+                    if "response" in result and "body" in result["response"]:
+                        content = result["response"]["body"]["choices"][0]["message"]["content"]
                         processed_result = json.loads(content)
                         # Extract the original ID from custom_id (format: TIMESTAMP_ID)
-                        custom_id = result.get('custom_id', '')
-                        processed_result['id'] = extract_id_from_custom_id(custom_id)
+                        custom_id = result.get("custom_id", "")
+                        processed_result["id"] = extract_id_from_custom_id(custom_id)
                         results.append(processed_result)
                 except Exception as e:
                     print(f"Error processing result line: {e}")
@@ -141,7 +145,8 @@ def get_batch_results(batch_id: str) -> list:
         print(f"Error retrieving batch results: {e}")
         return []
 
-def process_batch_results(batch_ids: List[str]):
+
+def process_batch_results(batch_ids: list[str]):
     """Process the batch results and upload to Hugging Face."""
     all_batch_results = []
     for batch_id in batch_ids:
@@ -165,56 +170,51 @@ def process_batch_results(batch_ids: List[str]):
     # Filter and validate results
     url = "http://localhost:1234/test_program_stdio"
     new_results = []
-    #original_dataset = load_dataset(INPUT_HF_DATASET, "SFT", split=SPLIT, num_proc=open_instruct_utils.max_num_processes())
+    # original_dataset = load_dataset(INPUT_HF_DATASET, "SFT", split=SPLIT, num_proc=open_instruct_utils.max_num_processes())
 
     # Create a lookup dictionary for O(1) access
-    print('here')
-    #id_to_row = {get_id(row): row for row in original_dataset}
+    print("here")
+    # id_to_row = {get_id(row): row for row in original_dataset}
     print("created id_to_row")
     for result in all_batch_results:
         try:
             # Look up the row directly using the ID
-            #if result['id'] not in id_to_row:
+            # if result['id'] not in id_to_row:
             #    print(f"No matching row found for ID: {result['id']}")
             #    continue
-            #original_dataset_row = id_to_row[result['id']]
+            # original_dataset_row = id_to_row[result['id']]
 
-            test_cases_raw = result['test_cases']
+            test_cases_raw = result["test_cases"]
             if isinstance(test_cases_raw, list) and len(test_cases_raw) > 0 and isinstance(test_cases_raw[0], str):
                 test_cases = [json.loads(tc) for tc in test_cases_raw]
             else:
                 test_cases = test_cases_raw
 
-            rewritten_solution = result['rewritten_solution']
+            rewritten_solution = result["rewritten_solution"]
 
             # Test data
-            payload = {
-                "program": rewritten_solution,
-                "tests": test_cases,
-                "max_execution_time": 6.0
-            }
+            payload = {"program": rewritten_solution, "tests": test_cases, "max_execution_time": 6.0}
 
             # Send POST request
             response = requests.post(url, json=payload)
             response_json = response.json()
 
-            if response.ok and sum(response_json['results']) >= 0.8 * len(test_cases):
+            if response.ok and sum(response_json["results"]) >= 0.8 * len(test_cases):
                 # Keep only passed test cases
-                passed_test_cases = [test_cases[j] for j in range(len(test_cases)) if response_json['results'][j] == 1]
+                passed_test_cases = [test_cases[j] for j in range(len(test_cases)) if response_json["results"][j] == 1]
 
-                new_results.append({
-                    #**original_dataset_row,
-                    "messages": [{
-                        "role": "user",
-                        "content": result['rewritten_input']
-                    }],
-                    #"original_input": get_input(original_dataset_row),
-                    "ground_truth": json.dumps(passed_test_cases),
-                    "dataset": "code_stdio",
-                    "good_program": result["good_program"],
-                    "rewritten_solution": rewritten_solution,
-                    "rewritten_input": result['rewritten_input'],
-                })
+                new_results.append(
+                    {
+                        # **original_dataset_row,
+                        "messages": [{"role": "user", "content": result["rewritten_input"]}],
+                        # "original_input": get_input(original_dataset_row),
+                        "ground_truth": json.dumps(passed_test_cases),
+                        "dataset": "code_stdio",
+                        "good_program": result["good_program"],
+                        "rewritten_solution": rewritten_solution,
+                        "rewritten_input": result["rewritten_input"],
+                    }
+                )
             else:
                 print(f"Not adding. Test results: {response_json}")
         except Exception as e:
@@ -222,7 +222,9 @@ def process_batch_results(batch_ids: List[str]):
             print("test_cases_raw", test_cases_raw)
             print(traceback.format_exc())
 
-    print(f"After filtering, {len(new_results)} results out of {len(all_batch_results)} remain. Do you want to upload?")
+    print(
+        f"After filtering, {len(new_results)} results out of {len(all_batch_results)} remain. Do you want to upload?"
+    )
     breakpoint()
 
     # Upload to Hugging Face
@@ -233,6 +235,7 @@ def process_batch_results(batch_ids: List[str]):
     else:
         print("No valid results to upload")
 
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python open_code_reasoning_upload_batch.py <batch_ids_json_filepath>")
@@ -240,7 +243,7 @@ if __name__ == "__main__":
 
     filepath = sys.argv[1]
     try:
-        with open(filepath, 'r') as f:
+        with open(filepath) as f:
             batch_ids = json.load(f)
     except FileNotFoundError:
         print(f"Error: File not found at {filepath}")

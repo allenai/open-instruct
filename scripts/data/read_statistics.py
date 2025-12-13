@@ -1,7 +1,6 @@
 import argparse
 import json
 import os
-from typing import Dict, List
 
 """
 Usage:
@@ -9,34 +8,35 @@ python scripts/data/read_statistics.py --latex data/processed/
 
 """
 
-def load_dataset_statistics(output_dir: str) -> List[Dict]:
+
+def load_dataset_statistics(output_dir: str) -> list[dict]:
     statistics = []
     for root, dirs, files in os.walk(output_dir):
         for filename in files:
             if filename.endswith("_statistics.json"):
                 file_path = os.path.join(root, filename)
-                with open(file_path, 'r') as f:
+                with open(file_path) as f:
                     data = json.load(f)
                     dataset_name = os.path.basename(root) + "/" + filename.split("_statistics")[0]
 
                     stat = {
-                        'Dataset': dataset_name,
-                        'Num Instances': data['num_instances'],
-                        'Avg Total Length': data['total_lengths_summary']['mean'],
-                        'Max Total Length': data['total_lengths_summary']['max'],
-                        'Avg User Prompt': data['user_prompt_lengths_summary']['mean'],
-                        'Avg Assistant Response': data['assistant_response_lengths_summary']['mean'],
-                        'Avg Turns': data['turns_summary']['mean'],
-                        '% > 512': data['num_instances_with_total_length_gt_512'] / data['num_instances'] * 100,
-                        '% > 1024': data['num_instances_with_total_length_gt_1024'] / data['num_instances'] * 100,
-                        '% > 2048': data['num_instances_with_total_length_gt_2048'] / data['num_instances'] * 100,
-                        '% > 4096': data['num_instances_with_total_length_gt_4096'] / data['num_instances'] * 100,
+                        "Dataset": dataset_name,
+                        "Num Instances": data["num_instances"],
+                        "Avg Total Length": data["total_lengths_summary"]["mean"],
+                        "Max Total Length": data["total_lengths_summary"]["max"],
+                        "Avg User Prompt": data["user_prompt_lengths_summary"]["mean"],
+                        "Avg Assistant Response": data["assistant_response_lengths_summary"]["mean"],
+                        "Avg Turns": data["turns_summary"]["mean"],
+                        "% > 512": data["num_instances_with_total_length_gt_512"] / data["num_instances"] * 100,
+                        "% > 1024": data["num_instances_with_total_length_gt_1024"] / data["num_instances"] * 100,
+                        "% > 2048": data["num_instances_with_total_length_gt_2048"] / data["num_instances"] * 100,
+                        "% > 4096": data["num_instances_with_total_length_gt_4096"] / data["num_instances"] * 100,
                     }
                     statistics.append(stat)
     return statistics
 
 
-def print_markdown_table(statistics: List[Dict], columns: List[str], roundings: Dict[str, int]):
+def print_markdown_table(statistics: list[dict], columns: list[str], roundings: dict[str, int]):
     if not statistics:
         print("No statistics found.")
         return
@@ -47,7 +47,7 @@ def print_markdown_table(statistics: List[Dict], columns: List[str], roundings: 
     print("|" + "|".join(["---" for _ in headers]) + "|")
 
     # Print table rows
-    for stat in sorted(statistics, key=lambda x: x['Dataset']):
+    for stat in sorted(statistics, key=lambda x: x["Dataset"]):
         row = []
         for col in columns:
             value = stat[col]
@@ -57,7 +57,7 @@ def print_markdown_table(statistics: List[Dict], columns: List[str], roundings: 
         print("| " + " | ".join(row) + " |")
 
 
-def print_latex_table(statistics: List[Dict], columns: List[str], roundings: Dict[str, int]):
+def print_latex_table(statistics: list[dict], columns: list[str], roundings: dict[str, int]):
     if not statistics:
         print("No statistics found.")
         return
@@ -74,7 +74,7 @@ def print_latex_table(statistics: List[Dict], columns: List[str], roundings: Dic
     print("\\midrule")
 
     # Print table rows
-    for stat in sorted(statistics, key=lambda x: x['Dataset']):
+    for stat in sorted(statistics, key=lambda x: x["Dataset"]):
         row = []
         for col in columns:
             value = stat[col]

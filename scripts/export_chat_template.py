@@ -10,11 +10,11 @@ from open_instruct.dataset_transformation import CHAT_TEMPLATES
 # Example
 # uv run python scripts/export_chat_template.py olmo_thinker_remove_intermediate_thinking
 
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "template",
-        help="Name of the chat template as defined in open_instruct.dataset_transformation.CHAT_TEMPLATES.",
+        "template", help="Name of the chat template as defined in open_instruct.dataset_transformation.CHAT_TEMPLATES."
     )
     parser.add_argument(
         "--output",
@@ -27,9 +27,7 @@ def parse_args() -> argparse.Namespace:
         help="Allow overwriting an existing file; otherwise the script exits with an error.",
     )
     parser.add_argument(
-        "--list",
-        action="store_true",
-        help="List available template names and exit (Ignores other flags).",
+        "--list", action="store_true", help="List available template names and exit (Ignores other flags)."
     )
     return parser.parse_args()
 
@@ -66,4 +64,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

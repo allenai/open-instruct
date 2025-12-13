@@ -67,7 +67,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 import numpy as np
 from tqdm import tqdm
@@ -96,16 +96,16 @@ class ConvertSFTDataArguments:
     output_dir: str = field()
 
     """The name of the dataset to use (via the datasets library)."""
-    dataset_name: Optional[str] = field(default=None)
+    dataset_name: str | None = field(default=None)
 
     """A dictionary of datasets (local or HF) to sample from."""
-    dataset_mixer: Optional[dict] = field(default=None)
+    dataset_mixer: dict | None = field(default=None)
 
     """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_list: List[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-olmo-2-mixture-0225", "1.0"])
+    dataset_mixer_list: list[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-olmo-2-mixture-0225", "1.0"])
 
     """The dataset splits to use for training"""
-    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
+    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
 
     """The list of transform functions to apply to the dataset."""
     dataset_transform_fn: list[str] = field(
@@ -113,7 +113,7 @@ class ConvertSFTDataArguments:
     )
 
     """The columns to use for the dataset."""
-    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE)
+    dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE)
 
     """The mode to use for caching the dataset."""
     dataset_cache_mode: Literal["hf", "local"] = "local"
@@ -122,13 +122,13 @@ class ConvertSFTDataArguments:
     dataset_local_cache_dir: str = "local_dataset_cache"
 
     """The hash of the dataset configuration."""
-    dataset_config_hash: Optional[str] = None
+    dataset_config_hash: str | None = None
 
     """Whether to skip the cache."""
     dataset_skip_cache: bool = False
 
     """Maximum sequence length. If not provided, no truncation will be performed."""
-    max_seq_length: Optional[int] = field(default=None)
+    max_seq_length: int | None = field(default=None)
 
     """Number of examples to process for debugging. 0 means process all examples."""
     num_examples: int = field(default=0)
@@ -166,9 +166,9 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     chat_template_path = os.path.join(tokenizer_output_dir, "chat_template.jinja")
     tokenizer_config_path = os.path.join(tokenizer_output_dir, "tokenizer_config.json")
     if os.path.exists(chat_template_path) and os.path.exists(tokenizer_config_path):
-        with open(chat_template_path, "r") as f:
+        with open(chat_template_path) as f:
             chat_template_content = f.read()
-        with open(tokenizer_config_path, "r") as f:
+        with open(tokenizer_config_path) as f:
             tokenizer_config = json.load(f)
         if "chat_template" not in tokenizer_config:
             tokenizer_config["chat_template"] = chat_template_content
@@ -266,9 +266,9 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
             per_dataset_filtered[dataset_source] += 1
 
         # Assert that attention mask is all 1s
-        assert all(mask == 1 for mask in sample[ATTENTION_MASK_KEY]), (
-            f"Expected all attention mask values to be 1, but found: {sample[ATTENTION_MASK_KEY]}"
-        )
+        assert all(
+            mask == 1 for mask in sample[ATTENTION_MASK_KEY]
+        ), f"Expected all attention mask values to be 1, but found: {sample[ATTENTION_MASK_KEY]}"
 
     train_dataset = remove_dataset_source_field(train_dataset)
 
@@ -374,18 +374,18 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
 
 def write_dataset_statistics(
     output_dir: str,
-    dataset_statistics: Dict[str, Any],
+    dataset_statistics: dict[str, Any],
     total_instances: int,
     total_tokens: int,
     total_trainable_tokens: int,
     num_samples_skipped: int,
     tokenizer_name: str,
-    max_seq_length: Optional[int],
-    chat_template_name: Optional[str],
-    per_dataset_counts: Dict[str, int],
-    per_dataset_tokens: Dict[str, int],
-    per_dataset_trainable_tokens: Dict[str, int],
-    per_dataset_filtered: Dict[str, int],
+    max_seq_length: int | None,
+    chat_template_name: str | None,
+    per_dataset_counts: dict[str, int],
+    per_dataset_tokens: dict[str, int],
+    per_dataset_trainable_tokens: dict[str, int],
+    per_dataset_filtered: dict[str, int],
 ):
     """Write dataset statistics to both text and JSON files."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

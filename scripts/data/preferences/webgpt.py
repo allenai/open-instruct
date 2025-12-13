@@ -47,9 +47,7 @@ def extract(item):
     message_1 = [system_prompt, question_1, answer_1]
 
     # Prepare the example dictionary
-    example = {
-        "prompt": item["question"]["full_text"],
-    }
+    example = {"prompt": item["question"]["full_text"]}
 
     # Compare scores and assign chosen/rejected
     if item["score_0"] > item["score_1"]:
@@ -71,20 +69,12 @@ def main(push_to_hub: bool, hf_entity: str | None):
     ds = datasets.load_dataset("openai/webgpt_comparisons", num_proc=max_num_processes())
 
     # filter out the ties
-    ds = ds["train"].filter(
-        is_not_tie,
-        num_proc=multiprocessing.cpu_count(),
-        load_from_cache_file=False,
-    )
+    ds = ds["train"].filter(is_not_tie, num_proc=multiprocessing.cpu_count(), load_from_cache_file=False)
 
     # test one element
     print(extract(ds[0]))
 
-    ds = ds.map(
-        extract,
-        num_proc=multiprocessing.cpu_count(),
-        load_from_cache_file=False,
-    )
+    ds = ds.map(extract, num_proc=multiprocessing.cpu_count(), load_from_cache_file=False)
 
     all_col = ds.column_names
     # remove except prompt and chosen and rejected
@@ -101,10 +91,7 @@ def main(push_to_hub: bool, hf_entity: str | None):
         ds.push_to_hub(repo_id)
 
         api.upload_file(
-            path_or_fileobj=__file__,
-            path_in_repo="create_dataset.py",
-            repo_id=repo_id,
-            repo_type="dataset",
+            path_or_fileobj=__file__, path_in_repo="create_dataset.py", repo_id=repo_id, repo_type="dataset"
         )
     else:
         print("Dataset processed locally (not pushed to Hub)")

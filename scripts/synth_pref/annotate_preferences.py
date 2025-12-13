@@ -1,9 +1,7 @@
 import argparse
 import datetime
 import json
-import logging
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -12,9 +10,9 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from tqdm import tqdm
 
+from open_instruct import logger_utils
 from scripts.synth_pref.utils.openai_api import format_for_openai_batch
 from scripts.synth_pref.utils.ultrafeedback_template import system_prompt
-from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -76,9 +74,7 @@ def main():
             model=args.model,
             id_col=args.id_col,
             rows_per_shard=args.rows_per_shard,
-            custom_id_suffix=(
-                "" if args.no_suffix else get_aspect_suffix(args.input_path.stem)
-            ),
+            custom_id_suffix=("" if args.no_suffix else get_aspect_suffix(args.input_path.stem)),
         )
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -103,9 +99,7 @@ def main():
         pd.DataFrame(columns=headers).to_csv(retry_file_path, index=False)
 
         for file in tqdm(files):
-            batch_input_file = client.files.create(
-                file=open(file, "rb"), purpose="batch"
-            )
+            batch_input_file = client.files.create(file=open(file, "rb"), purpose="batch")
 
             batch_input_file_id = batch_input_file.id
             logger.info(f"File: {file} ID: {batch_input_file_id}")
@@ -138,13 +132,8 @@ def main():
                     else:
                         # For non-pending errors, log warning and add to retry file
                         logger.warning(f"Please retry: {file} | ERROR: {str(e)}")
-                        row = {
-                            "local_filepath": str(file),
-                            "shard": file.stem.removesuffix("-full"),
-                        }
-                        pd.DataFrame([row]).to_csv(
-                            retry_file_path, mode="a", header=False, index=False
-                        )
+                        row = {"local_filepath": str(file), "shard": file.stem.removesuffix("-full")}
+                        pd.DataFrame([row]).to_csv(retry_file_path, mode="a", header=False, index=False)
                         break
 
             if batch is not None:
@@ -155,9 +144,7 @@ def main():
                     "local_filepath": str(file),
                     "shard": file.stem.removesuffix("-full"),
                 }
-                pd.DataFrame([row]).to_csv(
-                    file_path, mode="a", header=False, index=False
-                )
+                pd.DataFrame([row]).to_csv(file_path, mode="a", header=False, index=False)
         logger.info(
             "Created a batch report as a CSV file. Please keep this as you'll use this to retrieve the results later on!"
         )
@@ -177,9 +164,7 @@ def main():
             while status not in ("completed", "failed", "canceled"):
                 batch_response = client.batches.retrieve(batch_id)
                 status = batch_response.status
-                print(
-                    f"{datetime.datetime.now()} Batch Id: {batch_id},  Status: {status}"
-                )
+                print(f"{datetime.datetime.now()} Batch Id: {batch_id},  Status: {status}")
 
                 if status == "completed" and output_dir:
                     file_id = batch_response.output_file_id
@@ -187,9 +172,7 @@ def main():
                     logger.info(f"Retrieving responses for batch id {batch_id}")
                     file_response = client.files.content(file_id)
                     raw_responses = file_response.text.strip().split("\n")
-                    json_responses = [
-                        json.loads(response) for response in raw_responses
-                    ]
+                    json_responses = [json.loads(response) for response in raw_responses]
                     logger.info(f"Saving file {file_id} to {output_path}")
                     resp_df = pd.DataFrame(json_responses)
                     resp_df.to_json(output_path, lines=True, orient="records")
