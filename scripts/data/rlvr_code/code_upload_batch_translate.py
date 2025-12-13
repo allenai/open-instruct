@@ -215,8 +215,3 @@ if __name__ == "__main__":
     for language, batch_id_filepath in batch_ids.items():
         batch_ids = json.load(open(batch_id_filepath))
         process_batch_results(batch_ids, language)
-
-
-
-
-

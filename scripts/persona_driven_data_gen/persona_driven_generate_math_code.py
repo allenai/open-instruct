@@ -1,13 +1,13 @@
 """
 This code is partially borrowed and adapted from: https://github.com/tencent-ailab/persona-hub
 
-Example uses: 
+Example uses:
 # example 10 math solutions
-python persona_driven_generate_math_code.py --model "gpt-4o" --end_index 10 --output_path <OUTPUT_MATH> --openai_key XXX --org_id YYY --dataset <OUTPUT_MATH_PROMPT> --template math_solution 
+python persona_driven_generate_math_code.py --model "gpt-4o" --end_index 10 --output_path <OUTPUT_MATH> --openai_key XXX --org_id YYY --dataset <OUTPUT_MATH_PROMPT> --template math_solution
 # example for 10 code prompts
-python persona_driven_generate_math_code.py --model "gpt-4o" --start_index 0 --end_index 10 --output_path <OUTPUT_CODE_PROMPT> --openai_key XXX --org_id YYY --dataset ai2-adapt-dev/personahub_personas --template code 
+python persona_driven_generate_math_code.py --model "gpt-4o" --start_index 0 --end_index 10 --output_path <OUTPUT_CODE_PROMPT> --openai_key XXX --org_id YYY --dataset ai2-adapt-dev/personahub_personas --template code
 # example for 10 code soltuions
-python persona_driven_generate_math_code.py --org_name anthropic --model 'claude-3-5-sonnet-20240620' --start_index 0 --end_index 10 --output_path <OUTPUT_CODE> --openai_key XXX --org_id YYY --dataset <OUTPUT_CODE_PROMPT> --template code_solution 
+python persona_driven_generate_math_code.py --org_name anthropic --model 'claude-3-5-sonnet-20240620' --start_index 0 --end_index 10 --output_path <OUTPUT_CODE> --openai_key XXX --org_id YYY --dataset <OUTPUT_CODE_PROMPT> --template code_solution
 """
 
 import argparse

@@ -32,10 +32,10 @@ Optional Arguments:
 Examples:
     # Basic usage
     python plot_seq_len.py --dataset_name "allenai/c4" --split "train" --column_name "text"
-    
+
     # Streaming mode for large datasets
     python plot_seq_len.py --dataset_name "allenai/c4" --split "train" --column_name "text" --streaming --max_samples_streaming 10000
-    
+
     # Custom plot settings
     python plot_seq_len.py --dataset_name "my/dataset" --split "validation" --column_name "output" --num_bins 100 --show_plot
 """
@@ -233,8 +233,3 @@ if __name__ == "__main__":
         logger.warning("--max_samples_streaming is ignored when --streaming is not used.")
 
     main(args)
-
-
-
-
-

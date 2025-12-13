@@ -30,7 +30,7 @@ def test_utility_functions():
     """Test utility functions for text processing and detection."""
     print("Testing utility functions...")
     print("=" * 80)
-    
+
     # Test split_into_paragraphs
     print("\n🧪 Test: split_into_paragraphs")
     text = "Para 1.\n\nPara 2.\n\n\nPara 3."
@@ -38,7 +38,7 @@ def test_utility_functions():
     print(f"Input: {repr(text)}")
     print(f"Output: {paragraphs}")
     assert len(paragraphs) == 3, f"Expected 3 paragraphs, got {len(paragraphs)}"
-    
+
     # Test split_into_sentences
     print("\n🧪 Test: split_into_sentences")
     text = "Sentence 1. Sentence 2! Sentence 3?"
@@ -46,7 +46,7 @@ def test_utility_functions():
     print(f"Input: {repr(text)}")
     print(f"Output: {sentences}")
     assert len(sentences) == 3, f"Expected 3 sentences, got {len(sentences)}"
-    
+
     # Test is_math_or_code
     print("\n🧪 Test: is_math_or_code")
     math_text = "x = y + 1"
@@ -55,7 +55,7 @@ def test_utility_functions():
     print(f"Normal text '{normal_text}': {is_math_or_code(normal_text)}")
     assert is_math_or_code(math_text) == True
     assert is_math_or_code(normal_text) == False
-    
+
     # Test is_code_import_or_return
     print("\n🧪 Test: is_code_import_or_return")
     import_text = "import numpy as np"
@@ -67,7 +67,7 @@ def test_utility_functions():
     assert is_code_import_or_return(import_text) == True
     assert is_code_import_or_return(return_text) == True
     assert is_code_import_or_return(normal_text) == False
-    
+
     # Test is_short_phrase
     print("\n🧪 Test: is_short_phrase")
     short_phrase = "not sure"
@@ -83,7 +83,7 @@ def test_2x_repetitions():
     """Test 2x repetitions (minimum threshold)."""
     print("\nTesting 2x repetitions (minimum threshold)...")
     print("=" * 80)
-    
+
     # Test case 1: Exactly 2x paragraph repetition
     two_paragraph_text = """This is the first paragraph that will be repeated.
 
@@ -92,7 +92,7 @@ Some other content in between.
 This is the first paragraph that will be repeated.
 
 More different content at the end."""
-    
+
     # Test case 2: Exactly 2x consecutive line repetition
     two_line_text = """This is a normal line.
 
@@ -100,7 +100,7 @@ This line will be repeated twice.
 This line will be repeated twice.
 
 And then we continue with normal text."""
-    
+
     # Test case 3: Large chunks repeated 2x
     large_chunk_2x = """<|user|>
 I have a complex question about machine learning algorithms and their applications in natural language processing. Can you help me understand the differences?
@@ -151,7 +151,7 @@ I have a complex question about machine learning algorithms and their applicatio
 
 Would you like me to dive deeper into any specific area?
 </answer>"""
-    
+
     # Test 1: 2x paragraph repetition (should be caught with min_repetitions=2)
     print("\n🧪 Test 1: Exactly 2x paragraph repetition")
     has_rep, reason, details = detect_exact_block_repetition(two_paragraph_text, min_repetitions=2)
@@ -163,7 +163,7 @@ Would you like me to dive deeper into any specific area?
         print(f"Block type: {details['block_type']}")
         print(f"Positions: {details['positions']}")
         print(f"Repeated block: '{details['repeated_block'][:100]}...'")
-    
+
     # Test 2: 2x consecutive line repetition
     print("\n🧪 Test 2: Exactly 2x consecutive line repetition")
     has_rep, reason, details = detect_exact_block_repetition(two_line_text, min_repetitions=2)
@@ -174,7 +174,7 @@ Would you like me to dive deeper into any specific area?
         print(f"Consecutive count: {details['consecutive_count']}")
         print(f"Block type: {details['block_type']}")
         print(f"Positions: {details['positions']}")
-    
+
     # Test 3: Large chunk repeated exactly 2x
     print("\n🧪 Test 3: Large conversation chunk repeated 2x")
     has_rep, reason, details = detect_exact_block_repetition(large_chunk_2x, min_repetitions=2)
@@ -186,11 +186,11 @@ Would you like me to dive deeper into any specific area?
         print(f"Block type: {details['block_type']}")
         print(f"Positions: {details['positions']}")
         print(f"Repeated block: '{details['repeated_block'][:200]}...'")
-    
+
     print("\n" + "=" * 80)
     print("Testing with default min_repetitions=10 (should NOT catch 2x repetitions)")
     print("=" * 80)
-    
+
     # Test same examples with default threshold (should not be caught)
     print("\n🧪 Test 4: 2x repetition with default threshold (should be FALSE)")
     has_rep, reason, details = detect_exact_block_repetition(two_paragraph_text, min_repetitions=10)
@@ -201,7 +201,7 @@ def test_consecutive_repetitions():
     """Test consecutive vs non-consecutive repetitions."""
     print("\nTesting consecutive vs non-consecutive repetitions...")
     print("=" * 80)
-    
+
     # Test case: consecutive line repetitions (more repetitions to meet threshold)
     consecutive_text = """This is a normal line.
 
@@ -217,7 +217,7 @@ This repetition happens here.
 This repetition happens here.
 
 And then we continue with normal text."""
-    
+
     # Test case: non-consecutive repetitions (more repetitions to meet threshold)
     non_consecutive_text = """This repetition happens here.
 
@@ -262,7 +262,7 @@ Yet another different section.
 This repetition happens here.
 
 Final different content."""
-    
+
     # Test 1: Consecutive repetitions
     print("\n🧪 Test 1: Consecutive line repetitions")
     has_rep, reason, details = detect_exact_block_repetition(consecutive_text)
@@ -272,9 +272,9 @@ Final different content."""
         print(f"Total count: {details['total_count']}")
         print(f"Consecutive count: {details['consecutive_count']}")
         print(f"Positions: {details['positions']}")
-    
+
     # Test 2: Non-consecutive repetitions (should still be caught)
-    print("\n🧪 Test 2: Non-consecutive repetitions")  
+    print("\n🧪 Test 2: Non-consecutive repetitions")
     has_rep, reason, details = detect_exact_block_repetition(non_consecutive_text)
     print(f"Result: {has_rep}")
     print(f"Reason: {reason}")
@@ -282,7 +282,7 @@ Final different content."""
         print(f"Total count: {details['total_count']}")
         print(f"Consecutive count: {details['consecutive_count']}")
         print(f"Positions: {details['positions']}")
-    
+
     # Test 3: Simple repetition with lower thresholds (should be caught)
     print("\n🧪 Test 3: Simple repetition with lower thresholds")
     simple_text = """This line repeats.
@@ -301,7 +301,7 @@ def test_exact_repetition_examples():
     """Test specific examples of exact block repetition."""
     print("\nTesting exact block repetition detection...")
     print("=" * 80)
-    
+
     # Test case 1: Scooby-Doo example
     scooby_text = """Shaggy: (excitedly) I don't know, man! But I'm ready for some spooky action!
 
@@ -332,8 +332,8 @@ Shaggy: (excitedly) I don't know, man! But I'm ready for some spooky action!
 (Scooby-Doo theme music plays)
 
 Scooby-Doo, where are you?"""
-    
-    # Test case 2: Marketing URL example  
+
+    # Test case 2: Marketing URL example
     marketing_url_text = """<|user|>
 I am trying to change the marketing URL but it is not selecting
 <|assistant|>
@@ -366,14 +366,14 @@ I am trying to change the marketing URL but it is not selecting
 3. Clear your browser cache and cookies, then try again.
 4. Try using a different web browser to access App Store Connect.
 5. If none of the above steps work, contact Apple Support for further assistance."""
-    
+
     # Test case 3: Normal text (should NOT be flagged)
     normal_text = """This is a normal conversation about various topics. The user asks a question and I provide a helpful response. There might be some repetition of words here and there, but nothing excessive.
 
 The weather today is quite nice. I hope you are having a good day. Let me know if you need any help with anything else.
 
 Here's another paragraph with different content. This paragraph talks about something completely different from the previous one. There's no repetition here that would be problematic."""
-    
+
     # Test 1: Scooby-Doo example
     print("\n🧪 Test 1: Scooby-Doo repeated lines")
     has_rep, reason, details = detect_exact_block_repetition(scooby_text)
@@ -381,15 +381,15 @@ Here's another paragraph with different content. This paragraph talks about some
     print(f"Reason: {reason}")
     if details:
         print(f"Details: {details}")
-    
+
     # Test 2: Marketing URL example
-    print("\n🧪 Test 2: Marketing URL conversation repetition")  
+    print("\n🧪 Test 2: Marketing URL conversation repetition")
     has_rep, reason, details = detect_exact_block_repetition(marketing_url_text)
     print(f"Result: {has_rep}")
     print(f"Reason: {reason}")
     if details:
         print(f"Details: {details}")
-    
+
     # Test 3: Normal text
     print("\n🧪 Test 3: Normal text (should NOT be flagged)")
     has_rep, reason, details = detect_exact_block_repetition(normal_text)
@@ -402,7 +402,7 @@ def test_main_functions():
     """Test the main processing functions with mock dataset examples."""
     print("\nTesting main filtering functions...")
     print("=" * 80)
-    
+
     # Create mock dataset examples
     test_examples = [
         {
@@ -414,7 +414,7 @@ def test_main_functions():
             "source": "normal_conversation"
         },
         {
-            "id": "repetitive_example", 
+            "id": "repetitive_example",
             "messages": [
                 {"role": "user", "content": "Help me with this issue."},
                 {"role": "assistant", "content": """I'll help you solve this problem step by step.
@@ -446,22 +446,22 @@ I hope this comprehensive explanation helps you understand the concept better!""
             "source": "another_dataset"
         }
     ]
-    
+
     for i, example in enumerate(test_examples):
         print(f"\n🧪 Test {i+1}: {example['id']}")
-        
+
         # Test the filtering function
         should_filter, reason, details = should_be_filtered_by_repetition(
             example, "messages", filter_user_turns=False, min_repetitions=2
         )
-        
+
         print(f"Should filter: {should_filter}")
         print(f"Reason: {reason}")
         if details:
             print(f"Block type: {details.get('block_type', 'N/A')}")
             print(f"Total count: {details.get('total_count', 'N/A')}")
             print(f"Consecutive count: {details.get('consecutive_count', 'N/A')}")
-        
+
         # Test the process function
         processed = process_example(example, "messages", index=i, filter_user_turns=False, min_repetitions=2)
         print(f"Has repetition: {processed['has_repetition']}")
@@ -471,19 +471,19 @@ def test_edge_cases():
     """Test edge cases and boundary conditions."""
     print("\nTesting edge cases and boundary conditions...")
     print("=" * 80)
-    
+
     # Test empty text
     print("\n🧪 Test 1: Empty text")
     has_rep, reason, details = detect_exact_block_repetition("")
     print(f"Result: {has_rep}")
     print(f"Reason: {reason}")
-    
+
     # Test single word
     print("\n🧪 Test 2: Single word")
     has_rep, reason, details = detect_exact_block_repetition("hello")
     print(f"Result: {has_rep}")
     print(f"Reason: {reason}")
-    
+
     # Test code patterns (should be ignored)
     print("\n🧪 Test 3: Code patterns")
     code_text = """import numpy as np
@@ -495,7 +495,7 @@ def function():
     has_rep, reason, details = detect_exact_block_repetition(code_text)
     print(f"Result: {has_rep}")
     print(f"Reason: {reason}")
-    
+
     # Test math expressions (should be ignored)
     print("\n🧪 Test 4: Math expressions")
     math_text = """x = y + 1
@@ -505,7 +505,7 @@ z = a * b"""
     has_rep, reason, details = detect_exact_block_repetition(math_text)
     print(f"Result: {has_rep}")
     print(f"Reason: {reason}")
-    
+
     # Test short phrases (should be ignored for non-consecutive)
     print("\n🧪 Test 5: Short phrases")
     short_phrase_text = """not sure
@@ -521,19 +521,19 @@ def test_ngram_functions():
     """Test the n-gram repetition detection functions."""
     print("\nTesting n-gram repetition detection functions...")
     print("=" * 80)
-    
+
     # Test find_consecutive_repetitions
     print("\n🧪 Test 1: find_consecutive_repetitions")
     items = ["a", "b", "a", "b", "a", "b", "c"]
     consecutive = find_consecutive_repetitions(items, "test")
     print(f"Items: {items}")
     print(f"Consecutive repetitions: {consecutive}")
-    
+
     # Test find_all_repetitions
     print("\n🧪 Test 2: find_all_repetitions")
     all_reps = find_all_repetitions(items, "test")
     print(f"All repetitions: {all_reps}")
-    
+
     # Test find_ngram_repetitions
     print("\n🧪 Test 3: find_ngram_repetitions")
     text = "the cat the dog the cat the bird"
@@ -545,7 +545,7 @@ def run_all_tests():
     """Run all test functions."""
     print("🧪 COMPREHENSIVE TEST SUITE FOR FILTER_NGRAM_REPETITIONS")
     print("=" * 80)
-    
+
     try:
         test_utility_functions()
         test_2x_repetitions()
@@ -554,19 +554,19 @@ def run_all_tests():
         test_main_functions()
         test_edge_cases()
         test_ngram_functions()
-        
+
         print("\n" + "=" * 80)
         print("✅ ALL TESTS COMPLETED SUCCESSFULLY!")
         print("=" * 80)
-        
+
     except Exception as e:
         print(f"\n❌ TEST FAILED: {e}")
         import traceback
         traceback.print_exc()
         return False
-    
+
     return True
 
 if __name__ == "__main__":
     success = run_all_tests()
-    sys.exit(0 if success else 1) 
+    sys.exit(0 if success else 1)

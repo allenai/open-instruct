@@ -55,7 +55,7 @@ def process_example(example: Dict, column: str, index: int = None) -> Dict:
             id = str(hash(first_content))
         else:
             id = str(hash(str(example)))
-    
+
     source = example.get("source", "unknown")
 
     for msg in messages:
@@ -136,12 +136,12 @@ def main():
     remove_ids = set(ex["id"] for ex in filtered)  # Use set for faster lookup
     print(f"Removing {len(remove_ids)} examples from processed")
     print(f"Sample remove_ids: {list(remove_ids)[:5]}")
-    
+
     # Debug: Check if IDs exist in processed
     processed_ids = set(ex["id"] for ex in processed.select(range(min(100, len(processed)))))
     print(f"Sample processed IDs: {list(processed_ids)[:5]}")
     print(f"ID overlap check - first 5 remove_ids in processed: {[rid in processed_ids for rid in list(remove_ids)[:5]]}")
-    
+
     processed = processed.filter(
         lambda ex: ex["id"] not in remove_ids,
         num_proc=args.num_proc,
@@ -163,22 +163,22 @@ def main():
         else:
             # Use same entity as input dataset
             new_name = args.dataset + "-filter-datecutoff"
-        
+
         print(f"Uploading filtered dataset to: {new_name}")
         print(f"Dataset size before upload: {len(processed)}")
-        
+
         # Remove temporary columns if they exist
         columns_to_remove = []
         if "cutoff_matches" in processed.column_names:
             columns_to_remove.append("cutoff_matches")
-        
+
         if columns_to_remove:
             print(f"Removing columns: {columns_to_remove}")
             processed = processed.remove_columns(columns_to_remove)
-        
+
         print(f"Final dataset size: {len(processed)}")
         print(f"Final dataset columns: {processed.column_names}")
-        
+
         processed.push_to_hub(new_name, private=True)
         print(f"Successfully uploaded dataset with {len(processed)} examples")
 

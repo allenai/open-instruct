@@ -194,11 +194,11 @@ def load_jsonl(file_path: pathlib.Path) -> list[dict]:
 
 def process_single_batch(batch_id: str, id_lookup: dict) -> Tuple[dict[str, BatchResult], TokenUsage]:
     """Process a single batch and return its results and token usage.
-    
+
     Args:
         batch_id: The ID of the batch to process
         id_lookup: Dictionary mapping IDs to original dataset rows
-        
+
     Returns:
         Tuple containing:
         - Dictionary of result_id -> BatchResult

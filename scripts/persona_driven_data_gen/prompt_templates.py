@@ -307,7 +307,7 @@ code_solution_template = '''Provide solution to the given python programming que
 Question: {persona}
 
 
-Note: 
+Note:
 
 1. Your response should always start with the function definition and end with the final return statement.
 2. Your response should only and only include python function.'''

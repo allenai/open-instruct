@@ -150,8 +150,3 @@ if __name__ == "__main__":
     batch_ids = json.load(open(BATCH_ID_FILEPATH))
     for dataset, batch_id in batch_ids.items():
         process_batch_results(dataset, batch_id)
-
-
-
-
-

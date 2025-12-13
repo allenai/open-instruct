@@ -1,7 +1,7 @@
 """
 This script is used to convert the AceCoder dataset to an RLVR format.
 
-Usage: 
+Usage:
 python scripts/data/rlvr/acecoder.py --push_to_hub
 python scripts/data/rlvr/acecoder.py --push_to_hub --hf_entity ai2-adapt-dev
 """

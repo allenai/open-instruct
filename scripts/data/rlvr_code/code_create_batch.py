@@ -44,13 +44,13 @@ Examples:
     # Set environment variables
     export AZURE_OPENAI_API_KEY="your-api-key"
     export AZURE_OPENAI_ENDPOINT="https://your-endpoint.openai.azure.com/"
-    
+
     # Run the script
     python code_create_batch.py
-    
+
     # The script will output a batch job ID like:
     # "Batch job submitted with ID: batch_abc123def456"
-    
+
     # Use this ID later with code_upload_batch.py:
     # python code_upload_batch.py batch_abc123def456
     ```

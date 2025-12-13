@@ -42,11 +42,11 @@ def make_parser():
                     It will will collect all evaluation metrics and dump them in a json
                     file. It will also collect summary metrics for each task.""",
         epilog="""Usage example:
-                  python scripts/collect_eval_results.py 
-                      --experiment_id 01HV0P4E3MW9211HX0JEKM0PXM 
-                      --job_suffix _tulu2_13b_dpo_ultrainteract_04082024 
-                      --task_order gsm_cot gsm_direct toxigen alpaca_eval 
-                      --output_file metrics.json 
+                  python scripts/collect_eval_results.py
+                      --experiment_id 01HV0P4E3MW9211HX0JEKM0PXM
+                      --job_suffix _tulu2_13b_dpo_ultrainteract_04082024
+                      --task_order gsm_cot gsm_direct toxigen alpaca_eval
+                      --output_file metrics.json
                       --table_file metrics.tsv
                       --print_table""",
     )

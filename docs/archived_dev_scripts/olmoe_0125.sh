@@ -26,7 +26,7 @@ done
 done
 
 
-# 1B full sweep 5e-7 
+# 1B full sweep 5e-7
 for lr in 6e-7 7e-7; do
 python scripts/submit_dpo_job.py \
     --cluster ai2/jupiter \
@@ -112,7 +112,7 @@ done
 
 
 
-# on policy DPO 
+# on policy DPO
 for lr in 5e-7 6e-7 7e-7 8e-7 9e-7; do
 exp_name="0119_node4_dpo_olmoe_1blr_${lr}"
 python mason.py \
@@ -173,7 +173,7 @@ done
 
 
 
-# on policy DPO 
+# on policy DPO
 for lr in 5e-7 6e-7 7e-7 8e-7 9e-7; do
 exp_name="0125_dpo_olmoe_1blr_${lr}"
 python mason.py \

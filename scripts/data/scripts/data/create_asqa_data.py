@@ -54,7 +54,7 @@ def convert_asqa_to_open_instruct_format(data):
 def save_to_hf_repo(train_data, val_data, repo_id):
     """
     Save the formatted data to a Hugging Face repository with separate splits.
-    
+
     Args:
         train_data (list): List of formatted training data items
         val_data (list): List of formatted validation data items

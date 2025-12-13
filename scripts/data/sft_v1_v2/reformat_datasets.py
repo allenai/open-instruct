@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding=utf-8
 """
-Warning: this is a legacy script that was used for Tulu v1 and v2. 
+Warning: this is a legacy script that was used for Tulu v1 and v2.
 Please consider using the new script `convert_datasets.py` for Tulu v3 and beyond.
 
 This script is used to reformat the downloaded datasets into the format that can be used by the model.

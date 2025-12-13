@@ -2,7 +2,7 @@
 This code is partially borrowed and adapted from: https://github.com/tencent-ailab/persona-hub
 
 Example commands:
-# generate 20 if prompts: 
+# generate 20 if prompts:
 python persona_driven_generate_ifdata.py --model "gpt-4o" --start_index 0 --end_index 20 --output_path if_prompts.jsonl --openai_key Z --org_id YYY --dataset ai2-adapt-dev/personahub_personas --template instruction_following
 
 # generate 20 IF responses

@@ -1,7 +1,7 @@
 """
 SFT to RLVR Dataset Converter using Azure OpenAI
 
-This script converts Supervised Fine-Tuning (SFT) datasets into RLVR (Reinforcement Learning 
+This script converts Supervised Fine-Tuning (SFT) datasets into RLVR (Reinforcement Learning
 from Verification and Reasoning) format. It processes coding problems by:
 1. Transforming them into structured format with function signatures
 2. Generating test cases using Azure OpenAI GPT-4.1
@@ -58,11 +58,11 @@ Example:
     # Set environment variables
     export AZURE_OPENAI_API_KEY="your-api-key"
     export AZURE_OPENAI_ENDPOINT="https://your-endpoint.openai.azure.com/"
-    
+
     # Start code API
     docker build -t code-api -f open_instruct/code/Dockerfile .
     docker run -p 1234:1234 code-api
-    
+
     # Run the script
     python sft_to_rlvr_azure.py
     ```

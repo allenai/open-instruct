@@ -30,7 +30,7 @@ def filter_toxic(ds):
     initial_count = ds.num_rows
     ds_filtered = ds.filter(lambda ex: not ex.get("toxic", False))
     filtered_out = initial_count - ds_filtered.num_rows
-    logger.info("Filtered out %d toxic examples (%d remaining, %.2f%%).", 
+    logger.info("Filtered out %d toxic examples (%d remaining, %.2f%%).",
                  filtered_out, ds_filtered.num_rows, 100 * ds_filtered.num_rows / initial_count)
     return ds_filtered
 
@@ -40,7 +40,7 @@ def filter_redacted(ds):
     initial_count = ds.num_rows
     ds_filtered = ds.filter(lambda ex: not ex.get("redacted", False))
     filtered_out = initial_count - ds_filtered.num_rows
-    logger.info("Filtered out %d redacted examples (%d remaining, %.2f%%).", 
+    logger.info("Filtered out %d redacted examples (%d remaining, %.2f%%).",
                  filtered_out, ds_filtered.num_rows, 100 * ds_filtered.num_rows / initial_count)
     return ds_filtered
 
@@ -50,7 +50,7 @@ def filter_language(ds, lang="english"):
     initial_count = ds.num_rows
     ds_filtered = ds.filter(lambda ex: ex.get("language", "").lower() == lang.lower())
     filtered_out = initial_count - ds_filtered.num_rows
-    logger.info("Filtered out %d non-English examples (%d remaining, %.2f%%).", 
+    logger.info("Filtered out %d non-English examples (%d remaining, %.2f%%).",
                  filtered_out, ds_filtered.num_rows, 100 * ds_filtered.num_rows / initial_count)
     return ds_filtered
 

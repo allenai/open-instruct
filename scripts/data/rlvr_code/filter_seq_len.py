@@ -48,7 +48,7 @@ Examples:
         --max_seq_len 512 \
         --hub_repo_id "myuser/c4-filtered" \
         --new_branch_name "max-512-tokens"
-    
+
     # Use streaming mode for very large datasets
     python filter_seq_len.py \
         --dataset_name "allenai/c4" \

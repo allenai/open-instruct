@@ -3,7 +3,7 @@ This script is used to convert the GSM8K dataset to standard SFT format.
 Note that we don't do any special processing to answer, and we will mainly
 use it for generations.
 
-Usage: 
+Usage:
 
 python scripts/data/rlvr/gsm8k_rlvr.py --push_to_hub
 python scripts/data/rlvr/gsm8k_rlvr.py --push_to_hub --hf_entity ai2-adapt-dev

@@ -1,6 +1,6 @@
 """
 This script is used to convert https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero
-Usage: 
+Usage:
 
 python scripts/data/rlvr/open_reasoner.py --push_to_hub
 python scripts/data/rlvr/open_reasoner.py --push_to_hub --hf_entity ai2-adapt-dev

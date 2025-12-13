@@ -73,7 +73,7 @@ async def verify_and_process_row(session, row, id_to_row, base_url, dataset_to_u
         id = row['question_id']
         if id not in id_to_row:
             return "skipped", None
-        
+
         og_row = id_to_row[id]
         python_code = extract_python_code(row['messages'][1]['content'])
         source = row['source']
@@ -88,7 +88,7 @@ async def verify_and_process_row(session, row, id_to_row, base_url, dataset_to_u
             async with session.post(full_url, json=payload, timeout=10) as response:
                 response.raise_for_status()
                 result = await response.json()
-    
+
                 # Calculate pass rate from the results
                 test_results = result.get("results", [])
                 if not test_results:
@@ -120,12 +120,12 @@ async def main():
         dataset_map[dataset_name] = load_dataset_with_retries(dataset_name)
         for row in tqdm(dataset_map[dataset_name], desc=f"Processing {dataset_name}"):
             id_to_row[get_id(row)] = row
-        
+
     base_url = os.getenv("CODE_API_URL")
     logger.info(f"Using code API URL: {base_url}")
 
     source_ds = load_dataset_with_retries(SOURCE_DATASET)
-    
+
     semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
     async with aiohttp.ClientSession() as session:
@@ -146,7 +146,7 @@ async def main():
             skipped_rows += 1
         elif status == "failed":
             failed_rows += 1
-    
+
     logger.info(f"Skipped {skipped_rows} rows")
     logger.info(f"Failed {failed_rows} rows")
     logger.info(f"Passed {len(filtered_rows)} rows, uploading to {DESTINATION_DATASET}")

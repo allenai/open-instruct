@@ -45,11 +45,11 @@ Examples:
     ```bash
     # Set your OpenAI API key
     export OPENAI_API_KEY="your-openai-api-key"
-    
+
     # Start the code execution API
     docker build -t code-api -f open_instruct/code/Dockerfile .
     docker run -p 1234:1234 code-api
-    
+
     # Process batch results (replace with your actual batch ID)
     python code_upload_batch.py batch_abc123def456
     ```

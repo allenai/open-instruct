@@ -124,7 +124,7 @@ def cli() -> Namespace:
 
 def check_batch_status(batch_id: str) -> tuple[bool, bool]:
     """Check status of a single batch job.
-    
+
     Returns:
         tuple[bool, bool]: (is_terminal_state, is_success)
     """

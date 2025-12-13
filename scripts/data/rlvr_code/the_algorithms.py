@@ -33,14 +33,14 @@ Usage:
     ```bash
     # Clone the algorithms repository
     git clone https://github.com/TheAlgorithms/Python.git
-    
+
     # Set your OpenAI API key
     export OPENAI_API_KEY="your-openai-api-key"
-    
+
     # Start the code execution API
     docker build -t code-api -f open_instruct/code/Dockerfile .
     docker run -p 1234:1234 code-api
-    
+
     # Run the script
     python the_algorithms.py
     ```
@@ -142,14 +142,14 @@ async def main():
 
     # Create prompts to process
     master_prompt = r"""\
-I am creating a dataset of prompt and test cases. Can you convert the following file to 
+I am creating a dataset of prompt and test cases. Can you convert the following file to
 1) a prompt asking the user to implement a function and 2) a list of test cases extracted from the file,
 and 3) the reference solution to the function.
 
 Here is the file:
 {file_content}
 
-The prompt should be more human-like questions: relatively concise. 
+The prompt should be more human-like questions: relatively concise.
 The test cases should be a python list of executable assert code.
 
 You should return in json format like below. I should be able to parse it directly using json.loads, so
