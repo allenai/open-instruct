@@ -6,7 +6,7 @@ EXP_NAME=olmo3-7b-DPO-debug-${LR}
 
 uv run python mason.py \
     --cluster ai2/augusta \
-    --description "Single GPU DPO run with OLMo3-7B, for debugging purposes." \
+    --description "Multi-node DPO run with OLMo3-7B, 1k sequence length." \
     --workspace ai2/open-instruct-dev \
     --priority high \
     --image "$BEAKER_IMAGE" \
