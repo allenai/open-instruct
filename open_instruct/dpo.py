@@ -128,9 +128,6 @@ def build_reference_logprobs_cache(
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Caching reference logprobs"):
-            if device is not None:
-                batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-
             if use_lora:
                 assert isinstance(model, peft.PeftModel)
                 with model.disable_adapter():
@@ -234,15 +231,10 @@ class DPOTrainModule(TrainModule):
     def eval_batch(self, batch: dict[str, Any], labels: Any | None = None) -> Any:
         self.model.eval()
         with torch.no_grad():
-            if self.device is not None:
-                batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
             return self.model(**batch)
 
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
         self.model.train()
-
-        if self.device is not None:
-            batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
         policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
             self.model,
@@ -501,6 +493,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         world_size=world_size,
         work_dir=args.output_dir,
         collator=collator,
+        device=device,
     )
 
     forward_fn = concatenated_forward if args.dpo_config.concatenated_forward else separate_forward

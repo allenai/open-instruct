@@ -1,8 +1,13 @@
 from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 
+import torch
 from datasets import Dataset
 from olmo_core.data import data_loader
+
+
+def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
+    return {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
 
 class HFDataLoader(data_loader.DataLoaderBase):
@@ -24,6 +29,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         automatic_reshuffle: bool = False,
         collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
         fs_local_rank: int | None = None,
+        device: torch.device | None = None,
     ) -> None:
         """Initialize the HFDataLoader.
 
@@ -40,6 +46,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
                 of size batch_size // world_size.
             fs_local_rank: The filesystem-local rank. For shared filesystems, this should
                 equal the global rank. Defaults to rank if not specified.
+            device: Device to move batches to. If None, batches stay on CPU.
         """
         if fs_local_rank is None:
             fs_local_rank = rank
@@ -60,6 +67,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._excluded_indices: set[int] = set()
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
+        self._device = device
 
         self._reshard(epoch=0)
 
@@ -88,7 +96,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             example = self.dataset[i]
             batch_examples.append(example | {"prompt_id": f"{self._epoch}_{example['dataset_index']}"})
             if len(batch_examples) == self._per_rank_batch_size:
-                yield self._collator(batch_examples)
+                yield to_device(self._collator(batch_examples), self._device)
                 batch_examples = []
 
     @property
@@ -151,7 +159,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         num_examples = min(self._per_rank_batch_size, len(self.dataset))
         examples = [self.dataset[i] for i in range(num_examples)]
-        return self._collator(examples)
+        return to_device(self._collator(examples), self._device)
 
     def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int | None:
         """Return the total number of tokens in the batch across all ranks.
