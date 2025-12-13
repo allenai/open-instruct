@@ -487,24 +487,6 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
     model = model.to(device=device, dtype=torch.bfloat16)
 
-    dp_config = TransformerDataParallelConfig(
-        name=DataParallelType.hsdp,
-        num_replicas=None,
-        shard_degree=None,
-        param_dtype=DType.bfloat16,
-        reduce_dtype=DType.float32,
-        wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
-    )
-    world_mesh = build_world_mesh(dp=dp_config, device_type=device.type)
-    dp_mesh = get_dp_model_mesh(world_mesh)
-    logger.info(f"Applying HSDP with dp_mesh: {dp_mesh}")
-    model.apply_fsdp(
-        dp_mesh=dp_mesh,
-        param_dtype=torch.bfloat16,
-        reduce_dtype=torch.float32,
-        wrapping_strategy=dp_config.wrapping_strategy,
-    )
-
     if args.dpo_config.packing:
         collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
@@ -526,7 +508,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         forward_fn = partial(concatenated_forward, packing=True)
     average_log_prob = args.dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
 
-    logger.info("Caching reference logprobs...")
+    logger.info("Caching reference logprobs (before HSDP)...")
     reference_cache = build_reference_logprobs_cache(
         model=model,
         dataloader=data_loader_instance,
@@ -539,6 +521,24 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     )
     logger.info("Reference logprobs cached.")
     data_loader_instance.reshuffle(epoch=0)
+
+    dp_config = TransformerDataParallelConfig(
+        name=DataParallelType.hsdp,
+        num_replicas=None,
+        shard_degree=None,
+        param_dtype=DType.bfloat16,
+        reduce_dtype=DType.float32,
+        wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
+    )
+    world_mesh = build_world_mesh(dp=dp_config, device_type=device.type)
+    dp_mesh = get_dp_model_mesh(world_mesh)
+    logger.info(f"Applying HSDP with dp_mesh: {dp_mesh}")
+    model.apply_fsdp(
+        dp_mesh=dp_mesh,
+        param_dtype=torch.bfloat16,
+        reduce_dtype=torch.float32,
+        wrapping_strategy=dp_config.wrapping_strategy,
+    )
 
     no_decay = ["bias", "layer_norm.weight"]
     optimizer_grouped_parameters = [
