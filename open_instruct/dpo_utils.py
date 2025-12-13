@@ -32,14 +32,14 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 
 def dpo_loss(
-    policy_chosen_logps: torch.FloatTensor,
-    policy_rejected_logps: torch.FloatTensor,
-    reference_chosen_logps: torch.FloatTensor,
-    reference_rejected_logps: torch.FloatTensor,
+    policy_chosen_logps: torch.Tensor,
+    policy_rejected_logps: torch.Tensor,
+    reference_chosen_logps: torch.Tensor,
+    reference_rejected_logps: torch.Tensor,
     beta: float,
     reference_free: bool = False,
     label_smoothing: float = 0.0,
-) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Compute the DPO loss for a batch of policy and reference model log probabilities.
 
     Args:
@@ -78,15 +78,15 @@ def dpo_loss(
 
 
 def wpo_loss(
-    policy_chosen_logps: torch.FloatTensor,
-    policy_rejected_logps: torch.FloatTensor,
-    reference_chosen_logps: torch.FloatTensor,
-    reference_rejected_logps: torch.FloatTensor,
+    policy_chosen_logps: torch.Tensor,
+    policy_rejected_logps: torch.Tensor,
+    reference_chosen_logps: torch.Tensor,
+    reference_rejected_logps: torch.Tensor,
     beta: float,
     label_smoothing: float = 0.0,
     chosen_loss_mask: torch.BoolTensor = None,
     rejected_loss_mask: torch.BoolTensor = None,
-) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     pi_logratios = policy_chosen_logps - policy_rejected_logps
     ref_logratios = reference_chosen_logps - reference_rejected_logps
 
@@ -227,28 +227,20 @@ def concatenated_forward(
     average_log_prob: bool = False,
     output_router_logits: bool = False,
     packing: bool = False,
-) -> tuple[torch.FloatTensor, torch.FloatTensor]:
+) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor | None]:
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
     We do this to avoid doing two forward passes, because it's faster for FSDP.
+
+    Uses OLMo-core Transformer interface: model(input_ids) returns logits tensor directly
     """
     if not packing:
         concatenated_batch = concatenated_inputs(batch)
     else:
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
-    inputs = {
-        k.replace("concatenated_", ""): v
-        for k, v in concatenated_batch.items()
-        if k.startswith("concatenated_") and not k.endswith("labels")
-    }
-    if output_router_logits:
-        outputs = model(**inputs, output_router_logits=True)
-        logits = outputs.logits.to(torch.float32)
-        aux_loss = outputs.aux_loss
-    else:
-        logits = model(**inputs).logits.to(torch.float32)
-        aux_loss = None
+    logits = model(concatenated_batch["concatenated_input_ids"]).to(torch.float32)
+    aux_loss = None
 
     if not packing:
         all_logps = _get_batch_logps(
@@ -259,7 +251,7 @@ def concatenated_forward(
         all_logps = pf_get_batch_logps(
             logits,
             concatenated_batch["concatenated_labels"],
-            inputs["cu_seq_lens_k"],  # assume same as q
+            concatenated_batch["concatenated_cu_seq_lens"],
             average_log_prob=average_log_prob,
         )
     chosen_logps = all_logps[:bs]
@@ -275,64 +267,33 @@ def separate_forward(
 ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor | None]:
     """Run the model on chosen and rejected inputs separately.
 
+    Uses OLMo-core Transformer interface: model(input_ids) returns logits tensor directly
+    Note: OLMo-core handles MoE aux loss via compute_auxiliary_metrics() in the train module.
+
     Args:
         model: The model to run
         batch: Dictionary containing chosen and rejected inputs
         average_log_prob: Whether to average the log probabilities
-        output_router_logits: Whether to output router logits for MoE models
+        output_router_logits: Whether to output router logits for MoE models (kept for API compat)
 
     Returns:
         Tuple of (chosen_logps, rejected_logps, aux_loss)
     """
-    # Process chosen inputs
     chosen_batch = process_batch(batch, "chosen")
-
-    if output_router_logits:
-        chosen_outputs = model(
-            input_ids=chosen_batch["input_ids"],
-            attention_mask=chosen_batch["attention_mask"],
-            output_router_logits=True,
-        )
-        chosen_logits = chosen_outputs.logits.to(torch.float32)
-        aux_loss = chosen_outputs.aux_loss
-    else:
-        chosen_logits = model(
-            input_ids=chosen_batch["input_ids"], attention_mask=chosen_batch["attention_mask"]
-        ).logits.to(torch.float32)
-        aux_loss = None
+    chosen_logits = model(chosen_batch["input_ids"]).to(torch.float32)
 
     chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
     del chosen_batch, chosen_logits
-    if output_router_logits:
-        del chosen_outputs
     torch.cuda.empty_cache()
 
-    # Process rejected inputs
     rejected_batch = process_batch(batch, "rejected")
-
-    if output_router_logits:
-        rejected_outputs = model(
-            input_ids=rejected_batch["input_ids"],
-            attention_mask=rejected_batch["attention_mask"],
-            output_router_logits=True,
-        )
-        rejected_logits = rejected_outputs.logits.to(torch.float32)
-        aux_loss = rejected_outputs.aux_loss
-    else:
-        rejected_logits = model(
-            input_ids=rejected_batch["input_ids"], attention_mask=rejected_batch["attention_mask"]
-        ).logits.to(torch.float32)
-        aux_loss = None
+    rejected_logits = model(rejected_batch["input_ids"]).to(torch.float32)
 
     rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
     del rejected_batch, rejected_logits
-    if output_router_logits:
-        del rejected_outputs
     torch.cuda.empty_cache()
-    if output_router_logits:
-        aux_loss = torch.cat([chosen_outputs.aux_loss, rejected_outputs.aux_loss], dim=0)
 
-    return chosen_logps, rejected_logps, aux_loss
+    return chosen_logps, rejected_logps, None
 
 
 def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float, dim: int = -1) -> torch.Tensor:
@@ -365,4 +326,18 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             result["chosen_" + k] = chosen_features[k]
         for k in rejected_features:
             result["rejected_" + k] = rejected_features[k]
+        if "dataset_index" in features[0]:
+            result["dataset_index"] = torch.tensor([f["dataset_index"] for f in features])
+        max_len = max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
+        chosen_padded = torch.nn.functional.pad(
+            result["chosen_input_ids"],
+            (0, max_len - result["chosen_input_ids"].shape[1]),
+            value=self.tokenizer.pad_token_id,
+        )
+        rejected_padded = torch.nn.functional.pad(
+            result["rejected_input_ids"],
+            (0, max_len - result["rejected_input_ids"].shape[1]),
+            value=self.tokenizer.pad_token_id,
+        )
+        result["input_ids"] = torch.cat([chosen_padded, rejected_padded], dim=0)
         return result

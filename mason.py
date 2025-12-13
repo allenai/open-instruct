@@ -17,6 +17,18 @@ from rich.text import Text
 
 from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS, download_from_gs_bucket
 
+# Suppress multiprocess ResourceTracker cleanup warnings (Python 3.12 compatibility issue)
+_original_unraisablehook = sys.unraisablehook
+
+
+def _custom_unraisablehook(unraisable):
+    if "ResourceTracker" in str(unraisable.object) and "_recursion_count" in str(unraisable.exc_value):
+        return
+    _original_unraisablehook(unraisable)
+
+
+sys.unraisablehook = _custom_unraisablehook
+
 console = Console()
 
 
@@ -25,6 +37,7 @@ console = Console()
 OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/finetune.py",
     "open_instruct/dpo_tune_cache.py",
+    "open_instruct/dpo.py",
     "open_instruct/grpo_fast.py",
     "open_instruct/ppo.py",
     "open_instruct/reward_modeling.py",
@@ -152,6 +165,7 @@ def get_args():
     parser.add_argument(
         "--no_auto_dataset_cache", action="store_true", help="If given, don't cache the dataset automatically"
     )
+    parser.add_argument("--no_result", action="store_true", help="If given, skip uploading results to Beaker")
     parser.add_argument(
         "--auto_output_dir_path",
         type=str,
@@ -341,6 +355,8 @@ def get_env_vars(
                 [
                     # NOTE: For single-node training we still need all of these settings and we also
                     # need host networking enabled so that the ethernet interface names don't change.
+                    beaker.BeakerEnvVar(name="NCCL_LIB_DIR", value="/var/lib/tcpxo/lib64"),
+                    beaker.BeakerEnvVar(name="LD_LIBRARY_PATH", value="/var/lib/tcpxo/lib64"),
                     beaker.BeakerEnvVar(name="NCCL_CROSS_NIC", value="0"),
                     beaker.BeakerEnvVar(name="NCCL_PROTO", value="Simple,LL128"),
                     beaker.BeakerEnvVar(name="NCCL_MIN_NCHANNELS", value="4"),
@@ -360,6 +376,7 @@ def get_env_vars(
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
                     beaker.BeakerEnvVar(name="NCCL_TUNER_PLUGIN", value="libnccl-tuner.so"),
+                    beaker.BeakerEnvVar(name="OLMO_SHARED_FS", value="1"),
                     beaker.BeakerEnvVar(
                         name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto"
                     ),
@@ -621,6 +638,13 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
             download_path = gs_saved_path.replace("gs://", "/gs/")
             download_path_without_last_folder = download_path.rsplit("/", 1)[0]
             gs_download_command = [
+                "if",
+                "[",
+                "!",
+                "-f",
+                f"{download_path}/config.json",
+                "];",
+                "then",
                 "mkdir",
                 "-p",
                 download_path,
@@ -635,6 +659,8 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 "-r",
                 gs_saved_path,
                 download_path_without_last_folder,
+                ";",
+                "fi",
                 "&&",
                 "ls",
                 download_path_without_last_folder,
@@ -695,6 +721,17 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         command.append(dataset_config_hash)
             command = gs_download_command + command
 
+            output_dir_value = None
+            for idx, cmd in enumerate(command):
+                if cmd == "--output_dir":
+                    output_dir_value = command[idx + 1]
+                    break
+
+            if output_dir_value and not output_dir_value.startswith("gs://"):
+                gs_save_folder = f"gs://ai2-llm/post-training/deletable_checkpoint/{whoami}/{output_dir_value}"
+                command.extend(["--save_folder", gs_save_folder])
+                console.log(f"Adding --save_folder for GCS: {gs_save_folder}")
+
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote
@@ -722,6 +759,20 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
             ),
             join_full_command,
         )
+        # override torchrun call for multi-node (match olmo-core's setup)
+        if "torchrun" in join_full_command:
+            join_full_command = re.sub(r"--rdzv_backend\s+c10d", "--rdzv_backend=static", join_full_command)
+            if "--node_rank" not in join_full_command:
+                join_full_command = re.sub(r"(torchrun\s+)", r"\1--node_rank $BEAKER_REPLICA_RANK ", join_full_command)
+            if "--rdzv_id" not in join_full_command:
+                join_full_command = re.sub(r"(torchrun\s+)", r"\1--rdzv_id=12347 ", join_full_command)
+            if "--rdzv_conf" not in join_full_command:
+                join_full_command = re.sub(r"(torchrun\s+)", r"\1--rdzv_conf='read_timeout=420' ", join_full_command)
+            join_full_command = re.sub(
+                r"--rdzv_endpoint\s+(\$BEAKER_LEADER_REPLICA_HOSTNAME):(\d+)",
+                r"--rdzv_endpoint \1:29400",
+                join_full_command,
+            )
     full_command = setup_commands + join_full_command
     console.log("🔍🔍🔍 Full command")
     print(full_command)
@@ -756,7 +807,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         image=beaker.BeakerImageSource(beaker=args.image),
         command=["/bin/bash", "-c"],
         arguments=[full_command],
-        result=beaker.BeakerResultSpec(path="/output"),
+        result=None if args.no_result else beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster),
         context=beaker.BeakerTaskContext(
             priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible

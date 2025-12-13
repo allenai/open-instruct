@@ -1577,7 +1577,9 @@ def accumulate_inference_batches(
 
         # Replenish generation queue with new prompt
         if replenish_prompts:
-            add_prompt_to_generator(next(data_loader), prompt_Q, generation_config, is_eval=False)
+            batch = next(data_loader)
+            assert len(batch) == 1
+            add_prompt_to_generator(batch[0], prompt_Q, generation_config, is_eval=False)
 
         decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
@@ -2723,8 +2725,9 @@ def run_training(
 
     # Send initial data to ensure we have a N-step offset.
     for _ in range(args.async_steps * args.num_unique_prompts_rollout):
-        example = next(data_loader)
-        add_prompt_to_generator(example, prompt_Q, generation_configs["train"], is_eval=False)
+        batch = next(data_loader)
+        assert len(batch) == 1
+        add_prompt_to_generator(batch[0], prompt_Q, generation_configs["train"], is_eval=False)
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
         logger.info(f"Restored num_total_tokens: {num_total_tokens}")
@@ -2773,8 +2776,10 @@ def run_training(
             and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
-            for eval_example in iter(eval_data_loader):
-                add_prompt_to_generator(eval_example, prompt_Q, generation_configs["eval"], is_eval=True)
+            for eval_batch in iter(eval_data_loader):
+                # eval_data_loader is created with batch_size=1, so each batch has exactly one example.
+                assert len(eval_batch) == 1
+                add_prompt_to_generator(eval_batch[0], prompt_Q, generation_configs["eval"], is_eval=True)
         if collated_data is None:
             continue
 

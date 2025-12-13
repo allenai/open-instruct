@@ -1,8 +1,13 @@
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 
+import torch
 from datasets import Dataset
 from olmo_core.data import data_loader
+
+
+def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
+    return {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
 
 class HFDataLoader(data_loader.DataLoaderBase):
@@ -10,7 +15,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     This class implements the DataLoaderBase interface, providing iteration over
     a HuggingFace Dataset with support for sharding across distributed workers,
-    shuffling, and checkpointing.
+    shuffling, checkpointing, and optional collation.
     """
 
     def __init__(
@@ -22,6 +27,9 @@ class HFDataLoader(data_loader.DataLoaderBase):
         world_size: int,
         work_dir: str,
         automatic_reshuffle: bool = False,
+        collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
+        fs_local_rank: int | None = None,
+        device: torch.device | None = None,
     ) -> None:
         """Initialize the HFDataLoader.
 
@@ -33,21 +41,35 @@ class HFDataLoader(data_loader.DataLoaderBase):
             world_size: Total number of processes in the distributed setup.
             work_dir: Working directory for the data loader (required by DataLoaderBase).
             automatic_reshuffle: If True, automatically reshuffle at epoch boundaries.
+            collator: Optional callable that takes a list of examples and returns a
+                collated batch. When provided, _iter_batches() yields collated batches
+                of size batch_size // world_size.
+            fs_local_rank: The filesystem-local rank. For shared filesystems, this should
+                equal the global rank. Defaults to rank if not specified.
+            device: Device to move batches to. If None, batches stay on CPU.
         """
+        if fs_local_rank is None:
+            fs_local_rank = rank
         super().__init__(
-            work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=0
+            work_dir=work_dir,
+            global_batch_size=batch_size,
+            dp_world_size=world_size,
+            dp_rank=rank,
+            fs_local_rank=fs_local_rank,
         )
 
-        dataset_with_indices = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
-        self._original_dataset = dataset_with_indices.shard(num_shards=world_size, index=rank)
-        self.dataset = self._original_dataset.shuffle(seed=seed)
+        self._full_dataset = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
         self.seed = seed
         self._batch_size = batch_size
-        self.effective_size = len(self.dataset) - (len(self.dataset) % batch_size)
+        self._per_rank_batch_size = batch_size // world_size
+        self._collator = collator if collator is not None else (lambda x: x)
         self._automatic_reshuffle = automatic_reshuffle
         self._excluded_indices: set[int] = set()
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
+        self._device = device
+
+        self._reshard(epoch=0)
 
     def __next__(self) -> dict[str, Any]:
         if self._current_iter is None:
@@ -68,14 +90,19 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
-        for i in range(self.batches_processed, self.effective_size):
+        start_example = self.batches_processed * self._per_rank_batch_size
+        batch_examples: list[dict[str, Any]] = []
+        for i in range(start_example, self.effective_size):
             example = self.dataset[i]
-            yield example | {"prompt_id": f"{self._epoch}_{example['dataset_index']}"}
+            batch_examples.append(example | {"prompt_id": f"{self._epoch}_{example['dataset_index']}"})
+            if len(batch_examples) == self._per_rank_batch_size:
+                yield to_device(self._collator(batch_examples), self._device)
+                batch_examples = []
 
     @property
     def total_batches(self) -> int:
         """Return the total number of batches in an epoch."""
-        return self.effective_size // self._batch_size
+        return self.effective_size // self._per_rank_batch_size
 
     def state_dict(self) -> dict[str, Any]:
         """Return a state dictionary for checkpointing."""
@@ -104,26 +131,46 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._excluded_indices.add(index)
 
     def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
-        """Reshuffle the dataset for a new epoch.
+        """Reshuffle and reshard the dataset for a new epoch.
 
         Args:
-            epoch: The epoch number (unused, for API compatibility).
+            epoch: The epoch number to use for shuffling seed. If None, increments internal counter.
             **kwargs: Additional keyword arguments (unused, for API compatibility).
         """
-        self._epoch += 1
+        self._epoch = self._epoch + 1 if epoch is None else epoch
         self.batches_processed = 0
-        shuffled = self._original_dataset.shuffle(seed=self.seed + self._epoch)
-        # If this is slow, we can speed it up by making this a boolean mask.
-        self.dataset = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
-        self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
+        self._reshard(self._epoch)
+
+    def _reshard(self, epoch: int) -> None:
+        """Reshard the dataset for a given epoch.
+
+        Shuffles the full dataset with an epoch-based seed, then shards to this rank.
+        """
+        shuffled = self._full_dataset.shuffle(seed=self.seed + epoch)
+        sharded = shuffled.shard(num_shards=self.dp_world_size, index=self.dp_rank)
+        self.dataset = sharded.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
+        self.effective_size = len(self.dataset) - (len(self.dataset) % self._per_rank_batch_size)
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
 
         Used by the trainer to do a dry-run of the
         forward and backward pass before training officially starts.
-
-        Returns:
-            The first item from the dataset.
         """
-        return self.dataset[0]
+        num_examples = min(self._per_rank_batch_size, len(self.dataset))
+        examples = [self.dataset[i] for i in range(num_examples)]
+        return to_device(self._collator(examples), self._device)
+
+    def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int | None:
+        """Return the total number of tokens in the batch across all ranks.
+
+        Counts tokens from any key containing "input_ids" (e.g., input_ids,
+        chosen_input_ids, rejected_input_ids).
+        """
+        num_tokens = 0
+        for key, value in batch.items():
+            if "input_ids" in key and hasattr(value, "numel"):
+                num_tokens += value.numel()
+        if num_tokens == 0:
+            return None
+        return num_tokens * self.dp_world_size
