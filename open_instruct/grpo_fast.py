@@ -568,6 +568,7 @@ def prepare_collated_data_for_workers(
     world_size: int,
     per_device_train_batch_size: int,
     pad_token_id: int,
+    sequence_parallel_size: int = 1,
     pin_memory: bool = True,
 ) -> list[dict[str, list[torch.Tensor]]]:
     """Distributes and collates packed sequences for distributed training.
@@ -582,6 +583,7 @@ def prepare_collated_data_for_workers(
         world_size: Number of distributed workers.
         per_device_train_batch_size: Batch size for each device's micro-batch.
         pad_token_id: Token ID used for padding sequences.
+        sequence_parallel_size: Sequence parallel size.
         pin_memory: Whether to pin memory for faster data transfer to GPU.
 
     Returns:
@@ -589,9 +591,10 @@ def prepare_collated_data_for_workers(
         for query_responses, tool_masks, attention_masks, position_ids,
         advantages, response_masks, and vllm_logprobs.
     """
-    B = len(packed_sequences.query_responses) // world_size  # essentially doing `drop_last=True`, which is fine.
-    collated_data = []
-    for i in range(world_size):
+    dp_world_size = world_size // sequence_parallel_size
+    B = len(packed_sequences.query_responses) // dp_world_size  # essentially doing `drop_last=True`, which is fine.
+    collated_data = [None] * world_size
+    for i in range(dp_world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
         per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
         per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
@@ -632,17 +635,17 @@ def prepare_collated_data_for_workers(
             collated_vllm_logprobs.append(
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
             )
-        collated_data.append(
-            {
-                "collated_query_responses": collated_query_responses,
-                "collated_tool_masks": collated_tool_masks,
-                "collated_attention_masks": collated_attention_masks,
-                "collated_position_ids": collated_position_ids,
-                "collated_advantages": collated_advantages,
-                "collated_response_masks": collated_response_masks,
-                "collated_vllm_logprobs": collated_vllm_logprobs,
-            }
-        )
+        data = {
+            "collated_query_responses": collated_query_responses,
+            "collated_tool_masks": collated_tool_masks,
+            "collated_attention_masks": collated_attention_masks,
+            "collated_position_ids": collated_position_ids,
+            "collated_advantages": collated_advantages,
+            "collated_response_masks": collated_response_masks,
+            "collated_vllm_logprobs": collated_vllm_logprobs,
+        }
+        for j in range(sequence_parallel_size):
+            collated_data[i * sequence_parallel_size + j] = data
     return collated_data
 
 
@@ -1436,7 +1439,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     # divide by sequence parallel to total sp size
                     # TODO: is this correct?
                     if dist.is_available() and dist.is_initialized():
-                        loss *= dist.get_world_size() // args.sequence_parallel_size
+                        loss *= dist.get_world_size()
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
@@ -2256,10 +2259,11 @@ def data_preparation_thread(
         # ideally, you should avoid this since its wasting computation.
         if args.allow_world_padding:
             with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
-                shortfall = args.world_size - len(packed_sequences.query_responses)
+                dp_world_size = args.world_size // args.sequence_parallel_size
+                shortfall = dp_world_size - len(packed_sequences.query_responses)
                 if shortfall > 0:
                     logger.warning(
-                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
+                        f"Padding {shortfall} sequences for world size (DP world size {dp_world_size}). In future, you should adjust your compute this."
                     )
                     # construct "dummy" sequences for padding out the world size
                     # Ensure dummy sequence is long enough for Sequence Parallelism
@@ -2285,7 +2289,11 @@ def data_preparation_thread(
                         packed_sequences.vllm_logprobs.append(dummy_vllm_logprobs)
 
         collated_data = prepare_collated_data_for_workers(
-            packed_sequences, args.world_size, args.per_device_train_batch_size, tokenizer.pad_token_id
+            packed_sequences,
+            args.world_size,
+            args.per_device_train_batch_size,
+            tokenizer.pad_token_id,
+            sequence_parallel_size=args.sequence_parallel_size,
         )
         B = len(packed_sequences.query_responses) // args.world_size
 
