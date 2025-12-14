@@ -30,6 +30,7 @@ from olmo_core.nn.transformer import TransformerConfig
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.optim.scheduler import Scheduler
 from olmo_core.train import callbacks
+from olmo_core.train.callbacks import CheckpointerCallback
 from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import EvalBatchSpec, TrainModule
 from olmo_core.train.train_module.transformer import (
@@ -61,6 +62,7 @@ from open_instruct.utils import (
     ArgumentParserPlus,
     get_device_name,
     is_beaker_job,
+    is_on_gcp,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
@@ -346,7 +348,8 @@ class DPOExperimentConfig(config.Config):
 
     lr_scheduler_type: Literal["linear", "cosine", "constant"] = "linear"
     max_train_steps: int | None = None
-    checkpointing_steps: str | None = None
+    checkpointing_steps: int = 250
+    async_checkpointing: bool = False
     clip_grad_norm: float = -1
 
     use_8bit_optimizer: bool = False
@@ -434,6 +437,12 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         return
 
     train.prepare_training_environment(seed=args.seed)
+
+    if args.async_checkpointing and is_on_gcp():
+        raise ValueError(
+            "async_checkpointing=True is not supported on GCP (augusta) due to gloo process group issues. "
+            "Set async_checkpointing=False. See: olmo_core/internal/cookbook.py"
+        )
 
     rank = get_rank() if is_distributed() else 0
     world_size = get_world_size() if is_distributed() else 1
@@ -592,6 +601,9 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
             entity=args.wandb_entity,
             config=json_config,
         )
+    trainer_callbacks["checkpointer"] = CheckpointerCallback(
+        save_interval=args.checkpointing_steps, save_async=args.async_checkpointing
+    )
 
     metrics_collect_interval = args.logging_steps if args.logging_steps is not None else args.log_every
     trainer = train.TrainerConfig(
