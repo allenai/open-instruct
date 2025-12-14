@@ -1,8 +1,7 @@
 #!/bin/bash
 
 EXP_NAME="olmo3_7b_rlzero_math_restart2k"
-# MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
-MODEL_NAME_OR_PATH="gs://ai2-llm/post-training//michaeln/output/olmo3_7b_rlzero_math__1__1763966683_checkpoints/step_2000"
+MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
 DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
 LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 16"
