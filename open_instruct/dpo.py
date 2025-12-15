@@ -138,16 +138,14 @@ def build_reference_logprobs_cache(
                 chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
 
             dataset_indices = batch["dataset_index"]
-            for i, idx in enumerate(dataset_indices):
-                idx_int = idx.item() if isinstance(idx, torch.Tensor) else idx
-                chosen_tensor[idx_int] = chosen_logps[i]
-                rejected_tensor[idx_int] = rejected_logps[i]
+            chosen_tensor[dataset_indices] = chosen_logps
+            rejected_tensor[dataset_indices] = rejected_logps
 
     dist.all_reduce(chosen_tensor, op=dist.ReduceOp.SUM)
     dist.all_reduce(rejected_tensor, op=dist.ReduceOp.SUM)
 
     model.train()
-    cache = TensorCache(tensors={"chosen_logps": chosen_tensor.cpu(), "rejected_logps": rejected_tensor.cpu()})
+    cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
 
     if cache_path is not None:
         logger.info(f"Saving reference logprobs cache to {cache_path}")

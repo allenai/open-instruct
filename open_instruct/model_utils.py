@@ -63,8 +63,7 @@ class TensorCache:
             Dictionary of tensors indexed by the given indices, on the same device as indices.
         """
         device = indices.device
-        idx = indices.cpu().long()
-        return {k: v[idx].to(device) for k, v in self.tensors.items()}
+        return {k: v.to(device)[indices.long()] for k, v in self.tensors.items()}
 
     def to_disk(self, path: str | pathlib.Path) -> None:
         """Save the cache to disk.
@@ -74,7 +73,8 @@ class TensorCache:
         """
         path = pathlib.Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(self.tensors, path)
+        cpu_tensors = {k: v.cpu() for k, v in self.tensors.items()}
+        torch.save(cpu_tensors, path)
 
     @classmethod
     def from_disk(cls, path: str | pathlib.Path) -> "TensorCache":
