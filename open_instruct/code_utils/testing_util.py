@@ -121,7 +121,7 @@ def make_function(code: str) -> str:
         all_other_stmts = []
         astree = ast.parse(code)
         for stmt in astree.body:
-            if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            if isinstance(stmt, ast.Import | ast.ImportFrom):
                 import_stmts.append(stmt)
             else:
                 all_other_stmts.append(stmt)

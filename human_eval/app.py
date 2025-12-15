@@ -13,16 +13,16 @@ from werkzeug.security import check_password_hash, generate_password_hash
 random.seed(42)
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(os.getcwd(), 'data', 'evaluation.db')
-print(app.config['SQLALCHEMY_DATABASE_URI'])
-app.config['SECRET_KEY'] = '123456' # replace with a real secret key
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(os.getcwd(), "data", "evaluation.db")
+print(app.config["SQLALCHEMY_DATABASE_URI"])
+app.config["SECRET_KEY"] = "123456"  # replace with a real secret key
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 
 # GLOBAL VARIABLE for the comparison instances
-COMPARISON_INSTANCES=[]
+COMPARISON_INSTANCES = []
 
 
 class User(UserMixin, db.Model):
@@ -54,54 +54,54 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 
-@app.route('/login', methods=['GET', 'POST'])
+@app.route("/login", methods=["GET", "POST"])
 def login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
         user = User.query.filter_by(username=username).first()
         if user and check_password_hash(user.password, password):
             login_user(user)
-            return redirect(url_for('index'))
+            return redirect(url_for("index"))
         else:
-            return 'Invalid username or password'
+            return "Invalid username or password"
     else:
-        return render_template('login.html')
+        return render_template("login.html")
 
 
-@app.route('/signup', methods=['GET', 'POST'])
+@app.route("/signup", methods=["GET", "POST"])
 def signup():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
         hashed_password = generate_password_hash(password)
         new_user = User(username=username, password=hashed_password)
         db.session.add(new_user)
         db.session.commit()
-        return redirect(url_for('login'))
+        return redirect(url_for("login"))
     else:
-        return render_template('login.html')
+        return render_template("login.html")
 
 
-@app.route('/logout')
+@app.route("/logout")
 @login_required
 def logout():
     logout_user()
-    return redirect(url_for('login'))
+    return redirect(url_for("login"))
 
 
-@app.route('/')
+@app.route("/")
 def index():
     # check if the user is logged in
     if current_user.is_authenticated:
-        return redirect(url_for('instances', index=0, current_user=current_user))
+        return redirect(url_for("instances", index=0, current_user=current_user))
     else:
-        return redirect(url_for('login'))
+        return redirect(url_for("login"))
 
 
-@app.route('/instances/<int:index>')
+@app.route("/instances/<int:index>")
 def instances(index):
-    return render_template('index.html', index=index, current_user=current_user)
+    return render_template("index.html", index=index, current_user=current_user)
 
 
 @app.route("/api/model-outputs/<int:index>", methods=["GET"])
@@ -119,8 +119,6 @@ def get_model_outputs(index):
 def summary():
     results = summarize_results()
     return jsonify(results), 200
-
-
 
 
 def count_user_contributions(users, records):
@@ -147,10 +145,7 @@ def get_progress(records):
 
 
 def get_acceptance_results(records, target_model_a, target_model_b):
-    acceptance_results = {
-        target_model_a: {},
-        target_model_b: {},
-    }
+    acceptance_results = {target_model_a: {}, target_model_b: {}}
     for record in records:
         instance_id = record.instance_id
         if instance_id not in acceptance_results[record.model_a]:
@@ -162,7 +157,9 @@ def get_acceptance_results(records, target_model_a, target_model_b):
         acceptance_results[record.model_b][instance_id].append(record.completion_b_is_acceptable)
 
     # count how many instances get multiple annotations
-    instances_with_multiple_annotations = [instance_id for instance_id, results in acceptance_results[record.model_a].items() if len(results) > 1]
+    instances_with_multiple_annotations = [
+        instance_id for instance_id, results in acceptance_results[record.model_a].items() if len(results) > 1
+    ]
     agreement_results = {
         "num_instances_with_multiple_annotations": len(instances_with_multiple_annotations),
         "acceptance_agreement": None,
@@ -178,14 +175,21 @@ def get_acceptance_results(records, target_model_a, target_model_b):
                 agreed_model_a_acceptance += 1
             if len(set(acceptance_results[target_model_b][instance_id][-2:])) == 1:
                 agreed_model_b_acceptance += 1
-        agreement_results["acceptance_agreement"] = \
-            (agreed_model_a_acceptance + agreed_model_b_acceptance) / (2 * len(instances_with_multiple_annotations))
-        agreement_results[f"{target_model_a}_acceptance_agreement"] = agreed_model_a_acceptance / len(instances_with_multiple_annotations)
-        agreement_results[f"{target_model_b}_acceptance_agreement"] = agreed_model_b_acceptance / len(instances_with_multiple_annotations)
+        agreement_results["acceptance_agreement"] = (agreed_model_a_acceptance + agreed_model_b_acceptance) / (
+            2 * len(instances_with_multiple_annotations)
+        )
+        agreement_results[f"{target_model_a}_acceptance_agreement"] = agreed_model_a_acceptance / len(
+            instances_with_multiple_annotations
+        )
+        agreement_results[f"{target_model_b}_acceptance_agreement"] = agreed_model_b_acceptance / len(
+            instances_with_multiple_annotations
+        )
 
     return {
-        f"{target_model_a}": sum([1 if x[-1]=="yes" else 0 for _, x in acceptance_results[target_model_a].items()]) / len(acceptance_results[target_model_a]),
-        f"{target_model_b}": sum([1 if x[-1]=="yes" else 0 for _, x in acceptance_results[target_model_b].items()]) / len(acceptance_results[target_model_b]),
+        f"{target_model_a}": sum([1 if x[-1] == "yes" else 0 for _, x in acceptance_results[target_model_a].items()])
+        / len(acceptance_results[target_model_a]),
+        f"{target_model_b}": sum([1 if x[-1] == "yes" else 0 for _, x in acceptance_results[target_model_b].items()])
+        / len(acceptance_results[target_model_b]),
         "agreement": agreement_results,
     }
 
@@ -217,17 +221,15 @@ def get_comparison_results(records, target_model_a, target_model_b):
     # thre can be multiple annotations for each instance; use the latest comparison result for each instance
     latest_comparison_results = [results[-1] for _, results in comparison_results.items()]
     model_wins_counter = Counter(latest_comparison_results)
-    model_wins_rates = {
-        result: count / len(latest_comparison_results) for result, count in model_wins_counter.items()
-    }
+    model_wins_rates = {result: count / len(latest_comparison_results) for result, count in model_wins_counter.items()}
     # merge the clearly better and slightly better results
-    model_wins_rates[f"{target_model_a}_wins"] = \
-        sum([v for k, v in model_wins_rates.items() if target_model_a in k])
-    model_wins_rates[f"{target_model_b}_wins"] = \
-        sum([v for k, v in model_wins_rates.items() if target_model_b in k])
+    model_wins_rates[f"{target_model_a}_wins"] = sum([v for k, v in model_wins_rates.items() if target_model_a in k])
+    model_wins_rates[f"{target_model_b}_wins"] = sum([v for k, v in model_wins_rates.items() if target_model_b in k])
 
     # count how many instances get multiple annotations
-    instances_with_multiple_annotations = [instance_id for instance_id, results in comparison_results.items() if len(results) > 1]
+    instances_with_multiple_annotations = [
+        instance_id for instance_id, results in comparison_results.items() if len(results) > 1
+    ]
     agreement_results = {
         "num_instances_with_multiple_annotations": len(instances_with_multiple_annotations),
         "comparison_agreement": None,
@@ -255,7 +257,9 @@ def get_comparison_results(records, target_model_a, target_model_b):
                 if "tie" in simplified_comparisons[-2:]:
                     relexed_agreed_comparison += 0.5
         agreement_results["comparison_agreement"] = agreed_comparison / len(instances_with_multiple_annotations)
-        agreement_results["relexed_comparison_agreement"] = relexed_agreed_comparison / len(instances_with_multiple_annotations)
+        agreement_results["relexed_comparison_agreement"] = relexed_agreed_comparison / len(
+            instances_with_multiple_annotations
+        )
 
     model_wins_rates["agreement"] = agreement_results
     return model_wins_rates
@@ -330,7 +334,7 @@ def submit_evaluation():
         instance_quality="",
         comment="",
         evaluator=evaluation_data["evaluator"],
-        timestamp=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
+        timestamp=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())),
     )
     db.session.add(new_record)
     db.session.commit()
@@ -358,7 +362,7 @@ def submit_feedback():
         instance_quality=feedback_data["instance_quality"],
         comment=feedback_data["comment"],
         evaluator=feedback_data["evaluator"],
-        timestamp=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
+        timestamp=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())),
     )
     db.session.add(new_record)
     db.session.commit()
@@ -372,28 +376,14 @@ def main():
         type=str,
         required=True,
         help="The path to the data file containing the instances to be evaluated. "
-             "Each instance should have a prompt and two completions."
+        "Each instance should have a prompt and two completions.",
     )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default="0.0.0.0",
-        help="The host of the server."
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=5001,
-        help="The port of the server."
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Whether to run the server in debug mode."
-    )
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="The host of the server.")
+    parser.add_argument("--port", type=int, default=5001, help="The port of the server.")
+    parser.add_argument("--debug", action="store_true", help="Whether to run the server in debug mode.")
     args = parser.parse_args()
 
-    if not os.path.exists(os.path.join(os.getcwd(), 'data', 'evaluation.db')):
+    if not os.path.exists(os.path.join(os.getcwd(), "data", "evaluation.db")):
         with app.app_context():
             db.create_all()
             new_user = User(username="admin", password=generate_password_hash("admin"))
@@ -402,14 +392,14 @@ def main():
 
     # load the predictions
     global COMPARISON_INSTANCES
-    with open(args.comparison_data_path, "r") as f:
+    with open(args.comparison_data_path) as f:
         COMPARISON_INSTANCES = [json.loads(line.strip()) for line in f.readlines()]
 
-    print("Total number of comparison instances: {}".format(len(COMPARISON_INSTANCES)))
+    print(f"Total number of comparison instances: {len(COMPARISON_INSTANCES)}")
 
     # run the app and listen on port 5000
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

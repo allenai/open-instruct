@@ -11,7 +11,7 @@ When running our training scripts, the model will get uploaded to several places
 
 ## Hugging Face
 
-Let's use [https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095](https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095) as an example. If you go to its wandb's Overview page -> config -> search for `hf`, then you can find this `hf_repo_url`. 
+Let's use [https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095](https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095) as an example. If you go to its wandb's Overview page -> config -> search for `hf`, then you can find this `hf_repo_url`.
 
 ![](trained_model_location/hf.png)
 ![](trained_model_location/hf2.png)
@@ -54,7 +54,7 @@ pytorch_model-00002-of-00004.bin  README.md
 
 ## Google Cloud Storage
 
-Let's use [https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095](https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095) as an example. Because this run was conducted on the `ai2/augusta`, `mason.py` automatically appends `--gs_bucket_path gs://ai2-llm/post-training/` to the training args (for external users you can try doing the same append). Then, the model was automatically uploaded to 
+Let's use [https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095](https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095) as an example. Because this run was conducted on the `ai2/augusta`, `mason.py` automatically appends `--gs_bucket_path gs://ai2-llm/post-training/` to the training args (for external users you can try doing the same append). Then, the model was automatically uploaded to
 
 ```
 gs://ai2-llm/post-training//costah/output/tulu3_8b_dpo__1__1742613782
@@ -90,8 +90,8 @@ Resuming download for ./tulu3_8b_dpo__1__1742613782/pytorch_model-00003-of-00004
 Resuming download for ./tulu3_8b_dpo__1__1742613782/pytorch_model-00003-of-00004.bin component 1
 Resuming download for ./tulu3_8b_dpo__1__1742613782/pytorch_model-00003-of-00004.bin component 2
 Resuming download for ./tulu3_8b_dpo__1__1742613782/pytorch_model-00003-of-00004.bin component 3
-| [10/10 files][ 15.0 GiB/ 15.0 GiB] 100% Done  52.1 MiB/s ETA 00:00:00         
-Operation completed over 10 objects/15.0 GiB.                                    
+| [10/10 files][ 15.0 GiB/ 15.0 GiB] 100% Done  52.1 MiB/s ETA 00:00:00
+Operation completed over 10 objects/15.0 GiB.
 root@phobos-cs-aus-452:/weka/oe-adapt-default/costah/oi2/tulu3_8b_dpo__1__1742613782# ls
 tulu3_8b_dpo__1__1742613782
 root@phobos-cs-aus-452:/weka/oe-adapt-default/costah/oi2/tulu3_8b_dpo__1__1742613782# ls tulu3_8b_dpo__1__1742613782
@@ -137,6 +137,6 @@ beaker dataset fetch "$dataset_id" -o $exp_name --concurrency 64
 ```
 ```
 Downloading dataset 01JPXXXKZPACGK5AZ1XSD5V54F to tulu3_8b_dpo__1__1742613782
-Files: 6          4 in progress ⠸  
-Bytes: 16.49 MiB  14.96 GiB in progress ⠸ 
+Files: 6          4 in progress ⠸
+Bytes: 16.49 MiB  14.96 GiB in progress ⠸
 ```

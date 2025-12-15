@@ -1,6 +1,6 @@
 # OLMo 2 Commands
 
-Here we'll add commands and references to the training runs of OLMo 2. 
+Here we'll add commands and references to the training runs of OLMo 2.
 We'll prioritize the smaller models where more people are hoping to study and reproduce them.
 
 Core to training OLMo models (version 1 and 2) at least are to include the following flags: `--add_bos` and `--use_slow_tokenizer False` because of the tokenizer used.
@@ -124,13 +124,13 @@ accelerate launch \
     --add_bos \
     --use_lora False \
     --dpo_loss_type dpo_norm \
-    --dpo_beta 5 
+    --dpo_beta 5
 ```
 
 For those internal to Ai2, see the [wandb logs](https://wandb.ai/ai2-llm/open_instruct_internal/runs/bcu4arvs/overview) or the [beaker job](https://beaker.allen.ai/orgs/ai2/workspaces/olmo-instruct/work/01JSMRC1TR1Q4MV7NY8WFSR4SA?).
 
 
-Example with DeepSpeed Stage 2: 
+Example with DeepSpeed Stage 2:
 ```
 python mason.py \
     --cluster ai2/augusta \

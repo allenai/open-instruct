@@ -81,7 +81,7 @@ python mason.py \
 
 During the job submission, it automatically tries to setup a shared Hugging Face cache with environment variables. For example, it sets
 
-* `HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface`. 
+* `HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface`.
 * `HF_DATASETS_CACHE=/weka/oe-adapt-default/allennlp/.cache/huggingface`
 * `HF_HUB_CACHE=/weka/oe-adapt-default/allennlp/.cache/hub`
 
@@ -235,7 +235,7 @@ gantry run --workspace {workspace} --budget ai2/oe-adapt --beaker-image kavelr/o
 
 You can freely add any additional arguments to give to Beaker, such as a `--priority` tag which can be set to preemptible, normal, high, or urgent. AI2 policies may restrict the priorities that are available to users on certain clusters.
 
-In the examples below, text within {} tags should be replaced with your own values. 
+In the examples below, text within {} tags should be replaced with your own values.
 
 As a convenience, you can use the `evaluation/gantry_run.sh` script which includes some necessary arguments. You can use it the same way as `gantry run`, but excluding these boilerplate arguments (take a look at the script to see what it includes). Example usage:
 

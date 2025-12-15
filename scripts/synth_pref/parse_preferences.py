@@ -1,15 +1,13 @@
 import argparse
-import logging
-import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from scripts.synth_pref.utils.ultrafeedback_template import parser
 from open_instruct import logger_utils
+from scripts.synth_pref.utils.ultrafeedback_template import parser
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -44,33 +42,20 @@ def main():
         df = pd.concat(_dfs).reset_index(drop=True)
         # Run parser function
         pref_df = parse_openai(
-            df,
-            ref_df=pd.read_json(args.reference_file, lines=True),
-            id_col=args.id_col,
-            text_col=args.text_col,
+            df, ref_df=pd.read_json(args.reference_file, lines=True), id_col=args.id_col, text_col=args.text_col
         )
 
     pref_df.to_json(args.output_path, lines=True, orient="records")
     logger.info(f"Saved file ({len(pref_df)} instances) to {args.output_path}")
 
 
-def parse_openai(
-    df: pd.DataFrame,
-    ref_df: pd.DataFrame,
-    id_col: str,
-    text_col: str,
-) -> pd.DataFrame:
+def parse_openai(df: pd.DataFrame, ref_df: pd.DataFrame, id_col: str, text_col: str) -> pd.DataFrame:
     assert "custom_id" in df.columns, "Missing 'custom_id' in input files"
     df = df.rename(columns={"custom_id": "_custom_id"})
-    aspects_map = {
-        "hon": "honesty",
-        "hel": "helpfulness",
-        "ins": "instruction_following",
-        "tru": "truthfulness",
-    }
+    aspects_map = {"hon": "honesty", "hel": "helpfulness", "ins": "instruction_following", "tru": "truthfulness"}
     aspects = list(aspects_map.values())
 
-    def find_key(d: dict[str, list[str]], value: str) -> Optional[str]:
+    def find_key(d: dict[str, list[str]], value: str) -> str | None:
         return next((k for k, v in d.items() if value in v), None)
 
     def get_resp(resp: dict[str, Any]) -> str:
@@ -101,9 +86,7 @@ def parse_openai(
     logger.info("openai: Parsing responses...")
     for aspect in aspects:
         df[f"{aspect}_responses"] = df[aspect].apply(lambda x: parser(x, aspect=aspect))
-        df[f"{aspect}_ratings"] = df[f"{aspect}_responses"].apply(
-            lambda x: get_rating(x)
-        )
+        df[f"{aspect}_ratings"] = df[f"{aspect}_responses"].apply(lambda x: get_rating(x))
 
     # Compute the mean ratings and get the chosen and rejected response
     # For Ultrafeedback, we get the chosen as the highest score, and rejected as the remaining three.
@@ -127,27 +110,15 @@ def parse_openai(
     binarized = binarized.dropna().reset_index(drop=True)
     pref_df = pd.concat([combined, binarized], axis=1)
     pref_df["chosen"] = pref_df.apply(
-        lambda x: [
-            {"content": x["prompt"], "role": "user"},
-            {"content": x["chosen_text"], "role": "assistant"},
-        ],
+        lambda x: [{"content": x["prompt"], "role": "user"}, {"content": x["chosen_text"], "role": "assistant"}],
         axis=1,
     )
     pref_df["rejected"] = pref_df.apply(
-        lambda x: [
-            {"content": x["prompt"], "role": "user"},
-            {"content": x["rejected_text"], "role": "assistant"},
-        ],
+        lambda x: [{"content": x["prompt"], "role": "user"}, {"content": x["rejected_text"], "role": "assistant"}],
         axis=1,
     )
 
-    columns_to_keep = [
-        "prompt",
-        "chosen",
-        "rejected",
-        "chosen_rating",
-        "rejected_rating",
-    ]
+    columns_to_keep = ["prompt", "chosen", "rejected", "chosen_rating", "rejected_rating"]
 
     if "dataset" in pref_df.columns:
         columns_to_keep.append("dataset")
@@ -178,7 +149,7 @@ def get_rating(resp: dict[str, Any]) -> str:
 
 
 def compute_mean_rating(row: dict[str, Any]) -> list[str]:
-    def _vmeans(data: list[list[int]]) -> Optional[list[float]]:
+    def _vmeans(data: list[list[int]]) -> list[float] | None:
         try:
             array = np.array(data, dtype=float)
             return list(np.nanmean(array, axis=0))
@@ -202,9 +173,7 @@ def binarize_pref(row):
         logger.warning(f"Potential parse error for instance id: {row['id']}")
         rejected_idx = chosen_idx
     else:
-        rejected_idx = int(
-            np.random.choice([i for i in range(len(ratings)) if i != chosen_idx], 1)
-        )
+        rejected_idx = int(np.random.choice([i for i in range(len(ratings)) if i != chosen_idx], 1))
 
     try:
         data = {
