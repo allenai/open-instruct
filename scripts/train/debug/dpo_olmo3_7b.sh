@@ -29,7 +29,7 @@ uv run python mason.py \
     --weight_decay 0.0 \
     --num_epochs 1 \
     --output_dir output/dpo_olmo3_debug/ \
-    --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
+    --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 1000 \
     --seed 123 \
     --use_flash_attn \
     --logging_steps 1 \
