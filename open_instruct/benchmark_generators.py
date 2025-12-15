@@ -27,7 +27,7 @@ import torch.utils.flop_counter
 import vllm
 from ray.util import queue as ray_queue
 
-from open_instruct import dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils
+from open_instruct import data_loader, dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import PromptRequest
 
@@ -116,7 +116,11 @@ def get_git_commit() -> str:
 
 
 def save_benchmark_results_to_csv(
-    results: list[dict[str, Any]], total_time: float, args: grpo_fast.Args, model_config: model_utils.ModelConfig
+    results: list[dict[str, Any]],
+    total_time: float,
+    args: grpo_fast.Args,
+    streaming_config: data_loader.StreamingDataLoaderConfig,
+    model_config: model_utils.ModelConfig,
 ) -> None:
     """Save benchmark results to CSV file."""
     git_commit = get_git_commit()
@@ -127,10 +131,10 @@ def save_benchmark_results_to_csv(
         "git_commit": git_commit,
         "model": model_config.model_name_or_path,
         "total_batches": len(results),
-        "batch_size": args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout,
+        "batch_size": args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout,
         "num_unique_prompts_rollout": args.num_unique_prompts_rollout,
-        "num_samples_per_prompt_rollout": args.num_samples_per_prompt_rollout,
-        "response_length": args.response_length,
+        "num_samples_per_prompt_rollout": streaming_config.num_samples_per_prompt_rollout,
+        "response_length": streaming_config.response_length,
         "total_time": total_time,
         "total_generation_time": agg_results["total_generation_time"],
         "total_weight_sync_time": agg_results["total_weight_sync_time"],
@@ -145,7 +149,7 @@ def save_benchmark_results_to_csv(
         "avg_generation_time_per_batch": agg_results["avg_generation_time"],
         "avg_weight_sync_time_per_batch": agg_results["avg_weight_sync_time"],
         "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"]
-        / (len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout),
+        / (len(results) * args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout),
     }
 
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
@@ -199,14 +203,18 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
 
 
-def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation.TokenizerConfig) -> datasets.Dataset:
+def setup_dataset(
+    args: grpo_fast.Args,
+    streaming_config: data_loader.StreamingDataLoaderConfig,
+    tokenizer_config: dataset_transformation.TokenizerConfig,
+) -> datasets.Dataset:
     """Set up the dataset using the same pipeline as grpo_fast.py."""
     logger.info("Loading and processing dataset...")
 
     # Transform function arguments
     transform_fn_args = [
         {},  # For rlvr_tokenize_v1
-        {"max_prompt_token_length": args.max_prompt_token_length},  # For rlvr_filter_v1
+        {"max_prompt_token_length": streaming_config.max_prompt_token_length},  # For rlvr_filter_v1
     ]
 
     # Load dataset
@@ -347,6 +355,7 @@ def run_benchmark(
     inference_results_Q: ray_queue.Queue,
     actor_manager: ray.actor.ActorHandle,
     args: grpo_fast.Args,
+    streaming_config: data_loader.StreamingDataLoaderConfig,
     model_config: model_utils.ModelConfig,
     timestamp: int,
     num_batches: int = 5,
@@ -359,10 +368,10 @@ def run_benchmark(
     # Create sampling parameters with 'n' for multiple samples per prompt
     generation_config = vllm.SamplingParams(
         temperature=args.temperature,
-        max_tokens=args.response_length,
-        min_tokens=args.response_length,
+        max_tokens=streaming_config.response_length,
+        min_tokens=streaming_config.response_length,
         top_p=args.vllm_top_p,
-        n=args.num_samples_per_prompt_rollout,
+        n=streaming_config.num_samples_per_prompt_rollout,
         seed=args.seed,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
@@ -478,7 +487,7 @@ def run_benchmark(
                 all_prompt_lengths,
                 batch_generation_time,
                 response_lengths=all_response_lengths,
-                samples_per_prompt=args.num_samples_per_prompt_rollout,
+                samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
                 num_gpus=num_inference_gpus,
             )
 
@@ -486,7 +495,7 @@ def run_benchmark(
                 all_prompt_lengths,
                 batch_generation_time,
                 response_lengths=all_response_lengths,
-                samples_per_prompt=args.num_samples_per_prompt_rollout,
+                samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
                 num_engines=num_engines,
                 num_gpus_per_engine=num_gpus_per_engine,
             )
@@ -506,8 +515,8 @@ def run_benchmark(
         # Calculate total time for main benchmark only
         main_benchmark_time = sum(r["generation_time"] for r in results)
 
-        print_summary(results, main_benchmark_time, args, model_config, model_dims)
-        save_benchmark_results_to_csv(results, main_benchmark_time, args, model_config)
+        print_summary(results, main_benchmark_time, args, streaming_config, model_config, model_dims)
+        save_benchmark_results_to_csv(results, main_benchmark_time, args, streaming_config, model_config)
 
     finally:
         stop_event.set()
@@ -570,13 +579,14 @@ def print_summary(
     results: list[dict[str, Any]],
     total_time: float,
     args: grpo_fast.Args,
+    streaming_config: data_loader.StreamingDataLoaderConfig,
     model_config: model_utils.ModelConfig,
     model_dims: utils.ModelDims,
 ) -> None:
     """Print benchmark summary statistics."""
 
     agg_results = aggregate_results(results)
-    total_samples = len(results) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    total_samples = len(results) * args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
     avg_new_tokens_per_sample = agg_results["total_num_new_tokens"] / total_samples
 
     print("\n" + "=" * 60)
@@ -584,10 +594,10 @@ def print_summary(
     print("=" * 60)
     print(f"Model: {model_config.model_name_or_path}")
     print(f"Main benchmark batches: {len(results)} (after 1 warmup batch)")
-    print(f"Batch size: {args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout}")
+    print(f"Batch size: {args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout}")
     print(f"Unique prompts per batch: {args.num_unique_prompts_rollout}")
-    print(f"Num rollouts: {args.num_samples_per_prompt_rollout}")
-    print(f"Max tokens: {args.response_length}")
+    print(f"Num rollouts: {streaming_config.num_samples_per_prompt_rollout}")
+    print(f"Max tokens: {streaming_config.response_length}")
     print("-" * 60)
     print(f"Total time (main benchmark): {agg_results['total_generation_time']:.2f}s")
     print(f"Total weight sync time: {agg_results['total_weight_sync_time']:.2f}s")
@@ -647,11 +657,21 @@ def main() -> None:
     """Main benchmark function."""
     # Parse arguments using ArgumentParserPlus
     parser = utils.ArgumentParserPlus(
-        (grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig)  # type: ignore[arg-type]
+        (
+            grpo_fast.Args,
+            dataset_transformation.TokenizerConfig,
+            model_utils.ModelConfig,
+            data_loader.StreamingDataLoaderConfig,
+        )  # type: ignore[arg-type]
     )
 
-    args, tokenizer_config, model_config = cast(
-        tuple[grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig],
+    args, tokenizer_config, model_config, streaming_config = cast(
+        tuple[
+            grpo_fast.Args,
+            dataset_transformation.TokenizerConfig,
+            model_utils.ModelConfig,
+            data_loader.StreamingDataLoaderConfig,
+        ],
         parser.parse_args_into_dataclasses(),
     )
 
@@ -665,8 +685,8 @@ def main() -> None:
     logger.info("Freeing GPU memory before starting vLLM...")
     free_all_gpu_memory()
 
-    dataset = setup_dataset(args, tokenizer_config)
-    max_model_len = args.max_prompt_token_length + args.response_length
+    dataset = setup_dataset(args, streaming_config, tokenizer_config)
+    max_model_len = streaming_config.max_prompt_token_length + streaming_config.response_length
     vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
         args, tokenizer_config, model_config, max_model_len
     )
@@ -675,7 +695,15 @@ def main() -> None:
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
     run_benchmark(
-        dataset, vllm_engines, param_prompt_Q, inference_results_Q, actor_manager, args, model_config, timestamp
+        dataset,
+        vllm_engines,
+        param_prompt_Q,
+        inference_results_Q,
+        actor_manager,
+        args,
+        streaming_config,
+        model_config,
+        timestamp,
     )
 
     cleanup(vllm_engines, actor_manager)
