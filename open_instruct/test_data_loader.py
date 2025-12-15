@@ -44,13 +44,14 @@ class TestHFDataLoader(unittest.TestCase):
     @parameterized.parameterized.expand([("world_size_2", 2), ("world_size_4", 4), ("world_size_8", 8)])
     def test_multi_rank_sampling(self, name, world_size):
         num_examples = 100
+        batch_size = world_size
         data = {"text": [f"example_{i}" for i in range(num_examples)], "label": list(range(num_examples))}
         dataset = datasets.Dataset.from_dict(data)
 
         loaders = [
             open_instruct.data_loader.HFDataLoader(
                 dataset=dataset,
-                batch_size=world_size,  # batch_size must be >= world_size for per_rank_batch_size >= 1
+                batch_size=batch_size,
                 seed=42,
                 rank=rank,
                 world_size=world_size,
@@ -75,8 +76,9 @@ class TestHFDataLoader(unittest.TestCase):
         union = set()
         for indices in all_indices:
             union |= indices
-        expected_indices = set(range(num_examples))
-        self.assertEqual(union, expected_indices)
+        total_batches = num_examples // batch_size
+        expected_num_samples = total_batches * batch_size
+        self.assertEqual(len(union), expected_num_samples)
 
     def test_reshuffle(self):
         data = {"text": [f"example_{i}" for i in range(20)], "label": list(range(20))}

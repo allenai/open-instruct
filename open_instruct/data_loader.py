@@ -144,12 +144,17 @@ class HFDataLoader(data_loader.DataLoaderBase):
     def _reshard(self, epoch: int) -> None:
         """Reshard the dataset for a given epoch.
 
-        Shuffles the full dataset with an epoch-based seed, then shards to this rank.
+        Shuffles the full dataset with an epoch-based seed, filters excluded indices,
+        calculates effective_size from GLOBAL dataset size to ensure all ranks have
+        identical batch counts (preventing deadlocks from uneven data distribution),
+        then shards to this rank.
         """
         shuffled = self._full_dataset.shuffle(seed=self.seed + epoch)
-        sharded = shuffled.shard(num_shards=self.dp_world_size, index=self.dp_rank)
-        self.dataset = sharded.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
-        self.effective_size = len(self.dataset) - (len(self.dataset) % self._per_rank_batch_size)
+        filtered = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
+        global_size = len(filtered)
+        total_batches = global_size // self._batch_size
+        self.effective_size = total_batches * self._per_rank_batch_size
+        self.dataset = filtered.shard(num_shards=self.dp_world_size, index=self.dp_rank)
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
