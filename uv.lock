@@ -38,7 +38,7 @@ wheels = [
 
 [[package]]
 name = "ai2-olmo-core"
-version = "2.4.0"
+version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bettermap" },
@@ -53,9 +53,9 @@ dependencies = [
     { name = "torch", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.8.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform != 'darwin'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/88/8b/9cae912f67625116d8fda3e979f84173249b257fdd014c66a17904d322b7/ai2_olmo_core-2.4.0.tar.gz", hash = "sha256:25f48abeedb3befddfe5c711138b094c151801f0b8fcde42c57677ddf932b6e6", size = 496584, upload-time = "2025-11-20T19:15:10.62Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/68/f8/0a55822e471a1143fc4e55dbe6995259141260ed9c460c7eac448e9e9acd/ai2_olmo_core-2.3.0.tar.gz", hash = "sha256:7745fea1268cf0d882d28c25fbbfbedc969e2f9bf4f187d8c042105429d0dff7", size = 345084, upload-time = "2025-10-17T16:22:04.579Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bd/16/d85b676c5ab5fec197e1c9de6d990a24d16ba3f94e04bbb784929cec62dd/ai2_olmo_core-2.4.0-py3-none-any.whl", hash = "sha256:82a61146c49d41ebe42b6a3d7611bdbf6f50973e085feb62267bc31a9517f5d6", size = 582441, upload-time = "2025-11-20T19:15:08.393Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/d2/353853a4de4ccf209dd04d3ceb28e2d8ce11c06816a2517eb6b412524294/ai2_olmo_core-2.3.0-py3-none-any.whl", hash = "sha256:7b22d09aaaf8e49000c808833b377b7cef774f10e93114fb3c6e61b74cb75df8", size = 404339, upload-time = "2025-10-17T16:22:02.903Z" },
 ]
 
 [[package]]
@@ -1836,7 +1836,7 @@ name = "nvidia-cudnn-cu12"
 version = "9.10.2.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "sys_platform != 'darwin'" },
+    { name = "nvidia-cublas-cu12", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/51/e123d997aa098c61d029f76663dedbfb9bc8dcf8c60cbd6adbe42f76d049/nvidia_cudnn_cu12-9.10.2.21-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:949452be657fa16687d0930933f032835951ef0892b37d2d53824d1a84dc97a8", size = 706758467, upload-time = "2025-06-06T21:54:08.597Z" },
@@ -1847,7 +1847,7 @@ name = "nvidia-cufft-cu12"
 version = "11.3.3.83"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'darwin'" },
+    { name = "nvidia-nvjitlink-cu12", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1f/13/ee4e00f30e676b66ae65b4f08cb5bcbb8392c03f54f2d5413ea99a5d1c80/nvidia_cufft_cu12-11.3.3.83-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:4d2dd21ec0b88cf61b62e6b43564355e5222e4a3fb394cac0db101f2dd0d4f74", size = 193118695, upload-time = "2025-03-07T01:45:27.821Z" },
@@ -1874,9 +1874,9 @@ name = "nvidia-cusolver-cu12"
 version = "11.7.3.90"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "sys_platform != 'darwin'" },
-    { name = "nvidia-cusparse-cu12", marker = "sys_platform != 'darwin'" },
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'darwin'" },
+    { name = "nvidia-cublas-cu12", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "nvidia-cusparse-cu12", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "nvidia-nvjitlink-cu12", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/85/48/9a13d2975803e8cf2777d5ed57b87a0b6ca2cc795f9a4f59796a910bfb80/nvidia_cusolver_cu12-11.7.3.90-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:4376c11ad263152bd50ea295c05370360776f8c3427b30991df774f9fb26c450", size = 267506905, upload-time = "2025-03-07T01:47:16.273Z" },
@@ -1887,7 +1887,7 @@ name = "nvidia-cusparse-cu12"
 version = "12.5.8.93"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'darwin'" },
+    { name = "nvidia-nvjitlink-cu12", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c2/f5/e1854cb2f2bcd4280c44736c93550cc300ff4b8c95ebe370d0aa7d2b473d/nvidia_cusparse_cu12-12.5.8.93-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:1ec05d76bbbd8b61b06a80e1eaf8cf4959c3d4ce8e711b65ebd0443bb0ebb13b", size = 288216466, upload-time = "2025-03-07T01:48:13.779Z" },
@@ -1971,7 +1971,6 @@ dependencies = [
     { name = "ai2-olmo-core" },
     { name = "antlr4-python3-runtime" },
     { name = "backoff" },
-    { name = "beaker-py" },
     { name = "bitsandbytes", marker = "sys_platform != 'darwin'" },
     { name = "datasets" },
     { name = "debugpy" },
@@ -2022,10 +2021,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.10.1" },
-    { name = "ai2-olmo-core", specifier = "==2.4.0" },
+    { name = "ai2-olmo-core", specifier = "==2.3.0" },
     { name = "antlr4-python3-runtime", specifier = "==4.11" },
     { name = "backoff", specifier = ">=2.2.1" },
-    { name = "beaker-py", specifier = ">=2.5.3" },
     { name = "bitsandbytes", marker = "sys_platform != 'darwin'", specifier = ">=0.44.1" },
     { name = "datasets", specifier = ">=4.0.0" },
     { name = "debugpy", specifier = ">=1.8.13" },
@@ -3768,8 +3766,8 @@ name = "xformers"
 version = "0.0.32.post1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", marker = "sys_platform != 'darwin'" },
-    { name = "torch", version = "2.8.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform != 'darwin'" },
+    { name = "numpy", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "torch", version = "2.8.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6f/33/3b9c4d3d5b2da453d27de891df4ad653ac5795324961aa3a5c15b0353fe6/xformers-0.0.32.post1.tar.gz", hash = "sha256:1de84a45c497c8d92326986508d81f4b0a8c6be4d3d62a29b8ad6048a6ab51e1", size = 12106196, upload-time = "2025-08-14T18:07:45.486Z" }
 wheels = [
