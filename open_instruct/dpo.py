@@ -413,6 +413,10 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     )
     tokenizer = tc.tokenizer
 
+    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    if is_beaker_job():
+        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     dataset = get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
@@ -451,9 +455,6 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     if args.add_seed_and_date_to_exp_name:
         args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.exp_name)
-
-    if is_beaker_job():
-        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
 
     beaker_config = None
     if is_beaker_job() and is_main_process:
