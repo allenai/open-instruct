@@ -37,4 +37,5 @@ uv run python mason.py \
     --dpo_beta 5 \
     --gradient_checkpointing \
     --with_tracking \
+    --dataset_skip_cache \
     --reference_logprobs_cache_path /weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache/dpo_olmo3_7b.pt
