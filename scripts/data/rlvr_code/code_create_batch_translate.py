@@ -35,6 +35,7 @@ The LLM is prompted to return a JSON object with the following keys:
 - `translated_solution`: The solution code, translated.
 - `translated_test_cases`: The test cases, translated.
 """
+
 import hashlib
 import json
 import os
@@ -42,17 +43,17 @@ import random
 import re
 import subprocess
 import time
-from typing import List
 
 from datasets import Dataset, load_dataset
-import open_instruct.utils as open_instruct_utils
 from openai import AzureOpenAI
 from pydantic import BaseModel
+
+import open_instruct.utils as open_instruct_utils
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
     azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
-    api_version="2024-12-01-preview"
+    api_version="2024-12-01-preview",
 )
 
 MODEL = "gpt-4.1"
@@ -62,17 +63,36 @@ TIMESTAMP = int(time.time())
 BATCH_FILE_NAME = f"{WD}/batch_files/{TIMESTAMP}.jsonl"
 os.makedirs(f"{WD}/batch_files", exist_ok=True)
 
-INPUT_HF_DATASETS = ["saurabh5/the-algorithm-python", "saurabh5/llama-nemotron-rlvr", "saurabh5/open-code-reasoning-rlvr", "saurabh5/tulu-3-personas-code-rlvr", "saurabh5/rlvr_acecoder_filtered"]
+INPUT_HF_DATASETS = [
+    "saurabh5/the-algorithm-python",
+    "saurabh5/llama-nemotron-rlvr",
+    "saurabh5/open-code-reasoning-rlvr",
+    "saurabh5/tulu-3-personas-code-rlvr",
+    "saurabh5/rlvr_acecoder_filtered",
+]
 SPLIT = "train"
 
-TARGET_LANGUAGES = ["JavaScript", "bash", "C++", "Go", "Java", "Rust", "Swift", "Kotlin", "Haskell", "Lean", "TypeScript"]
+TARGET_LANGUAGES = [
+    "JavaScript",
+    "bash",
+    "C++",
+    "Go",
+    "Java",
+    "Rust",
+    "Swift",
+    "Kotlin",
+    "Haskell",
+    "Lean",
+    "TypeScript",
+]
 
 hf_datasets = {
     "taco": load_dataset("BAAI/TACO", trust_remote_code=True, num_proc=open_instruct_utils.max_num_processes()),
     "apps": load_dataset("codeparrot/apps", trust_remote_code=True, num_proc=open_instruct_utils.max_num_processes()),
     "code_contests": load_dataset("deepmind/code_contests", num_proc=open_instruct_utils.max_num_processes()),
-    "open-r1/codeforces": load_dataset("open-r1/codeforces", num_proc=open_instruct_utils.max_num_processes())
+    "open-r1/codeforces": load_dataset("open-r1/codeforces", num_proc=open_instruct_utils.max_num_processes()),
 }
+
 
 def extract_python_code(model_output: str) -> str:
     """Extract the last code block between ``` markers from the model output."""
@@ -116,14 +136,17 @@ def get_question(ds_name, split, index):
 
     return None
 
-#def get_input(row):
+
+# def get_input(row):
 #    ds_name, ds_split, ds_index = row["dataset"], row["split"], int(row["index"])
 #    if ds_name not in hf_datasets:
 #        return None
 #    return get_question(ds_name, ds_split, ds_index)
 
+
 def get_input(row):
-    return row['messages'][0]['content']
+    return row["messages"][0]["content"]
+
 
 def get_solution(row):
     """
@@ -132,28 +155,32 @@ def get_solution(row):
             return message['content']
     return None
     """
-    #return extract_python_code(row['output'])
-    if 'reference_solution' in row:
-        return row['reference_solution']
-    elif 'rewritten_solution' in row:
-        return row['rewritten_solution']
-    elif 'solution' in row:
-        return row['solution']
+    # return extract_python_code(row['output'])
+    if "reference_solution" in row:
+        return row["reference_solution"]
+    elif "rewritten_solution" in row:
+        return row["rewritten_solution"]
+    elif "solution" in row:
+        return row["solution"]
     return None
 
+
 def get_test_cases(row):
-    return row['ground_truth']
+    return row["ground_truth"]
+
 
 def get_id(row):
     input_str = get_input(row)
     if input_str:
-        return hashlib.sha256(input_str.encode('utf-8')).hexdigest()
+        return hashlib.sha256(input_str.encode("utf-8")).hexdigest()
     return None
+
 
 class OpenAIStructuredOutput(BaseModel):
     translated_problem: str
     translated_solution: str
-    translated_test_cases: List[str]
+    translated_test_cases: list[str]
+
 
 def create_batch_file(prompts):
     """Create a batch file in the format required by Azure OpenAI Batch API."""
@@ -167,8 +194,11 @@ def create_batch_file(prompts):
                 "body": {
                     "model": MODEL,
                     "messages": [
-                        {"role": "system", "content": "You are a helpful assistant that can translate code from Python to other languages."},
-                        {"role": "user", "content": prompt}
+                        {
+                            "role": "system",
+                            "content": "You are a helpful assistant that can translate code from Python to other languages.",
+                        },
+                        {"role": "user", "content": prompt},
                     ],
                     "max_tokens": 8192,
                     "response_format": {
@@ -181,17 +211,14 @@ def create_batch_file(prompts):
                                 "properties": {
                                     "translated_problem": {"type": "string"},
                                     "translated_solution": {"type": "string"},
-                                    "translated_test_cases": {
-                                        "type": "array",
-                                        "items": {"type": "string"}
-                                    },
+                                    "translated_test_cases": {"type": "array", "items": {"type": "string"}},
                                 },
                                 "required": ["translated_problem", "translated_solution", "translated_test_cases"],
-                                "additionalProperties": False
-                            }
-                        }
-                    }
-                }
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                },
             }
             f.write(json.dumps(batch_request) + "\n")
 
@@ -208,10 +235,10 @@ def find_cached_results(id: str):
     all_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
 
     if all_files:
-        with open(all_files[0], "r") as f:
+        with open(all_files[0]) as f:
             try:
                 response = json.load(f)
-                rewritten_input = response['rewritten_input']
+                rewritten_input = response["rewritten_input"]
                 if type(rewritten_input) == dict:
                     return None
                 return response
@@ -219,6 +246,7 @@ def find_cached_results(id: str):
                 return None
 
     return None
+
 
 def main(target_language):
     global SAMPLE_LIMIT
@@ -245,7 +273,7 @@ def main(target_language):
     sampled_rows = random.sample(unique_rows, min(SAMPLE_LIMIT, len(unique_rows)))
 
     print(f"Processing {len(sampled_rows)} unique rows")
-    #create a new dataset with the rows
+    # create a new dataset with the rows
     new_dataset = Dataset.from_list(sampled_rows)
     new_dataset.push_to_hub("saurabh5/rlvr-code-data-python")
     master_prompt_stdio = r"""
@@ -336,8 +364,15 @@ Output should be a JSON object with this structure:
         test_cases = get_test_cases(row)
         if test_cases is None or solution is None or input is None:
             continue
-        prompts.append((get_id(row), master_prompt_fn.replace("{input}", input).replace("{solution}", solution).replace("{test_cases}", test_cases).replace("{target_language}", target_language)))
-
+        prompts.append(
+            (
+                get_id(row),
+                master_prompt_fn.replace("{input}", input)
+                .replace("{solution}", solution)
+                .replace("{test_cases}", test_cases)
+                .replace("{target_language}", target_language),
+            )
+        )
 
     print(f"Creating batch file with {len(prompts)} prompts...")
     print(f"First prompt: {prompts[0]}")
@@ -347,15 +382,10 @@ Output should be a JSON object with this structure:
     # Submit the batch job
     try:
         print("Submitting batch job to Azure OpenAI...")
-        batch_file = client.files.create(
-            file=open(BATCH_FILE_NAME, "rb"),
-            purpose="batch"
-        )
+        batch_file = client.files.create(file=open(BATCH_FILE_NAME, "rb"), purpose="batch")
 
         batch_job = client.batches.create(
-            input_file_id=batch_file.id,
-            endpoint="/v1/chat/completions",
-            completion_window="24h"
+            input_file_id=batch_file.id, endpoint="/v1/chat/completions", completion_window="24h"
         )
 
         print(f"Batch job submitted with ID: {batch_job.id}")
@@ -374,8 +404,7 @@ Output should be a JSON object with this structure:
 
         try:
             subprocess.run(
-                ["python", script_path, BATCH_FILE_NAME, "--batch_ids_file", target_language_filename],
-                check=True
+                ["python", script_path, BATCH_FILE_NAME, "--batch_ids_file", target_language_filename], check=True
             )
             print(f"Successfully submitted chunks. Batch IDs are in {full_path_to_ids_file}")
             return full_path_to_ids_file
@@ -386,11 +415,12 @@ Output should be a JSON object with this structure:
             print(f"Error: The script at {script_path} was not found.")
             return None
 
+
 if __name__ == "__main__":
     batch_ids = {}
     for target_language in TARGET_LANGUAGES:
         batch_ids[target_language] = main(target_language)
         break
 
-    #with open(f"{WD}/batch_ids_translate.json", "w") as f:
+    # with open(f"{WD}/batch_ids_translate.json", "w") as f:
     #    json.dump(batch_ids, f)

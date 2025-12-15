@@ -6,11 +6,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Process MetaMathQA dataset and optionally upload to Hugging Face Hub."
     )
-    parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Upload the dataset to Hugging Face Hub",
-    )
+    parser.add_argument("--push_to_hub", action="store_true", help="Upload the dataset to Hugging Face Hub")
     parser.add_argument(
         "--hf_entity",
         type=str,
@@ -18,10 +14,7 @@ if __name__ == "__main__":
         help="Hugging Face organization to upload to (if not provided, uploads to user's account)",
     )
     parser.add_argument(
-        "--converted_dataset_name",
-        type=str,
-        default=None,
-        help="Name of the converted dataset on Hugging Face Hub.",
+        "--converted_dataset_name", type=str, default=None, help="Name of the converted dataset on Hugging Face Hub."
     )
     parser.add_argument(
         "--local_save_dir",
@@ -38,9 +31,7 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "--apply_empty_message_filters",
-        action="store_true",
-        help="Apply empty message filters to the dataset.",
+        "--apply_empty_message_filters", action="store_true", help="Apply empty message filters to the dataset."
     )
     args = parser.parse_args()
 
@@ -72,8 +63,9 @@ if __name__ == "__main__":
         apply_empty_message_filters=args.apply_empty_message_filters,
         push_to_hub=args.push_to_hub,
         hf_entity=args.hf_entity,
-        converted_dataset_name="numinamath_cot_converted" \
-            if args.converted_dataset_name is None else args.converted_dataset_name + "_cot",
+        converted_dataset_name="numinamath_cot_converted"
+        if args.converted_dataset_name is None
+        else args.converted_dataset_name + "_cot",
         local_save_dir=args.local_save_dir,
         readme_content=cot_subset_readme_content,
     )
@@ -88,8 +80,9 @@ if __name__ == "__main__":
         apply_empty_message_filters=args.apply_empty_message_filters,
         push_to_hub=args.push_to_hub,
         hf_entity=args.hf_entity,
-        converted_dataset_name="numinamath_tir_converted" \
-            if args.converted_dataset_name is None else args.converted_dataset_name + "_tir",
+        converted_dataset_name="numinamath_tir_converted"
+        if args.converted_dataset_name is None
+        else args.converted_dataset_name + "_tir",
         local_save_dir=args.local_save_dir,
         readme_content=tir_subset_readme_content,
     )

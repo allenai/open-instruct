@@ -2435,13 +2435,13 @@ def one_training_step(
         **utilization_metrics,
     }
     # Print only scalar metrics
-    scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
+    scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
         # Convert array/list metrics to wandb histograms for logging
         for key, value in metrics.items():
-            if (isinstance(value, (np.ndarray, list))) and len(value) > 0:
+            if (isinstance(value, np.ndarray | list)) and len(value) > 0:
                 metrics[key] = wandb.Histogram(value)
         wandb.log(metrics, step=episode)
 

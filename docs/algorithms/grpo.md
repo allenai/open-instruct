@@ -63,18 +63,18 @@ bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
 ![grpo_tulu3_8b_time](grpo/tulu3.1_8b_grpo_fast-time.png)
 
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
-    
+
     <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-1-8B-GRPO-Fast--VmlldzoxMTk0NzcwOA" style="width:100%; height:500px" title="Tulu3-8B-GRPO-Fast"></iframe>
 
 ???+ info
 
-    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up.
 
     ![grpo_plot](grpo/tulu3.1_8b_grpo_fast_eval_curve.png)
 
 ???+ info
 
-    Based on our internal evaluation, the GRPO model is roughly on par with the original `allenai/Llama-3.1-Tulu-3.1-8B` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training. 
+    Based on our internal evaluation, the GRPO model is roughly on par with the original `allenai/Llama-3.1-Tulu-3.1-8B` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.
 
     ![grpo_plot](grpo/tulu3.1_8b_grpo_fast_eval.png)
 
@@ -98,13 +98,13 @@ bash scripts/train/qwen/grpo_fast_7b.sh
 
 
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
-    
+
     <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Qwen2-5-7B-GRPO-Fast-Zero--VmlldzoxMjA2NDExMA" style="width:100%; height:500px" title="Qwen2.5-7B-GRPO-Fast-Zero"></iframe>
 
 
 ???+ info
 
-    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up.
 
     ![grpo_plot](grpo/qwen2.5_7b_grpo_fast_zero_eval_curve.png)
 
@@ -128,12 +128,12 @@ bash scripts/train/olmo2/grpo_fast_7b_zero.sh
 ![grpo_olmo2_7b_zero_time](grpo/olmo2_7b_grpo_fast_zero-time.png)
 
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
-    
+
     <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-7B-GRPO-Fast-Zero--VmlldzoxMjA0MjU4MQ" style="width:100%; height:500px" title="OLMo2-7B-GRPO-Fast-Zero"></iframe>
 
 ???+ info
 
-    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up.
 
     ![grpo_plot](grpo/olmo2_7b_grpo_fast_zero_eval_curve.png)
 
@@ -156,12 +156,12 @@ bash scripts/train/olmo2/grpo_fast_13b_zero.sh
 ![grpo_olmo2_13b_zero_time](grpo/olmo2_13b_grpo_fast_zero-time.png)
 
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
-    
+
     <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-13B-GRPO-Fast-Zero--VmlldzoxMjA0MjU4Mw" style="width:100%; height:500px" title="OLMo2-13B-GRPO-Fast-Zero"></iframe>
 
 ???+ info
 
-    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up.
 
     ![grpo_plot](grpo/olmo2_13b_grpo_fast_zero_eval_curve.png)
 
@@ -214,20 +214,20 @@ bash scripts/train/tulu3/grpo_8b.sh
 
 
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
-    
+
     <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-1-8B-GRPO--VmlldzoxMTkyNzc2MA" style="width:100%; height:500px" title="Tulu3-8B-GRPO"></iframe>
 
 
 ???+ info
 
-    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up.
 
     ![grpo_plot](grpo/tulu3.1_8b_grpo_eval_curve.png)
 
 
 ???+ info
 
-    Based on our internal evaluation, the GRPO model is roughly on par with the original `allenai/Llama-3.1-Tulu-3.1-8B` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training. 
+    Based on our internal evaluation, the GRPO model is roughly on par with the original `allenai/Llama-3.1-Tulu-3.1-8B` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.
 
     ![grpo_plot](grpo/tulu3.1_8b_grpo_eval.png)
 
@@ -244,19 +244,19 @@ bash scripts/train/olmo2/grpo_7b.sh
 ![grpo_olmo2_7b_time](grpo/olmo2_7b_grpo-time.png)
 
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
-    
+
     <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-7B-GRPO--VmlldzoxMTkyNzc1OA" style="width:100%; height:500px" title="OLMo2-7B-GRPO"></iframe>
 
 ???+ info
 
-    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up.
 
     ![grpo_plot](grpo/olmo2_7b_grpo_eval_curve.png)
 
 
 ???+ info
 
-    Based on our internal evaluation, the GRPO model actually outperforms the original `allenai/OLMo-2-1124-7B-Instruct` model. This is mostly because the original `allenai/OLMo-2-1124-7B-Instruct` was trained with PPO, which may suffer from not using a outcome reward model to initialize the value model (since it uses a genreal RM to initialize the value model). Note that your results may vary slightly due to the random seeds used in the training. 
+    Based on our internal evaluation, the GRPO model actually outperforms the original `allenai/OLMo-2-1124-7B-Instruct` model. This is mostly because the original `allenai/OLMo-2-1124-7B-Instruct` was trained with PPO, which may suffer from not using a outcome reward model to initialize the value model (since it uses a genreal RM to initialize the value model). Note that your results may vary slightly due to the random seeds used in the training.
 
     ![grpo_plot](grpo/olmo2_7b_grpo_eval.png)
 
@@ -276,12 +276,12 @@ bash scripts/train/qwen/grpo_7b.sh
 
 
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
-    
+
     <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Qwen2-5-7B-GRPO-Zero--VmlldzoxMjA0MjY5OA" style="width:100%; height:500px" title="Qwen2.5-7B-GRPO-Zero"></iframe>
 
 ???+ info
 
-    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up.
 
     ![grpo_plot](grpo/qwen2.5_7b_grpo_zero_eval_curve.png)
 

@@ -117,6 +117,19 @@ make quality
 
 Run the tests with `uv run pytest`.
 
+#### Pre-commit hooks
+
+To automatically run linting and formatting on each commit:
+```bash
+uv add pre-commit --dev
+uv run pre-commit install
+```
+
+To run on all files (recommended after initial setup):
+```bash
+uv run pre-commit run --all-files
+```
+
 ### Repo structure
 ```
 ├── assets/                     <- Images, licenses, etc.
