@@ -457,7 +457,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         )
 
     if is_distributed():
-        dist.barrier()
+        dist.barrier()  # type: ignore[attr-defined]
 
     if not is_main_process:
         dataset = get_cached_dataset_tulu(
@@ -491,6 +491,11 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.exp_name)
 
+    if is_distributed():
+        path_list = [args.output_dir]
+        dist.broadcast_object_list(path_list, src=0)  # type: ignore[attr-defined]
+        args.output_dir = path_list[0]
+
     beaker_config = None
     if is_beaker_job() and is_main_process:
         beaker_config = maybe_get_beaker_config()
@@ -510,7 +515,10 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     if args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    if is_main_process:
+        os.makedirs(args.output_dir, exist_ok=True)
+    if is_distributed():
+        dist.barrier()  # type: ignore[attr-defined]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if args.model_name_or_path is None:
