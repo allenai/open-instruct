@@ -506,18 +506,23 @@ class PolicyTrainerRayProcess(RayProcess):
         self.pad_token_id = tokenizer.pad_token_id
         self.num_mini_batches = args.num_mini_batches
         self._args = args
-        self.dataloader = iter(
-            data_loader_config.build_dataloader(
-                data_prep_actor_name=data_prep_actor_name,
-                tokenizer=tokenizer,
-                dp_rank=rank,
-                fs_local_rank=local_rank,
-                num_training_steps=args.num_training_steps,
-                work_dir=args.output_dir,
-                global_batch_size=args.num_unique_prompts_rollout,
-                dp_world_size=world_size,
-            )
+        self._streaming_dataloader = data_loader_config.build_dataloader(
+            data_prep_actor_name=data_prep_actor_name,
+            tokenizer=tokenizer,
+            dp_rank=rank,
+            fs_local_rank=local_rank,
+            num_training_steps=args.num_training_steps,
+            work_dir=args.output_dir,
+            global_batch_size=args.num_unique_prompts_rollout,
+            dp_world_size=world_size,
         )
+        self.dataloader = iter(self._streaming_dataloader)
+
+    def get_dataloader_state(self) -> dict[str, Any]:
+        return self._streaming_dataloader.state_dict()
+
+    def load_dataloader_state(self, state_dict: dict[str, Any]) -> None:
+        self._streaming_dataloader.load_state_dict(state_dict)
 
     def from_pretrained(
         self,
@@ -2093,7 +2098,7 @@ def run_training(
     if checkpoint_state and "dataloader_state" in checkpoint_state:
         ray_get_with_progress(
             [
-                policy_group.models[i].dataloader.load_state_dict.remote(checkpoint_state["dataloader_state"])
+                policy_group.models[i].load_dataloader_state.remote(checkpoint_state["dataloader_state"])
                 for i in range(args.world_size)
             ],
             desc="Restoring dataloader state",
@@ -2215,7 +2220,7 @@ def run_training(
                 }
 
                 # Save dataloader state from Ray actor
-                client_state["dataloader_state"] = ray.get(policy_group.models[0].dataloader.state_dict.remote())
+                client_state["dataloader_state"] = ray.get(policy_group.models[0].get_dataloader_state.remote())
 
                 # Save DataPreparationActor state
                 data_prep_actor = ray.get_actor("data_prep_singleton")

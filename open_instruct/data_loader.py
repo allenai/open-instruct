@@ -774,7 +774,7 @@ class DataPreparationActor:
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
-        for i in range(num_initial_prompts):
+        for _ in range(num_initial_prompts):
             add_prompt_to_generator(
                 next(self.iter_dataloader),
                 self.iter_dataloader._epoch,
@@ -782,11 +782,6 @@ class DataPreparationActor:
                 self.generation_config,
                 is_eval=False,
             )
-            if (i + 1) % 10 == 0 or i == num_initial_prompts - 1:
-                logger.info(f"[DataPreparationActor] Pushed {i + 1}/{num_initial_prompts} initial prompts")
-        logger.info(
-            f"[DataPreparationActor] Done pushing initial prompts, starting training loop from step {self.training_step}"
-        )
 
         for step in range(self.training_step, self.num_training_steps):
             if self.shutdown_requested:
