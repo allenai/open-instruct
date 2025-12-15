@@ -5,7 +5,7 @@ LR=1e-6
 EXP_NAME=olmo3-7b-DPO-debug-${LR}
 
 uv run python mason.py \
-    --cluster ai2/augusta \
+    --cluster ai2/jupiter \
     --description "Multi-node DPO run with OLMo3-7B, 1k sequence length." \
     --workspace ai2/open-instruct-dev \
     --priority high \
@@ -14,7 +14,7 @@ uv run python mason.py \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
-    --gpus 8 -- source /var/lib/tcpxo/lib64/nccl-env-profile.sh \&\& torchrun --nnodes 4 --nproc_per_node 8 --rdzv_backend c10d --rdzv_endpoint \$BEAKER_LEADER_REPLICA_HOSTNAME:29500 open_instruct/dpo.py \
+    --gpus 8 -- torchrun --nnodes 4 --nproc_per_node 8 --rdzv_backend c10d --rdzv_endpoint \$BEAKER_LEADER_REPLICA_HOSTNAME:29500 open_instruct/dpo.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
     --tokenizer_name_or_path "$MODEL_NAME" \
