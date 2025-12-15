@@ -319,9 +319,7 @@ def get_env_vars(
         env_vars.extend(
             [
                 beaker.BeakerEnvVar(name="HF_HOME", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"),
-                beaker.BeakerEnvVar(
-                    name="HF_DATASETS_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"
-                ),
+                beaker.BeakerEnvVar(name="HF_DATASETS_CACHE", value="/tmp/hf_datasets_cache"),
                 beaker.BeakerEnvVar(name="HF_HUB_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/hub"),
                 beaker.BeakerEnvVar(
                     name="CHECKPOINT_OUTPUT_DIR",
