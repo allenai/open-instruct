@@ -11,13 +11,13 @@ dependencies = [
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
     "datasets>=4.0.0",
     "debugpy>=1.8.13",
-    "deepspeed<0.17.3", # version 17.3 and up break our training code right now
+    "deepspeed<0.17.3",  # version 17.3 and up break our training code right now
     "hf-transfer>=0.1.8",
-    "litellm>=1.72.0,<1.75.2", # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
+    "litellm>=1.72.0,<1.75.2",  # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
     "nltk>=3.9.1",
     "numpy<2",
-    "ai2-olmo-core==2.4.0",
+    "ai2-olmo-core==2.3.0",
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
@@ -32,8 +32,6 @@ dependencies = [
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
-    "ai2-olmo-core==2.4.0",
-    "beaker-py>=2.5.3",
 ]
 
 [build-system]
@@ -154,7 +152,6 @@ include = [
     "open_instruct/dataset_processor.py",
     "open_instruct/data_loader.py",
     "open_instruct/data_types.py",
-    "open_instruct/dpo.py",
     "open_instruct/logger_utils.py",
     "open_instruct/mix_data.py",
     "open_instruct/mix_data_preferences.py",
