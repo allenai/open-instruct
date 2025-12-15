@@ -935,7 +935,7 @@ def create_vllm_engines(
     enforce_eager: bool,
     tokenizer_name_or_path: str,
     pretrain: str,
-    revision: str,
+    revision: str | None,
     seed: int,
     enable_prefix_caching: bool,
     max_model_len: int,
@@ -953,7 +953,7 @@ def create_vllm_engines(
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
-) -> list[LLMRayActor]:
+) -> list[ray.actor.ActorHandle]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     if tools:
         assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (

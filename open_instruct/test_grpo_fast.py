@@ -1,16 +1,20 @@
 import gc
 import os
+import threading
 import time
 import unittest
 from typing import Any
+from unittest.mock import MagicMock, Mock
 
 import ray
 import torch
 from datasets import Dataset
 from parameterized import parameterized
+from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 
-from open_instruct import data_loader, rl_utils, utils
+from open_instruct import data_loader as data_loader_lib
+from open_instruct import grpo_fast, rl_utils, utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
@@ -198,6 +202,517 @@ class TestGrpoFastBase(unittest.TestCase):
         }
         return Dataset.from_dict(data)
 
+    def setup_and_add_prompts_to_generator(self, queries, ground_truths, datasets, raw_queries, indices, num_engines):
+        """Setup queues and add prompts to generator - common pattern."""
+        # Queue size must be at least as large as the number of queries to avoid blocking
+        queue_size = max(len(queries), num_engines * 2)
+        prompt_Q = ray_queue.Queue(maxsize=queue_size)
+        inference_results_Q = ray_queue.Queue(maxsize=queue_size)
+
+        # Track queues for cleanup
+        self._ray_queues.extend([prompt_Q, inference_results_Q])
+
+        mock_generation_config = MagicMock()
+        mock_generation_config.n = 4
+
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        data_loader = data_loader_lib.HFDataLoader(
+            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
+        )
+
+        for example in data_loader:
+            grpo_fast.add_prompt_to_generator(example, prompt_Q, mock_generation_config, False)
+
+        return prompt_Q, inference_results_Q, mock_dataset
+
+
+class TestGrpoFastVLLM(TestGrpoFastBase):
+    @parameterized.expand([(1, 16), (2, 32), (4, 64), (8, 128)])
+    def test_batch_splitting_and_engine_configurations(self, vllm_num_engines: int, num_unique_prompts_rollout: int):
+        """Test batch splitting and accumulation with various engine configurations."""
+        # Create test data
+        queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices = self.create_test_data(
+            num_unique_prompts_rollout
+        )
+
+        # Setup and split batch
+        prompt_Q, inference_results_Q, mock_dataset = self.setup_and_add_prompts_to_generator(
+            queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
+        )
+
+        # Verify that we have the expected number of items in the queue (one per prompt)
+        self.assertEqual(prompt_Q.qsize(), num_unique_prompts_rollout)
+
+        # Simulate vLLM processing
+        batch_idx = 0
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
+            self.assertIsInstance(request, PromptRequest)
+            self.assertIsInstance(request.dataset_index, int)
+            self.assertIsInstance(request.prompt_id, str)
+
+            mock_result = self.create_mock_result_from_request(request)
+            inference_results_Q.put(mock_result)
+            batch_idx += 1
+
+        # Simulate streaming accumulation (simplified version for testing)
+        combined_responses = []
+        combined_queries = []
+        combined_raw_queries = []
+        combined_ground_truths = []
+        combined_datasets = []
+
+        for _ in range(num_unique_prompts_rollout):
+            result = inference_results_Q.get()
+            dataset_index = result.dataset_index
+
+            # Get query from dataset using index
+            example = mock_dataset[dataset_index]
+            q = example[INPUT_IDS_PROMPT_KEY]
+            gt = example[GROUND_TRUTHS_KEY]
+            d = example[VERIFIER_SOURCE_KEY]
+            raw_q = example[RAW_PROMPT_KEY]
+
+            combined_responses.extend(result.responses)
+            combined_queries.append(q)
+            combined_raw_queries.append(raw_q)
+            combined_ground_truths.append(gt)
+            combined_datasets.append(d)
+
+        combined_result = GenerationResult(
+            responses=combined_responses,
+            finish_reasons=["stop"] * len(combined_responses),
+            masks=[[1, 1, 1]] * len(combined_responses),
+            request_info=RequestInfo(
+                num_calls=[0] * len(combined_responses),
+                timeouts=[0] * len(combined_responses),
+                tool_errors=[""] * len(combined_responses),
+                tool_outputs=[""] * len(combined_responses),
+                tool_runtimes=[0.0] * len(combined_responses),
+                tool_calleds=[False] * len(combined_responses),
+            ),
+            dataset_index=0,
+            prompt_id="combined",
+        )
+
+        # Verify that the combined results contain the same items (order may differ due to shuffling)
+        self.assertEqual(sorted(combined_queries), sorted(queries_next))
+        self.assertEqual(sorted(combined_ground_truths), sorted(ground_truths_next))
+        self.assertEqual(sorted(combined_datasets), sorted(datasets_next))
+
+        # Verify that the combined result has the correct structure
+        self.assertIsInstance(combined_result, GenerationResult)
+        self.assertEqual(len(combined_result.responses), len(queries_next))
+        self.assertEqual(len(combined_result.finish_reasons), len(queries_next))
+        self.assertEqual(len(combined_result.masks), len(queries_next))
+
+        # Verify that the inference_results_Q is empty after accumulation
+        self.assertEqual(inference_results_Q.qsize(), 0)
+
+    def test_dataset_index_preservation_through_pipeline(self):
+        """Test that dataset indices are correctly preserved through the pipeline."""
+        vllm_num_engines = 4
+        num_unique_prompts_rollout = 32
+
+        # Create test data
+        queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices = self.create_test_data(
+            num_unique_prompts_rollout
+        )
+
+        # Setup and split batch
+        prompt_Q, inference_results_Q, mock_dataset = self.setup_and_add_prompts_to_generator(
+            queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
+        )
+
+        # Simulate vLLM processing
+        batch_idx = 0
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
+            mock_result = self.create_mock_result_from_request(request)
+            inference_results_Q.put(mock_result)
+            batch_idx += 1
+
+        # Simulate streaming accumulation
+        combined_queries = []
+        combined_raw_queries = []
+        combined_ground_truths = []
+        combined_datasets = []
+
+        for _ in range(num_unique_prompts_rollout):
+            result = inference_results_Q.get()
+            dataset_index = result.dataset_index
+
+            example = mock_dataset[dataset_index]
+            q = example[INPUT_IDS_PROMPT_KEY]
+            gt = example[GROUND_TRUTHS_KEY]
+            d = example[VERIFIER_SOURCE_KEY]
+            raw_q = example[RAW_PROMPT_KEY]
+            combined_queries.append(q)
+            combined_raw_queries.append(raw_q)
+            combined_ground_truths.append(gt)
+            combined_datasets.append(d)
+
+        # Verify results (order may differ due to shuffling)
+        self.assertEqual(sorted(combined_queries), sorted(queries_next))
+        self.assertEqual(sorted(combined_ground_truths), sorted(ground_truths_next))
+        self.assertEqual(sorted(combined_datasets), sorted(datasets_next))
+
+    @parameterized.expand([(1, 16), (2, 8), (4, 4)])
+    def test_multiple_samples_per_prompt(self, vllm_num_engines: int, num_samples_per_prompt: int):
+        """Test handling of multiple samples per prompt."""
+        num_unique_prompts_rollout = 16
+
+        # Create test data
+        queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices = self.create_test_data(
+            num_unique_prompts_rollout
+        )
+
+        # Setup and split batch
+        prompt_Q, inference_results_Q, mock_dataset = self.setup_and_add_prompts_to_generator(
+            queries_next, ground_truths_next, datasets_next, raw_queries_next, dataset_indices, vllm_num_engines
+        )
+
+        # Simulate vLLM processing with multiple samples
+        batch_idx = 0
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
+            mock_result = self.create_mock_result_from_request(request, num_samples_per_prompt)
+            inference_results_Q.put(mock_result)
+            batch_idx += 1
+
+        # Simulate streaming accumulation
+        combined_responses = []
+        combined_queries = []
+        combined_raw_queries = []
+        combined_ground_truths = []
+        combined_datasets = []
+
+        for _ in range(num_unique_prompts_rollout):
+            result = inference_results_Q.get()
+            dataset_index = result.dataset_index
+
+            # Look up from dataset
+            example = mock_dataset[dataset_index]
+            q = example[INPUT_IDS_PROMPT_KEY]
+            gt = example[GROUND_TRUTHS_KEY]
+            d = example[VERIFIER_SOURCE_KEY]
+            raw_q = example[RAW_PROMPT_KEY]
+
+            combined_responses.extend(result.responses)
+            combined_queries.append(q)
+            combined_raw_queries.append(raw_q)
+            combined_ground_truths.append(gt)
+            combined_datasets.append(d)
+
+        combined_result = GenerationResult(
+            responses=combined_responses,
+            finish_reasons=["stop"] * len(combined_responses),
+            masks=[[1, 1, 1]] * len(combined_responses),
+            request_info=RequestInfo(
+                num_calls=[0] * len(combined_responses),
+                timeouts=[0] * len(combined_responses),
+                tool_errors=[""] * len(combined_responses),
+                tool_outputs=[""] * len(combined_responses),
+                tool_runtimes=[0.0] * len(combined_responses),
+                tool_calleds=[False] * len(combined_responses),
+            ),
+            dataset_index=0,
+            prompt_id="combined",
+        )
+
+        # Verify results - streaming accumulation should NOT replicate (order may differ due to shuffling)
+        self.assertEqual(sorted(combined_queries), sorted(queries_next))
+        self.assertEqual(sorted(combined_ground_truths), sorted(ground_truths_next))
+        self.assertEqual(sorted(combined_datasets), sorted(datasets_next))
+
+        # Verify correct number of responses
+        expected_responses = num_unique_prompts_rollout * num_samples_per_prompt
+        self.assertEqual(len(combined_result.responses), expected_responses)
+
+
+class GrpoIntegrationTests(TestGrpoFastBase):
+    """Integration tests for GRPO with parallel processing."""
+
+    def test_out_of_order_processing(self):
+        """Test that dataset indices can be processed out of order."""
+        num_engines = 4
+        num_prompts = 16
+        num_samples_per_prompt = 4
+
+        queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
+
+        tokenizer, reward_fn = self.create_mock_tokenizer_and_reward_fn()
+
+        prompt_Q, inference_results_Q, mock_dataset = self.setup_and_add_prompts_to_generator(
+            queries, ground_truths, datasets, raw_queries, indices, num_engines
+        )
+
+        requests = []
+        while not prompt_Q.empty():
+            requests.append(prompt_Q.get())
+
+        for request in reversed(requests):
+            mock_result = self.create_mock_result_from_request(request, num_samples_per_prompt)
+            inference_results_Q.put(mock_result)
+
+        mock_args = self.create_mock_args(num_engines, num_samples_per_prompt)
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+
+        mock_model_dims = self.create_mock_model_dims()
+        combined_result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
+            inference_results_Q,
+            mock_args,
+            generation_config=mock_generation_config,
+            num_prompts=num_prompts,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            prompt_dataset=mock_dataset,
+        )
+
+        self.assertEqual(len(batch.queries), num_prompts * num_samples_per_prompt)
+        self.assertEqual(len(combined_result.responses), num_prompts * num_samples_per_prompt)
+
+    def test_accumulate_waits_for_all_engines(self):
+        """Test that accumulate_inference_batches waits for all engines."""
+        num_engines = 4
+        num_prompts = 16
+
+        tokenizer, reward_fn = self.create_mock_tokenizer_and_reward_fn()
+
+        expected_results = 3 * (num_prompts // num_engines)
+        inference_results_Q = ray_queue.Queue(maxsize=max(expected_results, num_engines * 2))
+
+        self._ray_queues.append(inference_results_Q)
+
+        queries = [f"q_{i}" for i in range(num_prompts)]
+        ground_truths = [f"t_{i}" for i in range(num_prompts)]
+        datasets = [f"d_{i}" for i in range(num_prompts)]
+        raw_queries = [f"q_{i}" for i in range(num_prompts)]
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+
+        for engine_id in range(3):
+            for i in range(engine_id * 4, (engine_id + 1) * 4):
+                mock_result = self.create_mock_result(i, f"0_{i}")
+                inference_results_Q.put(mock_result)
+
+        mock_args = self.create_mock_args(num_engines)
+
+        completed = threading.Event()
+
+        def run_accumulate():
+            try:
+                mock_generation_config = Mock()
+                mock_generation_config.n = 1
+
+                mock_model_dims = self.create_mock_model_dims()
+                grpo_fast.accumulate_inference_batches(
+                    inference_results_Q,
+                    mock_args,
+                    generation_config=mock_generation_config,
+                    num_prompts=num_prompts,
+                    model_dims=mock_model_dims,
+                    tokenizer=tokenizer,
+                    prompt_dataset=mock_dataset,
+                )
+                completed.set()
+            except Exception:
+                completed.set()
+
+        thread = threading.Thread(target=run_accumulate, daemon=True)
+        thread.start()
+
+        self.assertFalse(completed.wait(timeout=1.0))
+        self.assertTrue(thread.is_alive())
+
+        self.assertEqual(inference_results_Q.qsize(), 0)
+
+
+class TestStreamingAccumulation(TestGrpoFastBase):
+    """Test the new streaming accumulation functionality."""
+
+    def test_more_engines_than_queries(self):
+        """Test that add_prompt_to_generator handles gracefully when engines > queries."""
+        num_queries = 4
+
+        queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
+        prompt_Q = ray_queue.Queue(maxsize=num_queries)
+
+        self._ray_queues.append(prompt_Q)
+
+        mock_generation_config = MagicMock()
+        mock_generation_config.n = 1
+
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        data_loader = data_loader_lib.HFDataLoader(
+            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
+        )
+
+        for example in data_loader:
+            grpo_fast.add_prompt_to_generator(example, prompt_Q, mock_generation_config, False)
+
+        self.assertEqual(prompt_Q.qsize(), num_queries, f"Should have {num_queries} batches for {num_queries} queries")
+
+        prompt_count = 0
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
+            self.assertIsInstance(request, PromptRequest)
+            self.assertIsNotNone(request.prompt, "Each request should have a prompt")
+            prompt_count += 1
+
+        self.assertEqual(prompt_count, num_queries, f"Should have {num_queries} PromptRequests")
+
+    def test_uneven_distribution_no_empty_batches(self):
+        """Test that uneven query distribution doesn't create empty batches."""
+        num_queries = 7
+
+        queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_queries)
+        prompt_Q = ray_queue.Queue(maxsize=num_queries)
+
+        self._ray_queues.append(prompt_Q)
+
+        mock_generation_config = MagicMock()
+        mock_generation_config.n = 1
+
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        data_loader = data_loader_lib.HFDataLoader(
+            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
+        )
+
+        for example in data_loader:
+            grpo_fast.add_prompt_to_generator(example, prompt_Q, mock_generation_config, False)
+
+        request_count = 0
+        while not prompt_Q.empty():
+            request = prompt_Q.get()
+            self.assertIsInstance(request, PromptRequest)
+            self.assertIsNotNone(request.prompt, "Each request should have a prompt")
+            request_count += 1
+
+        self.assertEqual(request_count, num_queries, "Total requests should match total queries")
+        self.assertEqual(request_count, num_queries, f"Should have {num_queries} individual PromptRequests")
+
+    def test_streaming_accumulation_basic(self):
+        """Test basic streaming accumulation with in-order results."""
+        num_prompts = 8
+
+        queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
+
+        inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
+
+        self._ray_queues.append(inference_results_Q)
+
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+
+        for i in range(num_prompts):
+            mock_result = self.create_mock_result(i, f"0_{i}")
+            inference_results_Q.put(mock_result)
+
+        results_list = []
+        queries_list = []
+        expected_results = num_prompts
+
+        while len(results_list) < expected_results:
+            result = inference_results_Q.get()
+
+            results_list.append(result)
+
+            dataset_index = result.dataset_index
+            example = mock_dataset[dataset_index]
+            q = example[INPUT_IDS_PROMPT_KEY]
+            gt = example[GROUND_TRUTHS_KEY]
+            d = example[VERIFIER_SOURCE_KEY]
+            raw_q = example[RAW_PROMPT_KEY]
+            queries_list.append((q, gt, d, raw_q))
+
+        self.assertEqual(len(results_list), expected_results)
+
+        combined_queries = []
+        for i in range(num_prompts):
+            q, _, _, _ = queries_list[i]
+            combined_queries.append(q)
+
+        self.assertEqual(combined_queries, queries)
+
+    def test_streaming_with_multiple_samples(self):
+        """Test streaming accumulation with multiple samples per prompt."""
+        num_prompts = 4
+        num_samples = 3
+
+        queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
+
+        inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
+
+        self._ray_queues.append(inference_results_Q)
+
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+
+        for i in range(num_prompts):
+            mock_result = self.create_mock_result(i, f"0_{i}", num_samples_per_prompt=num_samples)
+            inference_results_Q.put(mock_result)
+
+        total_responses = 0
+        while not inference_results_Q.empty():
+            result = inference_results_Q.get()
+
+            expected_responses = num_samples
+            self.assertEqual(len(result.responses), expected_responses)
+            total_responses += len(result.responses)
+
+            idx = result.dataset_index
+            example = mock_dataset[idx]
+            self.assertEqual(example[INPUT_IDS_PROMPT_KEY], queries[idx])
+
+        self.assertEqual(total_responses, num_prompts * num_samples)
+
+
+class TestAccumulateInferenceBatches(TestGrpoFastBase):
+    """Test accumulate_inference_batches function."""
+
+    def test_all_prompts_filtered_returns_none(self):
+        """Test that accumulate_inference_batches returns None when all prompts are filtered."""
+        num_prompts = 8
+        num_samples_per_prompt = 4
+
+        queries, ground_truths, datasets, raw_queries, indices = self.create_test_data(num_prompts)
+
+        inference_results_Q = ray_queue.Queue(maxsize=num_prompts)
+
+        self._ray_queues.append(inference_results_Q)
+
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+
+        for i in range(num_prompts):
+            constant_scores = [0.5] * num_samples_per_prompt
+            mock_result = self.create_mock_result(
+                i, f"0_{i}", num_samples_per_prompt=num_samples_per_prompt, reward_scores=constant_scores
+            )
+            inference_results_Q.put(mock_result)
+
+        mock_args = self.create_mock_args(num_engines=4, num_samples=num_samples_per_prompt)
+        mock_generation_config = Mock()
+        mock_generation_config.n = num_samples_per_prompt
+        mock_model_dims = self.create_mock_model_dims()
+
+        tokenizer_name = "EleutherAI/pythia-14m"
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+        result, batch, reward_metrics, batch_stats = grpo_fast.accumulate_inference_batches(
+            inference_results_Q,
+            mock_args,
+            generation_config=mock_generation_config,
+            num_prompts=num_prompts,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            prompt_dataset=mock_dataset,
+            filter_zero_std_samples=True,
+        )
+
+        self.assertIsNone(result)
+        self.assertIsNone(batch)
+        self.assertIsNone(reward_metrics)
+        self.assertIsNone(batch_stats)
+
 
 class TestDataPreparation(TestGrpoFastBase):
     """Test prepare_collated_data_for_workers function."""
@@ -218,7 +733,7 @@ class TestDataPreparation(TestGrpoFastBase):
     ):
         """Test data distribution, structure, micro-batch collation, and padding."""
         packed_sequences = self.create_mock_packed_sequences(batch_size, seq_length, variable_length)
-        result = data_loader.prepare_collated_data_for_workers(
+        result = data_loader_lib.prepare_collated_data_for_workers(
             packed_sequences, world_size, per_device_train_batch_size, pad_token_id, pin_memory=False
         )
 

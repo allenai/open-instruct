@@ -127,37 +127,6 @@ logger = logger_utils.setup_logger(__name__)
 
 INVALID_LOGPROB = 1.0
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
-DISK_USAGE_WARNING_THRESHOLD = 0.85
-CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://")
-
-
-def warn_if_low_disk_space(path: str, *, threshold: float, send_slack_alerts: bool) -> None:
-    """Warns when disk usage exceeds the provided threshold.
-
-    Args:
-        path: Filesystem path to check disk usage for.
-        threshold: Usage ratio (0.0-1.0) above which to warn.
-        send_slack_alerts: Whether to also send a Slack alert when warning.
-    """
-    if path.startswith(CLOUD_PATH_PREFIXES):
-        return
-
-    usage = shutil.disk_usage(path)
-    if usage.total == 0:
-        return
-
-    used_ratio = usage.used / usage.total
-    if used_ratio >= threshold:
-        used_percent = used_ratio * 100
-        free_gib = usage.free / (1024**3)
-        total_gib = usage.total / (1024**3)
-        warning_message = (
-            f"Disk usage near capacity for {path}: {used_percent:.1f}% used "
-            f"({free_gib:.1f} GiB free of {total_gib:.1f} GiB). Checkpointing may fail."
-        )
-        logger.warning(warning_message)
-        if send_slack_alerts:
-            utils.send_slack_message(f"{warning_message}")
 
 
 @dataclass
@@ -271,6 +240,8 @@ class Args:
     """How many training steps to take before updating the reference policy."""
     load_ref_policy: bool = True
     """Whether to load and use a reference policy for KL penalty calculation."""
+    loss_fn: Literal["dapo", "cispo"] = "dapo"
+    """Whether to use DAPO or CISPO loss function."""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
@@ -423,8 +394,10 @@ class Args:
     # Tool settings
     tools: list[str] | None = None
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: list[int] = field(default_factory=lambda: [5])
-    """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
+    max_tool_calls: tuple[int, ...] = (5,)
+    """Maximum number of tool calls allowed. If a tuple is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
+    mask_tool_use: bool = True
+    """Whether to mask the tool output. By default on."""
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
 
@@ -1021,10 +994,22 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    pg_losses_BT = -data_BT.advantages[i][:, 1:] * ratio_BT
-                    pg_losses2_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
-                        ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher
-                    )
+                    if self.args.loss_fn == "dapo":
+                        pg_losses_BT = -data_BT.advantages[i][:, 1:] * ratio_BT
+                        pg_losses2_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
+                            ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher
+                        )
+                    elif self.args.loss_fn == "cispo":
+                        # cispo: directly clip ratio, no lower bound.
+                        # reinforce loss, so multiply by new logprobs
+                        pg_losses_BT = (
+                            -data_BT.advantages[i][:, 1:]
+                            * torch.clamp(ratio_BT.detach(), max=1.0 + self.args.clip_higher)
+                            * new_logprobs_BT
+                        )
+                        pg_losses2_BT = pg_losses_BT
+                    else:
+                        raise ValueError(f"Invalid loss function: {self.args.loss_fn}")
 
                     # Apply truncated importance sampling if enabled
                     if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
@@ -1523,7 +1508,7 @@ def create_model_and_optimizer(
     wandb_url: str,
     tokenizer: PreTrainedTokenizer,
     inference_results_Q: ray_queue.Queue,
-    param_prompt_Q: ray_queue.Queue,
+    prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
     data_loader_config: data_loader_lib.StreamingDataLoaderConfig,
     train_dataset: Dataset,
@@ -1567,7 +1552,7 @@ def create_model_and_optimizer(
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
-        "Param Prompt Queue": param_prompt_Q,
+        "Prompt Queue": prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
@@ -1580,7 +1565,7 @@ def create_model_and_optimizer(
     _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
         dataset=train_dataset,
         inference_results_Q=inference_results_Q,
-        param_prompt_Q=param_prompt_Q,
+        param_prompt_Q=prompt_Q,
         tokenizer=tokenizer,
         config=data_loader_config,
         generation_config=generation_config,
@@ -1634,7 +1619,7 @@ def create_model_and_optimizer(
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
         mask_tool_use=data_loader_config.mask_tool_use,
-        prompt_queue=param_prompt_Q,
+        prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
@@ -1909,22 +1894,23 @@ def maybe_evaluate(
     episode,
     eval_dataset: Dataset,
     eval_generation_config,
-    generate_metrics_Q: Queue,
-    num_eval_prompts: int,
     model_dims: utils.ModelDims,
     actor_manager=None,
 ):
     """Optionally evaluate the model."""
+    if eval_dataset is None:
+        return
+
     try:
-        # timeout 0.01 if this is the last training step or we're not evaluating
+        # timeout 0.01 if this is not the last training step
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
+        timeout = 0.01 if training_step < args.num_training_steps else 100
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
             eval_generation_config,
-            num_prompts=num_eval_prompts,
+            num_prompts=len(eval_dataset),
             model_dims=model_dims,
             tokenizer=tokenizer,
             dataset=eval_dataset,
@@ -1936,12 +1922,6 @@ def maybe_evaluate(
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
-
-        eval_generate_metrics = {}
-        try:
-            eval_generate_metrics = generate_metrics_Q.get_nowait()
-        except Empty:
-            logger.info("[Main Thread] didn't get eval generation metrics")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
         eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
@@ -1956,8 +1936,6 @@ def maybe_evaluate(
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
         }
-        if "time/generation" in eval_generate_metrics:
-            eval_metrics["eval/generation_time"] = eval_generate_metrics["time/generation"]
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
@@ -2101,9 +2079,8 @@ def run_training(
     stop_event,
     executor,
     inference_results_Q,
-    param_prompt_Q,
+    prompt_Q,
     evaluation_inference_results_Q,
-    generate_metrics_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
     model_dims: utils.ModelDims,
@@ -2190,16 +2167,15 @@ def run_training(
             and (args.eval_on_step_0 or training_step > 1)
         ):
             for eval_example in iter(eval_data_loader):
-                add_prompt_to_generator(eval_example, 0, param_prompt_Q, generation_configs["eval"], is_eval=True)
+                add_prompt_to_generator(eval_example, 0, prompt_Q, generation_configs["eval"], is_eval=True)
 
         episode += args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
         data_thread_metrics = {}
-        for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
-            try:
-                data_thread_metrics |= metrics_Q.get_nowait()
-            except Empty:
-                logger.info("[Main Thread] didn't get train generation metrics")
+        try:
+            data_thread_metrics |= weight_sync_metrics_Q.get_nowait()
+        except Empty:
+            logger.info("[Main Thread] didn't get train generation metrics")
 
         data_thread_metrics["time/health_check"] = health_check_time
 
@@ -2229,11 +2205,7 @@ def run_training(
             and training_step % args.checkpoint_state_freq == 0
             and args.checkpoint_state_dir is not None
         ):
-            warn_if_low_disk_space(
-                args.checkpoint_state_dir,
-                threshold=DISK_USAGE_WARNING_THRESHOLD,
-                send_slack_alerts=args.send_slack_alerts,
-            )
+            utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
             with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
                 # Save comprehensive client state including dataloader state
                 client_state = {
@@ -2269,8 +2241,6 @@ def run_training(
             episode,
             eval_dataset,
             generation_configs["eval"],
-            generate_metrics_Q,
-            len(eval_dataset) if eval_dataset else 0,
             model_dims,
             actor_manager,
         )
@@ -2321,10 +2291,12 @@ def main(
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
-    # all prompts from async_steps + 1 training steps
-    queue_size = (streaming_config.async_steps + 1) * args.num_unique_prompts_rollout
+    # - all prompts from async_steps + 1 training steps
+    # - all eval prompts
+    num_eval_prompts = len(eval_dataset) if eval_dataset is not None else 0
+    queue_size = (streaming_config.async_steps + 1) * args.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
-    param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    prompt_Q = ray_queue.Queue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
@@ -2365,7 +2337,7 @@ def main(
         wandb_url,
         tokenizer,
         inference_results_Q,
-        param_prompt_Q,
+        prompt_Q,
         evaluation_inference_results_Q,
         streaming_config,
         train_dataset,
@@ -2380,7 +2352,6 @@ def main(
         logger.info(f"Restored episode count: {episode}")
 
     # Create additional queues (main queues already created above)
-    generate_metrics_Q = Queue(maxsize=streaming_config.async_steps)
     weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
 
     stop_event = threading.Event()
@@ -2403,9 +2374,8 @@ def main(
             stop_event,
             executor,
             inference_results_Q,
-            param_prompt_Q,
+            prompt_Q,
             evaluation_inference_results_Q,
-            generate_metrics_Q,
             weight_sync_metrics_Q,
             actor_manager,
             model_dims,
@@ -2417,7 +2387,7 @@ def main(
         raise
     finally:
         cleanup_training_resources(
-            stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
+            stop_event, executor, [inference_results_Q, prompt_Q, evaluation_inference_results_Q], actor_manager
         )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
