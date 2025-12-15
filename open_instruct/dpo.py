@@ -100,24 +100,7 @@ def build_reference_logprobs_cache(
     device: torch.device | None = None,
     cache_path: str | pathlib.Path | None = None,
 ) -> TensorCache:
-    """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
-
-    Each rank computes logprobs for its shard, then all_reduce combines them into
-    a full cache on every rank.
-
-    Args:
-        model: The model to use for computing reference logprobs.
-        dataloader: The data loader to iterate over.
-        average_log_prob: Whether to average log probabilities.
-        forward_fn: The forward function to use.
-        full_dataset_size: Total size of the full dataset (before sharding).
-        use_lora: Whether the model uses LoRA adapters.
-        device: The device to use for computation.
-        cache_path: Optional path to save/load the cache.
-
-    Returns:
-        A TensorCache instance with cached logprobs.
-    """
+    """Build a TensorCache with reference logprobs by computing logprobs once for all samples."""
     if cache_path is not None:
         cache_path = pathlib.Path(cache_path)
         if cache_path.exists():

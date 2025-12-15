@@ -918,10 +918,7 @@ def is_beaker_job() -> bool:
 
 
 def is_on_gcp() -> bool:
-    """Check if running on GCP by looking for filestore paths in HF env vars.
-
-    On GCP clusters, mason.py sets HF_HOME and HF_HUB_CACHE to /filestore/...
-    """
+    """Check if running on GCP."""
     hf_home = os.environ.get("HF_HOME", "")
     hf_hub_cache = os.environ.get("HF_HUB_CACHE", "")
     return hf_home.startswith("/filestore") or hf_hub_cache.startswith("/filestore")

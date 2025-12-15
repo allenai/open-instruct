@@ -30,8 +30,6 @@ class BeakerCallbackV2(Callback):
     """
 
     priority: ClassVar[int] = min(CometCallback.priority - 1, WandBCallback.priority - 1)
-    workload_id: str | None = None
-    update_interval: int | None = None
     enabled: bool | None = None
     config: dict[str, Any] | None = None
     result_dir: str = BEAKER_RESULT_DIR
@@ -46,15 +44,14 @@ class BeakerCallbackV2(Callback):
 
     def pre_train(self) -> None:
         if self.enabled and get_rank() == 0:
-            if self.workload_id is None:
-                self.workload_id = os.environ.get(BEAKER_WORKLOAD_ID_ENV_VAR)
-                if self.workload_id is None:
-                    log.warning(f"BeakerCallbackV2: {BEAKER_WORKLOAD_ID_ENV_VAR} not set, disabling")
-                    self.enabled = False
-                    return
+            workload_id = os.environ.get(BEAKER_WORKLOAD_ID_ENV_VAR)
+            if workload_id is None:
+                log.warning(f"BeakerCallbackV2: {BEAKER_WORKLOAD_ID_ENV_VAR} not set, disabling")
+                self.enabled = False
+                return
 
             self._start_time = time.perf_counter()
-            log.info(f"Running in Beaker workload {self.workload_id}")
+            log.info(f"Running in Beaker workload {workload_id}")
 
             result_dir = Path(self.result_dir) / "olmo-core"
             result_dir.mkdir(parents=True, exist_ok=True)
@@ -66,34 +63,20 @@ class BeakerCallbackV2(Callback):
                     json.dump(self.config, config_file)
 
             requirements_path = result_dir / "requirements.txt"
-            try:
-                with requirements_path.open("w") as requirements_file:
-                    requirements_file.write(f"# python={platform.python_version()}\n")
-                with requirements_path.open("a") as requirements_file:
-                    subprocess.call(
-                        ["uv", "pip", "freeze"], stdout=requirements_file, stderr=subprocess.DEVNULL, timeout=10
-                    )
-            except Exception as e:
-                log.warning(f"Error saving Python packages: {e}")
+            with requirements_path.open("w") as requirements_file:
+                requirements_file.write(f"# python={platform.python_version()}\n")
+                subprocess.call(
+                    ["uv", "pip", "freeze"], stdout=requirements_file, stderr=subprocess.DEVNULL, timeout=10
+                )
 
-            for callback in self.trainer.callbacks.values():
-                if isinstance(callback, WandBCallback) and callback.enabled:
-                    if callback.run is not None and (url := callback.run.get_url()) is not None:
-                        self._url = url
-                    break
-                elif isinstance(callback, CometCallback) and callback.enabled:
-                    if callback.exp is not None and (url := callback.exp.url) is not None:
-                        self._url = url
-                    break
-
+            self._url = self._get_tracking_url()
             self._update()
 
     def post_step(self) -> None:
-        update_interval = self.update_interval or self.trainer.metrics_collect_interval
         should_update = (
             self.enabled
             and get_rank() == 0
-            and self.step % update_interval == 0
+            and self.step % self.trainer.metrics_collect_interval == 0
             and (self._last_update is None or (time.monotonic() - self._last_update) > 10)
         )
         if should_update:
@@ -103,6 +86,14 @@ class BeakerCallbackV2(Callback):
         if self.enabled and get_rank() == 0:
             self._update()
 
+    def _get_tracking_url(self) -> str | None:
+        for callback in self.trainer.callbacks.values():
+            if isinstance(callback, WandBCallback) and callback.enabled and callback.run is not None:
+                return callback.run.get_url()
+            elif isinstance(callback, CometCallback) and callback.enabled and callback.exp is not None:
+                return callback.exp.url
+        return None
+
     def _update(self) -> None:
         self.trainer.run_bookkeeping_op(
             self._set_description,
@@ -110,7 +101,6 @@ class BeakerCallbackV2(Callback):
             op_name="beaker_set_description",
             allow_multiple=False,
             distributed=False,
-            cb=lambda _: None,
         )
         self._last_update = time.monotonic()
 

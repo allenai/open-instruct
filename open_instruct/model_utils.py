@@ -45,32 +45,17 @@ logger = logger_utils.setup_logger(__name__)
 
 @dataclass
 class TensorCache:
-    """A cache for tensors indexed by dataset indices.
-
-    Supports indexing with torch.Tensor to retrieve cached values.
-    Can be saved to and loaded from disk.
-    """
+    """A cache for tensors indexed by dataset indices."""
 
     tensors: dict[str, torch.Tensor]
 
     def __getitem__(self, indices: torch.Tensor) -> dict[str, torch.Tensor]:
-        """Get cached tensors for the given indices.
-
-        Args:
-            indices: Tensor of indices to retrieve.
-
-        Returns:
-            Dictionary of tensors indexed by the given indices, on the same device as indices.
-        """
+        """Get cached tensors for the given indices."""
         device = indices.device
         return {k: v.to(device)[indices.long()] for k, v in self.tensors.items()}
 
     def to_disk(self, path: str | pathlib.Path) -> None:
-        """Save the cache to disk.
-
-        Args:
-            path: Path to save the cache file.
-        """
+        """Save the cache to disk."""
         path = pathlib.Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         cpu_tensors = {k: v.cpu() for k, v in self.tensors.items()}
@@ -78,14 +63,7 @@ class TensorCache:
 
     @classmethod
     def from_disk(cls, path: str | pathlib.Path) -> "TensorCache":
-        """Load a cache from disk.
-
-        Args:
-            path: Path to the cache file.
-
-        Returns:
-            A TensorCache instance.
-        """
+        """Load a cache from disk."""
         data = torch.load(path, weights_only=True)
         return cls(tensors=data)
 

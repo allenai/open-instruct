@@ -31,23 +31,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
         fs_local_rank: int | None = None,
         device: torch.device | None = None,
     ) -> None:
-        """Initialize the HFDataLoader.
-
-        Args:
-            dataset: The HuggingFace Dataset to load data from.
-            batch_size: The global batch size.
-            seed: Random seed for shuffling.
-            rank: The rank of the current process in the distributed setup.
-            world_size: Total number of processes in the distributed setup.
-            work_dir: Working directory for the data loader (required by DataLoaderBase).
-            automatic_reshuffle: If True, automatically reshuffle at epoch boundaries.
-            collator: Optional callable that takes a list of examples and returns a
-                collated batch. When provided, _iter_batches() yields collated batches
-                of size batch_size // world_size.
-            fs_local_rank: The filesystem-local rank. For shared filesystems, this should
-                equal the global rank. Defaults to rank if not specified.
-            device: Device to move batches to. If None, batches stay on CPU.
-        """
         if fs_local_rank is None:
             fs_local_rank = rank
         super().__init__(
@@ -142,13 +125,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._reshard(self._epoch)
 
     def _reshard(self, epoch: int) -> None:
-        """Reshard the dataset for a given epoch.
-
-        Shuffles the full dataset with an epoch-based seed, filters excluded indices,
-        calculates effective_size from GLOBAL dataset size to ensure all ranks have
-        identical batch counts (preventing deadlocks from uneven data distribution),
-        then shards to this rank.
-        """
+        """Reshard the dataset for a given epoch."""
         shuffled = self._full_dataset.shuffle(seed=self.seed + epoch)
         filtered = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
         global_size = len(filtered)
@@ -167,11 +144,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         return to_device(self._collator(examples), self._device)
 
     def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int | None:
-        """Return the total number of tokens in the batch across all ranks.
-
-        Counts tokens from any key containing "input_ids" (e.g., input_ids,
-        chosen_input_ids, rejected_input_ids).
-        """
+        """Return the total number of tokens in the batch across all ranks."""
         num_tokens = 0
         for key, value in batch.items():
             if "input_ids" in key and hasattr(value, "numel"):
