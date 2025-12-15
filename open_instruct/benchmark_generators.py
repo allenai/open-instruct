@@ -65,7 +65,7 @@ def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx
     logger.info(f"Saved completion lengths to {csv_path}.")
 
 
-def save_config(args, tokenizer_config, model_config, timestamp: int):
+def save_config(args, tokenizer_config, model_config, dataset_config, timestamp: int):
     """
     Save configuration to JSON file.
 
@@ -73,15 +73,16 @@ def save_config(args, tokenizer_config, model_config, timestamp: int):
         args: Args dataclass
         tokenizer_config: TokenizerConfig dataclass
         model_config: ModelConfig dataclass
+        dataset_config: DatasetConfig dataclass
         timestamp: Unix timestamp
     """
     config_path = DATA_DIR / f"config_{timestamp}.json"
 
-    # Convert dataclasses to dicts
     config_dict = {
         "args": dataclasses.asdict(args),
         "tokenizer_config": dataclasses.asdict(tokenizer_config),
         "model_config": dataclasses.asdict(model_config),
+        "dataset_config": dataclasses.asdict(dataset_config),
         "timestamp": timestamp,
     }
 
@@ -199,29 +200,38 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
 
 
-def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation.TokenizerConfig) -> datasets.Dataset:
+def setup_dataset(
+    args: grpo_fast.Args,
+    tokenizer_config: dataset_transformation.TokenizerConfig,
+    dataset_config: grpo_fast.DatasetConfig,
+) -> datasets.Dataset:
     """Set up the dataset using the same pipeline as grpo_fast.py."""
     logger.info("Loading and processing dataset...")
 
-    # Transform function arguments
+    system_prompt_override = None
+    if dataset_config.system_prompt_override_file is not None:
+        with open(dataset_config.system_prompt_override_file) as f:
+            system_prompt_override = f.read().strip()
+
     transform_fn_args = [
-        {},  # For rlvr_tokenize_v1
-        {"max_prompt_token_length": args.max_prompt_token_length},  # For rlvr_filter_v1
+        {"system_prompt_override": system_prompt_override},
+        {"max_prompt_token_length": dataset_config.max_prompt_token_length},
     ]
 
-    # Load dataset
     dataset = dataset_transformation.get_cached_dataset_tulu(
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+        dataset_mixer_list=dataset_config.dataset_mixer_list,
+        dataset_mixer_list_splits=dataset_config.dataset_mixer_list_splits,
         tc=tokenizer_config,
-        dataset_transform_fn=args.dataset_transform_fn,
+        dataset_transform_fn=dataset_config.dataset_transform_fn,
         transform_fn_args=transform_fn_args,
-        dataset_cache_mode=args.dataset_cache_mode,
-        dataset_local_cache_dir=args.dataset_local_cache_dir,
-        dataset_skip_cache=args.dataset_skip_cache,
+        dataset_cache_mode=dataset_config.dataset_cache_mode,
+        dataset_config_hash=dataset_config.dataset_config_hash,
+        hf_entity=dataset_config.hf_entity,
+        dataset_local_cache_dir=dataset_config.dataset_local_cache_dir,
+        dataset_skip_cache=dataset_config.dataset_skip_cache,
+        system_prompt_override=system_prompt_override,
     )
 
-    # Shuffle dataset
     dataset = dataset.shuffle(seed=args.seed)
     logger.info(f"Dataset loaded with {len(dataset)} samples")
 
@@ -645,35 +655,33 @@ def cleanup(vllm_engines: list[ray.actor.ActorHandle], actor_manager: ray.actor.
 
 def main() -> None:
     """Main benchmark function."""
-    # Parse arguments using ArgumentParserPlus
     parser = utils.ArgumentParserPlus(
-        (grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig)  # type: ignore[arg-type]
+        (grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig, grpo_fast.DatasetConfig)  # type: ignore[arg-type]
     )
 
-    args, tokenizer_config, model_config = cast(
-        tuple[grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig],
+    args, tokenizer_config, model_config, dataset_config = cast(
+        tuple[
+            grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig, grpo_fast.DatasetConfig
+        ],
         parser.parse_args_into_dataclasses(),
     )
 
-    # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Calculate flops per token before starting vLLM
     logger.info("Calculating model FLOPs per token...")
 
-    # Free GPU memory after calculating FLOPs and before starting vLLM
     logger.info("Freeing GPU memory before starting vLLM...")
     free_all_gpu_memory()
 
-    dataset = setup_dataset(args, tokenizer_config)
-    max_model_len = args.max_prompt_token_length + args.response_length
+    dataset = setup_dataset(args, tokenizer_config, dataset_config)
+    max_model_len = dataset_config.max_prompt_token_length + args.response_length
     vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
         args, tokenizer_config, model_config, max_model_len
     )
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
-    save_config(args, tokenizer_config, model_config, timestamp)
+    save_config(args, tokenizer_config, model_config, dataset_config, timestamp)
     run_benchmark(
         dataset, vllm_engines, param_prompt_Q, inference_results_Q, actor_manager, args, model_config, timestamp
     )

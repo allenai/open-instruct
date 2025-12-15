@@ -40,6 +40,7 @@ with contextlib.suppress(Exception):
 from open_instruct import utils
 
 # isort: on
+import argparse
 import asyncio
 import dataclasses
 import json
@@ -107,7 +108,6 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
 from open_instruct.utils import (
-    ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
     _z3_params_to_fetch,
@@ -142,34 +142,95 @@ class ShutdownSentinel:
 
 
 @dataclass
-class Args:
-    # Dataset
+class DatasetConfig:
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
-    """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_eval_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
-    """A list of datasets (local or HF) to sample from for evaluation."""
     dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
-    """The dataset splits to use for training"""
-    dataset_mixer_eval_list_splits: list[str] = field(default_factory=lambda: ["test"])
-    """The dataset splits to use for evaluation"""
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"])
-    """The list of transform functions to apply to the dataset."""
     dataset_cache_mode: Literal["hf", "local"] = "local"
-    """The mode to use for caching the dataset."""
     dataset_local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
     dataset_config_hash: str | None = None
-    """The hash of the dataset configuration."""
-    dataset_config_eval_hash: str | None = None
-    """The hash of the dataset configuration for evaluation."""
     dataset_skip_cache: bool = False
-    """Whether to skip the cache."""
+    max_prompt_token_length: int = 256
+    system_prompt_override_file: str | None = None
+    system_prompt_override: str | None = None
+    hf_entity: str | None = None
+
+    def build_cache(self, tc: TokenizerConfig) -> None:
+        system_prompt_override = None
+        if self.system_prompt_override_file is not None:
+            with open(self.system_prompt_override_file) as f:
+                system_prompt_override = f.read().strip()
+
+        transform_fn_args = [
+            {"system_prompt_override": system_prompt_override},
+            {"max_prompt_token_length": self.max_prompt_token_length},
+        ]
+        get_cached_dataset_tulu(
+            dataset_mixer_list=self.dataset_mixer_list,
+            dataset_mixer_list_splits=self.dataset_mixer_list_splits,
+            tc=tc,
+            dataset_transform_fn=self.dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            dataset_cache_mode=self.dataset_cache_mode,
+            dataset_config_hash=self.dataset_config_hash,
+            hf_entity=self.hf_entity,
+            dataset_local_cache_dir=self.dataset_local_cache_dir,
+            dataset_skip_cache=self.dataset_skip_cache,
+            system_prompt_override=system_prompt_override,
+        )
+
+
+@dataclass
+class ExperimentConfig:
+    args: "Args"
+    tokenizer_config: TokenizerConfig
+    model_config: ModelConfig
+    dataset_config: "DatasetConfig"
+    eval_dataset_config: "DatasetConfig | None" = None
+
+    def __post_init__(self):
+        if self.tokenizer_config.tokenizer_name_or_path is None:
+            self.tokenizer_config.tokenizer_name_or_path = self.model_config.model_name_or_path
+        if self.tokenizer_config.tokenizer_revision is None:
+            self.tokenizer_config.tokenizer_revision = self.model_config.model_revision
+        assert self.args.pack_length >= self.dataset_config.max_prompt_token_length + self.args.response_length, (
+            f"pack_length ({self.args.pack_length}) must be >= max_prompt_token_length ({self.dataset_config.max_prompt_token_length}) + response_length ({self.args.response_length})"
+        )
+        if self.eval_dataset_config is not None:
+            assert (
+                self.args.pack_length >= self.eval_dataset_config.max_prompt_token_length + self.args.response_length
+            ), (
+                f"pack_length ({self.args.pack_length}) must be >= eval max_prompt_token_length ({self.eval_dataset_config.max_prompt_token_length}) + response_length ({self.args.response_length})"
+            )
+
+    @classmethod
+    def from_file(cls, path: str) -> "ExperimentConfig":
+        with open(path) as f:
+            data = json.load(f)
+        eval_dataset_config = None
+        if "eval_dataset_config" in data:
+            eval_dataset_config = DatasetConfig(**data["eval_dataset_config"])
+        return cls(
+            args=Args(**data["args"]),
+            tokenizer_config=TokenizerConfig(**data["tokenizer_config"]),
+            model_config=ModelConfig(**data["model_config"]),
+            dataset_config=DatasetConfig(**data["dataset_config"]),
+            eval_dataset_config=eval_dataset_config,
+        )
+
+    def cache_dataset(self) -> None:
+        self.dataset_config.build_cache(self.tokenizer_config)
+        if self.eval_dataset_config is not None:
+            self.eval_dataset_config.build_cache(self.tokenizer_config)
+
+    def run(self) -> None:
+        main(self)
+
+
+@dataclass
+class Args:
     shuffle_eval_dataset: bool = False
     """Whether to shuffle the evaluation dataset."""
-    max_prompt_token_length: int = 256
-    """The maximum prompt token length to use for the dataset"""
-    system_prompt_override_file: str | None = None
-    """Path to a text file containing a system prompt to override the dataset's system prompts"""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -472,9 +533,6 @@ class Args:
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
-        assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
-            "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
-        )
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
@@ -1204,7 +1262,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
-                        if args.load_ref_policy:
+                        if self.args.load_ref_policy:
                             # NOTE: in packed implementation, kl calculation are averages over response tokens
                             loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
                             loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
@@ -1218,7 +1276,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
 
             with torch.no_grad():
-                if args.load_ref_policy:
+                if self.args.load_ref_policy:
                     for j in range(4):
                         self.local_metrics[f"objective/kl{j}_avg"] = loss_stats_B["kl"][j].mean()
                     self.local_metrics["loss/kl_avg"] = loss_stats_B["kl_loss"].mean()
@@ -1983,43 +2041,57 @@ def data_preparation_thread(
         )
 
 
-def setup_runtime_variables(args: Args) -> Args:
+def setup_runtime_variables(
+    args: Args, dataset_config: DatasetConfig, eval_dataset_config: DatasetConfig | None
+) -> Args:
     """Set up runtime variables for the experiment."""
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
-    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    dataset_config.dataset_local_cache_dir = os.path.abspath(dataset_config.dataset_local_cache_dir)
     if is_beaker_job():
-        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        dataset_config.dataset_local_cache_dir = (
+            "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        )
+    if eval_dataset_config is not None:
+        eval_dataset_config.dataset_local_cache_dir = dataset_config.dataset_local_cache_dir
     args.world_size = sum(args.num_learners_per_node)
     args.num_training_steps = args.total_episodes // (
         args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     )
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
-        if args.hf_repo_id is None:  # auto-generate one
+        if args.hf_repo_id is None:
             args.hf_repo_id = "open_instruct_dev"
-        if args.hf_entity is None:  # first try to use AI2 entity
+        if args.hf_entity is None:
             args.hf_entity = maybe_use_ai2_hf_entity()
-        if args.hf_entity is None:  # then try to use the user's entity
+        if args.hf_entity is None:
             args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:  # auto-generate one
+        if args.hf_repo_revision is None:
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
     args.tool_use = args.tools is not None and len(args.tools) > 0
+    if dataset_config.hf_entity is None:
+        dataset_config.hf_entity = maybe_use_ai2_hf_entity()
+    if dataset_config.hf_entity is None:
+        dataset_config.hf_entity = HfApi().whoami()["name"]
+    if eval_dataset_config is not None and eval_dataset_config.hf_entity is None:
+        eval_dataset_config.hf_entity = dataset_config.hf_entity
     return args
 
 
-def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+def setup_experiment_tracking(
+    args: Args, tc: TokenizerConfig, model_config: ModelConfig, dataset_config: DatasetConfig
+):
     """Setup experiment tracking and seeds."""
     all_configs = {}
     beaker_config = None
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
         all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
+    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config), **asdict(dataset_config))
 
     wandb_url = None
     if args.with_tracking:
@@ -2037,52 +2109,50 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
     return beaker_config, wandb_url
 
 
-def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
-    """Set up training and evaluation datasets."""
-    system_prompt_override = None
-    if args.system_prompt_override_file is not None:
-        logger.info(f"Loading system prompt override from {args.system_prompt_override_file}")
-        with open(args.system_prompt_override_file) as f:
+def _load_dataset_from_config(dataset_config: DatasetConfig, tc: TokenizerConfig) -> Dataset:
+    system_prompt_override = dataset_config.system_prompt_override
+    if system_prompt_override is None and dataset_config.system_prompt_override_file is not None:
+        logger.info(f"Loading system prompt override from {dataset_config.system_prompt_override_file}")
+        with open(dataset_config.system_prompt_override_file) as f:
             system_prompt_override = f.read().strip()
+    if system_prompt_override is not None:
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
     transform_fn_args = [
         {"system_prompt_override": system_prompt_override},
-        {"max_prompt_token_length": args.max_prompt_token_length},
+        {"max_prompt_token_length": dataset_config.max_prompt_token_length},
     ]
-    train_dataset = get_cached_dataset_tulu(
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+    return get_cached_dataset_tulu(
+        dataset_mixer_list=dataset_config.dataset_mixer_list,
+        dataset_mixer_list_splits=dataset_config.dataset_mixer_list_splits,
         tc=tc,
-        dataset_transform_fn=args.dataset_transform_fn,
+        dataset_transform_fn=dataset_config.dataset_transform_fn,
         transform_fn_args=transform_fn_args,
-        dataset_cache_mode=args.dataset_cache_mode,
-        dataset_config_hash=args.dataset_config_hash,
-        hf_entity=args.hf_entity,
-        dataset_local_cache_dir=args.dataset_local_cache_dir,
-        dataset_skip_cache=args.dataset_skip_cache,
+        dataset_cache_mode=dataset_config.dataset_cache_mode,
+        dataset_config_hash=dataset_config.dataset_config_hash,
+        hf_entity=dataset_config.hf_entity,
+        dataset_local_cache_dir=dataset_config.dataset_local_cache_dir,
+        dataset_skip_cache=dataset_config.dataset_skip_cache,
         system_prompt_override=system_prompt_override,
     )
+
+
+def setup_datasets(
+    args: Args,
+    tc: TokenizerConfig,
+    tokenizer: PreTrainedTokenizer,
+    dataset_config: DatasetConfig,
+    eval_dataset_config: DatasetConfig | None,
+):
+    """Set up training and evaluation datasets."""
+    train_dataset = _load_dataset_from_config(dataset_config, tc)
     train_dataset = train_dataset.shuffle(seed=args.seed)
 
-    if len(args.dataset_mixer_eval_list) > 0:
-        eval_dataset = get_cached_dataset_tulu(
-            dataset_mixer_list=args.dataset_mixer_eval_list,
-            dataset_mixer_list_splits=args.dataset_mixer_eval_list_splits,
-            tc=tc,
-            dataset_transform_fn=args.dataset_transform_fn,
-            transform_fn_args=transform_fn_args,
-            hf_entity=args.hf_entity,
-            dataset_cache_mode=args.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_eval_hash,
-            dataset_local_cache_dir=args.dataset_local_cache_dir,
-            dataset_skip_cache=args.dataset_skip_cache,
-            system_prompt_override=system_prompt_override,
-        )
+    eval_dataset = None
+    if eval_dataset_config is not None:
+        eval_dataset = _load_dataset_from_config(eval_dataset_config, tc)
         if args.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
-    else:
-        eval_dataset = None
 
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
 
@@ -2102,6 +2172,7 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     train_dataset,
     eval_dataset,
+    max_prompt_token_length: int,
 ) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
@@ -2117,7 +2188,7 @@ def create_model_and_optimizer(
     )
 
     # Set up tools
-    max_len = args.max_prompt_token_length + args.response_length
+    max_len = max_prompt_token_length + args.response_length
     tool_objects = {}
     if args.tools:
         for tool in args.tools:
@@ -2865,18 +2936,23 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+def main(config: ExperimentConfig):
+    args = config.args
+    tc = config.tokenizer_config
+    model_config = config.model_config
+    dataset_config = config.dataset_config
+    eval_dataset_config = config.eval_dataset_config
     tokenizer = make_tokenizer(tc, model_config)
-    args = setup_runtime_variables(args)
+    args = setup_runtime_variables(args, dataset_config, eval_dataset_config)
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
         for handler in logging.getLogger().handlers:
             handler.setLevel(logging.DEBUG)
 
-    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
+    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config, dataset_config)
 
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
+    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, dataset_config, eval_dataset_config)
 
     if len(train_dataset) < (needed := max(args.async_steps, 1) * args.num_unique_prompts_rollout):
         raise ValueError(
@@ -2928,6 +3004,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             reward_config,
             train_dataset,
             eval_dataset,
+            dataset_config.max_prompt_token_length,
         )
     )
 
@@ -3029,10 +3106,16 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
-    args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
-    assert isinstance(args, Args)
-    assert isinstance(tokenizer_config, TokenizerConfig)
-    assert isinstance(model_config, ModelConfig)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config_file", type=str, required=False, default=None)
+    known_args, remaining = parser.parse_known_args()
 
-    main(args, tokenizer_config, model_config)
+    if known_args.config_file is not None:
+        main(ExperimentConfig.from_file(known_args.config_file))
+    else:
+        cli_parser = utils.ArgumentParserPlus((Args, TokenizerConfig, ModelConfig, DatasetConfig))
+        args, tokenizer_config, model_config, dataset_config = cli_parser.parse_args_into_dataclasses()
+        config = ExperimentConfig(
+            args=args, tokenizer_config=tokenizer_config, model_config=model_config, dataset_config=dataset_config
+        )
+        main(config)
