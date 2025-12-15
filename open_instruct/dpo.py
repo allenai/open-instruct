@@ -418,27 +418,64 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
-    dataset = get_cached_dataset_tulu(
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
-        tc=tc,
-        dataset_transform_fn=args.dataset_transform_fn,
-        transform_fn_args=transform_fn_args,
-        target_columns=args.dataset_target_columns,
-        dataset_cache_mode=args.dataset_cache_mode.value,
-        dataset_config_hash=args.dataset_config_hash,
-        hf_entity=args.hf_entity,
-        dataset_local_cache_dir=args.dataset_local_cache_dir,
-        dataset_skip_cache=args.dataset_skip_cache,
-    )
-    dataset = dataset.shuffle(seed=args.seed)
-    dataset.set_format(type="pt")
 
     if args.cache_dataset_only:
+        dataset = get_cached_dataset_tulu(
+            dataset_mixer_list=args.dataset_mixer_list,
+            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            tc=tc,
+            dataset_transform_fn=args.dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=args.dataset_target_columns,
+            dataset_cache_mode=args.dataset_cache_mode.value,
+            dataset_config_hash=args.dataset_config_hash,
+            hf_entity=args.hf_entity,
+            dataset_local_cache_dir=args.dataset_local_cache_dir,
+            dataset_skip_cache=args.dataset_skip_cache,
+        )
         logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
         return
 
     train.prepare_training_environment(seed=args.seed)
+
+    rank = get_rank() if is_distributed() else 0
+    is_main_process = rank == 0
+
+    if is_main_process:
+        dataset = get_cached_dataset_tulu(
+            dataset_mixer_list=args.dataset_mixer_list,
+            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            tc=tc,
+            dataset_transform_fn=args.dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=args.dataset_target_columns,
+            dataset_cache_mode=args.dataset_cache_mode.value,
+            dataset_config_hash=args.dataset_config_hash,
+            hf_entity=args.hf_entity,
+            dataset_local_cache_dir=args.dataset_local_cache_dir,
+            dataset_skip_cache=args.dataset_skip_cache,
+        )
+
+    if is_distributed():
+        dist.barrier()
+
+    if not is_main_process:
+        dataset = get_cached_dataset_tulu(
+            dataset_mixer_list=args.dataset_mixer_list,
+            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            tc=tc,
+            dataset_transform_fn=args.dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=args.dataset_target_columns,
+            dataset_cache_mode=args.dataset_cache_mode.value,
+            dataset_config_hash=args.dataset_config_hash,
+            hf_entity=args.hf_entity,
+            dataset_local_cache_dir=args.dataset_local_cache_dir,
+            dataset_skip_cache=args.dataset_skip_cache,
+        )
+
+    dataset = dataset.shuffle(seed=args.seed)
+    dataset.set_format(type="pt")
 
     if args.async_checkpointing and is_on_gcp():
         raise ValueError(
@@ -446,9 +483,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
             "Set async_checkpointing=False. See: olmo_core/internal/cookbook.py"
         )
 
-    rank = get_rank() if is_distributed() else 0
     world_size = get_world_size() if is_distributed() else 1
-    is_main_process = rank == 0
 
     logger_utils.setup_logger(rank=rank)
 
