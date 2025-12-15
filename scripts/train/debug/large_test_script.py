@@ -112,8 +112,7 @@ def main(run_local: bool = False, beaker_image: str = "open-instruct-integration
         env=[{"name": "VLLM_ALLOW_LONG_MAX_MODEL_LEN", "value": "1"}],
     )
 
-    url = launch_on_beaker(experiment, launch_config)
-    print(f"Launched: {url}")
+    launch_on_beaker(experiment, launch_config)
 
 
 if __name__ == "__main__":

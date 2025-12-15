@@ -32,12 +32,40 @@ DEFAULT_ENV_VARS = {
     "VLLM_ALLOW_INSECURE_SERIALIZATION": "1",
 }
 
+GCP_NCCL_MULTI_NODE_SETTINGS = [
+    ("NCCL_CROSS_NIC", "0"),
+    ("NCCL_PROTO", "Simple,LL128"),
+    ("NCCL_MIN_NCHANNELS", "4"),
+    ("NCCL_P2P_NET_CHUNKSIZE", "524288"),
+    ("NCCL_P2P_PCI_CHUNKSIZE", "524288"),
+    ("NCCL_P2P_NVL_CHUNKSIZE", "1048576"),
+    ("NCCL_NVLSTREE_MAX_CHUNKSIZE", "131072"),
+    ("NCCL_FASTRAK_NUM_FLOWS", "2"),
+    ("NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL", "0"),
+    ("NCCL_BUFFSIZE", "8388608"),
+    ("NCCL_FASTRAK_USE_SNAP", "1"),
+    ("CUDA_VISIBLE_DEVICES", "0,1,2,3,4,5,6,7"),
+    ("NCCL_NET_GDR_LEVEL", "PIX"),
+    ("NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING", "0"),
+    ("NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS", "600000"),
+    ("NCCL_USE_SNAP", "1"),
+    ("NCCL_FASTRAK_USE_LLCM", "1"),
+    ("NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", "/dev/aperture_devices"),
+    ("NCCL_TUNER_PLUGIN", "libnccl-tuner.so"),
+    ("NCCL_TUNER_CONFIG_PATH", "/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto"),
+    ("NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE", "/var/lib/tcpxo/lib64/a3plus_guest_config_ll128.textproto"),
+    ("NCCL_FASTRAK_CTRL_DEV", "enp0s12"),
+    ("NCCL_FASTRAK_IFNAME", "enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0"),
+    ("NCCL_SOCKET_IFNAME", "enp0s12"),
+    ("NCCL_DEBUG_SUBSYS", "INIT,NET"),
+]
+
 
 @dataclass
 class LaunchConfig:
     cluster: list[str]
     budget: str
-    image: str = "ai2/cuda11.8-cudnn8-dev-ubuntu20.04"
+    image: str = "nathanl/open_instruct_auto"
     description: str = "Beaker-Mason job."
     workspace: str | None = None
     hostname: list[str] | None = None
@@ -60,6 +88,10 @@ class LaunchConfig:
     no_host_networking: bool = False
     timeout: str | None = None
     resumable: bool = True
+
+    def __post_init__(self):
+        if self.non_resumable:
+            self.resumable = False
 
 
 def generate_id(length: int = 8) -> str:
@@ -173,44 +205,7 @@ def get_env_vars(
         )
         if num_nodes > 1:
             env_vars.extend(
-                [
-                    # NOTE: For single-node training we still need all of these settings and we also
-                    # need host networking enabled so that the ethernet interface names don't change.
-                    beaker.BeakerEnvVar(name="NCCL_CROSS_NIC", value="0"),
-                    beaker.BeakerEnvVar(name="NCCL_PROTO", value="Simple,LL128"),
-                    beaker.BeakerEnvVar(name="NCCL_MIN_NCHANNELS", value="4"),
-                    beaker.BeakerEnvVar(name="NCCL_P2P_NET_CHUNKSIZE", value="524288"),
-                    beaker.BeakerEnvVar(name="NCCL_P2P_PCI_CHUNKSIZE", value="524288"),
-                    beaker.BeakerEnvVar(name="NCCL_P2P_NVL_CHUNKSIZE", value="1048576"),
-                    beaker.BeakerEnvVar(name="NCCL_NVLSTREE_MAX_CHUNKSIZE", value="131072"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_NUM_FLOWS", value="2"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL", value="0"),
-                    beaker.BeakerEnvVar(name="NCCL_BUFFSIZE", value="8388608"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_SNAP", value="1"),
-                    beaker.BeakerEnvVar(name="CUDA_VISIBLE_DEVICES", value="0,1,2,3,4,5,6,7"),
-                    beaker.BeakerEnvVar(name="NCCL_NET_GDR_LEVEL", value="PIX"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING", value="0"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS", value="600000"),
-                    beaker.BeakerEnvVar(name="NCCL_USE_SNAP", value="1"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
-                    beaker.BeakerEnvVar(name="NCCL_TUNER_PLUGIN", value="libnccl-tuner.so"),
-                    beaker.BeakerEnvVar(
-                        name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto"
-                    ),
-                    beaker.BeakerEnvVar(
-                        name="NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE",
-                        value="/var/lib/tcpxo/lib64/a3plus_guest_config_ll128.textproto",
-                    ),
-                    beaker.BeakerEnvVar(name="NCCL_FASTRAK_CTRL_DEV", value="enp0s12"),
-                    beaker.BeakerEnvVar(
-                        name="NCCL_FASTRAK_IFNAME",
-                        value="enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
-                    ),
-                    beaker.BeakerEnvVar(name="NCCL_SOCKET_IFNAME", value="enp0s12"),
-                    # Add COLL here to log all collective operations. Extreamly verbose, dont use for production.
-                    beaker.BeakerEnvVar(name="NCCL_DEBUG_SUBSYS", value="INIT,NET"),
-                ]
+                [beaker.BeakerEnvVar(name=name, value=value) for name, value in GCP_NCCL_MULTI_NODE_SETTINGS]
             )
 
     if resumable:
@@ -305,32 +300,11 @@ def make_task_spec(
     return spec
 
 
-def serialize_experiment_config(config: "ExperimentConfig") -> dict:
-    def serialize_dataclass(obj):
-        if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-            result = {}
-            for f in dataclasses.fields(obj):
-                value = getattr(obj, f.name)
-                result[f.name] = serialize_dataclass(value)
-            return result
-        elif isinstance(obj, tuple):
-            return {"__tuple__": True, "items": [serialize_dataclass(item) for item in obj]}
-        elif isinstance(obj, list):
-            return [serialize_dataclass(item) for item in obj]
-        elif isinstance(obj, dict):
-            return {k: serialize_dataclass(v) for k, v in obj.items()}
-        else:
-            return obj
-
-    result = {
-        "args": serialize_dataclass(config.args),
-        "tokenizer_config": serialize_dataclass(config.tokenizer_config),
-        "model_config": serialize_dataclass(config.model_config),
-        "dataset_config": serialize_dataclass(config.dataset_config),
-    }
-    if config.eval_dataset_config is not None:
-        result["eval_dataset_config"] = serialize_dataclass(config.eval_dataset_config)
-    return result
+def _copy_system_prompt_override(dataset_config) -> None:
+    if dataset_config.system_prompt_override_file is not None:
+        with open(dataset_config.system_prompt_override_file) as f:
+            dataset_config.system_prompt_override = f.read().strip()
+    dataset_config.system_prompt_override_file = None
 
 
 def launch_on_beaker(
@@ -338,16 +312,15 @@ def launch_on_beaker(
     launch_config: LaunchConfig,
     setup_command: str = "source configs/beaker_configs/ray_node_setup.sh",
     script_path: str = "open_instruct/grpo_fast.py",
-) -> str:
+) -> None:
     if not launch_config.no_auto_dataset_cache:
         experiment_config.cache_dataset()
-    experiment_config.dataset_config.system_prompt_override_file = None
+    _copy_system_prompt_override(experiment_config.dataset_config)
     if experiment_config.eval_dataset_config is not None:
-        experiment_config.eval_dataset_config.system_prompt_override_file = None
+        _copy_system_prompt_override(experiment_config.eval_dataset_config)
     wandb_id = generate_id()
 
-    config_dict = serialize_experiment_config(experiment_config)
-    config_json = json.dumps(config_dict)
+    config_json = json.dumps(dataclasses.asdict(experiment_config))
     config_base64 = base64.b64encode(config_json.encode()).decode()
 
     config_write_command = f"echo {config_base64} | base64 -d > /tmp/experiment_config.json"
@@ -382,6 +355,6 @@ def launch_on_beaker(
         exp = beaker_client.experiment.create(spec=experiment_spec)
         url = f"https://beaker.org/ex/{exp.experiment.id}"
         console.log(f"Kicked off Beaker job. {url}")
-        return url
+        print(f"Launched: {url}")
 
-    return _launch()
+    _launch()

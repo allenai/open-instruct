@@ -152,6 +152,7 @@ class DatasetConfig:
     dataset_skip_cache: bool = False
     max_prompt_token_length: int = 256
     system_prompt_override_file: str | None = None
+    system_prompt_override: str | None = None
     hf_entity: str | None = None
 
     def build_cache(self, tc: TokenizerConfig) -> None:
@@ -204,17 +205,8 @@ class ExperimentConfig:
 
     @classmethod
     def from_file(cls, path: str) -> "ExperimentConfig":
-        def deserialize(obj):
-            if isinstance(obj, dict):
-                if obj.get("__tuple__"):
-                    return tuple(deserialize(item) for item in obj["items"])
-                return {k: deserialize(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [deserialize(item) for item in obj]
-            return obj
-
         with open(path) as f:
-            data = deserialize(json.load(f))
+            data = json.load(f)
         eval_dataset_config = None
         if "eval_dataset_config" in data:
             eval_dataset_config = DatasetConfig(**data["eval_dataset_config"])
@@ -2090,14 +2082,16 @@ def setup_runtime_variables(
     return args
 
 
-def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+def setup_experiment_tracking(
+    args: Args, tc: TokenizerConfig, model_config: ModelConfig, dataset_config: DatasetConfig
+):
     """Setup experiment tracking and seeds."""
     all_configs = {}
     beaker_config = None
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
         all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
+    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config), **asdict(dataset_config))
 
     wandb_url = None
     if args.with_tracking:
@@ -2116,11 +2110,12 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
 
 
 def _load_dataset_from_config(dataset_config: DatasetConfig, tc: TokenizerConfig) -> Dataset:
-    system_prompt_override = None
-    if dataset_config.system_prompt_override_file is not None:
+    system_prompt_override = dataset_config.system_prompt_override
+    if system_prompt_override is None and dataset_config.system_prompt_override_file is not None:
         logger.info(f"Loading system prompt override from {dataset_config.system_prompt_override_file}")
         with open(dataset_config.system_prompt_override_file) as f:
             system_prompt_override = f.read().strip()
+    if system_prompt_override is not None:
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
     transform_fn_args = [
@@ -2955,7 +2950,7 @@ def main(config: ExperimentConfig):
         for handler in logging.getLogger().handlers:
             handler.setLevel(logging.DEBUG)
 
-    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
+    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config, dataset_config)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, dataset_config, eval_dataset_config)
 
