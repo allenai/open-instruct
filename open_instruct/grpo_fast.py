@@ -432,6 +432,8 @@ class Args:
         # Initialize stop_strings if None
         if self.stop_strings is None:
             self.stop_strings = []
+        # Convert max_tool_calls elements to int (HfArgumentParser parses tuples as strings)
+        self.max_tool_calls = tuple(int(x) for x in self.max_tool_calls)
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
