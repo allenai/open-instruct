@@ -2295,7 +2295,7 @@ def data_preparation_thread(
             tokenizer.pad_token_id,
             sequence_parallel_size=args.sequence_parallel_size,
         )
-        B = len(packed_sequences.query_responses) // args.world_size
+        B = len(packed_sequences.query_responses) // (args.world_size // args.sequence_parallel_size)
 
         # Create a result package with metrics and data
         if len(result.responses) == 0:
