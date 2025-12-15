@@ -1,5 +1,3 @@
-import logging
-
 import datasets
 from tqdm import tqdm
 
@@ -36,6 +34,7 @@ OUTPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr-sft-stdio"
 STDIN_INPUT_COLUMN_NAME = "rewritten_input"
 STDIN_SOLUTION_COLUMN_NAME = "rewritten_solution"
 
+
 def validate_row(row):
     """Validate that a row has all required fields."""
     required_fields = ["good_program", STDIN_INPUT_COLUMN_NAME, STDIN_SOLUTION_COLUMN_NAME]
@@ -46,8 +45,9 @@ def validate_row(row):
             return False, f"Field {field} is None"
     return True, None
 
+
 def get_original_input(row):
-    return row['messages'][0]["content"]
+    return row["messages"][0]["content"]
 
 
 def main():
@@ -73,33 +73,29 @@ def main():
                 continue
 
             try:
-                #fn_input = row[FN_INPUT_COLUMN_NAME]
+                # fn_input = row[FN_INPUT_COLUMN_NAME]
                 stdin_input = get_original_input(row)
-                #fn_solution = row[FN_SOLUTION_COLUMN_NAME]
+                # fn_solution = row[FN_SOLUTION_COLUMN_NAME]
                 stdin_solution = row[STDIN_SOLUTION_COLUMN_NAME]
 
                 # construct messages
-                #fn_messages = [
+                # fn_messages = [
                 #    {"role": "user", "content": fn_input},
                 #    {"role": "assistant", "content": fn_solution}
-                #]
+                # ]
 
                 stdin_messages = [
                     {"role": "user", "content": stdin_input},
-                    {"role": "assistant", "content": stdin_solution}
+                    {"role": "assistant", "content": stdin_solution},
                 ]
 
-                #fn_rows.append({
+                # fn_rows.append({
                 #    "messages": fn_messages,
                 #    "dataset": "code",
                 #    "good_program": row["good_program"],
-                #})
+                # })
 
-                stdin_rows.append({
-                    "messages": stdin_messages,
-                    "dataset": "code",
-                    "good_program": row["good_program"],
-                })
+                stdin_rows.append({"messages": stdin_messages, "dataset": "code", "good_program": row["good_program"]})
 
             except Exception as e:
                 logger.error(f"Error processing row {i}: {e}")
@@ -125,6 +121,7 @@ def main():
     except Exception as e:
         logger.error(f"Script failed: {e}")
         raise
+
 
 if __name__ == "__main__":
     main()

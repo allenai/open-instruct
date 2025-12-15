@@ -48,7 +48,7 @@ python mason.py \
     --local_eval_every 250 \
     --save_freq 40 \
     --gradient_checkpointing \
-    --with_tracking 
+    --with_tracking
 
 
 

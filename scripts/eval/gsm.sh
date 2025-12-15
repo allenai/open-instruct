@@ -58,7 +58,7 @@ python -m eval.gsm.run_eval \
     --save_dir results/gsm/chatgpt-cot \
     --openai_engine "gpt-3.5-turbo-0301" \
     --eval_batch_size 20 \
-    --n_shot 8 
+    --n_shot 8
 
 
 # Evaluating chatgpt using direct answering (no chain-of-thought)
@@ -79,7 +79,7 @@ python -m eval.gsm.run_eval \
     --save_dir results/gsm/gpt4-cot \
     --openai_engine "gpt-4-0314" \
     --eval_batch_size 20 \
-    --n_shot 8 
+    --n_shot 8
 
 
 # Evaluating gpt4 using direct answering (no chain-of-thought)
