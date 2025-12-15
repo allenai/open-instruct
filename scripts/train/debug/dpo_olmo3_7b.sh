@@ -14,7 +14,6 @@ uv run python mason.py \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
-    --no_auto_dataset_cache \
     --gpus 8 -- open_instruct/dpo.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
@@ -37,5 +36,4 @@ uv run python mason.py \
     --dpo_beta 5 \
     --gradient_checkpointing \
     --with_tracking \
-    --dataset_skip_cache \
     --reference_logprobs_cache_path /weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache/dpo_olmo3_7b_1000.pt
