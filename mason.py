@@ -744,6 +744,20 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
         setup_commands = f"cd {os.getcwd()} && "
 
     join_full_command = " ".join(full_command)
+    # Auto-generate torchrun for multi-node jobs
+    if args.num_nodes > 1 and "torchrun" not in join_full_command and "accelerate" not in join_full_command:
+        torchrun_prefix = (
+            f"torchrun "
+            f"--rdzv_conf='read_timeout=420' "
+            f"--rdzv_id=12347 "
+            f"--node_rank $BEAKER_REPLICA_RANK "
+            f"--nnodes {args.num_nodes} "
+            f"--nproc_per_node {args.gpus} "
+            f"--rdzv_backend=static "
+            f"--rdzv_endpoint $BEAKER_LEADER_REPLICA_HOSTNAME:29400 "
+        )
+        join_full_command = torchrun_prefix + join_full_command
+        console.log(f"Auto-generated torchrun prefix for {args.num_nodes}-node job")
     # override accelerate call
     if args.num_nodes > 1:
         if "--num_processes" not in join_full_command and "accelerate" in join_full_command:

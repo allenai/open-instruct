@@ -14,7 +14,7 @@ uv run python mason.py \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
-    --gpus 8 -- torchrun --nnodes 4 --nproc_per_node 8 --rdzv_backend c10d --rdzv_endpoint \$BEAKER_LEADER_REPLICA_HOSTNAME:29500 open_instruct/dpo.py \
+    --gpus 8 -- open_instruct/dpo.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
     --tokenizer_name_or_path "$MODEL_NAME" \
