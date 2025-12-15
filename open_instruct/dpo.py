@@ -446,6 +446,12 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     world_size = get_world_size() if is_distributed() else 1
     is_main_process = rank == 0
 
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        level=logging.INFO if is_main_process else logging.WARNING,
+    )
+
     if args.add_seed_and_date_to_exp_name:
         args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.exp_name)
