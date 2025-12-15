@@ -327,6 +327,7 @@ def get_env_vars(
                     name="CHECKPOINT_OUTPUT_DIR",
                     value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{global_wandb_id}",
                 ),
+                beaker.BeakerEnvVar(name="OLMO_SHARED_FS", value="1"),
             ]
         )
         if num_nodes > 1:
