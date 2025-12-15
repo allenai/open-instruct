@@ -141,8 +141,8 @@ def build_reference_logprobs_cache(
             chosen_tensor[dataset_indices] = chosen_logps
             rejected_tensor[dataset_indices] = rejected_logps
 
-    dist.all_reduce(chosen_tensor, op=dist.ReduceOp.SUM)
-    dist.all_reduce(rejected_tensor, op=dist.ReduceOp.SUM)
+    dist.all_reduce(chosen_tensor, op=dist.ReduceOp.SUM)  # type: ignore[attr-defined]
+    dist.all_reduce(rejected_tensor, op=dist.ReduceOp.SUM)  # type: ignore[attr-defined]
 
     model.train()
     cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
