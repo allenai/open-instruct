@@ -1,7 +1,7 @@
 # flake8: noqa
 import contextlib
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Generic, List, TypeVar
 
 import numpy as np
@@ -20,7 +20,9 @@ class Timer(contextlib.ContextDecorator):
 
     description: str
     noop: bool = False
-    start_time: float | None = None
+    start_time: float = field(init=False)
+    end_time: float = field(init=False)
+    duration: float = field(init=False)
 
     def __enter__(self):
         self.start_time = time.perf_counter()
