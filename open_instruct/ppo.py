@@ -44,7 +44,6 @@ import socket
 import threading
 import time
 import traceback
-from argparse import Namespace
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
@@ -1881,11 +1880,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
     print("finished training")
 
-    accelerator = Namespace()
-    accelerator.is_main_process = True  # hack
-    if args.push_to_hub:
+    if args.push_to_hub and (not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0):
         print("Pushing model to hub")
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
 
 if __name__ == "__main__":
