@@ -683,12 +683,21 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             mock.patch("torch.cuda.is_available", return_value=True),
         ):
             model_dims = utils.ModelDims.from_hf_config("test/defaults")
-
-        self.assertEqual(model_dims.intermediate_size, 4096)
-        self.assertEqual(model_dims.head_dim, 128)
-        self.assertEqual(model_dims.num_kv_heads, 8)
-        self.assertIsNone(model_dims.sliding_window)
-        self.assertEqual(model_dims.num_sliding_window_layers, 0)
+        self.assertEqual(
+            model_dims,
+            utils.ModelDims(
+                num_layers=12,
+                hidden_size=1024,
+                intermediate_size=4096,
+                vocab_size=64000,
+                num_attn_heads=8,
+                head_dim=128,
+                num_kv_heads=8,
+                sliding_window=None,
+                num_sliding_window_layers=0,
+                device_name="h100",
+            ),
+        )
 
     def test_from_hf_config_sliding_window_no_layer_types(self):
         config = SimpleNamespace(
