@@ -22,9 +22,9 @@ jobs:
         fetch-depth: 0
 
     - name: Check that CHANGELOG has been updated
+      env:
+        PR_BODY: ${{ github.event.pull_request.body }}
       run: |
-        # Check for CHANGELOG bypass in PR body
-        PR_BODY='${{ github.event.pull_request.body }}'
         if echo "$PR_BODY" | grep -q 'CHANGELOG='; then
           REASON=$(echo "$PR_BODY" | grep -oP 'CHANGELOG=\K[^\n\r]*' | head -1)
           echo "CHANGELOG check bypassed. Reason: $REASON"
