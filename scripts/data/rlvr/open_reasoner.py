@@ -1,6 +1,6 @@
 """
 This script is used to convert https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero
-Usage: 
+Usage:
 
 python scripts/data/rlvr/open_reasoner.py --push_to_hub
 python scripts/data/rlvr/open_reasoner.py --push_to_hub --hf_entity ai2-adapt-dev
@@ -9,7 +9,6 @@ python scripts/data/rlvr/open_reasoner.py --push_to_hub --hf_entity ai2-adapt-de
 import os
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional
 
 import datasets
 from huggingface_hub import HfApi
@@ -20,7 +19,8 @@ from transformers import HfArgumentParser
 @dataclass
 class Args:
     push_to_hub: bool = False
-    hf_entity: Optional[str] = None
+    hf_entity: str | None = None
+
 
 def main(args: Args):
     # download https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero/raw/refs/heads/main/data/orz_math_57k_collected.json
@@ -35,16 +35,18 @@ def main(args: Args):
         with open(file_path, "w") as f:
             f.write(response.text)
 
-    with open(file_path, "r") as f:
+    with open(file_path) as f:
         data = json.load(f)
 
     table = defaultdict(list)
     for item in data:
-        assert len(item) == 2 # 1 question 2 ground truth
-        table["messages"].append([
-            {"role": "user", "content": item[0]["value"]},
-            {"role": "assistant", "content": item[1]["ground_truth"]["value"]},
-        ])
+        assert len(item) == 2  # 1 question 2 ground truth
+        table["messages"].append(
+            [
+                {"role": "user", "content": item[0]["value"]},
+                {"role": "assistant", "content": item[1]["ground_truth"]["value"]},
+            ]
+        )
         table["ground_truth"].append(item[1]["ground_truth"]["value"])
         table["dataset"].append("math")
     dataset = datasets.Dataset.from_dict(table)
@@ -57,10 +59,7 @@ def main(args: Args):
         print(f"Pushing dataset to Hub: {repo_id}")
         dataset.push_to_hub(repo_id)
         api.upload_file(
-            path_or_fileobj=__file__,
-            path_in_repo="create_dataset.py",
-            repo_type="dataset",
-            repo_id=repo_id,
+            path_or_fileobj=__file__, path_in_repo="create_dataset.py", repo_type="dataset", repo_id=repo_id
         )
 
         # Add RepoCard
@@ -78,12 +77,11 @@ The dataset contains math problems and their solutions in a conversational forma
 
 - `messages`: List of message dictionaries with user questions and assistant answers
 - `ground_truth`: The correct solution for each problem
-- `dataset`: Always "math" to indicate this is from the math datases""")
-        repo_card.push_to_hub(
-            repo_id,
-            repo_type="dataset",
+- `dataset`: Always "math" to indicate this is from the math datases"""
         )
+        repo_card.push_to_hub(repo_id, repo_type="dataset")
+
 
 if __name__ == "__main__":
-    parser = HfArgumentParser((Args))
+    parser = HfArgumentParser(Args)
     main(*parser.parse_args_into_dataclasses())

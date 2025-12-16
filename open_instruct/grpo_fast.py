@@ -1121,8 +1121,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
                     elif self.args.loss_fn == "cispo":
                         # cispo: directly clip ratio, no lower bound.
-                        pg_losses_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
-                            ratio_BT, max=1.0 + self.args.clip_higher
+                        # reinforce loss, so multiply by new logprobs
+                        pg_losses_BT = (
+                            -data_BT.advantages[i][:, 1:]
+                            * torch.clamp(ratio_BT.detach(), max=1.0 + self.args.clip_higher)
+                            * new_logprobs_BT
                         )
                         pg_losses2_BT = pg_losses_BT
                     else:
@@ -2426,13 +2429,13 @@ def one_training_step(
         **utilization_metrics,
     }
     # Print only scalar metrics
-    scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
+    scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
         # Convert array/list metrics to wandb histograms for logging
         for key, value in metrics.items():
-            if (isinstance(value, (np.ndarray, list))) and len(value) > 0:
+            if (isinstance(value, np.ndarray | list)) and len(value) > 0:
                 metrics[key] = wandb.Histogram(value)
         wandb.log(metrics, step=episode)
 

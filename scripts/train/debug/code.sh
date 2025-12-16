@@ -36,4 +36,4 @@ python open_instruct/grpo_fast.py \
     --local_eval_every 200 \
     --save_freq 40 \
     --gradient_checkpointing \
-    --single_gpu_mode 
+    --single_gpu_mode

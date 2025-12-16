@@ -50,7 +50,7 @@ Furthermore, we also track the dataset length visualization in wandb (see detail
 ![token length visualization in wandb](reward_modeling_token_wandb.png)
 
 
-Finally, we also include samples 
+Finally, we also include samples
 
 ![reward modeling preference sample texts](reward_modeling_preference_sample_texts.png)
 

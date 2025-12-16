@@ -13,23 +13,26 @@ source configs/beaker_configs/code_api_setup.sh
 
 You might have to explicitly install nginx first: sudo apt-get update && apt-get install -y --no-install-recommends nginx
 """
-import os
+
 import argparse
 import json
+import os
 from functools import partial
 from multiprocessing import Pool, cpu_count, set_start_method
 
-from datasets import Dataset
 import matplotlib.pyplot as plt
+from datasets import Dataset
 from tqdm import tqdm
 
-from open_instruct.ground_truth_utils import build_all_verifiers, VerifierFunction
 from open_instruct import logger_utils
+from open_instruct.ground_truth_utils import VerifierFunction, build_all_verifiers
 
 logger = logger_utils.setup_logger(__name__)
 
 
-def _avg_correctness(sample: dict, reward_fn_mapping: dict[str, VerifierFunction], judge_override: str | None = None) -> tuple[float, int]:
+def _avg_correctness(
+    sample: dict, reward_fn_mapping: dict[str, VerifierFunction], judge_override: str | None = None
+) -> tuple[float, int]:
     """
     Compute the mean correctness for one sample (called in worker).
     Args:
@@ -57,133 +60,66 @@ def _avg_correctness(sample: dict, reward_fn_mapping: dict[str, VerifierFunction
 def load_samples(files):
     """Load all JSONL lines into memory (fast on SSD)."""
     for file in files:
-        with open(file, "r") as f:
+        with open(file) as f:
             for line in f:
                 yield json.loads(line)
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Filter a JSONL dataset by correctness using multiprocessing."
-    )
+    parser = argparse.ArgumentParser(description="Filter a JSONL dataset by correctness using multiprocessing.")
+    parser.add_argument("--files", nargs="+", required=True, help="One or more .jsonl files produced by sampling")
+    parser.add_argument("--output_file", type=str, default=None, help="Path to save filtered samples")
+    parser.add_argument("--lower_bound", type=float, default=0.0, help="Lower bound for correctness")
+    parser.add_argument("--upper_bound", type=float, default=1.0, help="Upper bound for correctness")
+    parser.add_argument("--hist_file_name", type=str, default="hist.png", help="Name of the histogram file")
     parser.add_argument(
-        "--files",
-        nargs="+",
-        required=True,
-        help="One or more .jsonl files produced by sampling"
-    )
-    parser.add_argument(
-        "--output_file",
-        type=str,
-        default=None,
-        help="Path to save filtered samples"
-    )
-    parser.add_argument(
-        "--lower_bound",
-        type=float,
-        default=0.0,
-        help="Lower bound for correctness"
-    )
-    parser.add_argument(
-        "--upper_bound",
-        type=float,
-        default=1.0,
-        help="Upper bound for correctness"
-    )
-    parser.add_argument(
-        "--hist_file_name",
-        type=str,
-        default="hist.png",
-        help="Name of the histogram file"
-    )
-    parser.add_argument(
-        "--push_to_hub",
-        default=None,
-        type=str,
-        help="Give a dataset name to push this data to the hub."
+        "--push_to_hub", default=None, type=str, help="Give a dataset name to push this data to the hub."
     )
     parser.add_argument(
         "--code_api_url",
         default=os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program",
         type=str,
-        help="Give a code api url to use for code verifier."
+        help="Give a code api url to use for code verifier.",
     )
     parser.add_argument(
-        "--code_max_execution_time",
-        default=1.0,
-        type=float,
-        help="Give a max execution time for code verifier."
+        "--code_max_execution_time", default=1.0, type=float, help="Give a max execution time for code verifier."
     )
     parser.add_argument(
         "--code_pass_rate_reward_threshold",
         default=1.0,
         type=float,
-        help="Threshold for pass rate; below this the code verifier returns 0.0."
+        help="Threshold for pass rate; below this the code verifier returns 0.0.",
     )
     parser.add_argument(
         "--code_apply_perf_penalty",
         action="store_true",
-        help="If set, apply a runtime-based performance penalty to passing code tests."
+        help="If set, apply a runtime-based performance penalty to passing code tests.",
     )
     parser.add_argument(
-        "--llm_judge_model",
-        default=None,
-        type=str,
-        help="Give a llm judge model to use for llm verifier."
+        "--llm_judge_model", default=None, type=str, help="Give a llm judge model to use for llm verifier."
     )
+    parser.add_argument("--llm_judge_max_tokens", default=2048, type=int, help="Give a max tokens for llm judge.")
     parser.add_argument(
-        "--llm_judge_max_tokens",
-        default=2048,
-        type=int,
-        help="Give a max tokens for llm judge."
+        "--llm_judge_max_context_length", default=128_000, type=int, help="Max context length for the LLM judge model."
     )
-    parser.add_argument(
-        "--llm_judge_max_context_length",
-        default=128_000,
-        type=int,
-        help="Max context length for the LLM judge model."
-    )
-    parser.add_argument(
-        "--llm_judge_temperature",
-        default=1.0,
-        type=float,
-        help="Give a temperature for llm judge."
-    )
-    parser.add_argument(
-        "--llm_judge_timeout",
-        default=60,
-        type=int,
-        help="Give a timeout for llm judge."
-    )
-    parser.add_argument(
-        "--seed",
-        default=42,
-        type=int,
-        help="Give a seed for llm judge."
-    )
+    parser.add_argument("--llm_judge_temperature", default=1.0, type=float, help="Give a temperature for llm judge.")
+    parser.add_argument("--llm_judge_timeout", default=60, type=int, help="Give a timeout for llm judge.")
+    parser.add_argument("--seed", default=42, type=int, help="Give a seed for llm judge.")
     parser.add_argument(
         "--max_length_verifier_max_length",
         default=32768,
         type=int,
-        help="Max length used by max-length style verifiers."
+        help="Max length used by max-length style verifiers.",
     )
     parser.add_argument(
-        "--remap_verifier",
-        default=None,
-        type=str,
-        help="Optional mapping old=new to remap a verifier name."
+        "--remap_verifier", default=None, type=str, help="Optional mapping old=new to remap a verifier name."
     )
-    parser.add_argument(
-        "--split",
-        type=str,
-        default="train",
-        help="Split to use on upload"
-    )
+    parser.add_argument("--split", type=str, default="train", help="Split to use on upload")
     parser.add_argument(
         "--annotate_original_dataset",
         type=str,
         default=None,
-        help="If set, annotate the original dataset with the passrates, and save to this path."
+        help="If set, annotate the original dataset with the passrates, and save to this path.",
     )
     parser.add_argument(
         "--judge_override",
@@ -216,11 +152,7 @@ def main():
         logger.info(f"Using judge override: {override_key}")
 
     # currying the avg_correctness function
-    avg_correctness = partial(
-        _avg_correctness,
-        reward_fn_mapping=reward_fn_mapping,
-        judge_override=override_key,
-    )
+    avg_correctness = partial(_avg_correctness, reward_fn_mapping=reward_fn_mapping, judge_override=override_key)
 
     # Prefer 'spawn' for better safety on macOS / Jupyter
     try:
@@ -236,11 +168,7 @@ def main():
 
     with Pool(processes=workers) as pool:
         results = list(
-            tqdm(
-                pool.imap(avg_correctness, samples, chunksize=chunk_size),
-                total=len(samples),
-                desc="Scoring"
-            )
+            tqdm(pool.imap(avg_correctness, samples, chunksize=chunk_size), total=len(samples), desc="Scoring")
         )
     # results is a list of tuples: (avg_score, num_rollouts)
     avg_scores = [score for score, _ in results]
@@ -256,13 +184,8 @@ def main():
     lower_bound = args.lower_bound
     upper_bound = args.upper_bound
     # Filter out everything outside of this range
-    filtered_samples = [
-        sample for sample, score in zip(samples, avg_scores)
-        if lower_bound <= score <= upper_bound
-    ]
-    logger.info(
-        f"Filtered {len(samples) - len(filtered_samples)} samples out of {len(samples)}"
-    )
+    filtered_samples = [sample for sample, score in zip(samples, avg_scores) if lower_bound <= score <= upper_bound]
+    logger.info(f"Filtered {len(samples) - len(filtered_samples)} samples out of {len(samples)}")
 
     # Save filtered samples
     if args.output_file is not None:

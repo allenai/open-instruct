@@ -28,19 +28,21 @@ Workflow:
 3.  Wait for the batch job to complete.
 4.  The results (generated code solutions) can then be retrieved using the batch job ID for further processing.
 """
+
 import hashlib
 import json
 import os
 import time
 
 from datasets import load_dataset
-import open_instruct.utils as open_instruct_utils
 from openai import AzureOpenAI
+
+import open_instruct.utils as open_instruct_utils
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
     azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
-    api_version="2024-12-01-preview"
+    api_version="2024-12-01-preview",
 )
 
 MODEL = "o3"
@@ -52,6 +54,7 @@ os.makedirs(f"{WD}/batch_files", exist_ok=True)
 
 INPUT_HF_DATASET = "saurabh5/rlvr_acecoder"
 SPLIT = "train"
+
 
 def extract_python_code(model_output: str) -> str:
     """Extract the last code block between ``` markers from the model output."""
@@ -67,7 +70,8 @@ def extract_python_code(model_output: str) -> str:
 
 
 def get_input(row):
-    return row['messages'][0]['content']
+    return row["messages"][0]["content"]
+
 
 def get_solution(row):
     """
@@ -76,12 +80,13 @@ def get_solution(row):
             return message['content']
     return None
     """
-    return row['solution']
+    return row["solution"]
+
 
 def get_id(row):
     input = get_input(row)
     if input:
-        return hashlib.sha256(input.encode('utf-8')).hexdigest()
+        return hashlib.sha256(input.encode("utf-8")).hexdigest()
     return None
 
 
@@ -98,9 +103,9 @@ def create_batch_file(prompts):
                     "model": MODEL,
                     "messages": [
                         {"role": "system", "content": "You are a helpful assistant that can write code in Python."},
-                        {"role": "user", "content": prompt}
+                        {"role": "user", "content": prompt},
                     ],
-                }
+                },
             }
             f.write(json.dumps(batch_request) + "\n")
 
@@ -141,7 +146,6 @@ Output should be a valid Python function. Feel free to think step by step before
             continue
         prompts.append((get_id(row), master_prompt.replace("{input}", input)))
 
-
     print(f"Creating batch file with {len(prompts)} prompts...")
     print(f"First prompt: {prompts[0]}")
     create_batch_file(prompts)
@@ -149,19 +153,15 @@ Output should be a valid Python function. Feel free to think step by step before
 
     # Submit the batch job
     print("Submitting batch job to Azure OpenAI...")
-    batch_file = client.files.create(
-        file=open(BATCH_FILE_NAME, "rb"),
-        purpose="batch"
-    )
+    batch_file = client.files.create(file=open(BATCH_FILE_NAME, "rb"), purpose="batch")
 
     batch_job = client.batches.create(
-        input_file_id=batch_file.id,
-        endpoint="/v1/chat/completions",
-        completion_window="24h"
+        input_file_id=batch_file.id, endpoint="/v1/chat/completions", completion_window="24h"
     )
 
     print(f"Batch job submitted with ID: {batch_job.id}")
     print("You can check the status of your batch job using the ID above.")
+
 
 if __name__ == "__main__":
     main()
