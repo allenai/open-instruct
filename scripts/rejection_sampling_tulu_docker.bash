@@ -25,12 +25,12 @@ do
     # Calculate start and end indices for this shard
     start_idx=$((i * prompts_per_shard))
     end_idx=$(((i + 1) * prompts_per_shard))
-    
+
     # Adjust the end index for the last shard to include any remaining prompts
     if [ $i -eq $((num_shards - 1)) ]; then
         end_idx=$num_prompts
     fi
-    
+
     # Build the command string for this shard
     shard_command="python open_instruct/rejection_sampling/generation.py \
     --dataset_name $sft_dataset \

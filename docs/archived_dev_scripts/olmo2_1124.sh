@@ -20,8 +20,8 @@ done
 done
 done
 done
-	
-# 7B DPO sweep 5e-7 6e-7 7e-7 8e-7 
+
+# 7B DPO sweep 5e-7 6e-7 7e-7 8e-7
 for lr in 1e-6 2e-6 3e-6; do
 python scripts/submit_dpo_job.py \
     --cluster ai2/jupiter \
@@ -333,7 +333,7 @@ done
 
 
 
-# 7B DPO sweep 
+# 7B DPO sweep
 for lr in 6e-7 7e-7 8e-7 9e-7 1e-6 2e-6; do
 python scripts/submit_dpo_job.py \
     --cluster ai2/jupiter \
@@ -388,7 +388,7 @@ python mason.py \
 
 
 
-# 13B DPO sweep 8e-7 
+# 13B DPO sweep 8e-7
 for lr in 8.5e-7 9e-7 9.5e-7 1e-6 1.5e-6 2e-6 ; do
 python scripts/submit_dpo_job.py \
     --cluster ai2/jupiter \

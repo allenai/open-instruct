@@ -6,7 +6,7 @@ use_slow_tokenizer: true
 dataset_mixer:
     #  This mix adds back no_robots to v3.5.9
     # ------------------------------------------------------
-    # no_robot dataset, human written, for general chat. 
+    # no_robot dataset, human written, for general chat.
     # License: CC-By-NC-4.0
     # Total: 9500
     ai2-adapt-dev/no_robots_converted: 9500
@@ -61,7 +61,7 @@ dataset_mixer:
     # License: listed as Apache 2.0, but the individual subsets have descrepancy
     # ai2-adapt-dev/codefeedback_filtered_instructions_converted: 156361
     # ------------------------------------------------------
-    # As a replacement of codefeedback, we use Magicoder-Evol-Instruct, 
+    # As a replacement of codefeedback, we use Magicoder-Evol-Instruct,
     # which is a decontaminated version of evol-codealpaca-v1.
     # License: Apache 2.0
     # Total: 110999

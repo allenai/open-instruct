@@ -17,7 +17,7 @@ runs:
     - uses: allenai/setup-beaker@v2
       with:
         token: ${{ inputs.beaker_token }}
-        workspace: ai2/oe-adapt
+        workspace: ai2/open-instruct-dev
 
     # - shell: bash
     #   run: |

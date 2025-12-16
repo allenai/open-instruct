@@ -4,7 +4,7 @@ This section focuses explicitly on creating synthetic preference datasets.
 
 # Debug run (use an interactive session)
 
-This code supports HF models, local models and also API-based models (e.g., `gpt-4`). For generating completions, the code now accepts one model at a time, but we're working on adding an ensemble of models. Stay tuned. 
+This code supports HF models, local models and also API-based models (e.g., `gpt-4`). For generating completions, the code now accepts one model at a time, but we're working on adding an ensemble of models. Stay tuned.
 
 ```bash
 # 1. first sample a bunch of completions given prompts
@@ -33,7 +33,7 @@ python open_instruct/rejection_sampling/synthetic_preference_dataset.py \
 ```
 
 
-You can visualize the dataset via 
+You can visualize the dataset via
 
 ```bash
 python -m costa_utils.hf_viz \
@@ -52,7 +52,7 @@ python -m costa_utils.hf_viz \
 
 # Run through the entire dataset run
 
-To run through the entire dataset you would need a lot more GPUs to finish the generation more quickly. 
+To run through the entire dataset you would need a lot more GPUs to finish the generation more quickly.
 
 
 ```bash
@@ -78,4 +78,3 @@ deploy_mode="nfs" bash scripts/synthetic_preference_dataset.bash
 You can see a demo [here](https://drive.google.com/file/d/1dq3KG15ajpOv8tFYEZGS4tlW7G55oOYP/view?usp=sharing)
 
 <img width="1327" alt="image" src="https://github.com/user-attachments/assets/71a15671-e054-4eab-a571-715881958e74">
-

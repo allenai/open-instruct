@@ -1,13 +1,15 @@
 #!/bin/bash
+set -eo pipefail
 
-BEAKER_IMAGE="$1"
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
 uv run python mason.py \
        --cluster ai2/saturn \
        --image "$BEAKER_IMAGE" \
-       --description "GPU tests for test_grpo_fast_gpu.py" \
+       --description "GPU tests for test_*_gpu.py" \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
@@ -19,5 +21,4 @@ uv run python mason.py \
        --gpus 1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)" \
-       --env RAY_health_check_failure_threshold=3 \
-       -- source configs/beaker_configs/ray_node_setup.sh \&\& pytest open_instruct/test_grpo_fast_gpu.py -xvs \; cp -r open_instruct/test_data /output/test_data 2\>/dev/null \|\| true
+       -- bash scripts/train/debug/run_gpu_tests.sh

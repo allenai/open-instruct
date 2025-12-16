@@ -1,19 +1,19 @@
-'''
+"""
 A script for quickly collecting beaker results given a prefix.
 Computes mmlu average quckly.
-'''
+"""
+
 import argparse
 
 from beaker import Beaker
-
 from eval.utils import upload_results_to_hf
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--prefix", type=str, required=True)
+parser.add_argument("--workspace", type=str, default="ai2/tulu-3-results", help="workspace to search for experiments")
 parser.add_argument(
-    "--workspace", type=str, default="ai2/tulu-3-results", help="workspace to search for experiments"
-)
-parser.add_argument("--upload_to_hf", type=str, default=None)  # set to allenai/tulu-3-results//results/<model_name> to upload
+    "--upload_to_hf", type=str, default=None
+)  # set to allenai/tulu-3-results//results/<model_name> to upload
 args = parser.parse_args()
 
 MMLU_TASKS = [
@@ -73,7 +73,7 @@ MMLU_TASKS = [
     "mmlu_sociology",
     "mmlu_us_foreign_policy",
     "mmlu_virology",
-    "mmlu_world_religions"
+    "mmlu_world_religions",
 ]
 
 beaker = Beaker.from_env(default_workspace=args.workspace)
@@ -101,7 +101,7 @@ for exp in beaker.workspace.iter_experiments(workspace=args.workspace, match=arg
 
 # finally, print results in order given with tab spacing
 for eval_name in MMLU_TASKS:
-    print(eval_name, '\t', results.get(eval_name + ":mc::tulu", 0))
+    print(eval_name, "\t", results.get(eval_name + ":mc::tulu", 0))
 print()
 # compute macro-average (usual mmlu score)
 mmlu_sum = 0
@@ -111,23 +111,12 @@ mmlu_avg = mmlu_sum / len(MMLU_TASKS)
 
 print(f"Macro-average MMLU: {mmlu_avg}")
 
-results_blob = {
-    "metrics": {
-        "primary_score": mmlu_avg,
-        **results
-    },
-    "task_name": "mmlu:mc::tulu"
-}
+results_blob = {"metrics": {"primary_score": mmlu_avg, **results}, "task_name": "mmlu:mc::tulu"}
 
 # upload to huggingface if asked
 if args.upload_to_hf is not None:
     hf_datsaset_name = args.upload_to_hf.split("//")[0]
     hf_dataset_save_dir = args.upload_to_hf.split("//")[1]
     upload_results_to_hf(
-        results_blob,
-        hf_dataset_name,
-        hf_dataset_save_dir,
-        task_name=None,
-        primary_score=None,
-        prepend_timestamp=False,
+        results_blob, hf_dataset_name, hf_dataset_save_dir, task_name=None, primary_score=None, prepend_timestamp=False
     )
