@@ -2992,6 +2992,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             model_dims,
             checkpoint_state,
         )
+
+        if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
+            push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     except Exception as e:
         if args.send_slack_alerts:
             utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
@@ -3012,10 +3015,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
     logger.info("finished training")
-
-    if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
-        logger.info("Pushing model to hub")
-        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
     # Check for runtime leaks before exiting
     logger.info("Checking for runtime leaks...")
