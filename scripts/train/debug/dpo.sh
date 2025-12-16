@@ -12,8 +12,7 @@ uv run python mason.py \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
-    --gpus 1 \
-    --no_result -- torchrun --nproc_per_node=1 open_instruct/dpo.py \
+    --gpus 1 -- torchrun --nproc_per_node=1 open_instruct/dpo.py \
     --model_name_or_path allenai/Olmo-3-1025-7B \
     --chat_template_name olmo \
     --max_seq_length 1024 \
