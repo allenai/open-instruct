@@ -7,6 +7,15 @@ from olmo_core.data import data_loader
 
 
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
+    """Move all tensors in a batch dictionary to the specified device.
+
+    Args:
+        batch: Dictionary potentially containing torch.Tensor values.
+        device: Target device. If None, tensors are not moved.
+
+    Returns:
+        Dictionary with the same keys, but tensor values moved to the target device.
+    """
     return {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
 
@@ -28,17 +37,23 @@ class HFDataLoader(data_loader.DataLoaderBase):
         work_dir: str,
         automatic_reshuffle: bool = False,
         collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
-        fs_local_rank: int | None = None,
         device: torch.device | None = None,
     ) -> None:
-        if fs_local_rank is None:
-            fs_local_rank = rank
+        """Initialize the HFDataLoader.
+
+        Args:
+            dataset: The HuggingFace Dataset to load data from.
+            batch_size: The global batch size.
+            seed: Random seed for shuffling.
+            rank: The rank of the current process in the distributed setup.
+            world_size: Total number of processes in the distributed setup.
+            work_dir: Working directory for the data loader (required by DataLoaderBase).
+            automatic_reshuffle: If True, automatically reshuffle at epoch boundaries.
+            collator: Optional collation function for batching examples.
+            device: Device to move tensors to.
+        """
         super().__init__(
-            work_dir=work_dir,
-            global_batch_size=batch_size,
-            dp_world_size=world_size,
-            dp_rank=rank,
-            fs_local_rank=fs_local_rank,
+            work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=rank
         )
 
         self._full_dataset = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
@@ -144,10 +159,19 @@ class HFDataLoader(data_loader.DataLoaderBase):
         return to_device(self._collator(examples), self._device)  # type: ignore[return-value]
 
     def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int | None:
-        """Return the total number of tokens in the batch across all ranks."""
+        """Return the total number of tokens in the batch across all ranks.
+
+        Counts tokens from all keys containing 'input_ids' that are torch tensors.
+
+        Args:
+            batch: A batch dictionary containing input tensors.
+
+        Returns:
+            Total number of tokens across all ranks, or None if no input_ids found.
+        """
         num_tokens = 0
         for key, value in batch.items():
-            if "input_ids" in key and hasattr(value, "numel"):
+            if "input_ids" in key and isinstance(value, torch.Tensor):
                 num_tokens += value.numel()
         if num_tokens == 0:
             return None

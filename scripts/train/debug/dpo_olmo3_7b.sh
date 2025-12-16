@@ -14,7 +14,15 @@ uv run python mason.py \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
-    --gpus 8 -- open_instruct/dpo.py \
+    --gpus 8 -- torchrun \
+    --rdzv_conf='read_timeout=420' \
+    --rdzv_id=12347 \
+    --node_rank \$BEAKER_REPLICA_RANK \
+    --nnodes 4 \
+    --nproc_per_node 8 \
+    --rdzv_backend=static \
+    --rdzv_endpoint \$BEAKER_LEADER_REPLICA_HOSTNAME:29400 \
+    open_instruct/dpo.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
     --tokenizer_name_or_path "$MODEL_NAME" \

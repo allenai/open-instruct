@@ -39,7 +39,7 @@ from olmo_core.train.train_module.transformer import (
 )
 from tqdm.auto import tqdm
 
-from open_instruct import data_types, logger_utils
+from open_instruct import logger_utils
 from open_instruct.beaker_callback import BeakerCallbackV2
 from open_instruct.data_loader import HFDataLoader
 from open_instruct.dataset_transformation import (
@@ -49,9 +49,9 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
-    concatenated_forward,
+    concatenated_forward_olmo,
     dpo_loss,
-    separate_forward,
+    separate_forward_olmo,
     simpo_loss,
     wpo_loss,
 )
@@ -178,11 +178,11 @@ class DPOTrainModule(TrainModule):
         self.average_log_prob = dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
 
         if dpo_config.packing:
-            self._forward_fn = partial(concatenated_forward, packing=True)
+            self._forward_fn = partial(concatenated_forward_olmo, packing=True)
         elif dpo_config.concatenated_forward:
-            self._forward_fn = concatenated_forward
+            self._forward_fn = concatenated_forward_olmo
         else:
-            self._forward_fn = separate_forward
+            self._forward_fn = separate_forward_olmo
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state_dict: dict[str, Any] = {"model": self.model.state_dict()}
@@ -366,7 +366,7 @@ class DPOExperimentConfig(config.Config):
     report_to: str | list[str] = "all"
 
     dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
-    dataset_cache_mode: data_types.DatasetCacheMode = data_types.DatasetCacheMode.local
+    dataset_cache_mode: Literal["hf", "local"] = "local"
     dataset_local_cache_dir: str = "local_dataset_cache"
     dataset_skip_cache: bool = False
     cache_dataset_only: bool = False
@@ -410,7 +410,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
             dataset_transform_fn=args.dataset_transform_fn,
             transform_fn_args=transform_fn_args,
             target_columns=args.dataset_target_columns,
-            dataset_cache_mode=args.dataset_cache_mode.value,
+            dataset_cache_mode=args.dataset_cache_mode,
             dataset_config_hash=args.dataset_config_hash,
             hf_entity=args.hf_entity,
             dataset_local_cache_dir=args.dataset_local_cache_dir,
@@ -432,7 +432,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
             dataset_transform_fn=args.dataset_transform_fn,
             transform_fn_args=transform_fn_args,
             target_columns=args.dataset_target_columns,
-            dataset_cache_mode=args.dataset_cache_mode.value,
+            dataset_cache_mode=args.dataset_cache_mode,
             dataset_config_hash=args.dataset_config_hash,
             hf_entity=args.hf_entity,
             dataset_local_cache_dir=args.dataset_local_cache_dir,
@@ -450,7 +450,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
             dataset_transform_fn=args.dataset_transform_fn,
             transform_fn_args=transform_fn_args,
             target_columns=args.dataset_target_columns,
-            dataset_cache_mode=args.dataset_cache_mode.value,
+            dataset_cache_mode=args.dataset_cache_mode,
             dataset_config_hash=args.dataset_config_hash,
             hf_entity=args.hf_entity,
             dataset_local_cache_dir=args.dataset_local_cache_dir,
@@ -532,9 +532,9 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         device=device,
     )
 
-    forward_fn = concatenated_forward if args.dpo_config.concatenated_forward else separate_forward
+    forward_fn = concatenated_forward_olmo if args.dpo_config.concatenated_forward else separate_forward_olmo
     if args.dpo_config.packing:
-        forward_fn = partial(concatenated_forward, packing=True)
+        forward_fn = partial(concatenated_forward_olmo, packing=True)
     average_log_prob = args.dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
 
     logger.info("Caching reference logprobs (before HSDP)...")

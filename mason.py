@@ -708,20 +708,6 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
         setup_commands = f"cd {os.getcwd()} && "
 
     join_full_command = " ".join(full_command)
-    # Auto-generate torchrun for multi-node jobs
-    if args.num_nodes > 1 and "torchrun" not in join_full_command and "accelerate" not in join_full_command:
-        torchrun_prefix = (
-            f"torchrun "
-            f"--rdzv_conf='read_timeout=420' "
-            f"--rdzv_id=12347 "
-            f"--node_rank $BEAKER_REPLICA_RANK "
-            f"--nnodes {args.num_nodes} "
-            f"--nproc_per_node {args.gpus} "
-            f"--rdzv_backend=static "
-            f"--rdzv_endpoint $BEAKER_LEADER_REPLICA_HOSTNAME:29400 "
-        )
-        join_full_command = torchrun_prefix + join_full_command
-        console.log(f"Auto-generated torchrun prefix for {args.num_nodes}-node job")
     # override accelerate call
     if args.num_nodes > 1:
         if "--num_processes" not in join_full_command and "accelerate" in join_full_command:
@@ -737,20 +723,6 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
             ),
             join_full_command,
         )
-        # override torchrun call for multi-node (match olmo-core's setup)
-        if "torchrun" in join_full_command:
-            join_full_command = re.sub(r"--rdzv_backend\s+c10d", "--rdzv_backend=static", join_full_command)
-            if "--node_rank" not in join_full_command:
-                join_full_command = re.sub(r"(torchrun\s+)", r"\1--node_rank $BEAKER_REPLICA_RANK ", join_full_command)
-            if "--rdzv_id" not in join_full_command:
-                join_full_command = re.sub(r"(torchrun\s+)", r"\1--rdzv_id=12347 ", join_full_command)
-            if "--rdzv_conf" not in join_full_command:
-                join_full_command = re.sub(r"(torchrun\s+)", r"\1--rdzv_conf='read_timeout=420' ", join_full_command)
-            join_full_command = re.sub(
-                r"--rdzv_endpoint\s+(\$BEAKER_LEADER_REPLICA_HOSTNAME):(\d+)",
-                r"--rdzv_endpoint \1:29400",
-                join_full_command,
-            )
     full_command = setup_commands + join_full_command
     console.log("🔍🔍🔍 Full command")
     print(full_command)

@@ -1,14 +1,8 @@
 import dataclasses
-import enum
 from dataclasses import dataclass
 from typing import Any
 
 import torch
-
-
-class DatasetCacheMode(enum.Enum):
-    hf = "hf"
-    local = "local"
 
 
 @dataclass
