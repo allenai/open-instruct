@@ -2260,7 +2260,7 @@ def main(
         )
     except Exception as e:
         if args.send_slack_alerts:
-            utils.send_slack_message(f"Training failed with error: {e}")
+            utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
         raise
     finally:
         cleanup_training_resources(
