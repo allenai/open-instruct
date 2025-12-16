@@ -101,7 +101,7 @@ class VerificationResult:
 
 @dataclass
 class MaxLengthVerifierConfig(VerifierConfig):
-    max_length_verifier_max_length: int
+    max_length_verifier_max_length: int = 32768
 
 
 class VerifierFunction(ABC):
