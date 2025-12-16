@@ -65,7 +65,9 @@ def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx
     logger.info(f"Saved completion lengths to {csv_path}.")
 
 
-def save_config(args, tokenizer_config, model_config, timestamp: int):
+def save_config(
+    args, tokenizer_config, model_config, streaming_config: data_loader.StreamingDataLoaderConfig, timestamp: int
+):
     """
     Save configuration to JSON file.
 
@@ -73,6 +75,7 @@ def save_config(args, tokenizer_config, model_config, timestamp: int):
         args: Args dataclass
         tokenizer_config: TokenizerConfig dataclass
         model_config: ModelConfig dataclass
+        streaming_config: StreamingDataLoaderConfig dataclass
         timestamp: Unix timestamp
     """
     config_path = DATA_DIR / f"config_{timestamp}.json"
@@ -82,6 +85,7 @@ def save_config(args, tokenizer_config, model_config, timestamp: int):
         "args": dataclasses.asdict(args),
         "tokenizer_config": dataclasses.asdict(tokenizer_config),
         "model_config": dataclasses.asdict(model_config),
+        "streaming_config": dataclasses.asdict(streaming_config),
         "timestamp": timestamp,
     }
 
@@ -693,7 +697,7 @@ def main() -> None:
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
-    save_config(args, tokenizer_config, model_config, timestamp)
+    save_config(args, tokenizer_config, model_config, streaming_config, timestamp)
     run_benchmark(
         dataset,
         vllm_engines,

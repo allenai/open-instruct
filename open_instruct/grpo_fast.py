@@ -2319,11 +2319,17 @@ def main(
     generation_configs = create_generation_configs(args, streaming_config)
 
     checkpoint_state = None
+    data_prep_actor_state = None
     if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
         checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
         if os.path.exists(checkpoint_path):
             checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
             logger.info(f"Loaded checkpoint state from {checkpoint_path}")
+            data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")
+            if data_prep_actor_state:
+                # Use trainer's authoritative training_step for DataPreparationActor.
+                # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
+                data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
     (
         policy_group,
@@ -2349,7 +2355,7 @@ def main(
         eval_dataset,
         reward_config,
         generation_configs["train"],
-        checkpoint_state.get("data_prep_actor_state") if checkpoint_state else None,
+        data_prep_actor_state,
     )
 
     if checkpoint_state:
