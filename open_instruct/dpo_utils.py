@@ -32,14 +32,14 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 
 def dpo_loss(
-    policy_chosen_logps: torch.FloatTensor,
-    policy_rejected_logps: torch.FloatTensor,
-    reference_chosen_logps: torch.FloatTensor,
-    reference_rejected_logps: torch.FloatTensor,
+    policy_chosen_logps: torch.Tensor,
+    policy_rejected_logps: torch.Tensor,
+    reference_chosen_logps: torch.Tensor,
+    reference_rejected_logps: torch.Tensor,
     beta: float,
     reference_free: bool = False,
     label_smoothing: float = 0.0,
-) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Compute the DPO loss for a batch of policy and reference model log probabilities.
 
     Args:
@@ -78,15 +78,16 @@ def dpo_loss(
 
 
 def wpo_loss(
-    policy_chosen_logps: torch.FloatTensor,
-    policy_rejected_logps: torch.FloatTensor,
-    reference_chosen_logps: torch.FloatTensor,
-    reference_rejected_logps: torch.FloatTensor,
+    policy_chosen_logps: torch.Tensor,
+    policy_rejected_logps: torch.Tensor,
+    reference_chosen_logps: torch.Tensor,
+    reference_rejected_logps: torch.Tensor,
     beta: float,
     label_smoothing: float = 0.0,
-    chosen_loss_mask: torch.BoolTensor = None,
-    rejected_loss_mask: torch.BoolTensor = None,
-) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    *,
+    chosen_loss_mask: torch.Tensor,
+    rejected_loss_mask: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     pi_logratios = policy_chosen_logps - policy_rejected_logps
     ref_logratios = reference_chosen_logps - reference_rejected_logps
 
@@ -110,12 +111,12 @@ def wpo_loss(
 
 # From https://github.com/princeton-nlp/SimPO/blob/main/scripts/simpo_trainer.py#L560C1-L595C56
 def simpo_loss(
-    policy_chosen_logps: torch.FloatTensor,
-    policy_rejected_logps: torch.FloatTensor,
+    policy_chosen_logps: torch.Tensor,
+    policy_rejected_logps: torch.Tensor,
     beta: float,
     gamma_beta_ratio: float,
     label_smoothing: float = 0.0,
-) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Compute the SimPO loss for a batch of policy model log probabilities.
 
     Args:
@@ -139,9 +140,7 @@ def simpo_loss(
     return losses, chosen_rewards, rejected_rewards
 
 
-def _get_batch_logps(
-    logits: torch.FloatTensor, labels: torch.LongTensor, average_log_prob: bool = False
-) -> torch.FloatTensor:
+def _get_batch_logps(logits: torch.Tensor, labels: torch.Tensor, average_log_prob: bool = False) -> torch.Tensor:
     """Compute the log probabilities of the given labels under the given logits.
 
     Args:
@@ -173,9 +172,7 @@ def _get_batch_logps(
         return (per_token_logps * loss_mask).sum(-1)
 
 
-def process_batch(
-    batch: dict[str, list | torch.LongTensor], prefix: str, pad_value: int = 0
-) -> dict[str, torch.LongTensor]:
+def process_batch(batch: dict[str, list | torch.Tensor], prefix: str, pad_value: int = 0) -> dict[str, torch.Tensor]:
     """Process either chosen or rejected inputs separately.
 
     Args:
@@ -194,7 +191,7 @@ def process_batch(
     return processed
 
 
-def concatenated_inputs(batch: dict[str, list | torch.LongTensor]) -> dict[str, torch.LongTensor]:
+def concatenated_inputs(batch: dict[str, list | torch.Tensor]) -> dict[str, torch.Tensor]:
     """Concatenate the chosen and rejected inputs into a single tensor.
 
     Args:
@@ -204,30 +201,36 @@ def concatenated_inputs(batch: dict[str, list | torch.LongTensor]) -> dict[str, 
     Returns:
         A dictionary containing the concatenated inputs under the key 'concatenated_input_ids'.
     """
-    max_length = max(batch["chosen_input_ids"].shape[1], batch["rejected_input_ids"].shape[1])
+    chosen_ids = batch["chosen_input_ids"]
+    rejected_ids = batch["rejected_input_ids"]
+    assert isinstance(chosen_ids, torch.Tensor)
+    assert isinstance(rejected_ids, torch.Tensor)
+    max_length = max(chosen_ids.shape[1], rejected_ids.shape[1])
     concatenated_batch = {}
     for k in batch:
-        if k.startswith("chosen") and isinstance(batch[k], torch.Tensor):
+        v = batch[k]
+        if k.startswith("chosen") and isinstance(v, torch.Tensor):
             pad_value = -100 if "labels" in k else 0
             concatenated_key = k.replace("chosen", "concatenated")
-            concatenated_batch[concatenated_key] = pad_to_length(batch[k], max_length, pad_value=pad_value)
+            concatenated_batch[concatenated_key] = pad_to_length(v, max_length, pad_value=pad_value)
     for k in batch:
-        if k.startswith("rejected") and isinstance(batch[k], torch.Tensor):
+        v = batch[k]
+        if k.startswith("rejected") and isinstance(v, torch.Tensor):
             pad_value = -100 if "labels" in k else 0
             concatenated_key = k.replace("rejected", "concatenated")
             concatenated_batch[concatenated_key] = torch.cat(
-                (concatenated_batch[concatenated_key], pad_to_length(batch[k], max_length, pad_value=pad_value)), dim=0
+                (concatenated_batch[concatenated_key], pad_to_length(v, max_length, pad_value=pad_value)), dim=0
             )
     return concatenated_batch
 
 
 def concatenated_forward(
     model: nn.Module,
-    batch: dict[str, list | torch.LongTensor],
+    batch: dict[str, list | torch.Tensor],
     average_log_prob: bool = False,
     output_router_logits: bool = False,
     packing: bool = False,
-) -> tuple[torch.FloatTensor, torch.FloatTensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
     We do this to avoid doing two forward passes, because it's faster for FSDP.
@@ -254,7 +257,9 @@ def concatenated_forward(
         all_logps = _get_batch_logps(
             logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
         )
-        bs = batch["chosen_input_ids"].shape[0]
+        chosen_ids = batch["chosen_input_ids"]
+        assert isinstance(chosen_ids, torch.Tensor)
+        bs = chosen_ids.shape[0]
     else:
         all_logps = pf_get_batch_logps(
             logits,
@@ -269,10 +274,10 @@ def concatenated_forward(
 
 def separate_forward(
     model: nn.Module,
-    batch: dict[str, list | torch.LongTensor],
+    batch: dict[str, list | torch.Tensor],
     average_log_prob: bool = False,
     output_router_logits: bool = False,
-) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor | None]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Run the model on chosen and rejected inputs separately.
 
     Args:
@@ -294,12 +299,12 @@ def separate_forward(
             output_router_logits=True,
         )
         chosen_logits = chosen_outputs.logits.to(torch.float32)
-        aux_loss = chosen_outputs.aux_loss
+        chosen_aux_loss = chosen_outputs.aux_loss
     else:
         chosen_logits = model(
             input_ids=chosen_batch["input_ids"], attention_mask=chosen_batch["attention_mask"]
         ).logits.to(torch.float32)
-        aux_loss = None
+        chosen_aux_loss = None
 
     chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
     del chosen_batch, chosen_logits
@@ -317,21 +322,25 @@ def separate_forward(
             output_router_logits=True,
         )
         rejected_logits = rejected_outputs.logits.to(torch.float32)
-        aux_loss = rejected_outputs.aux_loss
+        rejected_aux_loss = rejected_outputs.aux_loss
     else:
         rejected_logits = model(
             input_ids=rejected_batch["input_ids"], attention_mask=rejected_batch["attention_mask"]
         ).logits.to(torch.float32)
-        aux_loss = None
+        rejected_aux_loss = None
 
     rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
     del rejected_batch, rejected_logits
     if output_router_logits:
         del rejected_outputs
     torch.cuda.empty_cache()
-    if output_router_logits:
-        aux_loss = torch.cat([chosen_outputs.aux_loss, rejected_outputs.aux_loss], dim=0)
 
+    if output_router_logits:
+        assert isinstance(chosen_aux_loss, torch.Tensor)
+        assert isinstance(rejected_aux_loss, torch.Tensor)
+        aux_loss = torch.cat([chosen_aux_loss, rejected_aux_loss], dim=0)
+    else:
+        aux_loss = None
     return chosen_logps, rejected_logps, aux_loss
 
 
