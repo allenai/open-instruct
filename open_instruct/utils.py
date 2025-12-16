@@ -1869,7 +1869,7 @@ class ModelDims:
             if layer_types is not None:
                 num_sliding_window_layers = layer_types.count("sliding_attention")
             else:
-                # If "layer_types" is None, then we assume all layers are sliding layers. 
+                # If "layer_types" is None, then we assume all layers are sliding layers.
                 num_sliding_window_layers = num_layers
 
         return cls(
