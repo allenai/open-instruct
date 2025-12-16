@@ -6,11 +6,7 @@ from datasets import Dataset
 from olmo_core.data import data_loader
 
 
-def to_device(
-    batch: dict[str, Any] | list[dict[str, Any]], device: torch.device | None
-) -> dict[str, Any] | list[dict[str, Any]]:
-    if isinstance(batch, list):
-        return batch
+def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
     return {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
 
@@ -49,7 +45,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.seed = seed
         self._batch_size = batch_size
         self._per_rank_batch_size = batch_size // world_size
-        self._collator = collator if collator is not None else (lambda x: x)
+        self._collator = collator if collator is not None else (lambda x: {"examples": x})
         self._automatic_reshuffle = automatic_reshuffle
         self._excluded_indices: set[int] = set()
         self._epoch: int = 0
