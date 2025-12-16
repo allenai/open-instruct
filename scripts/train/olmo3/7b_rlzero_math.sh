@@ -59,7 +59,7 @@ uv run mason.py \
     --chat_template_name olmo_thinker_rlzero \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 1024512 \
+    --total_episodes 768000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 8 \
     --vllm_num_engines 56 \
