@@ -47,8 +47,12 @@ class TestVllmUtils3(unittest.TestCase):
         def create_mock_logprobs(token_ids):
             return [-0.1 * tid for tid in token_ids]
 
+        dataset_index = 43039
+        epoch = 0
+        prompt_id = f"{epoch}_{dataset_index}"
+
         mock_request = PromptRequest(
-            prompt=[1, 2, 3], generation_config=None, is_eval=False, dataset_index=43039, prompt_id="test_prompt_1"
+            prompt=[1, 2, 3], generation_config=None, is_eval=False, dataset_index=dataset_index, prompt_id=prompt_id
         )
         request_id = vllm_utils.make_request_id(mock_request)
 
@@ -86,8 +90,8 @@ class TestVllmUtils3(unittest.TestCase):
         request_metadata = {
             request_id: {
                 "is_eval": False,
-                "dataset_index": 43039,
-                "prompt_id": "test_prompt_1",
+                "dataset_index": dataset_index,
+                "prompt_id": prompt_id,
                 "prompt_token_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                 "start_time": 1000.0,
             }
@@ -130,8 +134,12 @@ class TestVllmUtils3(unittest.TestCase):
         def create_mock_logprobs(token_ids):
             return [-0.1 * tid for tid in token_ids]
 
+        dataset_index = 200
+        epoch = 0
+        prompt_id = f"{epoch}_{dataset_index}"
+
         mock_request = PromptRequest(
-            prompt=[1, 2, 3], generation_config=None, is_eval=True, dataset_index=200, prompt_id="test_prompt_2"
+            prompt=[1, 2, 3], generation_config=None, is_eval=True, dataset_index=dataset_index, prompt_id=prompt_id
         )
         request_id = vllm_utils.make_request_id(mock_request)
 
@@ -155,8 +163,8 @@ class TestVllmUtils3(unittest.TestCase):
         request_metadata = {
             request_id: {
                 "is_eval": True,
-                "dataset_index": 200,
-                "prompt_id": "test_prompt_2",
+                "dataset_index": dataset_index,
+                "prompt_id": prompt_id,
                 "prompt_token_ids": [1, 2, 3, 4, 5],
                 "start_time": 2000.0,
             }
