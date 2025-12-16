@@ -1356,7 +1356,7 @@ def setup_datasets(
             transform_fn_args=transform_fn_args,
             hf_entity=args.hf_entity,
             dataset_cache_mode=streaming_config.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_eval_hash,
+            dataset_config_hash=streaming_config.dataset_config_eval_hash,
             dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
             dataset_skip_cache=streaming_config.dataset_skip_cache,
             system_prompt_override=system_prompt_override,
