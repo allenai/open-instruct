@@ -23,6 +23,14 @@ jobs:
 
     - name: Check that CHANGELOG has been updated
       run: |
+        # Check for CHANGELOG bypass in PR body
+        PR_BODY='${{ github.event.pull_request.body }}'
+        if echo "$PR_BODY" | grep -q 'CHANGELOG='; then
+          REASON=$(echo "$PR_BODY" | grep -oP 'CHANGELOG=\K[^\n\r]*' | head -1)
+          echo "CHANGELOG check bypassed. Reason: $REASON"
+          exit 0
+        fi
+
         # Only require changelog for open_instruct/** changes
         if git diff --name-only $(git merge-base origin/main HEAD) | grep -q '^open_instruct/'; then
           git diff --name-only $(git merge-base origin/main HEAD) | grep '^CHANGELOG.md$' && echo "Thanks for helping keep our CHANGELOG up-to-date!"
