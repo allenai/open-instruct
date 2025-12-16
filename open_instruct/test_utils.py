@@ -18,6 +18,7 @@ import tempfile
 import time
 import unittest
 from unittest import mock
+from types import SimpleNamespace
 
 import pytest
 import ray
@@ -630,6 +631,62 @@ class TestModelDims(unittest.TestCase):
             vllm_dims = utils.ModelDims.from_vllm_config(mock_vllm_config)
 
         self.assertEqual(vllm_dims, expected_dims)
+
+
+class TestModelDimsFromHFConfig(unittest.TestCase):
+    def test_from_hf_config_with_sliding_window(self):
+        config = SimpleNamespace(
+            hidden_size=2048,
+            intermediate_size=8192,
+            sliding_window=4096,
+            layer_types=["sliding_attention", "attention"],
+            num_attention_heads=16,
+            num_hidden_layers=24,
+            vocab_size=32000,
+            num_key_value_heads=8,
+            head_dim=128,
+        )
+
+        with mock.patch(
+            "transformers.AutoConfig.from_pretrained", return_value=config
+        ) as mock_from_pretrained, mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
+            model_dims = utils.ModelDims.from_hf_config("test/model")
+
+        mock_from_pretrained.assert_called_once_with("test/model", trust_remote_code=True)
+        self.assertEqual(
+            model_dims,
+            utils.ModelDims(
+                num_layers=24,
+                hidden_size=2048,
+                intermediate_size=8192,
+                vocab_size=32000,
+                num_attn_heads=16,
+                head_dim=128,
+                num_kv_heads=8,
+                sliding_window=4096,
+                num_sliding_window_layers=1,
+                device_name="h100",
+            ),
+        )
+
+    def test_from_hf_config_defaults(self):
+        config = SimpleNamespace(
+            hidden_size=1024,
+            num_attention_heads=8,
+            num_hidden_layers=12,
+            vocab_size=64000,
+        )
+
+        with mock.patch("transformers.AutoConfig.from_pretrained", return_value=config), mock.patch(
+            "torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"
+        ):
+            model_dims = utils.ModelDims.from_hf_config("test/defaults")
+
+        self.assertEqual(model_dims.intermediate_size, 4096)
+        self.assertEqual(model_dims.head_dim, 128)
+        self.assertEqual(model_dims.num_kv_heads, 8)
+        self.assertIsNone(model_dims.sliding_window)
+        self.assertEqual(model_dims.num_sliding_window_layers, 0)
 
 
 # useful for checking if public datasets are still available
