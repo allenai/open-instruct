@@ -13,13 +13,14 @@
 # limitations under the License.
 
 import logging
+import os
 import threading
 import time
 from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import ray
@@ -170,18 +171,106 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
 
 @dataclass
+class VLLMConfig:
+    vllm_num_engines: int = 1
+    vllm_tensor_parallel_size: int = 1
+    vllm_enforce_eager: bool = False
+    vllm_sync_backend: str = "nccl"
+    vllm_gpu_memory_utilization: float = 0.9
+    vllm_enable_prefix_caching: bool = False
+    vllm_top_p: float = 1.0
+
+    def __post_init__(self):
+        if os.environ.get("VLLM_USE_V1") == "0":
+            logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
+            if self.vllm_enable_prefix_caching:
+                raise ValueError("Prefix caching is currently not supported for v0.")
+
+
+@dataclass
 class StreamingDataLoaderConfig:
+    # Data loading/packing
     max_prompt_token_length: int = 256
     response_length: int = 256
+    pack_length: int = 512
+
+    # Batching
     async_steps: int = 1
     num_samples_per_prompt_rollout: int = 4
+    num_unique_prompts_rollout: int = 16
+
+    # GRPO sampling/filtering
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     no_resampling_pass_rate: float | None = None
     advantage_normalization_type: str = "standard"
     mask_truncated_completions: bool = False
-    pack_length: int = 512
     mask_tool_use: bool = True
+
+    # Dataset
+    dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
+    dataset_mixer_eval_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
+    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
+    dataset_mixer_eval_list_splits: list[str] = field(default_factory=lambda: ["test"])
+    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"])
+    dataset_cache_mode: Literal["hf", "local"] = "local"
+    dataset_local_cache_dir: str = "local_dataset_cache"
+    dataset_config_hash: str | None = None
+    dataset_config_eval_hash: str | None = None
+    dataset_skip_cache: bool = False
+    shuffle_eval_dataset: bool = False
+    system_prompt_override_file: str | None = None
+
+    # Generation
+    temperature: float = 0.7
+    stop_strings: list[str] | None = None
+    inflight_updates: bool = False
+
+    # Reward - R1 style format reward
+    apply_r1_style_format_reward: bool = False
+    r1_style_format_reward: float = 1.0
+    additive_format_reward: bool = False
+
+    # Reward - Verifiable reward
+    apply_verifiable_reward: bool = True
+    verification_reward: float = 10.0
+    remap_verifier: str | None = None
+
+    # LLM judge verifier
+    llm_judge_model: str = "azure/gpt-4o-mini-standard"
+    llm_judge_max_tokens: int = 2048
+    llm_judge_max_context_length: int = 8192
+    llm_judge_temperature: float = 1.0
+    llm_judge_timeout: int = 60
+
+    # Code verifier
+    code_api_url: str = field(
+        default_factory=lambda: os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
+    )
+    code_max_execution_time: float = 1.0
+    code_pass_rate_reward_threshold: float = 0.0
+    code_apply_perf_penalty: bool = False
+
+    # Max length verifier
+    max_length_verifier_max_length: int = 32768
+
+    # Non stop penalty
+    non_stop_penalty: bool = False
+    non_stop_penalty_value: float = 0.0
+
+    # Tools
+    tools: list[str] | None = None
+    max_tool_calls: tuple[int, ...] = (5,)
+    only_reward_good_outputs: bool = False
+
+    # RAG
+    number_documents_to_search: int = 3
+    search_api_endpoint: str | None = None
+
+    # Code tool
+    code_tool_api_endpoint: str | None = None
+
+    # Computed at post_init
     max_possible_score: float = 1.0
 
     def __post_init__(self):
@@ -210,6 +299,27 @@ class StreamingDataLoaderConfig:
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
 
+        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
+            "At least one reward must be applied!"
+        )
+
+        if self.stop_strings is None:
+            self.stop_strings = []
+
+        self.max_tool_calls = tuple(int(x) for x in self.max_tool_calls)
+
+        if self.tools is not None and len(self.tools) > 0:
+            for tool in self.tools:
+                if tool not in ["search", "code"]:
+                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
+            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+
+        self.max_possible_score = 0.0
+        if self.apply_verifiable_reward:
+            self.max_possible_score += self.verification_reward
+        if self.apply_r1_style_format_reward and self.additive_format_reward:
+            self.max_possible_score += self.r1_style_format_reward
+
     def build_dataloader(
         self,
         data_prep_actor_name: str,
@@ -218,7 +328,6 @@ class StreamingDataLoaderConfig:
         fs_local_rank: int,
         num_training_steps: int,
         work_dir: Path | str,
-        global_batch_size: int,
         dp_world_size: int,
     ) -> "StreamingDataLoader":
         """Build a thin wrapper dataloader that pulls from the DataPreparationActor singleton."""
@@ -226,7 +335,7 @@ class StreamingDataLoaderConfig:
             data_prep_actor_name=data_prep_actor_name,
             tokenizer=tokenizer,
             work_dir=work_dir,
-            global_batch_size=global_batch_size,
+            global_batch_size=self.num_unique_prompts_rollout,
             num_training_steps=num_training_steps,
             dp_world_size=dp_world_size,
             dp_rank=dp_rank,

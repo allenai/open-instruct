@@ -131,32 +131,6 @@ CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 
 @dataclass
 class Args:
-    # Dataset
-    dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
-    """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_eval_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
-    """A list of datasets (local or HF) to sample from for evaluation."""
-    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
-    """The dataset splits to use for training"""
-    dataset_mixer_eval_list_splits: list[str] = field(default_factory=lambda: ["test"])
-    """The dataset splits to use for evaluation"""
-    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"])
-    """The list of transform functions to apply to the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "local"
-    """The mode to use for caching the dataset."""
-    dataset_local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
-    dataset_config_hash: str | None = None
-    """The hash of the dataset configuration."""
-    dataset_config_eval_hash: str | None = None
-    """The hash of the dataset configuration for evaluation."""
-    dataset_skip_cache: bool = False
-    """Whether to skip the cache."""
-    shuffle_eval_dataset: bool = False
-    """Whether to shuffle the evaluation dataset."""
-    system_prompt_override_file: str | None = None
-    """Path to a text file containing a system prompt to override the dataset's system prompts"""
-
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
@@ -201,14 +175,6 @@ class Args:
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
 
-    # Generation
-    temperature: float = 0.7
-    """the sampling temperature"""
-    num_unique_prompts_rollout: int = 16
-    """The number of unique prompts during rollout"""
-    stop_strings: list[str] | None = None
-    """List of strings that stop the generation when they are generated.
-    The returned output will not contain the stop strings."""
     # Algorithm
     num_epochs: int = 1
     """the number of epochs to train"""
@@ -222,8 +188,6 @@ class Args:
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
     truncated_importance_sampling_ratio_cap: float = 0.0
     """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
-    inflight_updates: bool = False
-    """Enable immediate stopping of request processing when should_stop is set, allowing for quick pausing and resumption"""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -247,75 +211,12 @@ class Args:
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
-    # Reward
-    # -- r1 style format reward
-    apply_r1_style_format_reward: bool = False
-    """whether to add the R1 style format reward"""
-    r1_style_format_reward: float = 1.0
-    """the reward value for R1 style format reward"""
-    additive_format_reward: bool = False
-    """whether to add the format reward to the final reward"""
-
-    # -- verifiable reward
-    apply_verifiable_reward: bool = True
-    """whether to apply verifiable reward"""
-    verification_reward: float = 10.0
-    """the reward value for verifiable responses"""
-    remap_verifier: str = None
-    """Remap verifier like string_f1=general-quality_ref. Currently can only remap once."""
-
-    # -- llm verifiers
-    llm_judge_model: str = "azure/gpt-4o-mini-standard"
-    """the model to use for the llm judge"""
-    llm_judge_max_tokens: int = 2048
-    """the max tokens to use for the llm judge"""
-    llm_judge_max_context_length: int = 8192
-    """the max context length to use for the llm judge"""
-    llm_judge_temperature: float = 1.0
-    """the temperature to use for the llm judge"""
-    llm_judge_timeout: int = 60
-    """the timeout to use for the llm judge"""
-
-    # -- code verifier
-    code_api_url: str = os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
-    """the api url to use for the code verifier"""
-    code_max_execution_time: float = 1.0
-    """the max execution time to use for the code verifier"""
-    code_pass_rate_reward_threshold: float = 0.0
-    """the pass rate reward threshold for the code verifier. If pass rate is less than this threshold, reward is 0.0, otherwise reward is pass rate"""
-    code_apply_perf_penalty: bool = False
-    """whether to apply a performance penalty to the code verifier"""
-
-    # -- max length verifier
-    max_length_verifier_max_length: int = 32768
-    """the max length to use for the max length verifier"""
-
-    # -- non stop penalty
-    non_stop_penalty: bool = False
-    """whether to penalize responses which did not finish generation"""
-    non_stop_penalty_value: float = 0.0
-    """the reward value for responses which did not finish generation"""
-
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
     num_learners_per_node: list[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
-    vllm_num_engines: int = 1
-    """number of vLLM Engines, set to 0 to disable vLLM"""
-    vllm_tensor_parallel_size: int = 1
-    """tensor parallel size of vLLM Engine for multi-GPU inference"""
-    vllm_enforce_eager: bool = False
-    """whether to enforce eager mode for vLLM -- slow inference but needed for multi-node"""
-    vllm_sync_backend: str = "nccl"
-    """DeepSpeed -> vLLM weight sync backend"""
-    vllm_gpu_memory_utilization: float = 0.9
-    """vLLM GPU memory utilization"""
-    vllm_enable_prefix_caching: bool = False
-    """whether to enable prefix caching"""
-    vllm_top_p: float = 1.0
-    """vLLM top p for nucleus sampling"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     deepspeed_zpg: int = 8
@@ -391,49 +292,13 @@ class Args:
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
-    # Tool settings
-    tools: list[str] | None = None
-    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: tuple[int, ...] = (5,)
-    """Maximum number of tool calls allowed. If a tuple is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
-    only_reward_good_outputs: bool = False
-    """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
-
-    # rl-rag specific settngs
-    number_documents_to_search: int = 3
-    """The maximum number of documents to retrieve for each query."""
-    search_api_endpoint: str | None = None
-    """The API endpoint for the search engine."""
-
-    # code-tool specific settings
-    code_tool_api_endpoint: str | None = None
-
     def __post_init__(self):
-        if os.environ.get("VLLM_USE_V1") == "0":
-            logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
-            if self.vllm_enable_prefix_caching:
-                raise ValueError("Prefix caching is currently not supported for v0.")
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
         self.loss_denominator = utils.get_denominator(self.loss_denominator)
-        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
-            "At least one reward must be applied!"
-        )
-        # Ensure we have enough prompts for all VLLM engines
-        if self.num_unique_prompts_rollout < self.vllm_num_engines:
-            logger.warning(
-                f"With num_unique_prompts_rollout={self.num_unique_prompts_rollout} < "
-                f"vllm_num_engines={self.vllm_num_engines}, vllm will be generating data for multiple "
-                "batches simultaneously. This is fine but might be unexpected behaviour."
-            )
-        # Initialize stop_strings if None
-        if self.stop_strings is None:
-            self.stop_strings = []
-        # Convert max_tool_calls elements to int (HfArgumentParser parses tuples as strings)
-        self.max_tool_calls = tuple(int(x) for x in self.max_tool_calls)
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
@@ -463,23 +328,11 @@ class Args:
             if self.gs_checkpoint_state_dir is not None:
                 download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if self.tools is not None and len(self.tools) > 0:
-            for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
         if not self.load_ref_policy and self.beta != 0.0:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
-
-        # Figure out max possible RLVR score
-        self.max_possible_score = 0
-        if self.apply_verifiable_reward:
-            self.max_possible_score += self.verification_reward
-        if self.apply_r1_style_format_reward and self.additive_format_reward:
-            self.max_possible_score += self.r1_style_format_reward
 
 
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
@@ -497,7 +350,8 @@ class PolicyTrainerRayProcess(RayProcess):
         master_addr: str | None,
         master_port: int | None,
         args: Args,
-        data_loader_config: data_loader_lib.StreamingDataLoaderConfig,
+        streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+        vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
     ):
@@ -506,14 +360,15 @@ class PolicyTrainerRayProcess(RayProcess):
         self.pad_token_id = tokenizer.pad_token_id
         self.num_mini_batches = args.num_mini_batches
         self._args = args
-        self._streaming_dataloader = data_loader_config.build_dataloader(
+        self.streaming_config = streaming_config
+        self.vllm_config = vllm_config
+        self._streaming_dataloader = streaming_config.build_dataloader(
             data_prep_actor_name=data_prep_actor_name,
             tokenizer=tokenizer,
             dp_rank=rank,
             fs_local_rank=local_rank,
             num_training_steps=args.num_training_steps,
             work_dir=args.output_dir,
-            global_batch_size=args.num_unique_prompts_rollout,
             dp_world_size=world_size,
         )
         self.dataloader = iter(self._streaming_dataloader)
@@ -730,11 +585,11 @@ class PolicyTrainerRayProcess(RayProcess):
                 sock.bind(("", 0))
                 master_port = sock.getsockname()[1]
             vllm_num_engines, vllm_tensor_parallel_size = (
-                self.args.vllm_num_engines,
-                self.args.vllm_tensor_parallel_size,
+                self.vllm_config.vllm_num_engines,
+                self.vllm_config.vllm_tensor_parallel_size,
             )
             world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
-            backend = self.args.vllm_sync_backend
+            backend = self.vllm_config.vllm_sync_backend
             refs = [
                 engine.init_process_group.remote(
                     master_address,
@@ -827,7 +682,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     data_BT.attention_masks[i],
                     data_BT.position_ids[i],
                     pad_token_id,
-                    self.args.temperature,
+                    self.streaming_config.temperature,
                     return_entropy=False,
                 )
 
@@ -947,7 +802,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         data_BT.attention_masks[i],
                         data_BT.position_ids[i],
                         self.pad_token_id,
-                        self.args.temperature,
+                        self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
                     )
                     local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
@@ -1251,7 +1106,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 wandb_url=wandb_url,
                 training_step=training_step,
                 oe_eval_tasks=args.oe_eval_tasks,
-                stop_strings=args.stop_strings,
+                stop_strings=streaming_config.stop_strings,
                 gs_bucket_path=args.gs_bucket_path,
                 eval_priority=args.eval_priority,
                 eval_workspace=args.eval_workspace,
@@ -1268,7 +1123,8 @@ class ModelGroup:
         num_gpus_per_node: list[int],
         single_gpu_mode: bool,
         args: Args,
-        data_loader_config: data_loader_lib.StreamingDataLoaderConfig,
+        streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+        vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
     ):
@@ -1285,7 +1141,7 @@ class ModelGroup:
             scheduling_strategy=PlacementGroupSchedulingStrategy(
                 placement_group=self.pg, placement_group_bundle_index=0
             ),
-        ).remote(world_size, 0, 0, None, None, args, data_loader_config, data_prep_actor_name, tokenizer)
+        ).remote(world_size, 0, 0, None, None, args, streaming_config, vllm_config, data_prep_actor_name, tokenizer)
 
         self.models.append(master_policy)
         results, _ = ray_get_with_progress(
@@ -1325,7 +1181,8 @@ class ModelGroup:
                 master_addr,
                 master_port,
                 args,
-                data_loader_config,
+                streaming_config,
+                vllm_config,
                 data_prep_actor_name,
                 tokenizer,
             )
@@ -1391,18 +1248,20 @@ def calculate_utilization_metrics(
 
 def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig) -> Args:
     """Set up runtime variables for the experiment."""
-    if args.tools and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
+    if streaming_config.tools and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
-    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
     if is_beaker_job():
-        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        streaming_config.dataset_local_cache_dir = (
+            "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        )
     args.world_size = sum(args.num_learners_per_node)
     args.num_training_steps = args.total_episodes // (
-        args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+        streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
     )
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
@@ -1418,7 +1277,7 @@ def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.Stream
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = args.tools is not None and len(args.tools) > 0
+    args.tool_use = streaming_config.tools is not None and len(streaming_config.tools) > 0
     return args
 
 
@@ -1455,9 +1314,9 @@ def setup_datasets(
 ):
     """Set up training and evaluation datasets."""
     system_prompt_override = None
-    if args.system_prompt_override_file is not None:
-        logger.info(f"Loading system prompt override from {args.system_prompt_override_file}")
-        with open(args.system_prompt_override_file) as f:
+    if streaming_config.system_prompt_override_file is not None:
+        logger.info(f"Loading system prompt override from {streaming_config.system_prompt_override_file}")
+        with open(streaming_config.system_prompt_override_file) as f:
             system_prompt_override = f.read().strip()
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
@@ -1466,36 +1325,35 @@ def setup_datasets(
         {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+        dataset_mixer_list=streaming_config.dataset_mixer_list,
+        dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
         tc=tc,
-        dataset_transform_fn=args.dataset_transform_fn,
+        dataset_transform_fn=streaming_config.dataset_transform_fn,
         transform_fn_args=transform_fn_args,
-        dataset_cache_mode=args.dataset_cache_mode,
-        dataset_config_hash=args.dataset_config_hash,
+        dataset_cache_mode=streaming_config.dataset_cache_mode,
+        dataset_config_hash=streaming_config.dataset_config_hash,
         hf_entity=args.hf_entity,
-        dataset_local_cache_dir=args.dataset_local_cache_dir,
-        dataset_skip_cache=args.dataset_skip_cache,
+        dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
+        dataset_skip_cache=streaming_config.dataset_skip_cache,
         system_prompt_override=system_prompt_override,
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
-    train_dataset = train_dataset.map(lambda example, idx: {**example, "index": idx}, with_indices=True)
 
-    if len(args.dataset_mixer_eval_list) > 0:
+    if len(streaming_config.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
-            dataset_mixer_list=args.dataset_mixer_eval_list,
-            dataset_mixer_list_splits=args.dataset_mixer_eval_list_splits,
+            dataset_mixer_list=streaming_config.dataset_mixer_eval_list,
+            dataset_mixer_list_splits=streaming_config.dataset_mixer_eval_list_splits,
             tc=tc,
-            dataset_transform_fn=args.dataset_transform_fn,
+            dataset_transform_fn=streaming_config.dataset_transform_fn,
             transform_fn_args=transform_fn_args,
             hf_entity=args.hf_entity,
-            dataset_cache_mode=args.dataset_cache_mode,
+            dataset_cache_mode=streaming_config.dataset_cache_mode,
             dataset_config_hash=args.dataset_config_eval_hash,
-            dataset_local_cache_dir=args.dataset_local_cache_dir,
-            dataset_skip_cache=args.dataset_skip_cache,
+            dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
+            dataset_skip_cache=streaming_config.dataset_skip_cache,
             system_prompt_override=system_prompt_override,
         )
-        if args.shuffle_eval_dataset:
+        if streaming_config.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
     else:
         eval_dataset = None
@@ -1515,7 +1373,8 @@ def create_model_and_optimizer(
     inference_results_Q: ray_queue.Queue,
     prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
-    data_loader_config: data_loader_lib.StreamingDataLoaderConfig,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
     train_dataset: Dataset,
     eval_dataset,
     reward_config: RewardConfig,
@@ -1529,29 +1388,31 @@ def create_model_and_optimizer(
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
     # Set up tools
-    max_len = data_loader_config.max_prompt_token_length + data_loader_config.response_length
+    max_len = streaming_config.max_prompt_token_length + streaming_config.response_length
     tool_objects = {}
-    if args.tools:
-        for tool in args.tools:
+    if streaming_config.tools:
+        for tool in streaming_config.tools:
             if tool.lower() == "search":
                 from open_instruct.search_utils.search_tool import SearchTool
 
                 tool = SearchTool(
                     start_str="<query>",
                     end_str="</query>",
-                    api_endpoint=args.search_api_endpoint,
-                    number_documents_to_search=args.number_documents_to_search,
+                    api_endpoint=streaming_config.search_api_endpoint,
+                    number_documents_to_search=streaming_config.number_documents_to_search,
                 )
                 tool_objects[tool.end_str] = tool
                 # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
+                streaming_config.stop_strings.append(tool.end_str)
             elif tool.lower() == "code":
                 from open_instruct.tool_utils.tools import PythonCodeTool
 
-                tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
+                tool = PythonCodeTool(
+                    start_str="<code>", end_str="</code>", api_endpoint=streaming_config.code_tool_api_endpoint
+                )
                 tool_objects[tool.end_str] = tool
                 # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
+                streaming_config.stop_strings.append(tool.end_str)
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
@@ -1560,7 +1421,7 @@ def create_model_and_optimizer(
         "Prompt Queue": prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
-    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
+    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
 
     # Get model_dims early from HuggingFace config (doesn't require vLLM)
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
@@ -1572,14 +1433,14 @@ def create_model_and_optimizer(
         inference_results_Q=inference_results_Q,
         param_prompt_Q=prompt_Q,
         tokenizer=tokenizer,
-        config=data_loader_config,
+        config=streaming_config,
         generation_config=generation_config,
         num_training_steps=args.num_training_steps,
         seed=args.seed,
         per_device_train_batch_size=args.per_device_train_batch_size,
-        global_batch_size=args.num_unique_prompts_rollout,
+        global_batch_size=streaming_config.num_unique_prompts_rollout,
         dp_world_size=args.world_size,
-        max_possible_score=args.max_possible_score,
+        max_possible_score=streaming_config.max_possible_score,
         actor_manager=actor_manager,
         model_dims=model_dims,
         verbose=args.verbose,
@@ -1598,7 +1459,8 @@ def create_model_and_optimizer(
         args.num_learners_per_node,
         args.single_gpu_mode,
         args=args,
-        data_loader_config=data_loader_config,
+        streaming_config=streaming_config,
+        vllm_config=vllm_config,
         data_prep_actor_name=data_prep_actor_name,
         tokenizer=tokenizer,
     )
@@ -1609,26 +1471,26 @@ def create_model_and_optimizer(
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils.create_vllm_engines(
-        args.vllm_num_engines,
-        args.vllm_tensor_parallel_size,
-        args.vllm_enforce_eager,
+        vllm_config.vllm_num_engines,
+        vllm_config.vllm_tensor_parallel_size,
+        vllm_config.vllm_enforce_eager,
         tc.tokenizer_name_or_path,
         model_config.model_name_or_path,
         model_config.model_revision,
         args.seed,
-        args.vllm_enable_prefix_caching,
+        vllm_config.vllm_enable_prefix_caching,
         max_len,
-        args.vllm_gpu_memory_utilization,
+        vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
-        max_tool_calls=args.max_tool_calls,
-        mask_tool_use=data_loader_config.mask_tool_use,
+        max_tool_calls=streaming_config.max_tool_calls,
+        mask_tool_use=streaming_config.mask_tool_use,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
-        inflight_updates=args.inflight_updates,
+        inflight_updates=streaming_config.inflight_updates,
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
@@ -1639,14 +1501,14 @@ def create_model_and_optimizer(
         kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
         expected_batch_size = (
-            args.num_unique_prompts_rollout
-            * data_loader_config.num_samples_per_prompt_rollout
-            // args.vllm_num_engines
+            streaming_config.num_unique_prompts_rollout
+            * streaming_config.num_samples_per_prompt_rollout
+            // vllm_config.vllm_num_engines
         )
         if kv_cache_max_concurrency < expected_batch_size:
             nodes_needed = (
-                args.num_unique_prompts_rollout
-                * data_loader_config.num_samples_per_prompt_rollout
+                streaming_config.num_unique_prompts_rollout
+                * streaming_config.num_samples_per_prompt_rollout
                 // kv_cache_max_concurrency
             )
             logger.warning(
@@ -1663,8 +1525,8 @@ def create_model_and_optimizer(
     resume_training_step = results[0] + 1
     episode = (
         (resume_training_step - 1)
-        * args.num_unique_prompts_rollout
-        * data_loader_config.num_samples_per_prompt_rollout
+        * streaming_config.num_unique_prompts_rollout
+        * streaming_config.num_samples_per_prompt_rollout
     )
     logger.info("======== ✅ all models initialized =========")
 
@@ -1689,11 +1551,11 @@ def create_model_and_optimizer(
 def create_generation_configs(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig):
     """Create generation configs for training and evaluation."""
     generation_config = vllm_utils.SamplingConfig(
-        temperature=args.temperature,
-        top_p=args.vllm_top_p,
+        temperature=streaming_config.temperature,
+        top_p=vllm_config.vllm_top_p,
         max_tokens=streaming_config.response_length,
         n=streaming_config.num_samples_per_prompt_rollout,
-        stop=args.stop_strings,
+        stop=streaming_config.stop_strings,
         seed=args.seed,
         logprobs=1,
     )
@@ -1822,8 +1684,8 @@ def one_training_step(
         response_lengths=response_lengths,
         total_generation_time=total_generation_time,
         samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
-        num_engines=args.vllm_num_engines,
-        num_gpus_per_engine=args.vllm_tensor_parallel_size,
+        num_engines=vllm_config.vllm_num_engines,
+        num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
         training_time=train_timer.duration,
         num_training_gpus=args.world_size,
     )
@@ -2174,7 +2036,7 @@ def run_training(
             for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(eval_example, 0, prompt_Q, generation_configs["eval"], is_eval=True)
 
-        episode += args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+        episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
         data_thread_metrics = {}
         try:
@@ -2268,6 +2130,7 @@ def main(
     tc: TokenizerConfig,
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config)
@@ -2281,7 +2144,9 @@ def main(
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config)
 
-    if len(train_dataset) < (needed := max(streaming_config.async_steps, 1) * args.num_unique_prompts_rollout):
+    if len(train_dataset) < (
+        needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
+    ):
         raise ValueError(
             f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
         )
@@ -2299,21 +2164,21 @@ def main(
     # - all prompts from async_steps + 1 training steps
     # - all eval prompts
     num_eval_prompts = len(eval_dataset) if eval_dataset is not None else 0
-    queue_size = (streaming_config.async_steps + 1) * args.num_unique_prompts_rollout + num_eval_prompts
+    queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
     prompt_Q = ray_queue.Queue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
     reward_config = RewardConfig(
-        apply_r1_style_format_reward=args.apply_r1_style_format_reward,
-        r1_style_format_reward=args.r1_style_format_reward,
-        apply_verifiable_reward=args.apply_verifiable_reward,
-        verification_reward=args.verification_reward,
-        non_stop_penalty=args.non_stop_penalty,
-        non_stop_penalty_value=args.non_stop_penalty_value,
-        only_reward_good_outputs=args.only_reward_good_outputs,
-        additive_format_reward=args.additive_format_reward,
+        apply_r1_style_format_reward=streaming_config.apply_r1_style_format_reward,
+        r1_style_format_reward=streaming_config.r1_style_format_reward,
+        apply_verifiable_reward=streaming_config.apply_verifiable_reward,
+        verification_reward=streaming_config.verification_reward,
+        non_stop_penalty=streaming_config.non_stop_penalty,
+        non_stop_penalty_value=streaming_config.non_stop_penalty_value,
+        only_reward_good_outputs=streaming_config.only_reward_good_outputs,
+        additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args),
     )
     generation_configs = create_generation_configs(args, streaming_config)
@@ -2351,6 +2216,7 @@ def main(
         prompt_Q,
         evaluation_inference_results_Q,
         streaming_config,
+        vllm_config,
         train_dataset,
         eval_dataset,
         reward_config,
@@ -2428,11 +2294,14 @@ def main(
 if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig, data_loader_lib.StreamingDataLoaderConfig))
-    args, tokenizer_config, model_config, streaming_config = parser.parse_args_into_dataclasses()
+    parser = ArgumentParserPlus(
+        (Args, TokenizerConfig, ModelConfig, data_loader_lib.StreamingDataLoaderConfig, data_loader_lib.VLLMConfig)
+    )
+    args, tokenizer_config, model_config, streaming_config, vllm_config = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
+    assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
 
-    main(args, tokenizer_config, model_config, streaming_config)
+    main(args, tokenizer_config, model_config, streaming_config, vllm_config)

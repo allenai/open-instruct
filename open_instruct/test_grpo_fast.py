@@ -46,6 +46,7 @@ class TestGrpoFastBase(unittest.TestCase):
 
                 if hasattr(rt, "getfd"):
                     # This is a hack to get the cache info
+
                     # Try to find the cache in the module
                     for attr_name in dir(rt):
                         attr = getattr(rt, attr_name)
@@ -62,9 +63,12 @@ class TestGrpoFastBase(unittest.TestCase):
         """Initialize Ray and check for pre-existing leaks."""
         # Record initial resource tracker state
         self._initial_resources = self._get_resource_tracker_state()
+
         # Track Ray queues for cleanup
         self._ray_queues = []
+
         utils.check_runtime_leaks()
+
         # Initialize Ray for this test
         ray.init(include_dashboard=False, runtime_env={"env_vars": dict(os.environ)})
 
@@ -81,13 +85,17 @@ class TestGrpoFastBase(unittest.TestCase):
         """Check for leaks and shutdown Ray."""
         # Clean up Ray queues BEFORE shutting down Ray
         self._cleanup_ray_queues()
+
         # Shutdown Ray
         if ray.is_initialized():
             ray.shutdown()
+
         # Force garbage collection to clean up any lingering objects
         gc.collect()
+
         # Get final resource tracker state
         final_resources = self._get_resource_tracker_state()
+
         # Check for new resources that weren't there initially
         new_resources = {}
         for rtype, names in final_resources.items():
@@ -95,13 +103,16 @@ class TestGrpoFastBase(unittest.TestCase):
             new_names = [n for n in names if n not in initial_names]
             if new_names:
                 new_resources[rtype] = new_names
+
         utils.check_runtime_leaks()
+
         # Check for semaphore leaks
         if new_resources:
             # Report all new resources, especially semaphores
             leak_msg = f"Resource leaks detected after test {self._testMethodName}:\n"
             for rtype, names in new_resources.items():
                 leak_msg += f"  {rtype}: {names}\n"
+
             # Fail if there are semaphore leaks
             if "semaphore" in new_resources:
                 self.fail(leak_msg)
@@ -175,9 +186,11 @@ class TestGrpoFastBase(unittest.TestCase):
         )
 
     def create_mock_tokenizer_and_reward_fn(self):
-        tokenizer_name = "EleutherAI/pythia-14m"
+        # Set up dummy tokenizer
+        tokenizer_name = "EleutherAI/pythia-14m"  # Using a small model for testing
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
+        # Set up dummy reward fn that will guarantee nonzero std
         async def reward_fn(
             responses: list[torch.Tensor],
             decoded_responses: list[str],

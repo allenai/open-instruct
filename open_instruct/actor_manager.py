@@ -41,7 +41,7 @@ def find_free_port():
 class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
-    def __init__(self, queues: dict, args):
+    def __init__(self, queues: dict, args, streaming_config=None, vllm_config=None):
         self._should_stop = False
         self._last_updated = datetime.now()
         self._dashboard_port: int | None = None
@@ -56,6 +56,8 @@ class ActorManager:
         self._generation_batch_history = collections.deque(maxlen=self._sample_window)
         self._kv_cache_max_concurrency = None
         self._args = args
+        self._streaming_config = streaming_config
+        self._vllm_config = vllm_config
         if self._args.enable_queue_dashboard:
             self._setup_queue_monitoring()
             self._start_dashboard()
@@ -105,6 +107,12 @@ class ActorManager:
                 for queue_name, info in self._queue_info.items()
             }
 
+            vllm_num_engines = self._vllm_config.vllm_num_engines if self._vllm_config else 1
+            num_unique_prompts = self._streaming_config.num_unique_prompts_rollout if self._streaming_config else 1
+            num_samples_per_prompt = (
+                self._streaming_config.num_samples_per_prompt_rollout if self._streaming_config else 1
+            )
+            kv_cache_concurrency = self._kv_cache_max_concurrency if self._kv_cache_max_concurrency else 0
             return {
                 "should_stop": self._should_stop,
                 "last_updated": self._last_updated.isoformat(),
@@ -112,8 +120,8 @@ class ActorManager:
                 "token_stats": self.get_token_stats(),
                 "timing_stats": self.get_timing_stats(),
                 "concurrency_per_engine": self._kv_cache_max_concurrency,
-                "total_concurrency": self._kv_cache_max_concurrency * self._args.vllm_num_engines,
-                "batch_size": self._args.num_unique_prompts_rollout * self._args.num_samples_per_prompt_rollout,
+                "total_concurrency": kv_cache_concurrency * vllm_num_engines,
+                "batch_size": num_unique_prompts * num_samples_per_prompt,
             }
 
         def run_server():

@@ -64,7 +64,7 @@ from huggingface_hub import HfApi
 from ray.util import state as ray_state
 from rich.pretty import pprint
 from tqdm import tqdm
-from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
+from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils
@@ -1884,8 +1884,6 @@ class ModelDims:
     @classmethod
     def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
         """Create ModelDims from a HuggingFace model name or path."""
-        from transformers import AutoConfig
-
         config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
         hidden_size = config.hidden_size
         intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)

@@ -122,7 +122,6 @@ def get_git_commit() -> str:
 def save_benchmark_results_to_csv(
     results: list[dict[str, Any]],
     total_time: float,
-    args: grpo_fast.Args,
     streaming_config: data_loader.StreamingDataLoaderConfig,
     model_config: model_utils.ModelConfig,
 ) -> None:
@@ -135,8 +134,8 @@ def save_benchmark_results_to_csv(
         "git_commit": git_commit,
         "model": model_config.model_name_or_path,
         "total_batches": len(results),
-        "batch_size": args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout,
-        "num_unique_prompts_rollout": args.num_unique_prompts_rollout,
+        "batch_size": streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout,
+        "num_unique_prompts_rollout": streaming_config.num_unique_prompts_rollout,
         "num_samples_per_prompt_rollout": streaming_config.num_samples_per_prompt_rollout,
         "response_length": streaming_config.response_length,
         "total_time": total_time,
@@ -153,7 +152,11 @@ def save_benchmark_results_to_csv(
         "avg_generation_time_per_batch": agg_results["avg_generation_time"],
         "avg_weight_sync_time_per_batch": agg_results["avg_weight_sync_time"],
         "avg_new_tokens_per_sample": agg_results["total_num_new_tokens"]
-        / (len(results) * args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout),
+        / (
+            len(results)
+            * streaming_config.num_unique_prompts_rollout
+            * streaming_config.num_samples_per_prompt_rollout
+        ),
     }
 
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
@@ -223,14 +226,14 @@ def setup_dataset(
 
     # Load dataset
     dataset = dataset_transformation.get_cached_dataset_tulu(
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+        dataset_mixer_list=streaming_config.dataset_mixer_list,
+        dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
         tc=tokenizer_config,
-        dataset_transform_fn=args.dataset_transform_fn,
+        dataset_transform_fn=streaming_config.dataset_transform_fn,
         transform_fn_args=transform_fn_args,
-        dataset_cache_mode=args.dataset_cache_mode,
-        dataset_local_cache_dir=args.dataset_local_cache_dir,
-        dataset_skip_cache=args.dataset_skip_cache,
+        dataset_cache_mode=streaming_config.dataset_cache_mode,
+        dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
+        dataset_skip_cache=streaming_config.dataset_skip_cache,
     )
 
     # Shuffle dataset
@@ -242,6 +245,8 @@ def setup_dataset(
 
 def setup_vllm_engines(
     args: grpo_fast.Args,
+    streaming_config: data_loader.StreamingDataLoaderConfig,
+    vllm_config: data_loader.VLLMConfig,
     tokenizer_config: dataset_transformation.TokenizerConfig,
     model_config: model_utils.ModelConfig,
     max_model_len: int,
@@ -253,31 +258,31 @@ def setup_vllm_engines(
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
     queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
-    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
+    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
 
     tokenizer_name_or_path = tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
     assert tokenizer_name_or_path is not None
     assert model_config.model_name_or_path is not None
 
     vllm_engines = vllm_utils.create_vllm_engines(
-        num_engines=args.vllm_num_engines,
-        tensor_parallel_size=args.vllm_tensor_parallel_size,
-        enforce_eager=args.vllm_enforce_eager,
+        num_engines=vllm_config.vllm_num_engines,
+        tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
+        enforce_eager=vllm_config.vllm_enforce_eager,
         tokenizer_name_or_path=tokenizer_name_or_path,
         pretrain=model_config.model_name_or_path,
         revision=model_config.model_revision,
         seed=args.seed,
-        enable_prefix_caching=args.vllm_enable_prefix_caching,
+        enable_prefix_caching=vllm_config.vllm_enable_prefix_caching,
         max_model_len=max_model_len,
-        vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+        vllm_gpu_memory_utilization=vllm_config.vllm_gpu_memory_utilization,
         single_gpu_mode=args.single_gpu_mode,
         pg=None,
         tools={},
-        max_tool_calls=args.max_tool_calls,
+        max_tool_calls=streaming_config.max_tool_calls,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
-        inflight_updates=args.inflight_updates,
+        inflight_updates=streaming_config.inflight_updates,
     )
 
     logger.info("vLLM engines ready")
@@ -360,21 +365,22 @@ def run_benchmark(
     actor_manager: ray.actor.ActorHandle,
     args: grpo_fast.Args,
     streaming_config: data_loader.StreamingDataLoaderConfig,
+    vllm_config: data_loader.VLLMConfig,
     model_config: model_utils.ModelConfig,
     timestamp: int,
     num_batches: int = 5,
 ) -> list[dict[str, Any]]:
     """Run the full benchmark."""
     logger.info(
-        f"Starting benchmark with 1 warmup batch + {num_batches - 1} main batches of size {args.num_unique_prompts_rollout}"
+        f"Starting benchmark with 1 warmup batch + {num_batches - 1} main batches of size {streaming_config.num_unique_prompts_rollout}"
     )
 
     # Create sampling parameters with 'n' for multiple samples per prompt
     generation_config = vllm.SamplingParams(
-        temperature=args.temperature,
+        temperature=streaming_config.temperature,
         max_tokens=streaming_config.response_length,
         min_tokens=streaming_config.response_length,
-        top_p=args.vllm_top_p,
+        top_p=vllm_config.vllm_top_p,
         n=streaming_config.num_samples_per_prompt_rollout,
         seed=args.seed,
         include_stop_str_in_output=True,
@@ -397,7 +403,7 @@ def run_benchmark(
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")
     warmup_start_idx = 0
-    warmup_end_idx = min(args.num_unique_prompts_rollout, len(dataset))
+    warmup_end_idx = min(streaming_config.num_unique_prompts_rollout, len(dataset))
     warmup_data = dataset[warmup_start_idx:warmup_end_idx]
     warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
     # Create individual PromptRequest for each warmup prompt
@@ -431,7 +437,7 @@ def run_benchmark(
             dataset,
             generation_config,
             stop_event,
-            args.num_unique_prompts_rollout,
+            streaming_config.num_unique_prompts_rollout,
             1,
             num_batches - 1,
         )
@@ -442,7 +448,7 @@ def run_benchmark(
                 submission_future.result()
 
             # Collect all results for this batch (one per prompt)
-            batch_results = [inference_results_Q.get() for _ in range(args.num_unique_prompts_rollout)]
+            batch_results = [inference_results_Q.get() for _ in range(streaming_config.num_unique_prompts_rollout)]
 
             # Simulate weight sync between batches
             weight_sync_time = simulate_weight_sync(actor_manager, vllm_engines, args)
@@ -483,8 +489,8 @@ def run_benchmark(
                 "dataset_indices": all_dataset_indices,
             }
 
-            num_engines = args.vllm_num_engines
-            num_gpus_per_engine = args.vllm_tensor_parallel_size
+            num_engines = vllm_config.vllm_num_engines
+            num_gpus_per_engine = vllm_config.vllm_tensor_parallel_size
             num_inference_gpus = num_engines * num_gpus_per_engine
 
             result_dict["mfu"] = model_dims.calculate_mfu(
@@ -519,8 +525,8 @@ def run_benchmark(
         # Calculate total time for main benchmark only
         main_benchmark_time = sum(r["generation_time"] for r in results)
 
-        print_summary(results, main_benchmark_time, args, streaming_config, model_config, model_dims)
-        save_benchmark_results_to_csv(results, main_benchmark_time, args, streaming_config, model_config)
+        print_summary(results, main_benchmark_time, streaming_config, model_config, model_dims)
+        save_benchmark_results_to_csv(results, main_benchmark_time, streaming_config, model_config)
 
     finally:
         stop_event.set()
@@ -582,7 +588,6 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
 def print_summary(
     results: list[dict[str, Any]],
     total_time: float,
-    args: grpo_fast.Args,
     streaming_config: data_loader.StreamingDataLoaderConfig,
     model_config: model_utils.ModelConfig,
     model_dims: utils.ModelDims,
@@ -590,7 +595,9 @@ def print_summary(
     """Print benchmark summary statistics."""
 
     agg_results = aggregate_results(results)
-    total_samples = len(results) * args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+    total_samples = (
+        len(results) * streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+    )
     avg_new_tokens_per_sample = agg_results["total_num_new_tokens"] / total_samples
 
     print("\n" + "=" * 60)
@@ -598,8 +605,10 @@ def print_summary(
     print("=" * 60)
     print(f"Model: {model_config.model_name_or_path}")
     print(f"Main benchmark batches: {len(results)} (after 1 warmup batch)")
-    print(f"Batch size: {args.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout}")
-    print(f"Unique prompts per batch: {args.num_unique_prompts_rollout}")
+    print(
+        f"Batch size: {streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout}"
+    )
+    print(f"Unique prompts per batch: {streaming_config.num_unique_prompts_rollout}")
     print(f"Num rollouts: {streaming_config.num_samples_per_prompt_rollout}")
     print(f"Max tokens: {streaming_config.response_length}")
     print("-" * 60)
@@ -666,15 +675,17 @@ def main() -> None:
             dataset_transformation.TokenizerConfig,
             model_utils.ModelConfig,
             data_loader.StreamingDataLoaderConfig,
+            data_loader.VLLMConfig,
         )  # type: ignore[arg-type]
     )
 
-    args, tokenizer_config, model_config, streaming_config = cast(
+    args, tokenizer_config, model_config, streaming_config, vllm_config = cast(
         tuple[
             grpo_fast.Args,
             dataset_transformation.TokenizerConfig,
             model_utils.ModelConfig,
             data_loader.StreamingDataLoaderConfig,
+            data_loader.VLLMConfig,
         ],
         parser.parse_args_into_dataclasses(),
     )
@@ -692,7 +703,7 @@ def main() -> None:
     dataset = setup_dataset(args, streaming_config, tokenizer_config)
     max_model_len = streaming_config.max_prompt_token_length + streaming_config.response_length
     vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
-        args, tokenizer_config, model_config, max_model_len
+        args, streaming_config, vllm_config, tokenizer_config, model_config, max_model_len
     )
 
     # Create the timestamp here so we use it for both filenames.
@@ -706,6 +717,7 @@ def main() -> None:
         actor_manager,
         args,
         streaming_config,
+        vllm_config,
         model_config,
         timestamp,
     )
