@@ -660,9 +660,6 @@ def combine_dataset(
 # ----------------------------------------------------------------------------
 # Arguments utilities
 class ArgumentParserPlus(HfArgumentParser):
-    def __init__(self, dataclass_types: type | Iterable[type] | None = None, **kwargs: Any) -> None:
-        super().__init__(dataclass_types, **kwargs)
-
     def parse_yaml_and_args(self, yaml_arg: str, other_args: list[str] | None = None) -> list[dataclass]:
         """
         Parse a YAML file and overwrite the default/loaded values with the values provided to the command line.

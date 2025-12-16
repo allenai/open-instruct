@@ -17,18 +17,6 @@ from rich.text import Text
 
 from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS, download_from_gs_bucket
 
-# Suppress multiprocess ResourceTracker cleanup warnings (Python 3.12 compatibility issue)
-_original_unraisablehook = sys.unraisablehook
-
-
-def _custom_unraisablehook(unraisable):
-    if "ResourceTracker" in str(unraisable.object) and "_recursion_count" in str(unraisable.exc_value):
-        return
-    _original_unraisablehook(unraisable)
-
-
-sys.unraisablehook = _custom_unraisablehook
-
 console = Console()
 
 
@@ -165,7 +153,6 @@ def get_args():
     parser.add_argument(
         "--no_auto_dataset_cache", action="store_true", help="If given, don't cache the dataset automatically"
     )
-    parser.add_argument("--no_result", action="store_true", help="If given, skip uploading results to Beaker")
     parser.add_argument(
         "--auto_output_dir_path",
         type=str,
@@ -319,13 +306,14 @@ def get_env_vars(
         env_vars.extend(
             [
                 beaker.BeakerEnvVar(name="HF_HOME", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"),
-                beaker.BeakerEnvVar(name="HF_DATASETS_CACHE", value="/tmp/hf_datasets_cache"),
+                beaker.BeakerEnvVar(
+                    name="HF_DATASETS_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"
+                ),
                 beaker.BeakerEnvVar(name="HF_HUB_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/hub"),
                 beaker.BeakerEnvVar(
                     name="CHECKPOINT_OUTPUT_DIR",
                     value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{global_wandb_id}",
                 ),
-                beaker.BeakerEnvVar(name="OLMO_SHARED_FS", value="1"),
             ]
         )
         if num_nodes > 1:
@@ -354,8 +342,6 @@ def get_env_vars(
                 [
                     # NOTE: For single-node training we still need all of these settings and we also
                     # need host networking enabled so that the ethernet interface names don't change.
-                    beaker.BeakerEnvVar(name="NCCL_LIB_DIR", value="/var/lib/tcpxo/lib64"),
-                    beaker.BeakerEnvVar(name="LD_LIBRARY_PATH", value="/var/lib/tcpxo/lib64"),
                     beaker.BeakerEnvVar(name="NCCL_CROSS_NIC", value="0"),
                     beaker.BeakerEnvVar(name="NCCL_PROTO", value="Simple,LL128"),
                     beaker.BeakerEnvVar(name="NCCL_MIN_NCHANNELS", value="4"),
@@ -375,7 +361,6 @@ def get_env_vars(
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
                     beaker.BeakerEnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
                     beaker.BeakerEnvVar(name="NCCL_TUNER_PLUGIN", value="libnccl-tuner.so"),
-                    beaker.BeakerEnvVar(name="OLMO_SHARED_FS", value="1"),
                     beaker.BeakerEnvVar(
                         name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config_ll128.textproto"
                     ),
@@ -637,13 +622,6 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
             download_path = gs_saved_path.replace("gs://", "/gs/")
             download_path_without_last_folder = download_path.rsplit("/", 1)[0]
             gs_download_command = [
-                "if",
-                "[",
-                "!",
-                "-f",
-                f"{download_path}/config.json",
-                "];",
-                "then",
                 "mkdir",
                 "-p",
                 download_path,
@@ -658,8 +636,6 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 "-r",
                 gs_saved_path,
                 download_path_without_last_folder,
-                ";",
-                "fi",
                 "&&",
                 "ls",
                 download_path_without_last_folder,
@@ -719,17 +695,6 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         command.append("--dataset_config_eval_hash")
                         command.append(dataset_config_hash)
             command = gs_download_command + command
-
-            output_dir_value = None
-            for idx, cmd in enumerate(command):
-                if cmd == "--output_dir":
-                    output_dir_value = command[idx + 1]
-                    break
-
-            if output_dir_value and not output_dir_value.startswith("gs://"):
-                gs_save_folder = f"gs://ai2-llm/post-training/deletable_checkpoint/{whoami}/{output_dir_value}"
-                command.extend(["--save_folder", gs_save_folder])
-                console.log(f"Adding --save_folder for GCS: {gs_save_folder}")
 
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
@@ -820,7 +785,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         image=beaker.BeakerImageSource(beaker=args.image),
         command=["/bin/bash", "-c"],
         arguments=[full_command],
-        result=None if args.no_result else beaker.BeakerResultSpec(path="/output"),
+        result=beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster),
         context=beaker.BeakerTaskContext(
             priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible

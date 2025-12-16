@@ -6,7 +6,11 @@ from datasets import Dataset
 from olmo_core.data import data_loader
 
 
-def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
+def to_device(
+    batch: dict[str, Any] | list[dict[str, Any]], device: torch.device | None
+) -> dict[str, Any] | list[dict[str, Any]]:
+    if isinstance(batch, list):
+        return batch
     return {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
 
@@ -141,7 +145,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         num_examples = min(self._per_rank_batch_size, len(self.dataset))
         examples = [self.dataset[i] for i in range(num_examples)]
-        return to_device(self._collator(examples), self._device)
+        return to_device(self._collator(examples), self._device)  # type: ignore[return-value]
 
     def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int | None:
         """Return the total number of tokens in the batch across all ranks."""
