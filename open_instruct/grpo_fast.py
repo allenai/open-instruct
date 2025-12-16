@@ -3014,11 +3014,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
     logger.info("finished training")
 
-    accelerator = Namespace()
-    accelerator.is_main_process = True  # hack
-    if args.push_to_hub:
+    if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
         logger.info("Pushing model to hub")
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
     # Check for runtime leaks before exiting
     logger.info("Checking for runtime leaks...")

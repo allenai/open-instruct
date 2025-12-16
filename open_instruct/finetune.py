@@ -947,8 +947,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
         )
-    if args.push_to_hub:
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+    if args.push_to_hub and accelerator.is_main_process:
+        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     accelerator.wait_for_everyone()
     if args.with_tracking:
         accelerator.end_training()
