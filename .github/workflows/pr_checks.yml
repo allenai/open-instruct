@@ -32,11 +32,25 @@ jobs:
         fi
 
         # Only require changelog for open_instruct/** changes
-        if git diff --name-only $(git merge-base origin/main HEAD) | grep -q '^open_instruct/'; then
-          git diff --name-only $(git merge-base origin/main HEAD) | grep '^CHANGELOG.md$' && echo "Thanks for helping keep our CHANGELOG up-to-date!"
-        else
+        if ! git diff --name-only $(git merge-base origin/main HEAD) | grep -q '^open_instruct/'; then
           echo "No open_instruct/ changes detected, skipping CHANGELOG check"
+          exit 0
         fi
+
+        CHANGELOG_DIFF=$(git diff $(git merge-base origin/main HEAD) -- CHANGELOG.md)
+        if [ -z "$CHANGELOG_DIFF" ]; then
+          echo "ERROR: Changes to open_instruct/ detected but CHANGELOG.md was not updated."
+          exit 1
+        fi
+
+        PR_URL="${{ github.event.pull_request.html_url }}"
+        if ! echo "$CHANGELOG_DIFF" | grep -q "$PR_URL"; then
+          echo "ERROR: CHANGELOG.md was updated but does not include the PR URL: $PR_URL"
+          echo "Please add a link to this PR in your changelog entry."
+          exit 1
+        fi
+
+        echo "Thanks for helping keep our CHANGELOG up-to-date!"
 
   code-quality:
     name: Code Quality
