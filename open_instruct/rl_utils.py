@@ -2,7 +2,7 @@
 import contextlib
 import time
 from dataclasses import dataclass
-from typing import Generic, List, Optional, TypeVar
+from typing import Generic, List, TypeVar
 
 import numpy as np
 import torch
@@ -35,33 +35,33 @@ class Timer(contextlib.ContextDecorator):
 
 @dataclass
 class PackedSequences(Generic[T]):
-    query_responses: np.ndarray
+    query_responses: list[torch.Tensor]
     """packed query and response (batch_size, pack_length)"""
-    attention_masks: np.ndarray
+    attention_masks: list[torch.Tensor]
     """3D attention mask for packed sequences (batch_size, pack_length, pack_length);
     it basically uses a intra-document mask for each query response pair;
     see https://huggingface.co/blog/sirluk/llm-sequence-packing for more details
     """
-    response_masks: np.ndarray
+    response_masks: list[torch.Tensor]
     """bool response mask for packed sequences (batch_size, pack_length)"""
-    original_responses: np.ndarray
+    original_responses: list[list[int]]
     """need the original response for broadcast (batch_size, response_length)"""
-    advantages: Optional[np.ndarray] = None
+    advantages: list[torch.Tensor] | None = None
     """packed advantages (batch_size, pack_length) (to be filled in by the main process)"""
-    num_actions: Optional[np.ndarray] = None
+    num_actions: list[torch.Tensor] | None = None
     """packed number of actions (batch_size, pack_length)"""
-    position_ids: Optional[np.ndarray] = None
+    position_ids: list[torch.Tensor] | None = None
     """packed position ids (batch_size, pack_length)"""
-    packed_seq_lens: Optional[np.ndarray] = None
-    vllm_logprobs: Optional[np.ndarray] = None
-    """packed vLLM logprobs for comparison (batch_size, pack_length)"""
+    packed_seq_lens: list[torch.Tensor] | None = None
     """packed sequence lengths (batch_size, pack_length)"""
-    dones: Optional[np.ndarray] = None
+    vllm_logprobs: list[torch.Tensor] | None = None
+    """packed vLLM logprobs for comparison (batch_size, pack_length)"""
+    dones: list[torch.Tensor] | None = None
     """packed dones (batch_size, pack_length), specifies the sequence boundaries
     E.g., [0, 0, 0, 0, 1, 0, 0, 0, 0, 2] means the first sequence ends at index 4, and the
     second sequence ends at index 9
     """
-    rewards: Optional[np.ndarray] = None
+    rewards: list[torch.Tensor] | None = None
     """packed rewards (batch_size, pack_length)"""
 
 
