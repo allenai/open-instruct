@@ -914,13 +914,6 @@ def is_beaker_job() -> bool:
     return "BEAKER_JOB_ID" in os.environ
 
 
-def is_on_gcp() -> bool:
-    """Check if running on GCP."""
-    hf_home = os.environ.get("HF_HOME", "")
-    hf_hub_cache = os.environ.get("HF_HUB_CACHE", "")
-    return hf_home.startswith("/filestore") or hf_hub_cache.startswith("/filestore")
-
-
 def get_beaker_experiment_info(experiment_id: str) -> dict | None:
     get_experiment_command = f"beaker experiment get {experiment_id} --format json"
     process = subprocess.Popen(["bash", "-c", get_experiment_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
