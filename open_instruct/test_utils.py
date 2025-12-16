@@ -17,8 +17,8 @@ import pathlib
 import tempfile
 import time
 import unittest
-from unittest import mock
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 import ray
@@ -647,9 +647,10 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             head_dim=128,
         )
 
-        with mock.patch(
-            "transformers.AutoConfig.from_pretrained", return_value=config
-        ) as mock_from_pretrained, mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config) as mock_from_pretrained,
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+        ):
             model_dims = utils.ModelDims.from_hf_config("test/model")
 
         mock_from_pretrained.assert_called_once_with("test/model", trust_remote_code=True)
@@ -670,15 +671,11 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
         )
 
     def test_from_hf_config_defaults(self):
-        config = SimpleNamespace(
-            hidden_size=1024,
-            num_attention_heads=8,
-            num_hidden_layers=12,
-            vocab_size=64000,
-        )
+        config = SimpleNamespace(hidden_size=1024, num_attention_heads=8, num_hidden_layers=12, vocab_size=64000)
 
-        with mock.patch("transformers.AutoConfig.from_pretrained", return_value=config), mock.patch(
-            "torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
         ):
             model_dims = utils.ModelDims.from_hf_config("test/defaults")
 
