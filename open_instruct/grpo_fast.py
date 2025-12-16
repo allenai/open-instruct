@@ -730,6 +730,7 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=True,
         )
         optimization_steps_done = 0
+        checkpoint_state = None
         if args.checkpoint_state_dir:
             # check if the dir exists
             if not os.path.exists(args.checkpoint_state_dir):
@@ -746,6 +747,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
+                checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 
                 rng_states = states["rng_states"]
@@ -800,7 +802,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 else None,
             )
         self.local_metrics = utils.MetricsTracker(device=self.device)
-        return optimization_steps_done
+        return optimization_steps_done, checkpoint_state
 
     def forward(
         self,
@@ -2178,8 +2180,12 @@ def create_model_and_optimizer(
     )
 
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
-    resume_training_step = results[0] + 1
-    episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    optimization_steps_done, checkpoint_state = results[0]
+    resume_training_step = optimization_steps_done + 1
+    if checkpoint_state and "episode" in checkpoint_state:
+        episode = checkpoint_state["episode"]
+    else:
+        episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     logger.info("======== ✅ all models and vLLM engines initialized =========")
 
     kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
@@ -2204,7 +2210,7 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
-    return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
+    return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager, checkpoint_state
 
 
 def create_generation_configs(args: Args):
@@ -2914,7 +2920,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         verifier_functions=build_all_verifiers(args),
     )
 
-    policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
+    policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager, checkpoint_state = (
         create_model_and_optimizer(
             args,
             tc,
@@ -2935,17 +2941,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     model_dims = ray.get(vllm_engines[0].get_model_dims.remote())
 
     generation_configs = create_generation_configs(args)
-
-    checkpoint_state = None
-    if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
-        # Try to load the checkpoint state from the first rank
-        checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
-        if os.path.exists(checkpoint_path):
-            checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-            logger.info(f"Loaded checkpoint state from {checkpoint_path}")
-
-            episode = checkpoint_state["episode"]
-            logger.info(f"Restored episode count: {episode}")
 
     data_loader = data_loader_lib.HFDataLoader(
         dataset=train_dataset,
