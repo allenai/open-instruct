@@ -20,13 +20,15 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from ray.util import queue as ray_queue
 
-from open_instruct import logger_utils
+from open_instruct import data_loader, logger_utils
 
 
 def find_free_port():
@@ -41,7 +43,13 @@ def find_free_port():
 class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
-    def __init__(self, queues: dict, args, streaming_config=None, vllm_config=None):
+    def __init__(
+        self,
+        queues: dict[str, ray_queue.Queue],
+        args: Any,
+        streaming_config: data_loader.StreamingDataLoaderConfig,
+        vllm_config: data_loader.VLLMConfig,
+    ):
         self._should_stop = False
         self._last_updated = datetime.now()
         self._dashboard_port: int | None = None
@@ -54,7 +62,7 @@ class ActorManager:
         self._total_decode_tokens = 0
         self._training_step_history = collections.deque(maxlen=self._sample_window)
         self._generation_batch_history = collections.deque(maxlen=self._sample_window)
-        self._kv_cache_max_concurrency = None
+        self._kv_cache_max_concurrency = 0
         self._args = args
         self._streaming_config = streaming_config
         self._vllm_config = vllm_config
@@ -107,12 +115,6 @@ class ActorManager:
                 for queue_name, info in self._queue_info.items()
             }
 
-            vllm_num_engines = self._vllm_config.vllm_num_engines if self._vllm_config else 1
-            num_unique_prompts = self._streaming_config.num_unique_prompts_rollout if self._streaming_config else 1
-            num_samples_per_prompt = (
-                self._streaming_config.num_samples_per_prompt_rollout if self._streaming_config else 1
-            )
-            kv_cache_concurrency = self._kv_cache_max_concurrency if self._kv_cache_max_concurrency else 0
             return {
                 "should_stop": self._should_stop,
                 "last_updated": self._last_updated.isoformat(),
@@ -120,8 +122,9 @@ class ActorManager:
                 "token_stats": self.get_token_stats(),
                 "timing_stats": self.get_timing_stats(),
                 "concurrency_per_engine": self._kv_cache_max_concurrency,
-                "total_concurrency": kv_cache_concurrency * vllm_num_engines,
-                "batch_size": num_unique_prompts * num_samples_per_prompt,
+                "total_concurrency": self._kv_cache_max_concurrency * self._vllm_config.vllm_num_engines,
+                "batch_size": self._streaming_config.num_unique_prompts_rollout
+                * self._streaming_config.num_samples_per_prompt_rollout,
             }
 
         def run_server():
