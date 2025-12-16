@@ -46,19 +46,19 @@ bash scripts/train/tulu3/dpo_8b.sh
 
 
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
-    
+
     <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-8B-DPO--VmlldzoxMTg3NjY4Nw" style="width:100%; height:500px" title="Tulu3-8B-DPO"></iframe>
 
 
 ???+ info
 
 
-    Based on our internal evaluation, the DPO model is roughly on par with the original `allenai/Llama-3.1-Tulu-3-8B-DPO` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training. 
+    Based on our internal evaluation, the DPO model is roughly on par with the original `allenai/Llama-3.1-Tulu-3-8B-DPO` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.
 
     ![dpo_plot](dpo/tulu3_8b_dpo_eval.png)
 
-    For example, DROP is lower than the reference, but DROP can be quite brittle due to parsing issues (see below). 
-    
+    For example, DROP is lower than the reference, but DROP can be quite brittle due to parsing issues (see below).
+
     ![dpo_plot](dpo/tulu3_8b_dpo_eval_drop.png)
 
 
@@ -90,7 +90,7 @@ bash scripts/train/olmo2/dpo_7b.sh
 
 ???+ info
 
-    Based on our internal evaluation, the DPO model is roughly on par with the original `allenai/OLMo-2-1124-7B-DPO` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training. 
+    Based on our internal evaluation, the DPO model is roughly on par with the original `allenai/OLMo-2-1124-7B-DPO` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.
 
     ![dpo_plot](dpo/olmo2_7b_dpo_eval.png)
 
@@ -120,7 +120,7 @@ bash scripts/train/olmo2/dpo_13b.sh
 
 ???+ info
 
-    Based on our internal evaluation, the DPO model is roughly on par with the original `allenai/OLMo-2-1124-13B-DPO` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training. 
+    Based on our internal evaluation, the DPO model is roughly on par with the original `allenai/OLMo-2-1124-13B-DPO` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.
 
     ![dpo_plot](dpo/olmo2_13b_dpo_eval.png)
 
@@ -165,4 +165,4 @@ The metrics are logged every `logging_steps` steps (if specified) and provide in
 We would like to thank the following projects for general infrastructure:
 
 - [DeepSpeedAI/DeepSpeed](https://github.com/deepspeedai/DeepSpeed)
-- [HuggingFace/Transformers](https://github.com/huggingface/transformers) 
+- [HuggingFace/Transformers](https://github.com/huggingface/transformers)

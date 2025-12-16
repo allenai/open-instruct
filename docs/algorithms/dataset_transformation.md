@@ -1,8 +1,8 @@
 # Dataset Transformations
 
-Dataset transformations are a key part of the training process. Typically, we are given some text dataset, and we tokenize and filter it to be used for training. 
+Dataset transformations are a key part of the training process. Typically, we are given some text dataset, and we tokenize and filter it to be used for training.
 
-Open Instruct includes a `dataset_transformation.py` utility which 
+Open Instruct includes a `dataset_transformation.py` utility which
 
 * handles dataset mixing
 * handles different tokenization functions
@@ -11,7 +11,7 @@ Open Instruct includes a `dataset_transformation.py` utility which
     5 minutes to tokenize the dataset. This translates to 32 * 5 * 8 = 1280 minutes = 21 hours of
     wasted H100 time.
     * Sometimes we also launch on places that don't have a shared cache, so we would
-    download individual datasets 32 times, and wait for concatenation and tokenization (actually 
+    download individual datasets 32 times, and wait for concatenation and tokenization (actually
     twice because the `with accelerator.main_process_first()` function assumes a shared cache)
     * Using a cache like this also minimizes the time to get first training output, making debug
     cycles faster.

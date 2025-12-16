@@ -2,15 +2,14 @@ import asyncio
 import random
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 import pandas as pd
 from datasets import load_dataset
-import open_instruct.utils as open_instruct_utils
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm_asyncio
 from transformers import AutoTokenizer, HfArgumentParser
 
+import open_instruct.utils as open_instruct_utils
 from open_instruct.generation import print_rich_table
 
 
@@ -18,7 +17,7 @@ from open_instruct.generation import print_rich_table
 class LLMJudgeConfig:
     n: int = 64
     model: str = "gpt-3.5-turbo-0125"
-    max_parallel_requests: Optional[int] = None
+    max_parallel_requests: int | None = None
 
     def __post_init__(self):
         if "gpt-3.5" in self.model:
@@ -32,7 +31,7 @@ class LLMJudgeConfig:
 @dataclass
 class Args:
     csv: str = "gpt.csv"
-    output_path: Optional[str] = None
+    output_path: str | None = None
     num_trails: int = 1
 
 
@@ -53,7 +52,6 @@ Decision: <"not bad" or "bad">
 
 
 def llm_judge(ljc: LLMJudgeConfig, df: pd.DataFrame):
-
     async_client = AsyncOpenAI()
 
     async def process_text(prompt: str, i: int, limiter: asyncio.Semaphore):
@@ -111,7 +109,9 @@ def llm_judge(ljc: LLMJudgeConfig, df: pd.DataFrame):
 
 if __name__ == "__main__":
     args, ljc = HfArgumentParser((Args, LLMJudgeConfig)).parse_args_into_dataclasses()
-    raw_dataset = load_dataset("allenai/tulu-v2-sft-mixture", split="train", num_proc=open_instruct_utils.max_num_processes())
+    raw_dataset = load_dataset(
+        "allenai/tulu-v2-sft-mixture", split="train", num_proc=open_instruct_utils.max_num_processes()
+    )
     raw_dataset = raw_dataset.select(range(64))
     tokenizer = AutoTokenizer.from_pretrained("allenai/llama-3-tulu-2-8b")
     ds = raw_dataset.map(

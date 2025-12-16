@@ -1,14 +1,12 @@
 import argparse
-import logging
-import sys
 from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from scripts.synth_pref.utils.model_configs import MODELS
 from open_instruct import logger_utils
+from scripts.synth_pref.utils.model_configs import MODELS
 
 logger = logger_utils.setup_logger(__name__)
 

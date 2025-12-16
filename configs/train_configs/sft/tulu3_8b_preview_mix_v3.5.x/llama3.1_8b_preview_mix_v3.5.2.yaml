@@ -6,7 +6,7 @@ use_slow_tokenizer: true
 dataset_mixer:
     # This mix adds FLAN data back, in addition to the 3.5.1 mix.
     # ------------------------------------------------------
-    # no_robot dataset, human written, for general chat. 
+    # no_robot dataset, human written, for general chat.
     # License: CC-By-NC-4.0
     # Total: 9500
     ai2-adapt-dev/no_robots_converted: 9500

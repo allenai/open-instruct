@@ -33,7 +33,7 @@ def adjust_batch_size(task_spec, model_name, batch_size_reduction):
         new_batch_size = max(1, int(original_batch_size) // batch_size_reduction)
         task_spec["arguments"] = [
             task_spec["arguments"][0].replace(
-                "--eval_batch_size {}".format(original_batch_size), "--eval_batch_size {}".format(new_batch_size)
+                f"--eval_batch_size {original_batch_size}", f"--eval_batch_size {new_batch_size}"
             )
         ]
 
@@ -167,7 +167,7 @@ if len(workspace.split("/")) != 2 or not all(workspace.split("/")):
     )
 model_type = "vanilla_lm" if not args.is_tuned else "tuned_lm"
 
-with open("configs/beaker_configs/default_eval.yaml", "r") as f:
+with open("configs/beaker_configs/default_eval.yaml") as f:
     default_yaml = f.read()
 d1 = yaml.load(default_yaml, Loader=yaml.FullLoader)
 
@@ -582,14 +582,7 @@ for experiment_group in experiment_groups:
                 "--chat_formatting_function eval.templates.create_prompt_with_huggingface_tokenizer_template",
             )
         ]
-    elif "llama2-chat" in model_info[0]:
-        task_spec["arguments"] = [
-            task_spec["arguments"][0].replace(
-                "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
-                "--chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format",
-            )
-        ]
-    elif "code_llama_instruct" in model_info[0]:
+    elif "llama2-chat" in model_info[0] or "code_llama_instruct" in model_info[0]:
         task_spec["arguments"] = [
             task_spec["arguments"][0].replace(
                 "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
@@ -663,13 +656,13 @@ if not args.skip_oi_evals:
     # if configs/beaker_configs/auto_created doesn't exist, create it with os
     if not os.path.exists("configs/beaker_configs/auto_created"):
         os.makedirs("configs/beaker_configs/auto_created")
-    fn = "configs/beaker_configs/auto_created/{}.yaml".format(experiment_name)
+    fn = f"configs/beaker_configs/auto_created/{experiment_name}.yaml"
     os.makedirs(os.path.dirname(fn), exist_ok=True)
     with open(fn, "w") as file:
         yaml.dump(d, file, default_flow_style=True)
 
     # Do not prefix or rewrite the workspace; use exactly what the user provided.
-    cmd = "beaker experiment create {} --workspace {}".format(fn, workspace)
+    cmd = f"beaker experiment create {fn} --workspace {workspace}"
     subprocess.Popen(cmd, shell=True)
 
 if args.run_oe_eval_experiments:
@@ -678,11 +671,7 @@ if args.run_oe_eval_experiments:
     if args.upload_to_hf:
         oe_eval_cmd += f" --upload_to_hf {args.upload_to_hf}"
     ## model location munging: if beaker, use beaker://. If hf, just name
-    if model_info[0].startswith("hf-"):
-        oe_eval_cmd += f" --model-location {model_info[1]}"
-    elif model_info[1].startswith("/"):
-        oe_eval_cmd += f" --model-location {model_info[1]}"
-    elif model_info[1].startswith("gs://"):
+    if model_info[0].startswith("hf-") or model_info[1].startswith("/") or model_info[1].startswith("gs://"):
         oe_eval_cmd += f" --model-location {model_info[1]}"
     else:
         oe_eval_cmd += f" --model-location beaker://{model_info[1]}"

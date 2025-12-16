@@ -5,7 +5,7 @@ Our setup mostly follows our [Dockerfile](./Dockerfile), which uses Python 3.10.
 
 * **Local installation**: This is the recommended way to install Open Instruct. You can install the dependencies by running the following commands:
 ```bash
-pip install --upgrade pip "setuptools<70.0.0" wheel 
+pip install --upgrade pip "setuptools<70.0.0" wheel
 # TODO, unpin setuptools when this issue in flash attention is resolved
 pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
 pip install packaging
@@ -28,7 +28,7 @@ uv sync --extra compile # to install flash attention
 docker build . -t open_instruct_dev
 # if you are interally at AI2, you can create an image like this:
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-beaker image delete $beaker_user/open_instruct_dev 
+beaker image delete $beaker_user/open_instruct_dev
 beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
 ```
 
@@ -44,7 +44,7 @@ docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg
 docker build -f Dockerfile.uv --build-arg UV_CACHE_DIR=$UV_CACHE_DIR -t open_instruct_dev_uv .
 # if you are interally at AI2, you can create an image like this:
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-beaker image delete $beaker_user/open_instruct_dev_uv 
+beaker image delete $beaker_user/open_instruct_dev_uv
 beaker image create open_instruct_dev_uv -n open_instruct_dev_uv -w ai2/$beaker_user
 ```
 

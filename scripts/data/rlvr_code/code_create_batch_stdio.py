@@ -38,22 +38,23 @@ The LLM is prompted to return a JSON object with the following keys:
 - `test_cases`: A list of dictionaries, where each is a test case with `input` and `output` strings.
 - `good_program`: A boolean flag indicating if the transformation was successful.
 """
+
 import json
 import os
 import random
 import re
 import time
-from typing import List
 
 from datasets import load_dataset
-import open_instruct.utils as open_instruct_utils
 from openai import AzureOpenAI
 from pydantic import BaseModel, ConfigDict
+
+import open_instruct.utils as open_instruct_utils
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
     azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
-    api_version="2024-12-01-preview"
+    api_version="2024-12-01-preview",
 )
 
 MODEL = "o3"
@@ -65,6 +66,7 @@ os.makedirs(f"{WD}/batch_files", exist_ok=True)
 
 INPUT_HF_DATASET = "nvidia/OpenCodeReasoning-2"
 SPLIT = "python"
+
 
 def extract_python_code(model_output: str) -> str:
     """Extract the last code block between ``` markers from the model output."""
@@ -83,8 +85,9 @@ hf_datasets = {
     "taco": load_dataset("BAAI/TACO", trust_remote_code=True, num_proc=open_instruct_utils.max_num_processes()),
     "apps": load_dataset("codeparrot/apps", trust_remote_code=True, num_proc=open_instruct_utils.max_num_processes()),
     "code_contests": load_dataset("deepmind/code_contests", num_proc=open_instruct_utils.max_num_processes()),
-    "open-r1/codeforces": load_dataset("open-r1/codeforces", num_proc=open_instruct_utils.max_num_processes())
+    "open-r1/codeforces": load_dataset("open-r1/codeforces", num_proc=open_instruct_utils.max_num_processes()),
 }
+
 
 def get_question(ds_name, split, index):
     benchmark = hf_datasets[ds_name][split][int(index)]
@@ -115,29 +118,35 @@ def get_question(ds_name, split, index):
 
     return None
 
+
 def get_input(row):
-    dataset = row['dataset']
-    split = row['split']
-    index = row['index']
+    dataset = row["dataset"]
+    split = row["split"]
+    index = row["index"]
     return get_question(dataset, split, index)
 
+
 def get_solution(row):
-    return row['solution']
+    return row["solution"]
+
 
 def get_id(row):
-    return row['question_id']
+    return row["question_id"]
+
 
 class TestCase(BaseModel):
     model_config = ConfigDict(extra="forbid")
     input: str
     output: str
 
+
 class OpenAIStructuredOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     rewritten_input: str
     rewritten_solution: str
-    test_cases: List[TestCase]
+    test_cases: list[TestCase]
     good_program: bool
+
 
 def create_batch_file(prompts):
     """Create a batch file in the format required by Azure OpenAI Batch API."""
@@ -158,16 +167,15 @@ def create_batch_file(prompts):
                 "body": {
                     "model": MODEL,
                     "messages": [
-                        {"role": "system", "content": "You are a helpful assistant that can write code in Python and use stdio."},
-                        {"role": "user", "content": prompt}
+                        {
+                            "role": "system",
+                            "content": "You are a helpful assistant that can write code in Python and use stdio.",
+                        },
+                        {"role": "user", "content": prompt},
                     ],
                     "response_format": {
                         "type": "json_schema",
-                        "json_schema": {
-                            "name": "OpenAIStructuredOutput",
-                            "strict": True,
-                            "schema": schema,
-                        }
+                        "json_schema": {"name": "OpenAIStructuredOutput", "strict": True, "schema": schema},
                     },
                 },
             }
@@ -186,10 +194,10 @@ def find_cached_results(id: str):
     all_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
 
     if all_files:
-        with open(all_files[0], "r") as f:
+        with open(all_files[0]) as f:
             try:
                 response = json.load(f)
-                rewritten_input = response['rewritten_input']
+                rewritten_input = response["rewritten_input"]
                 if type(rewritten_input) == dict:
                     return None
                 return response
@@ -197,6 +205,7 @@ def find_cached_results(id: str):
                 return None
 
     return None
+
 
 def main():
     global SAMPLE_LIMIT
@@ -346,19 +355,15 @@ Output should be a JSON object with this structure:
 
     # Submit the batch job
     print("Submitting batch job to Azure OpenAI...")
-    batch_file = client.files.create(
-        file=open(BATCH_FILE_NAME, "rb"),
-        purpose="batch"
-    )
+    batch_file = client.files.create(file=open(BATCH_FILE_NAME, "rb"), purpose="batch")
 
     batch_job = client.batches.create(
-        input_file_id=batch_file.id,
-        endpoint="/v1/chat/completions",
-        completion_window="24h"
+        input_file_id=batch_file.id, endpoint="/v1/chat/completions", completion_window="24h"
     )
 
     print(f"Batch job submitted with ID: {batch_job.id}")
     print("You can check the status of your batch job using the ID above.")
+
 
 if __name__ == "__main__":
     main()

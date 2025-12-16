@@ -14,13 +14,13 @@ theme:
     - search.suggest
     - search.highlight
   palette:
-    - media: "(prefers-color-scheme: dark)" 
+    - media: "(prefers-color-scheme: dark)"
       scheme: ai2-dark
       primary: custom
       toggle:
         icon: material/lightbulb
         name: Switch to light mode
-    - media: "(prefers-color-scheme: light)" 
+    - media: "(prefers-color-scheme: light)"
       scheme: ai2
       primary: custom
       toggle:
@@ -29,11 +29,11 @@ theme:
 #adding git repo
 repo_url: https://github.com/allenai/open-instruct
 repo_name: allenai/open-instruct
-#markdown_extensions 
+#markdown_extensions
 markdown_extensions:
   - pymdownx.superfences
   - pymdownx.tabbed:
-      alternate_style: true 
+      alternate_style: true
   - abbr
   - pymdownx.highlight
   - pymdownx.inlinehilite

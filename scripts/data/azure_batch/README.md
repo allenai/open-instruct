@@ -100,9 +100,9 @@ If you have a dataset with more than 95k prompts, `regenerate_dataset_completion
 There are two main docs with the credentials you need:
 
 - [NAIRR Pilot Azure AI Foundry Access (General Post-training)](https://docs.google.com/document/d/12fZEjqfopzi6hDroXrtgSIo00kpgMTLFs71-Lc2kkNI/edit?tab=t.0#heading=h.5m6cr2r4j0m) for access to GPT 4o, 4o-mini, and 4.1.
-- [NAIRR Pilot Azure AI Foundry Access for using OpenAI Models for OLMo](https://docs.google.com/document/d/1PKygtkH-JmvayUwXQ-QaI_wj58P1KAF4uGRSh6yrBqs/edit?tab=t.0)  for access to GPT 4o, 4o-mini, 4.1, o3, o4-mini. 
+- [NAIRR Pilot Azure AI Foundry Access for using OpenAI Models for OLMo](https://docs.google.com/document/d/1PKygtkH-JmvayUwXQ-QaI_wj58P1KAF4uGRSh6yrBqs/edit?tab=t.0)  for access to GPT 4o, 4o-mini, 4.1, o3, o4-mini.
 
-Reach out to [finbarrt@](finbarrt@allenai.org) for access to these docs if you don't have it. 
+Reach out to [finbarrt@](finbarrt@allenai.org) for access to these docs if you don't have it.
 
 ## Validation
 

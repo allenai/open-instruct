@@ -1,8 +1,8 @@
 import argparse
 import re
-from typing import Dict
 
 from datasets import Sequence, Value, load_dataset
+
 import open_instruct.utils as open_instruct_utils
 
 """
@@ -37,7 +37,8 @@ CUT_OFF_PATTERN = re.compile(
     """
 )
 
-def process_example(example: Dict, column: str, index: int = None) -> Dict:
+
+def process_example(example: dict, column: str, index: int = None) -> dict:
     """
     Extract cutoff date mentions from the specified column and add them to the example.
     """
@@ -55,7 +56,7 @@ def process_example(example: Dict, column: str, index: int = None) -> Dict:
             id = str(hash(first_content))
         else:
             id = str(hash(str(example)))
-    
+
     source = example.get("source", "unknown")
 
     for msg in messages:
@@ -70,6 +71,7 @@ def process_example(example: Dict, column: str, index: int = None) -> Dict:
     new_features["source"] = source
     return new_features
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="allenai/tulu-3-sft-mixture")
@@ -77,7 +79,11 @@ def main():
     parser.add_argument("--num_proc", type=int, default=16)
     parser.add_argument("--split", type=str, default="train")
     parser.add_argument("--push_to_hf", action="store_true", default=False)
-    parser.add_argument("--output-entity", type=str, help="Output entity (org/user) for the filtered dataset. If not provided, uses the same entity as the input dataset.")
+    parser.add_argument(
+        "--output-entity",
+        type=str,
+        help="Output entity (org/user) for the filtered dataset. If not provided, uses the same entity as the input dataset.",
+    )
     args = parser.parse_args()
 
     dataset = load_dataset(args.dataset, num_proc=open_instruct_utils.max_num_processes())
@@ -101,14 +107,12 @@ def main():
         num_proc=args.num_proc,
         desc="Extracting cutoff matches",
         features=new_features,
-        with_indices=True
+        with_indices=True,
     )
 
     # Filter examples with matches
     filtered = processed.filter(
-        lambda ex: bool(ex["cutoff_matches"]),
-        num_proc=args.num_proc,
-        desc="Filtering examples with cutoff mentions"
+        lambda ex: bool(ex["cutoff_matches"]), num_proc=args.num_proc, desc="Filtering examples with cutoff mentions"
     )
 
     # Collect all matches
@@ -136,16 +140,16 @@ def main():
     remove_ids = set(ex["id"] for ex in filtered)  # Use set for faster lookup
     print(f"Removing {len(remove_ids)} examples from processed")
     print(f"Sample remove_ids: {list(remove_ids)[:5]}")
-    
+
     # Debug: Check if IDs exist in processed
     processed_ids = set(ex["id"] for ex in processed.select(range(min(100, len(processed)))))
     print(f"Sample processed IDs: {list(processed_ids)[:5]}")
-    print(f"ID overlap check - first 5 remove_ids in processed: {[rid in processed_ids for rid in list(remove_ids)[:5]]}")
-    
+    print(
+        f"ID overlap check - first 5 remove_ids in processed: {[rid in processed_ids for rid in list(remove_ids)[:5]]}"
+    )
+
     processed = processed.filter(
-        lambda ex: ex["id"] not in remove_ids,
-        num_proc=args.num_proc,
-        desc="Filtering processed examples"
+        lambda ex: ex["id"] not in remove_ids, num_proc=args.num_proc, desc="Filtering processed examples"
     )
     print(f"Number of examples in processed after filtering: {len(processed)}")
     print(f"Number of examples in orig dataset: {len(split_data)}")
@@ -163,25 +167,24 @@ def main():
         else:
             # Use same entity as input dataset
             new_name = args.dataset + "-filter-datecutoff"
-        
+
         print(f"Uploading filtered dataset to: {new_name}")
         print(f"Dataset size before upload: {len(processed)}")
-        
+
         # Remove temporary columns if they exist
         columns_to_remove = []
         if "cutoff_matches" in processed.column_names:
             columns_to_remove.append("cutoff_matches")
-        
+
         if columns_to_remove:
             print(f"Removing columns: {columns_to_remove}")
             processed = processed.remove_columns(columns_to_remove)
-        
+
         print(f"Final dataset size: {len(processed)}")
         print(f"Final dataset columns: {processed.column_names}")
-        
+
         processed.push_to_hub(new_name, private=True)
         print(f"Successfully uploaded dataset with {len(processed)} examples")
-
 
 
 if __name__ == "__main__":

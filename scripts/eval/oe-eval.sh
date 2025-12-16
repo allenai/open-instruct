@@ -184,7 +184,7 @@ TULU_3_DEV=(
     "mmlu:mc::tulu"
     "mmlu:cot::summarize"
     "alpaca_eval_v3::tulu" # GPT 4.1 judge on OpenAI
-    # "alpaca_eval_v4::tulu" # GPT 4.1, judge on Azure 
+    # "alpaca_eval_v4::tulu" # GPT 4.1, judge on Azure
     "truthfulqa::tulu"
 )
 TULU_3_UNSEEN=(
@@ -204,7 +204,7 @@ NEXT_MODEL_DEV=(
     "mmlu:cot::hamish_zs_reasoning_deepseek"
     "popqa::hamish_zs_reasoning_deepseek"
     "simpleqa::tulu-thinker_deepseek"
-    
+
     # Reasoning
     "bbh:cot::hamish_zs_reasoning_deepseek_v2" # OLD: "bbh:cot::hamish_zs_reasoning_deepseek"
     "gpqa:0shot_cot::qwen3-instruct"
@@ -218,14 +218,14 @@ NEXT_MODEL_DEV=(
     "omega_500:0-shot-chat_deepseek" # OLD: "omega:0-shot-chat"
     "aime:zs_cot_r1::pass_at_32_2024_deepseek"
     "aime:zs_cot_r1::pass_at_32_2025_deepseek"  # OLD: "aime::hamish_zs_reasoning"
-    
+
     # Coding
     "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek"
     "mbppplus:0-shot-chat::tulu-thinker_deepseek"
     "livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags"
     # [TODO not merged] codeeditorbench - requires separate server
     # [TODO, maybe] cruxeval
-    
+
     # Chat / IF / Vibes
     "alpaca_eval_v3::hamish_zs_reasoning_deepseek"
     "ifeval::hamish_zs_reasoning_deepseek"
@@ -378,7 +378,7 @@ for TASK in "${TASKS[@]}"; do
             --beaker-image "$BEAKER_IMAGE" \
             --beaker-priority "$PRIORITY" \
             --push-datalake \
-            --datalake-tags "$DATALAKE_ARGS" 
+            --datalake-tags "$DATALAKE_ARGS"
     else
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \

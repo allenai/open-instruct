@@ -61,13 +61,13 @@ echo
 # Process each dataset
 for dataset in "${DATASETS[@]}"; do
     print_status "Processing dataset: $dataset"
-    
+
     # Create log file name
     log_file="logs/filter_chinese_$(echo $dataset | sed 's/[^a-zA-Z0-9]/_/g')_$(date +%Y%m%d_%H%M%S).log"
-    
+
     # Run the filtering script
     print_status "Running: python scripts/data/filtering_and_updates/filter_chinese.py --input-dataset $dataset --threshold $THRESHOLD"
-    
+
     if uv run python scripts/data/filtering_and_updates/filter_chinese.py --input-dataset "$dataset" --threshold $THRESHOLD > "$log_file" 2>&1; then
         print_success "Completed processing: $dataset"
         print_status "Log saved to: $log_file"
@@ -75,9 +75,9 @@ for dataset in "${DATASETS[@]}"; do
         print_error "Failed to process: $dataset"
         print_status "Check log file for details: $log_file"
     fi
-    
+
     echo
 done
 
 print_status "Batch processing completed!"
-print_status "Check the logs directory for detailed output from each dataset" 
+print_status "Check the logs directory for detailed output from each dataset"

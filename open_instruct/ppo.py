@@ -1737,10 +1737,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 }
                 scalar_metrics = {}
                 for key, value in metrics.items():
-                    if isinstance(value, (float, int)):
+                    if isinstance(value, float | int):
                         writer.add_scalar(key, value, episode)
                         scalar_metrics[key] = value
-                    if isinstance(value, (np.ndarray, list)) and len(value) > 0:
+                    if isinstance(value, np.ndarray | list) and len(value) > 0:
                         writer.add_histogram(key, value, episode)
                 print_rich_single_line_metrics(scalar_metrics)
 

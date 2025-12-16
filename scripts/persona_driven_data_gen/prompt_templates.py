@@ -1,4 +1,4 @@
-math_template = '''Create a math problem related to the following persona:
+math_template = """Create a math problem related to the following persona:
 
 {persona}
 
@@ -8,9 +8,9 @@ Note:
 2. You should make full use of the persona description to create the math problem to ensure that the math problem is unique and specific to the persona.
 3. Your response should always start with "Math problem:". Your response should not include a solution to the created math problem.
 4. Your created math problem should include no more than 2 sub-problems.
-'''
+"""
 
-math_template_easy = '''Create a grade school math word problem related to the following persona:
+math_template_easy = """Create a grade school math word problem related to the following persona:
 
 {persona}
 
@@ -19,7 +19,7 @@ Note:
 1. You should make full use of the persona description to create the math problem to ensure that the math problem is unique and specific to the persona.
 2. The problem primarily involves performing a sequence of elementary calculations using basic arithmetic operations (+ − ×÷) to reach a single final answer.
 3. Your response should always start with "Math problem:". Your response should not include a solution to the created math problem.
-'''
+"""
 
 
 instruction_template = '''Guess a prompt that the following persona may ask you to do:
@@ -40,7 +40,7 @@ Note:
 1. The article should be specific, informative and knowledge-rich.
 2. Your response should start with "Title:"'''
 
-npc_template = '''World of Warcraft (WoW) is a massively multiplayer online role-playing game (MMORPG) developed by Blizzard Entertainment. It is set in the high-fantasy world of Azeroth, a land filled with rich lore, diverse races, and epic conflicts. The game has evolved significantly since its release in 2004, with numerous expansions adding new continents, races, classes, and storylines. Below is a detailed overview of the game's worldview, story background, and some key characters and NPCs.
+npc_template = """World of Warcraft (WoW) is a massively multiplayer online role-playing game (MMORPG) developed by Blizzard Entertainment. It is set in the high-fantasy world of Azeroth, a land filled with rich lore, diverse races, and epic conflicts. The game has evolved significantly since its release in 2004, with numerous expansions adding new continents, races, classes, and storylines. Below is a detailed overview of the game's worldview, story background, and some key characters and NPCs.
 
 ### Worldview and Story Background
 
@@ -240,24 +240,24 @@ Note:
 1. Your response should start with "Name:".
 2. Your NPC description should be specific and consistent with the game.
 3. You also need to specify how the NPC interacts with players in the game.
-'''
+"""
 
 
-math_solution_template = '''Provide solution to the given math problem.
+math_solution_template = """Provide solution to the given math problem.
 
 Problem: {persona}
 
 Note: Provide your solution step-by-step, and end your solution in a new line in the following format: \nFinal Answer: The final answer is $final_answer$. I hope it is correct.
-'''
+"""
 
-grade_math_solution_template = '''Provide solution to the given math problem.
+grade_math_solution_template = """Provide solution to the given math problem.
 
 Problem: {persona}
 
-Note: First provide your solution step-by-step, and then output only a single final answer after ####'''
+Note: First provide your solution step-by-step, and then output only a single final answer after ####"""
 # end with your final answer in the following format: #### final_answer
 
-instruction_following = '''Create a verifiable instruction that the following persona might ask you to do:
+instruction_following = """Create a verifiable instruction that the following persona might ask you to do:
 
 {persona}
 
@@ -268,16 +268,16 @@ Note:
 1. The above example is not tied to any particular persona, but you should create one that is unique and specific to the given persona.
 2. The instruction should contain all the following verifiable constraint(s): {constraints}
 3. Your output should start with "User instruction:". Your output should not include an answer to the instruction.
-'''
+"""
 
-instruction_following_solution = '''Provide a response to the given instruction while satisfying the constraints.
+instruction_following_solution = """Provide a response to the given instruction while satisfying the constraints.
 
 Instruction: {persona}
 
 Note that you should follow the instruction precisely and satisfy all the constraints.
-'''
+"""
 
-rewrite_if_prompt = '''Rewrite the given instruction to remove one of the constraints.
+rewrite_if_prompt = """Rewrite the given instruction to remove one of the constraints.
 
 Instruction: {persona}
 
@@ -286,11 +286,11 @@ Note:
 1. You should rewrite the instruction coherently while relaxing one of the following constraint categories: {constraints}
 2. Remember to entirely relax one of the constraint category that is {category}
 3. Your output should start with "User instruction:". Your output should not include an answer to the instruction.
-'''
+"""
 
 # (such as "write in more than 400 words")
 
-code_template = '''{persona}
+code_template = """{persona}
 
 Assume you are the persona described above and you are asking a python programming question in stackoverflow.
 
@@ -299,21 +299,21 @@ Note:
 1. Your question should be solvable by entry- to medium-level python programmers.
 2. Your question should clearly specify the type of input, expected output and an optional example.
 3. Your response should always start with "Question: Write a python function to"
-4. Your response should not include a solution to the created coding problem.'''
+4. Your response should not include a solution to the created coding problem."""
 
 
-code_solution_template = '''Provide solution to the given python programming question.
+code_solution_template = """Provide solution to the given python programming question.
 
 Question: {persona}
 
 
-Note: 
+Note:
 
 1. Your response should always start with the function definition and end with the final return statement.
-2. Your response should only and only include python function.'''
+2. Your response should only and only include python function."""
 
 
-math_int_algebra_template = '''Create an intermediate algebra math problem related to the following persona:
+math_int_algebra_template = """Create an intermediate algebra math problem related to the following persona:
 
 {persona}
 
@@ -323,4 +323,4 @@ Note:
 2. You should make full use of the persona description to create the math problem to ensure that the math problem is unique and specific to the persona.
 3. Your response should always start with "Math problem:". Your response should not include a solution to the created math problem.
 4. Your created math problem should include no more than 2 sub-problems.
-'''
+"""

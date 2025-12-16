@@ -29,36 +29,41 @@ Workflow:
 2.  Wait for the batch jobs to complete.
 3.  Run this script to retrieve the difficulty scores, merge them into the source datasets, and upload the updated datasets to the HuggingFace Hub.
 """
+
 import json
 import os
 
 from datasets import Dataset, load_dataset
-import open_instruct.utils as open_instruct_utils
 from openai import AzureOpenAI
 from pydantic import BaseModel, ConfigDict
+
+import open_instruct.utils as open_instruct_utils
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
     azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
-    api_version="2024-12-01-preview"
+    api_version="2024-12-01-preview",
 )
 
 BATCH_ID_FILEPATH = "batches_difficulty.json"
 
 
 def get_id(row):
-    return row['id']
+    return row["id"]
+
 
 def extract_id_from_custom_id(custom_id: str) -> str:
     # get rid of the timestamp
-    if '_' in custom_id:
-        return '_'.join(custom_id.split('_')[1:])
+    if "_" in custom_id:
+        return "_".join(custom_id.split("_")[1:])
     return custom_id
+
 
 class OpenAIStructuredOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     explanation: str
     difficulty: int
+
 
 def check_batch_status(batch_id: str) -> bool:
     """Check if the batch job is complete."""
@@ -71,6 +76,7 @@ def check_batch_status(batch_id: str) -> bool:
     except Exception as e:
         print(f"Error checking batch status: {e}")
         return False
+
 
 def get_batch_results(batch_id: str) -> list:
     """Retrieve and process batch results."""
@@ -89,16 +95,16 @@ def get_batch_results(batch_id: str) -> list:
 
         # Process each line of the output
         results = []
-        for line in content_str.split('\n'):
+        for line in content_str.split("\n"):
             if line.strip():
                 try:
                     result = json.loads(line)
-                    if 'response' in result and 'body' in result['response']:
-                        content = result['response']['body']['choices'][0]['message']['content']
+                    if "response" in result and "body" in result["response"]:
+                        content = result["response"]["body"]["choices"][0]["message"]["content"]
                         processed_result = json.loads(content)
                         # Extract the original ID from custom_id (format: TIMESTAMP_ID)
-                        custom_id = result.get('custom_id', '')
-                        processed_result['id'] = extract_id_from_custom_id(custom_id)
+                        custom_id = result.get("custom_id", "")
+                        processed_result["id"] = extract_id_from_custom_id(custom_id)
                         results.append(processed_result)
                 except Exception as e:
                     print(f"Error processing result line: {e}")
@@ -108,6 +114,7 @@ def get_batch_results(batch_id: str) -> list:
         print(f"Error retrieving batch results: {e}")
         return []
 
+
 def process_batch_results(dataset: str, batch_id: str):
     """Process the batch results and upload to Hugging Face."""
     batch_results = get_batch_results(batch_id)
@@ -115,27 +122,29 @@ def process_batch_results(dataset: str, batch_id: str):
         print("No results found in batch")
         return
 
-    ds = load_dataset(dataset, split='train', num_proc=open_instruct_utils.max_num_processes())
+    ds = load_dataset(dataset, split="train", num_proc=open_instruct_utils.max_num_processes())
     print("building id to row")
     id_to_row = {get_id(row): row for row in ds}
     new_results = []
     for result in batch_results:
         try:
-            id = result['id']
+            id = result["id"]
             if id not in id_to_row:
                 print(f"ID {id} not found in dataset")
                 continue
 
             row = id_to_row[id]
-            new_row = { **row}
-            new_row['difficulty'] = result['difficulty']
-            new_row['difficulty_explanation'] = result['explanation']
+            new_row = {**row}
+            new_row["difficulty"] = result["difficulty"]
+            new_row["difficulty_explanation"] = result["explanation"]
             new_results.append(new_row)
         except Exception as e:
             print(f"Error processing result: {e}")
             print(f"Result: {result}")
 
-    print(f"About to upload {len(new_results)} results to Hugging Face out of {len(batch_results)}. Do you want to upload?")
+    print(
+        f"About to upload {len(new_results)} results to Hugging Face out of {len(batch_results)}. Do you want to upload?"
+    )
 
     # Upload to Hugging Face
     if new_results:
@@ -146,12 +155,8 @@ def process_batch_results(dataset: str, batch_id: str):
     else:
         print("No valid results to upload")
 
+
 if __name__ == "__main__":
     batch_ids = json.load(open(BATCH_ID_FILEPATH))
     for dataset, batch_id in batch_ids.items():
         process_batch_results(dataset, batch_id)
-
-
-
-
-

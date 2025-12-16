@@ -26,7 +26,7 @@ The `test_filter_ngram_repetitions.py` test suite covers:
 
 ### Utility Functions
 - `split_into_paragraphs()` - Text paragraph splitting
-- `split_into_sentences()` - Text sentence splitting  
+- `split_into_sentences()` - Text sentence splitting
 - `is_math_or_code()` - Math/code pattern detection
 - `is_code_import_or_return()` - Code import/return detection
 - `is_short_phrase()` - Short phrase detection
@@ -56,4 +56,4 @@ The `test_filter_ngram_repetitions.py` test suite covers:
 - Tests use lower thresholds than production to ensure functionality works
 - Focus is on testing that functions work correctly, not exact production thresholds
 - Tests verify both positive cases (repetitions detected) and negative cases (normal text not flagged)
-- Edge cases and boundary conditions are covered 
+- Edge cases and boundary conditions are covered

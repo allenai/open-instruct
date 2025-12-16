@@ -16,14 +16,14 @@ dataset_mixer:
     # ai2-adapt-dev/personahub_math_v3_119975: 119975
     ai2-adapt-dev/personahub_math_v4_149975: 149975
     # Vtuber-plan/sharegpt-cleaned: 114046
-    # vicgalle/alpaca-gpt4: 20000 
-    # HuggingFaceH4/CodeAlpaca_20K: 18000 
-    # natolambert/tulu-v2-sft-mixture-lima: 1018 
+    # vicgalle/alpaca-gpt4: 20000
+    # HuggingFaceH4/CodeAlpaca_20K: 18000
+    # natolambert/tulu-v2-sft-mixture-lima: 1018
     # natolambert/tulu-v2-sft-mixture-science: 7468
     AI-MO/NuminaMath-TIR: 72441
     # ai2-adapt-dev/numina_math_gsm8k_sampled_sft_llama3_405_regen: 8937
     # ai2-adapt-dev/numina_math_gsm8k_sampled_sft_gold: 8937
-    # ai2-adapt-dev/numina_math_gsm8k_prefs_balance_minerva_format_v2_messages_format: 22841 
+    # ai2-adapt-dev/numina_math_gsm8k_prefs_balance_minerva_format_v2_messages_format: 22841
     # ai2-adapt-dev/math_numina_balanced_none_mc_prefs_minerva_format_messages_format: 41603
 max_seq_length: 4096
 preprocessing_num_workers: 128

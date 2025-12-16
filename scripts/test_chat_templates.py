@@ -2,8 +2,8 @@
 """Render canned chat examples with a chosen template to inspect formatting."""
 
 import argparse
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, List
 
 from transformers import AutoTokenizer
 
@@ -18,7 +18,7 @@ SINGLE_TURN_REASONING = [
     {
         "role": "assistant",
         "content": (
-            "<think>Okay... user sent \"asdlkasd\"—probably a test. Stay friendly, invite clarification...</think>\n"
+            '<think>Okay... user sent "asdlkasd"—probably a test. Stay friendly, invite clarification...</think>\n'
             "It looks like your message might be a bit jumbled! Could you clarify what you're asking about? "
             "I'm here to help with AI, language models, writing, coding—whatever you need."
         ),
@@ -61,10 +61,7 @@ EXAMPLES = {
         "messages": MULTI_TURN_REASONING,
         "description": "Two assistant turns, both containing <think> traces.",
     },
-    "basic_chat": {
-        "messages": BASIC_CHAT_TRANSCRIPT,
-        "description": "Simple chat without reasoning tags.",
-    },
+    "basic_chat": {"messages": BASIC_CHAT_TRANSCRIPT, "description": "Simple chat without reasoning tags."},
 }
 
 DEFAULT_EXAMPLES = ("single_reasoning", "multi_reasoning")
@@ -73,14 +70,10 @@ DEFAULT_EXAMPLES = ("single_reasoning", "multi_reasoning")
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--model-name",
-        default=MODEL_NAME,
-        help="Tokenizer identifier on Hugging Face (default: %(default)s).",
+        "--model-name", default=MODEL_NAME, help="Tokenizer identifier on Hugging Face (default: %(default)s)."
     )
     parser.add_argument(
-        "--revision",
-        default=MODEL_REVISION,
-        help="Tokenizer revision, tag, or commit (default: %(default)s).",
+        "--revision", default=MODEL_REVISION, help="Tokenizer revision, tag, or commit (default: %(default)s)."
     )
     parser.add_argument(
         "--template",
@@ -98,9 +91,7 @@ def parse_args() -> argparse.Namespace:
         help="Which canned message sets to render (use 'all' for everything).",
     )
     parser.add_argument(
-        "--show-tokens",
-        action="store_true",
-        help="Also print token ids and counts to compare serialized lengths.",
+        "--show-tokens", action="store_true", help="Also print token ids and counts to compare serialized lengths."
     )
     parser.add_argument(
         "--snippet-len",
@@ -111,7 +102,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def resolve_examples(selection: Iterable[str]) -> List[str]:
+def resolve_examples(selection: Iterable[str]) -> list[str]:
     ordered = list(dict.fromkeys(selection))  # preserve order, drop duplicates
     if "all" in ordered:
         return list(EXAMPLES.keys())
@@ -159,7 +150,9 @@ def main() -> None:
             print(rendered)
             if args.show_tokens:
                 print("\nTokenized:")
-                token_data = tokenizer.apply_chat_template(example["messages"], tokenize=True, add_generation_prompt=False)
+                token_data = tokenizer.apply_chat_template(
+                    example["messages"], tokenize=True, add_generation_prompt=False
+                )
                 if isinstance(token_data, list):
                     ids = token_data
                 elif hasattr(token_data, "tolist"):

@@ -9,14 +9,8 @@ from datasets import Dataset
 from scripts.data.sft.utils import convert_sft_dataset
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Process ShareGPT dataset and optionally upload to Hugging Face Hub."
-    )
-    parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Upload the dataset to Hugging Face Hub",
-    )
+    parser = argparse.ArgumentParser(description="Process ShareGPT dataset and optionally upload to Hugging Face Hub.")
+    parser.add_argument("--push_to_hub", action="store_true", help="Upload the dataset to Hugging Face Hub")
     parser.add_argument(
         "--hf_entity",
         type=str,
@@ -44,9 +38,7 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "--apply_empty_message_filters",
-        action="store_true",
-        help="Apply empty message filters to the dataset.",
+        "--apply_empty_message_filters", action="store_true", help="Apply empty message filters to the dataset."
     )
     args = parser.parse_args()
 
@@ -71,16 +63,16 @@ if __name__ == "__main__":
         print("Downloading ShareGPT files...")
         urlretrieve(
             "https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part1_html_cleaned.json",
-            os.path.join(temp_dir, "sg_90k_part1_html_cleaned.json")
+            os.path.join(temp_dir, "sg_90k_part1_html_cleaned.json"),
         )
         urlretrieve(
             "https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part2_html_cleaned.json",
-            os.path.join(temp_dir, "sg_90k_part2_html_cleaned.json")
+            os.path.join(temp_dir, "sg_90k_part2_html_cleaned.json"),
         )
 
-        with open(os.path.join(temp_dir, "sg_90k_part1_html_cleaned.json"), "r") as f:
+        with open(os.path.join(temp_dir, "sg_90k_part1_html_cleaned.json")) as f:
             data.extend(json.load(f))
-        with open(os.path.join(temp_dir, "sg_90k_part2_html_cleaned.json"), "r") as f:
+        with open(os.path.join(temp_dir, "sg_90k_part2_html_cleaned.json")) as f:
             data.extend(json.load(f))
 
     data = [d for d in data if "conversations" in d and len(d["conversations"]) > 0]
@@ -92,12 +84,12 @@ if __name__ == "__main__":
         "bing": "assistant",
         "chatgpt": "assistant",
         "gpt": "assistant",
-        "system": "system"
+        "system": "system",
     }
-    data = [{
-        "id": d["id"],
-        "messages": [{"role": role_map[c["from"]], "content": c["value"]} for c in d["conversations"]]
-    } for d in data]
+    data = [
+        {"id": d["id"], "messages": [{"role": role_map[c["from"]], "content": c["value"]} for c in d["conversations"]]}
+        for d in data
+    ]
 
     ds = Dataset.from_list(data)
     convert_sft_dataset(
@@ -112,4 +104,3 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=readme_content,
     )
-

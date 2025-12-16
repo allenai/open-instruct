@@ -48,7 +48,7 @@ Examples:
         --max_seq_len 512 \
         --hub_repo_id "myuser/c4-filtered" \
         --new_branch_name "max-512-tokens"
-    
+
     # Use streaming mode for very large datasets
     python filter_seq_len.py \
         --dataset_name "allenai/c4" \
@@ -78,7 +78,6 @@ Note:
 
 import argparse
 import json  # For saving streaming data
-import logging
 import os
 import sys
 import tempfile  # For streaming upload
@@ -94,6 +93,7 @@ logger = logger_utils.setup_logger(__name__)
 
 MODEL_NAME = "allenai/Llama-3.1-Tulu-3-8B-SFT"
 
+
 # --- Helper Function for Filtering ---
 def check_seq_len_batch(batch, tokenizer, column_name, max_seq_len):
     """
@@ -108,7 +108,7 @@ def check_seq_len_batch(batch, tokenizer, column_name, max_seq_len):
         # Get number of items in batch from another column
         example_key = next(iter(batch.keys()))
         num_items = len(batch[example_key])
-        return {"keep": [False] * num_items} # Exclude all items in this batch
+        return {"keep": [False] * num_items}  # Exclude all items in this batch
 
     outputs = [str(item) if item is not None else "" for item in batch[column_name]]
     try:
@@ -119,7 +119,8 @@ def check_seq_len_batch(batch, tokenizer, column_name, max_seq_len):
     except Exception as e:
         logger.error(f"Error during tokenization/length check in batch: {e}. Excluding rows in this batch.")
         num_items = len(outputs)
-        return {"keep": [False] * num_items} # Exclude all items on error
+        return {"keep": [False] * num_items}  # Exclude all items on error
+
 
 # --- Main Function ---
 def main(args):
@@ -133,13 +134,15 @@ def main(args):
 
     logger.info(f"Loading dataset: {args.dataset_name}, split: {args.split}, streaming={args.streaming}")
     try:
-        dataset = datasets.load_dataset(args.dataset_name, split=args.split, streaming=args.streaming, num_proc=max_num_processes())
+        dataset = datasets.load_dataset(
+            args.dataset_name, split=args.split, streaming=args.streaming, num_proc=max_num_processes()
+        )
     except FileNotFoundError:
         logger.error(f"Dataset '{args.dataset_name}' not found.")
         sys.exit(1)
     except ValueError as e:
-         logger.error(f"Invalid split '{args.split}' or dataset configuration error for '{args.dataset_name}': {e}")
-         sys.exit(1)
+        logger.error(f"Invalid split '{args.split}' or dataset configuration error for '{args.dataset_name}': {e}")
+        sys.exit(1)
     except Exception as e:
         logger.error(f"Failed to load dataset '{args.dataset_name}' split '{args.split}': {e}")
         sys.exit(1)
@@ -155,17 +158,14 @@ def main(args):
     try:
         dataset_with_keep_flag = dataset.map(
             check_seq_len_batch,
-            fn_kwargs={
-                "tokenizer": tokenizer,
-                "column_name": args.column_name,
-                "max_seq_len": args.max_seq_len
-            },
+            fn_kwargs={"tokenizer": tokenizer, "column_name": args.column_name, "max_seq_len": args.max_seq_len},
             batched=True,
-            batch_size=args.batch_size
+            batch_size=args.batch_size,
         )
     except Exception as e:
         logger.error(f"Error during the mapping phase for length checking: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
@@ -178,14 +178,16 @@ def main(args):
     if not args.streaming:
         logger.info("Applying filter to non-streaming dataset...")
         try:
-            filtered_dataset = dataset_with_keep_flag.filter(lambda example: example['keep'])
+            filtered_dataset = dataset_with_keep_flag.filter(lambda example: example["keep"])
             # Remove the temporary 'keep' column
             filtered_dataset = filtered_dataset.remove_columns(["keep"])
         except Exception as e:
             logger.error(f"Error applying filter or removing column: {e}")
             sys.exit(1)
 
-        logger.info(f"Original dataset size: {len(dataset_with_keep_flag)}") # Original might be different if map failed batches
+        logger.info(
+            f"Original dataset size: {len(dataset_with_keep_flag)}"
+        )  # Original might be different if map failed batches
         logger.info(f"Filtered dataset size: {len(filtered_dataset)}")
 
         # --- Uploading --- #
@@ -214,7 +216,7 @@ def main(args):
                     repo_type="dataset",
                     branch=args.new_branch_name,
                     token=hf_token,
-                    exist_ok=True # Don't fail if branch already exists
+                    exist_ok=True,  # Don't fail if branch already exists
                 )
                 logger.info(f"Ensured branch '{args.new_branch_name}' exists in repo '{args.hub_repo_id}'.")
             except Exception as e:
@@ -223,13 +225,15 @@ def main(args):
 
             if not args.streaming:
                 # --- Non-Streaming Upload ---
-                logger.info(f"Uploading filtered non-streaming dataset to '{args.hub_repo_id}' branch '{args.new_branch_name}' split '{args.split}'...")
+                logger.info(
+                    f"Uploading filtered non-streaming dataset to '{args.hub_repo_id}' branch '{args.new_branch_name}' split '{args.split}'..."
+                )
                 try:
                     filtered_dataset.push_to_hub(
                         args.hub_repo_id,
                         split=args.split,
                         token=hf_token,
-                        revision=args.new_branch_name # Target the new branch
+                        revision=args.new_branch_name,  # Target the new branch
                     )
                     logger.info("Dataset uploaded successfully to the Hub branch.")
                 except Exception as e:
@@ -237,7 +241,9 @@ def main(args):
                     sys.exit(1)
             else:
                 # --- Streaming Upload ---
-                logger.info(f"Processing stream and uploading to '{args.hub_repo_id}' branch '{args.new_branch_name}' split '{args.split}'...")
+                logger.info(
+                    f"Processing stream and uploading to '{args.hub_repo_id}' branch '{args.new_branch_name}' split '{args.split}'..."
+                )
                 # Write to a temporary JSONL file first
                 with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as temp_f:
                     temp_filename = temp_f.name
@@ -247,21 +253,23 @@ def main(args):
                     try:
                         for example in tqdm(dataset_with_keep_flag, desc="Filtering stream for upload"):
                             original_count += 1
-                            if example.get('keep', False):
-                                example.pop('keep', None)
-                                temp_f.write(json.dumps(example) + '\n')
+                            if example.get("keep", False):
+                                example.pop("keep", None)
+                                temp_f.write(json.dumps(example) + "\n")
                                 written_count += 1
                         logger.info(f"Processed approximately {original_count} records.")
                         logger.info(f"Wrote {written_count} filtered records to temporary file.")
                     except Exception as e:
                         logger.error(f"Failed during streaming filtering to temporary file: {e}")
-                        os.remove(temp_filename) # Clean up temp file on error
+                        os.remove(temp_filename)  # Clean up temp file on error
                         sys.exit(1)
 
                     # Upload the temporary file
                     if written_count > 0:
-                        upload_path_in_repo = f"data/{args.split}.jsonl" # Standard location
-                        logger.info(f"Uploading temporary file {temp_filename} to {args.hub_repo_id} at '{upload_path_in_repo}' on branch '{args.new_branch_name}'...")
+                        upload_path_in_repo = f"data/{args.split}.jsonl"  # Standard location
+                        logger.info(
+                            f"Uploading temporary file {temp_filename} to {args.hub_repo_id} at '{upload_path_in_repo}' on branch '{args.new_branch_name}'..."
+                        )
                         try:
                             api.upload_file(
                                 path_or_fileobj=temp_filename,
@@ -269,34 +277,55 @@ def main(args):
                                 repo_id=args.hub_repo_id,
                                 repo_type="dataset",
                                 token=hf_token,
-                                revision=args.new_branch_name, # Target the new branch
-                                commit_message=f"Add filtered {args.split} split to branch {args.new_branch_name} (max_len={args.max_seq_len}, col={args.column_name})"
+                                revision=args.new_branch_name,  # Target the new branch
+                                commit_message=f"Add filtered {args.split} split to branch {args.new_branch_name} (max_len={args.max_seq_len}, col={args.column_name})",
                             )
-                            logger.info(f"Successfully uploaded {upload_path_in_repo} to the Hub branch '{args.new_branch_name}'.")
+                            logger.info(
+                                f"Successfully uploaded {upload_path_in_repo} to the Hub branch '{args.new_branch_name}'."
+                            )
                         except Exception as e:
-                            logger.error(f"Failed to upload temporary file to Hub branch '{args.new_branch_name}': {e}")
+                            logger.error(
+                                f"Failed to upload temporary file to Hub branch '{args.new_branch_name}': {e}"
+                            )
                         finally:
                             logger.info(f"Cleaning up temporary file: {temp_filename}")
                             os.remove(temp_filename)
                     else:
                         logger.warning("No records were filtered to be kept. Nothing uploaded.")
-                        os.remove(temp_filename) # Still clean up empty temp file
+                        os.remove(temp_filename)  # Still clean up empty temp file
         else:
-             # This case should no longer be reachable since hub_repo_id is required
-             logger.error("No output method specified (this should not happen).")
-             sys.exit(1)
+            # This case should no longer be reachable since hub_repo_id is required
+            logger.error("No output method specified (this should not happen).")
+            sys.exit(1)
+
 
 # --- Argument Parsing and Execution ---
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Filter a Hugging Face dataset based on sequence length and upload to a new branch on the Hub.')
-    parser.add_argument('--dataset_name', type=str, required=True, help='Name of the source Hugging Face dataset (e.g., "allenai/c4").')
-    parser.add_argument('--split', type=str, required=True, help='Dataset split to use (e.g., "train", "validation").')
-    parser.add_argument('--column_name', type=str, required=True, help='Name of the column containing text data to check length.')
-    parser.add_argument('--max_seq_len', type=int, required=True, help='Maximum sequence length allowed (inclusive).')
-    parser.add_argument('--batch_size', type=int, default=1000, help='Batch size for filtering (default: 1000).')
-    parser.add_argument('--streaming', action='store_true', help='Load and process dataset in streaming mode.')
-    parser.add_argument('--hub_repo_id', type=str, required=True, help='Hugging Face Hub repository ID to upload the filtered dataset to (e.g., "username/my-filtered-dataset"). Requires prior `huggingface-cli login`.')
-    parser.add_argument('--new_branch_name', type=str, required=True, help='Name of the new branch to create in the Hub repository for the filtered data (e.g., "filtered-v1").')
+    parser = argparse.ArgumentParser(
+        description="Filter a Hugging Face dataset based on sequence length and upload to a new branch on the Hub."
+    )
+    parser.add_argument(
+        "--dataset_name", type=str, required=True, help='Name of the source Hugging Face dataset (e.g., "allenai/c4").'
+    )
+    parser.add_argument("--split", type=str, required=True, help='Dataset split to use (e.g., "train", "validation").')
+    parser.add_argument(
+        "--column_name", type=str, required=True, help="Name of the column containing text data to check length."
+    )
+    parser.add_argument("--max_seq_len", type=int, required=True, help="Maximum sequence length allowed (inclusive).")
+    parser.add_argument("--batch_size", type=int, default=1000, help="Batch size for filtering (default: 1000).")
+    parser.add_argument("--streaming", action="store_true", help="Load and process dataset in streaming mode.")
+    parser.add_argument(
+        "--hub_repo_id",
+        type=str,
+        required=True,
+        help='Hugging Face Hub repository ID to upload the filtered dataset to (e.g., "username/my-filtered-dataset"). Requires prior `huggingface-cli login`.',
+    )
+    parser.add_argument(
+        "--new_branch_name",
+        type=str,
+        required=True,
+        help='Name of the new branch to create in the Hub repository for the filtered data (e.g., "filtered-v1").',
+    )
 
     args = parser.parse_args()
 

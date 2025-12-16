@@ -96,7 +96,7 @@ if uv run python "$SCRIPT_DIR/filter_ngram_repetitions.py" \
     $FILTER_USER_TURNS \
     $DEBUG \
     --manual-filter; then
-    
+
     echo "=========================================="
     echo "Repetition filtering completed successfully!"
     echo "=========================================="
@@ -105,4 +105,4 @@ else
     echo "ERROR: Repetition filtering failed!"
     echo "=========================================="
     exit 1
-fi 
+fi

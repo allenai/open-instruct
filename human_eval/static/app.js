@@ -12,7 +12,7 @@ async function rendere_instance(index) {
     // if the response is error, show the out of range message
     if (data.error == "Index out of range") {
         show_alert(
-            "You requested an out-of-range instance. You might have completed all the evaluations. Thank you for your contribution!", 
+            "You requested an out-of-range instance. You might have completed all the evaluations. Thank you for your contribution!",
             "danger",
             insert_after_selector="#instance-info",
             timeout=1e10 // set timeout to a very large number so that the alert doesn't disappear
@@ -47,7 +47,7 @@ async function rendere_instance(index) {
     // now render the completions
     completion_a = data.completions[0];
     completion_b = data.completions[1];
-    
+
     $("#completion-A-col").html(`
         <xmp class="message-text" id="${completion_a.model}-completion">${completion_a.completion}</xmp>
     `);
@@ -72,7 +72,7 @@ function clear_all() {
             </div>
         </div>
     `);
-    $('.completion-col').empty(); 
+    $('.completion-col').empty();
     $('input[type="checkbox"], input[type="radio"]').prop('checked', false);
     $('textarea').val('');
 }
@@ -94,7 +94,7 @@ async function submit_evaluation() {
         const completion_a_is_acceptable = $("input[name='a-is-acceptable']:checked").val();
         const completion_b_is_acceptable = $("input[name='b-is-acceptable']:checked").val();
         const preference = $("input[name='preference-selection']:checked").val();
-        
+
         // get the prompt and completions
         const prompt = $("#history-message-region").find("xmp").text();
         const completion_a = $("#completion-A-col").find("xmp").text();
@@ -120,10 +120,10 @@ async function submit_evaluation() {
                 completion_a_is_acceptable,
                 completion_b_is_acceptable,
                 preference,
-                evaluator: username 
+                evaluator: username
             }),
         });
-        
+
         // if the response is 200, show the success message
         if (response.status == 200) {
             show_alert("Evaluation data is submitted successfully.", "success", insert_after_selector="#evaluation-submit", timeoutput=5000);
@@ -190,10 +190,10 @@ async function submit_feedback() {
                 completion_b,
                 instance_quality,
                 comment,
-                evaluator: username 
+                evaluator: username
             }),
         });
-        
+
         // if the response is 200, show the success message
         if (response.status == 200) {
             show_alert("Feedback is submitted successfully.", "success", insert_after_selector="#feedback-submit", timeoutput=5000);

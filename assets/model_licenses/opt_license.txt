@@ -6,11 +6,11 @@ This License Agreement (as may be amended in accordance with this License Agreem
 <br><br>
 1. **LICENSE GRANT**
 <br><br>
-   a. Subject to your compliance with the Documentation and Sections 2, 3, and 5, Meta grants you a non-exclusive, worldwide, non-transferable, non-sublicensable, revocable, royalty free and limited license under Meta’s copyright interests to reproduce, distribute, and create derivative works of the Software solely for your non-commercial research purposes.  The foregoing license is personal to you, and you may not assign or sublicense this License or any other rights or obligations under this License without Meta’s prior written consent; any such assignment or sublicense will be void and will automatically and immediately terminate this License. 
+   a. Subject to your compliance with the Documentation and Sections 2, 3, and 5, Meta grants you a non-exclusive, worldwide, non-transferable, non-sublicensable, revocable, royalty free and limited license under Meta’s copyright interests to reproduce, distribute, and create derivative works of the Software solely for your non-commercial research purposes.  The foregoing license is personal to you, and you may not assign or sublicense this License or any other rights or obligations under this License without Meta’s prior written consent; any such assignment or sublicense will be void and will automatically and immediately terminate this License.
 <br><br>
-   b. You may make a reasonable number of copies of the Documentation solely for use in connection with the license to the Software granted above. 
+   b. You may make a reasonable number of copies of the Documentation solely for use in connection with the license to the Software granted above.
 <br><br>
-   c. The grant of rights expressly set forth in this Section 1 (License Grant) are the complete grant of rights to you in the Software Products, and no other licenses are granted, whether by waiver, estoppel, implication, equity or otherwise.  Meta and its licensors reserve all rights not expressly granted by this License. 
+   c. The grant of rights expressly set forth in this Section 1 (License Grant) are the complete grant of rights to you in the Software Products, and no other licenses are granted, whether by waiver, estoppel, implication, equity or otherwise.  Meta and its licensors reserve all rights not expressly granted by this License.
 <br><br>
 2. **RESTRICTIONS**
 <br><br>
@@ -18,7 +18,7 @@ This License Agreement (as may be amended in accordance with this License Agreem
 <br><br>
    a. use, modify, copy, reproduce, create derivative works of, or distribute the Software Products (or any derivative works thereof, works incorporating the Software Products, or any data produced by the Software), in whole or in part, for (i) any commercial or production purposes, (ii) military purposes or in the service of nuclear technology, (iii) purposes of surveillance, including any research or development relating to surveillance, (iv) biometric processing, (v) in any manner that infringes, misappropriates, or otherwise violates any third-party rights, or (vi) in any manner that violates any applicable law, including accessing the Software Products from an embargoed country as prohibited by the U.S. government, and violating any privacy or security laws, rules, regulations, directives, or governmental requirements (including the General Data Privacy Regulation (Regulation (EU) 2016/679), the California Consumer Privacy Act, and any and all laws governing the processing of biometric information), as well as all amendments and successor laws to any of the foregoing;
 <br><br>
-   b. alter or remove copyright and other proprietary notices which appear on or in the Software Products; 
+   b. alter or remove copyright and other proprietary notices which appear on or in the Software Products;
 <br><br>
    c. utilize any equipment, device, software, or other means to circumvent or remove any security or protection used by Meta in connection with the Software, or to circumvent or remove any usage restrictions, or to enable functionality disabled by Meta; or
 <br><br>

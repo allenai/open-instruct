@@ -11,10 +11,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_path", type=str, default="data/raw_train/flan_v2/flan_v2_50k.jsonl")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
-        "--mixing_portions",
-        choices=["flan_v1", "flan_v2"],
-        default="flan_v2",
-        help="Mixing weights for flan subsets.",
+        "--mixing_portions", choices=["flan_v1", "flan_v2"], default="flan_v2", help="Mixing weights for flan subsets."
     )
     args = parser.parse_args()
     random.seed(args.seed)
@@ -73,13 +70,13 @@ if __name__ == "__main__":
             # randomly sample num_sample lines from task_data_path, the data might be very large so we can't load it all into memory
             # we need to first count the total number of lines in the file and then only load the lines we need
             num_lines = 0
-            with open(task_data_path, "r") as fin:
+            with open(task_data_path) as fin:
                 for line in tqdm.tqdm(fin, desc=f"Counting lines in {task_data_path}"):
                     num_lines += 1
             print(f"Sampling {num_sample} lines from {num_lines} lines")
             sampled_lines = random.sample(range(num_lines), num_sample)
             sampled_lines = set(sampled_lines)
-            with open(task_data_path, "r") as fin:
+            with open(task_data_path) as fin:
                 for i, line in tqdm.tqdm(enumerate(fin), desc="Reading the file to save the sampled lines"):
                     if i in sampled_lines:
                         fout.write(line)

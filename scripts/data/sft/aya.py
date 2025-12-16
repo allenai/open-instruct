@@ -3,14 +3,8 @@ import argparse
 from scripts.data.sft.utils import convert_sft_dataset
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Process Aya dataset and optionally upload to Hugging Face Hub."
-    )
-    parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Upload the dataset to Hugging Face Hub",
-    )
+    parser = argparse.ArgumentParser(description="Process Aya dataset and optionally upload to Hugging Face Hub.")
+    parser.add_argument("--push_to_hub", action="store_true", help="Upload the dataset to Hugging Face Hub")
     parser.add_argument(
         "--hf_entity",
         type=str,
@@ -38,16 +32,14 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "--apply_empty_message_filters",
-        action="store_true",
-        help="Apply empty message filters to the dataset.",
+        "--apply_empty_message_filters", action="store_true", help="Apply empty message filters to the dataset."
     )
     args = parser.parse_args()
 
     conversion_func = lambda example: {
         "messages": [
             {"role": "user", "content": example["inputs"]},
-            {"role": "assistant", "content": example["targets"]}
+            {"role": "assistant", "content": example["targets"]},
         ]
     }
 
@@ -78,4 +70,3 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=readme_content,
     )
-

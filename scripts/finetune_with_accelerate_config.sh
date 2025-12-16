@@ -22,7 +22,7 @@ echo "Number of GPUs: $NUM_GPUS"
 echo "Using config file: $CONFIG_FILE"
 echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 
-# You can also set --gradient_checkpointing or use `stage3_offloading_accelerate.conf` to save memory, 
+# You can also set --gradient_checkpointing or use `stage3_offloading_accelerate.conf` to save memory,
 # but it will trade off speed.
 accelerate launch \
     --mixed_precision bf16 \

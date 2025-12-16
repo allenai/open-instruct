@@ -164,4 +164,3 @@ python -m scripts.data.sft.tulu_hard_coded \
     --hf_entity ai2-adapt-dev \
     --repeat_n=10 \
     --local_save_dir ./data/sft/tulu_hard_coded
-

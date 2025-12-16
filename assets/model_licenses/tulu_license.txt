@@ -22,7 +22,7 @@ By clicking “I Accept” below or by using the Model, you agree to the terms o
    4. Except as set forth herein, AI2 claims no rights in the results you may produce or generate from the Model Components using informational content from any source (the “Output”). You are accountable for the Output you produce or generate from the Model Components and the subsequent use of that Output. No use of the Output can contravene any provision as stated in this License.
 
 
-2. RESTRICTIONS 
+2. RESTRICTIONS
 
 
 You will not, and will not permit, assist or cause any third party to:
@@ -31,13 +31,13 @@ You will not, and will not permit, assist or cause any third party to:
    5. Use, modify, copy, reproduce, create derivative works of, or distribute the Model Components (or any derivative works thereof, works incorporating the Model Components, or any data produced by the Model), in whole or in part, for (i) any commercial or production purposes, (ii) military purposes or in the service of nuclear technology, (iii) purposes of surveillance, including any research or development relating to surveillance, (iv) biometric processing, (v) in any manner that infringes, misappropriates, or otherwise violates any third-party rights, or (vi) in any manner that violates any applicable law and violating any privacy or security laws, rules, regulations, directives, or governmental requirements (including the General Data Privacy Regulation (Regulation (EU) 2016/679), the California Consumer Privacy Act, and any and all laws governing the processing of biometric information), as well as all amendments and successor laws to any of the foregoing;
 
 
-   6. Alter or remove copyright and other proprietary notices which appear on or in the Model Components; 
+   6. Alter or remove copyright and other proprietary notices which appear on or in the Model Components;
 
 
    7. Utilize any equipment, device, software, or other means to circumvent or remove any security or protection used by AI2 in connection with the Model, or to circumvent or remove any usage restrictions, or to enable functionality disabled by AI2;
 
 
-   8. Offer or impose any terms on the Model Components that alter, restrict, or are inconsistent with the terms of this License; 
+   8. Offer or impose any terms on the Model Components that alter, restrict, or are inconsistent with the terms of this License;
 
 
    9. Use the Model in service of any of the Restricted Uses identified in Appendix A to this Agreement; or
@@ -46,12 +46,12 @@ You will not, and will not permit, assist or cause any third party to:
    10. Violate any applicable U.S. and non-U.S. export control and trade sanctions laws (“Export Laws”), including by, for example but without limitation:
 
 
-      1. directly or indirectly exporting, re-exporting, providing, or otherwise transferring Model Components: 
+      1. directly or indirectly exporting, re-exporting, providing, or otherwise transferring Model Components:
 
 
-         1. to any individual, entity, or country prohibited by Export Laws; 
-         2. to anyone on U.S. or non-U.S. government restricted parties lists; or 
-         3. for any purpose prohibited by Export Laws, including nuclear, chemical or biological weapons, or missile technology applications; 
+         1. to any individual, entity, or country prohibited by Export Laws;
+         2. to anyone on U.S. or non-U.S. government restricted parties lists; or
+         3. for any purpose prohibited by Export Laws, including nuclear, chemical or biological weapons, or missile technology applications;
 
 
       2. using or downloading Model Components if you or they are
@@ -77,7 +77,7 @@ THE MODEL COMPONENTS ARE PROVIDED “AS IS” and “WITH ALL FAULTS” WITH NO 
          5. LIMITATION OF LIABILITY/YOUR RESPONSIBILITIES
 
 
-            3. TO THE FULLEST EXTENT PERMITTED BY LAW, IN NO EVENT WILL AI2 BE LIABLE TO YOU (i) UNDER ANY THEORY OF LIABILITY, WHETHER BASED IN CONTRACT, TORT, NEGLIGENCE, STRICT LIABILITY, WARRANTY, OR OTHERWISE UNDER THIS LICENSE, OR (ii) FOR ANY INDIRECT, CONSEQUENTIAL, EXEMPLARY, INCIDENTAL, PUNITIVE OR SPECIAL DAMAGES OR LOST PROFITS, EVEN IF YOU HAVE BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. THE MODEL COMPONENTS, THEIR CONSTITUENT COMPONENTS, AND ANY OUTPUT (COLLECTIVELY, “MODEL MATERIALS”) ARE NOT DESIGNED OR INTENDED FOR USE IN ANY APPLICATION OR SITUATION WHERE FAILURE OR FAULT OF THE MODEL MATERIALS COULD REASONABLY BE ANTICIPATED TO LEAD TO SERIOUS INJURY OF ANY PERSON, INCLUDING POTENTIAL DISCRIMINATION OR VIOLATION OF AN INDIVIDUAL’S PRIVACY RIGHTS, OR TO SEVERE PHYSICAL, PROPERTY, OR ENVIRONMENTAL DAMAGE (EACH, A “HIGH-RISK USE”). 
+            3. TO THE FULLEST EXTENT PERMITTED BY LAW, IN NO EVENT WILL AI2 BE LIABLE TO YOU (i) UNDER ANY THEORY OF LIABILITY, WHETHER BASED IN CONTRACT, TORT, NEGLIGENCE, STRICT LIABILITY, WARRANTY, OR OTHERWISE UNDER THIS LICENSE, OR (ii) FOR ANY INDIRECT, CONSEQUENTIAL, EXEMPLARY, INCIDENTAL, PUNITIVE OR SPECIAL DAMAGES OR LOST PROFITS, EVEN IF YOU HAVE BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. THE MODEL COMPONENTS, THEIR CONSTITUENT COMPONENTS, AND ANY OUTPUT (COLLECTIVELY, “MODEL MATERIALS”) ARE NOT DESIGNED OR INTENDED FOR USE IN ANY APPLICATION OR SITUATION WHERE FAILURE OR FAULT OF THE MODEL MATERIALS COULD REASONABLY BE ANTICIPATED TO LEAD TO SERIOUS INJURY OF ANY PERSON, INCLUDING POTENTIAL DISCRIMINATION OR VIOLATION OF AN INDIVIDUAL’S PRIVACY RIGHTS, OR TO SEVERE PHYSICAL, PROPERTY, OR ENVIRONMENTAL DAMAGE (EACH, A “HIGH-RISK USE”).
 
 
             4. IF YOU ELECT TO USE ANY OF THE MODEL MATERIALS FOR A HIGH-RISK USE, YOU DO SO AT YOUR OWN RISK. YOU AGREE TO DESIGN AND IMPLEMENT APPROPRIATE DECISION-MAKING AND RISK-MITIGATION PROCEDURES AND POLICIES IN CONNECTION WITH A HIGH-RISK USE SUCH THAT EVEN IF THERE IS A FAILURE OR FAULT IN ANY OF THE MODEL MATERIALS, THE SAFETY OF PERSONS OR PROPERTY AFFECTED BY THE ACTIVITY STAYS AT A LEVEL THAT IS REASONABLE, APPROPRIATE, AND LAWFUL FOR THE FIELD OF THE HIGH-RISK USE.
@@ -93,7 +93,7 @@ You will indemnify, defend and hold harmless AI2 and our subsidiaries and affili
 
 b. We may terminate this License, in whole or in part, at any time upon notice (including electronic) to you.
 
-c. The following sections survive termination of this License: 2 (Restrictions), 3 (Attribution), 4 (Disclaimers), 5 (Limitation on Liability), 6 (Indemnification) 7 (Termination; Survival), 8 (Third Party Materials), 9 (Trademarks), 10 (Applicable Law; Dispute Resolution), and 11 (Miscellaneous). 
+c. The following sections survive termination of this License: 2 (Restrictions), 3 (Attribution), 4 (Disclaimers), 5 (Limitation on Liability), 6 (Indemnification) 7 (Termination; Survival), 8 (Third Party Materials), 9 (Trademarks), 10 (Applicable Law; Dispute Resolution), and 11 (Miscellaneous).
 
                      8. THIRD PARTY MATERIALS
 
@@ -118,7 +118,7 @@ ________________
 Appendix A
 
 
-                           1. USE-BASED RESTRICTIONS 
+                           1. USE-BASED RESTRICTIONS
 
 
 You agree not to use the Model:
@@ -145,35 +145,35 @@ You agree not to use the Model:
 You agree not to use the Model to:
 
 
-                           1. Surveillance: 
+                           1. Surveillance:
 
 
                            4. Detect or infer any legally protected class or aspect of any person, as defined by U.S. Federal Law; or
                            5. Detect or infer aspects and/or features of an identity any person, such as name, family name, address, gender, sexual orientation, race, religion, age, location (at any geographical level), skin color, society or political affiliations, employment status and/or employment history, and health and medical conditions. Age and medical conditions may be inferred solely for the purpose of improving software/hardware accessibility and such data should not be cached or stored without the explicit and time limited permission of the data subject.
 
 
-                           2. Computer Generated Media: 
+                           2. Computer Generated Media:
 
 
                            1. Synthesize and/or modify audio-realistic and/or video-realistic representations (indistinguishable from photo/video recordings) of people and events, without including a caption and/or watermark or other similar notation indicating that the audio-realistic and/or video-realistic representations were generated using the Model.
- 
-                           3. Insurance. 
+
+                           3. Insurance.
 
 
                            1. Predict the likelihood that any person will request to file an insurance claim;
-                           2. Determine an insurance premium or deny insurance applications or claims; 
+                           2. Determine an insurance premium or deny insurance applications or claims;
                            3. Predict the likelihood that any person request to file an insurance claim based on determining a lifestyle of a person, medical-test reports, demographic details of a person and/or online activity of a person;
                            4. Determine an insurance premium or deny insurance applications or claims based on data determining a lifestyle of a person, medical-test reports, demographic details of a person, and/or online activity of a person;
                            5. Deny an insurance claim based on any predicted likelihood of the possibility of insurance fraud.
 
 
-                           4. Medical. 
+                           4. Medical.
 
 
-                           1. diagnose or fail to diagnose a medical condition without human oversight. 
+                           1. diagnose or fail to diagnose a medical condition without human oversight.
 
 
-                           5. Criminal. 
+                           5. Criminal.
 
 
                            2. use personal data or characteristics, physical attributes or traits, or other social or behavioral information to predict the likelihood a person will engage or has engaged in criminal behavior, including without limitation: name, family name, address, gender, sexual orientation, race, religion, age, location (at any geographical level), skin color, society or political affiliations, employment status and/or history, health and medical conditions (including physical, mental), family history, social media and publicly available data, image or video analysis of an individual or a group(s) of individuals, heart-rate, perspiration, breathing, and brain imaging and other metabolic data.

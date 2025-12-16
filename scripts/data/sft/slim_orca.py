@@ -3,14 +3,8 @@ import argparse
 from scripts.data.sft.utils import convert_sft_dataset
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Process SlimOrca dataset and optionally upload to Hugging Face Hub."
-    )
-    parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Upload the dataset to Hugging Face Hub",
-    )
+    parser = argparse.ArgumentParser(description="Process SlimOrca dataset and optionally upload to Hugging Face Hub.")
+    parser.add_argument("--push_to_hub", action="store_true", help="Upload the dataset to Hugging Face Hub")
     parser.add_argument(
         "--hf_entity",
         type=str,
@@ -38,9 +32,7 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "--apply_empty_message_filters",
-        action="store_true",
-        help="Apply empty message filters to the dataset.",
+        "--apply_empty_message_filters", action="store_true", help="Apply empty message filters to the dataset."
     )
     args = parser.parse_args()
 
@@ -55,9 +47,7 @@ if __name__ == "__main__":
             raise ValueError(f"Unknown role: {role}")
 
     conversion_func = lambda example: {
-        "messages": [
-            {"role": convert_role(it["from"]), "content": it["value"]} for it in example["conversations"]
-        ]
+        "messages": [{"role": convert_role(it["from"]), "content": it["value"]} for it in example["conversations"]]
     }
 
     readme_content = (
@@ -87,4 +77,3 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=readme_content,
     )
-

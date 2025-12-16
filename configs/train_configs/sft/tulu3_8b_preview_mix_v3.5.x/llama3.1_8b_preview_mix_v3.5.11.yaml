@@ -61,7 +61,7 @@ dataset_mixer:
     # License: listed as Apache 2.0, but the individual subsets have descrepancy
     # ai2-adapt-dev/codefeedback_filtered_instructions_converted: 156361
     # ------------------------------------------------------
-    # As a replacement of codefeedback, we use Magicoder-Evol-Instruct, 
+    # As a replacement of codefeedback, we use Magicoder-Evol-Instruct,
     # which is a decontaminated version of evol-codealpaca-v1.
     # License: Apache 2.0
     # Total: 110999

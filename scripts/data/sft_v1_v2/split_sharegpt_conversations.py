@@ -2,6 +2,7 @@
 This script is largely copied from the Vicuna repo: https://github.com/lm-sys/FastChat/blob/main/fastchat/data/split_long_conversation.py
 We fixed a bug in `split_one_sample`, which previously includes long conversations in the processed data. Now we skip these long conversations.
 """
+
 import argparse
 import json
 from concurrent.futures import ProcessPoolExecutor
@@ -12,10 +13,7 @@ from tqdm import tqdm
 
 def make_sample(sample, start_idx, end_idx):
     assert (end_idx - start_idx) % 2 == 0
-    return {
-        "id": sample["id"] + "_" + str(start_idx),
-        "conversations": sample["conversations"][start_idx:end_idx],
-    }
+    return {"id": sample["id"] + "_" + str(start_idx), "conversations": sample["conversations"][start_idx:end_idx]}
 
 
 tokenizer = max_length = None
@@ -94,10 +92,7 @@ def main(args):
     content = []
     for file in args.in_files:
         content.extend(json.load(open(file)))
-    tokenizer = transformers.AutoTokenizer.from_pretrained(
-        args.model_name_or_path,
-        use_fast=False,
-    )
+    tokenizer = transformers.AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=False)
     new_content = split_all(content, args.begin, args.end, tokenizer, args.max_length)
     new_content = filter_invalid_roles(new_content)
 

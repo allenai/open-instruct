@@ -74,5 +74,3 @@ We would like to thank the following projects for general infrastructure:
 
 - [DeepSpeedAI/DeepSpeed](https://github.com/deepspeedai/DeepSpeed)
 - [HuggingFace/Transformers](https://github.com/huggingface/transformers)
-
-

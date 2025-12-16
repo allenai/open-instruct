@@ -70,7 +70,7 @@ If you used this code, please cite our paper:
 
 ```bibtex
 @misc{wang2023far,
-   title={How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources}, 
+   title={How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources},
    author={Yizhong Wang and Hamish Ivison and Pradeep Dasigi and Jack Hessel and Tushar Khot and Khyathi Raghavi Chandu and David Wadden and Kelsey MacMillan and Noah A. Smith and Iz Beltagy and Hannaneh Hajishirzi},
    year={2023},
    eprint={2306.04751},

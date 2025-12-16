@@ -14,15 +14,17 @@ Run `huggingface-cli login` or set the `HF_TOKEN` env var before executing.
 Usage:
 python filter_wildchat.py --input-dataset <input_dataset> --output-dataset <output_dataset>
 """
-import argparse
-import logging
-import os
-from datasets import load_dataset
-import open_instruct.utils as open_instruct_utils
 
+import argparse
+import os
+
+from datasets import load_dataset
+
+import open_instruct.utils as open_instruct_utils
 from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
+
 
 def filter_toxic(ds):
     """Filter out rows where `toxic` is True."""
@@ -30,9 +32,14 @@ def filter_toxic(ds):
     initial_count = ds.num_rows
     ds_filtered = ds.filter(lambda ex: not ex.get("toxic", False))
     filtered_out = initial_count - ds_filtered.num_rows
-    logger.info("Filtered out %d toxic examples (%d remaining, %.2f%%).", 
-                 filtered_out, ds_filtered.num_rows, 100 * ds_filtered.num_rows / initial_count)
+    logger.info(
+        "Filtered out %d toxic examples (%d remaining, %.2f%%).",
+        filtered_out,
+        ds_filtered.num_rows,
+        100 * ds_filtered.num_rows / initial_count,
+    )
     return ds_filtered
+
 
 def filter_redacted(ds):
     """Filter out rows where `redacted` is True."""
@@ -40,9 +47,14 @@ def filter_redacted(ds):
     initial_count = ds.num_rows
     ds_filtered = ds.filter(lambda ex: not ex.get("redacted", False))
     filtered_out = initial_count - ds_filtered.num_rows
-    logger.info("Filtered out %d redacted examples (%d remaining, %.2f%%).", 
-                 filtered_out, ds_filtered.num_rows, 100 * ds_filtered.num_rows / initial_count)
+    logger.info(
+        "Filtered out %d redacted examples (%d remaining, %.2f%%).",
+        filtered_out,
+        ds_filtered.num_rows,
+        100 * ds_filtered.num_rows / initial_count,
+    )
     return ds_filtered
+
 
 def filter_language(ds, lang="english"):
     """Return only rows whose `language` matches `lang` (case‑insensitive)."""
@@ -50,9 +62,14 @@ def filter_language(ds, lang="english"):
     initial_count = ds.num_rows
     ds_filtered = ds.filter(lambda ex: ex.get("language", "").lower() == lang.lower())
     filtered_out = initial_count - ds_filtered.num_rows
-    logger.info("Filtered out %d non-English examples (%d remaining, %.2f%%).", 
-                 filtered_out, ds_filtered.num_rows, 100 * ds_filtered.num_rows / initial_count)
+    logger.info(
+        "Filtered out %d non-English examples (%d remaining, %.2f%%).",
+        filtered_out,
+        ds_filtered.num_rows,
+        100 * ds_filtered.num_rows / initial_count,
+    )
     return ds_filtered
+
 
 def main():
     parser = argparse.ArgumentParser(description="Filter Wildchat dataset")
@@ -79,8 +96,10 @@ def main():
 
     logger.info("All done!")
 
+
 if __name__ == "__main__":
     if os.environ.get("HF_TOKEN") is None:
-        logger.warning("HF_TOKEN environment variable not set. "
-                        "Run 'huggingface-cli login' or set HF_TOKEN to authenticate.")
+        logger.warning(
+            "HF_TOKEN environment variable not set. " "Run 'huggingface-cli login' or set HF_TOKEN to authenticate."
+        )
     main()

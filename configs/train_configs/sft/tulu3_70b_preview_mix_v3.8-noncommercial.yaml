@@ -17,7 +17,7 @@ dataset_mixer:
     # # Math datasets:
     # ai2-adapt-dev/personahub_math_v5_regen_149960: 149960 # all
     # ai2-adapt-dev/personahub_grade_math_v1_49980: 49980 # all
-    # ai2-adapt-dev/open_math_2_gsm8k_converted: 50000 
+    # ai2-adapt-dev/open_math_2_gsm8k_converted: 50000
     # AI-MO/NuminaMath-TIR: 72441 # all
     # ai2-adapt-dev/personahub_math_interm_algebra_50000: 20000
 

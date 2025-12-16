@@ -1,17 +1,14 @@
 import argparse
 import hashlib
-import logging
 import random
-import sys
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 from jinja2 import BaseLoader, Environment
 from tqdm import tqdm
 
-from scripts.synth_pref.utils.ultrafeedback_template import user_prompts
 from open_instruct import logger_utils
+from scripts.synth_pref.utils.ultrafeedback_template import user_prompts
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -42,12 +39,7 @@ def main():
         ignore_models=args.ignore_model,
     )
     logger.info(f"Using the {len(model_paths)} models")
-    df = sample_responses(
-        model_paths,
-        source_dir=input_dir,
-        id_col=args.id_col,
-        one_side_model=args.one_side_model,
-    )
+    df = sample_responses(model_paths, source_dir=input_dir, id_col=args.id_col, one_side_model=args.one_side_model)
 
     logger.info(f"*** Applying the prompt template '{args.prompt_template}' ***")
     aspect_dfs = {}
@@ -58,9 +50,7 @@ def main():
         tqdm.pandas(desc=aspect)
         aspect_df["text"] = df.progress_apply(
             lambda row: render_template(
-                instruction=row["text"],
-                completions=row["completions"],
-                prompt_template=prompt,
+                instruction=row["text"], completions=row["completions"], prompt_template=prompt
             ),
             axis=1,
         )
@@ -76,34 +66,21 @@ def main():
         output_dir = parent_output_dir / aspect
         output_dir.mkdir(parents=True, exist_ok=True)
         full_aspect_df = aspect_df.reset_index()
-        full_aspect_df.to_json(
-            full_output_dir / f"{aspect}-full.jsonl",
-            lines=True,
-            orient="records",
-        )
+        full_aspect_df.to_json(full_output_dir / f"{aspect}-full.jsonl", lines=True, orient="records")
 
         logger.debug(f"Saving shards in {output_dir}")
         for idx, shard in enumerate(range(0, len(df), rows_per_shard)):
             shard_df = aspect_df.iloc[shard : shard + rows_per_shard]
             shard_df = shard_df.reset_index()
-            shard_df.to_json(
-                output_dir / f"{aspect}___shard-{str(idx).zfill(6)}.jsonl",
-                lines=True,
-                orient="records",
-            )
+            shard_df.to_json(output_dir / f"{aspect}___shard-{str(idx).zfill(6)}.jsonl", lines=True, orient="records")
 
 
 def sample_responses(
-    model_paths: dict[str, pd.DataFrame],
-    source_dir: Path,
-    id_col: str,
-    one_side_model: Optional[str] = None,
+    model_paths: dict[str, pd.DataFrame], source_dir: Path, id_col: str, one_side_model: str | None = None
 ) -> pd.DataFrame:
     """Sample responses and combine all dataframes"""
 
-    def _filter_common_rows(
-        dfs: dict[str, pd.DataFrame], unique_key: str = "prompt_hash"
-    ) -> dict[str, pd.DataFrame]:
+    def _filter_common_rows(dfs: dict[str, pd.DataFrame], unique_key: str = "prompt_hash") -> dict[str, pd.DataFrame]:
         common_ids = pd.concat(dfs.values())[unique_key].value_counts()
         common_ids = common_ids[common_ids == len(dfs)].index
         return {key: df[df[unique_key].isin(common_ids)] for key, df in dfs.items()}
@@ -111,21 +88,13 @@ def sample_responses(
     logger.debug(f"Reading JSONL files from cache {source_dir}")
     model_dfs: dict[str, pd.DataFrame] = {}
     for model, path in tqdm(model_paths.items()):
-        model_df = pd.concat(
-            pd.read_json(file, lines=True) for file in path.glob("*.jsonl")
-        )
+        model_df = pd.concat(pd.read_json(file, lines=True) for file in path.glob("*.jsonl"))
         model_df = model_df.reset_index(drop=True)
         # Create hash so that it's easier to reference them later on
         if "prompt_hash" not in model_df.columns:
             model_df["reference_str"] = model_df["text"] + model_df[id_col]
-            model_df["prompt_hash"] = model_df["reference_str"].apply(
-                lambda x: hashlib.sha256(x.encode()).hexdigest()
-            )
-        model_df = (
-            model_df.drop_duplicates(subset=id_col)
-            .dropna(subset="outputs")
-            .reset_index(drop=True)
-        )
+            model_df["prompt_hash"] = model_df["reference_str"].apply(lambda x: hashlib.sha256(x.encode()).hexdigest())
+        model_df = model_df.drop_duplicates(subset=id_col).dropna(subset="outputs").reset_index(drop=True)
         model_df["response"] = model_df["outputs"].apply(lambda x: x[0]["text"])
         model_df["model_name"] = model.replace("___", "/")
 
@@ -153,9 +122,7 @@ def sample_responses(
         others_df["vs_completion"] = others_df.apply(lambda row: row["all_completions"][row["vs_choice_idx"]], axis=1)
         others_df["vs_model"] = others_df.apply(lambda row: row["all_models"][row["vs_choice_idx"]], axis=1)
         # fmt: on
-        vs_df = one_side_df.merge(others_df, on="prompt_hash").drop(
-            columns=["vs_choice_idx"]
-        )
+        vs_df = one_side_df.merge(others_df, on="prompt_hash").drop(columns=["vs_choice_idx"])
 
         def _sample_models(row):
             if random.random() >= 0.5:
@@ -189,9 +156,7 @@ def sample_responses(
 
 
 def filter_models(
-    model_paths: dict[str, Path],
-    include_models: Optional[list[str]] = None,
-    ignore_models: Optional[list[str]] = None,
+    model_paths: dict[str, Path], include_models: list[str] | None = None, ignore_models: list[str] | None = None
 ) -> dict[str, Path]:
     model_names = model_paths.keys()
     if include_models:
@@ -199,22 +164,13 @@ def filter_models(
     if ignore_models:
         model_names = [model for model in model_names if model not in ignore_models]
     # Filter model_paths to only include models in model_names
-    model_paths = {
-        model: path for model, path in model_paths.items() if model in model_names
-    }
+    model_paths = {model: path for model, path in model_paths.items() if model in model_names}
     return model_paths
 
 
-def render_template(
-    instruction: str,
-    completions: list[str],
-    prompt_template: str,
-) -> str:
+def render_template(instruction: str, completions: list[str], prompt_template: str) -> str:
     rtemplate = Environment(loader=BaseLoader()).from_string(prompt_template)
-    user_prompt = rtemplate.render(
-        instruction=instruction,
-        completions=completions,
-    )
+    user_prompt = rtemplate.render(instruction=instruction, completions=completions)
     return user_prompt
 
 

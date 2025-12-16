@@ -17,7 +17,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import torch
 import yaml
@@ -44,7 +44,7 @@ def compute_intermediate_size(n, ffn_dim_multiplier=1, multiple_of=256):
 
 
 def read_json(path):
-    with open(path, "r") as f:
+    with open(path) as f:
         return json.load(f)
 
 
@@ -98,7 +98,7 @@ def write_model(
     loaded = torch.load(os.path.join(input_base_path, "model.pt"), map_location="cpu")
 
     param_count = 0
-    index_dict: Dict[str, Any] = {"weight_map": {}}
+    index_dict: dict[str, Any] = {"weight_map": {}}
     for layer_i in range(n_layers):
         filename = f"pytorch_model-{layer_i + 1}-of-{n_layers + 1}.bin"
         # Unsharded
@@ -205,10 +205,7 @@ def write_model(
 
 
 def _write_tokenizer(
-    output_path: Path,
-    config: Olmo1124Config,
-    checkpoint_dir: str,
-    input_tokenizer_path: Path | None,
+    output_path: Path, config: Olmo1124Config, checkpoint_dir: str, input_tokenizer_path: Path | None
 ) -> None:
     print(f"Saving a {GPT2TokenizerFast.__name__} to {output_path}.")
 
@@ -255,11 +252,7 @@ def main():
         default=None,
         help="Location of OLMo November 2024 tokenizer json file. Defaults to what is set in the config file.",
     )
-    parser.add_argument(
-        "--output_dir",
-        required=True,
-        help="Location to write HF model and tokenizer",
-    )
+    parser.add_argument("--output_dir", required=True, help="Location to write HF model and tokenizer")
     parser.add_argument(
         "--no_fix_eos_token_id",
         action="store_false",

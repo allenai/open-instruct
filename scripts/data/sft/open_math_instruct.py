@@ -1,19 +1,15 @@
 import argparse
 
 from datasets import load_dataset
-import open_instruct.utils as open_instruct_utils
 
+import open_instruct.utils as open_instruct_utils
 from scripts.data.sft.utils import convert_sft_dataset
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Process OpenMathInstruct-2 dataset and optionally upload to Hugging Face Hub."
     )
-    parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Upload the dataset to Hugging Face Hub",
-    )
+    parser.add_argument("--push_to_hub", action="store_true", help="Upload the dataset to Hugging Face Hub")
     parser.add_argument(
         "--hf_entity",
         type=str,
@@ -21,10 +17,7 @@ if __name__ == "__main__":
         help="Hugging Face organization to upload to (if not provided, uploads to user's account)",
     )
     parser.add_argument(
-        "--converted_dataset_name",
-        type=str,
-        default=None,
-        help="Name of the converted dataset on Hugging Face Hub.",
+        "--converted_dataset_name", type=str, default=None, help="Name of the converted dataset on Hugging Face Hub."
     )
     parser.add_argument(
         "--local_save_dir",
@@ -41,16 +34,14 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "--apply_empty_message_filters",
-        action="store_true",
-        help="Apply empty message filters to the dataset.",
+        "--apply_empty_message_filters", action="store_true", help="Apply empty message filters to the dataset."
     )
     args = parser.parse_args()
 
     conversion_func = lambda example: {
         "messages": [
             {"role": "user", "content": example["problem"]},
-            {"role": "assistant", "content": example["generated_solution"]}
+            {"role": "assistant", "content": example["generated_solution"]},
         ]
     }
 
@@ -82,8 +73,9 @@ if __name__ == "__main__":
         apply_empty_message_filters=args.apply_empty_message_filters,
         push_to_hub=args.push_to_hub,
         hf_entity=args.hf_entity,
-        converted_dataset_name="open_math_2_gsm8k_converted" \
-            if not args.converted_dataset_name else args.converted_dataset_name + "_gsm8k",
+        converted_dataset_name="open_math_2_gsm8k_converted"
+        if not args.converted_dataset_name
+        else args.converted_dataset_name + "_gsm8k",
         local_save_dir=args.local_save_dir,
         readme_content=gsm_readme_content,
     )
@@ -111,8 +103,9 @@ if __name__ == "__main__":
         apply_empty_message_filters=args.apply_empty_message_filters,
         push_to_hub=args.push_to_hub,
         hf_entity=args.hf_entity,
-        converted_dataset_name="open_math_2_math_converted" \
-            if not args.converted_dataset_name else args.converted_dataset_name + "_math",
+        converted_dataset_name="open_math_2_math_converted"
+        if not args.converted_dataset_name
+        else args.converted_dataset_name + "_math",
         local_save_dir=args.local_save_dir,
         readme_content=math_readme_content,
     )

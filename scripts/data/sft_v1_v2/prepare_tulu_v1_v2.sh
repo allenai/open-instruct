@@ -1,4 +1,4 @@
-# check if there is $HF_TOKEN in the environment variables, or if the huggingface-cli is installed and logged in 
+# check if there is $HF_TOKEN in the environment variables, or if the huggingface-cli is installed and logged in
 if huggingface-cli whoami &>/dev/null; then
     echo "Logged in to HuggingFace."
 elif [ -z "$HF_TOKEN" ]

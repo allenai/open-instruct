@@ -4,13 +4,13 @@ There are many scripts in this repo, serving many different purposes. Here's a b
 1. Instruction training.
 2. Direct Preference Optimization (DPO) training.
 3. Submitting jobs on Ai2 infrastructure (Beaker). **Use this type of script for launching multiple jobs easily)
-4. Data and results management. 
+4. Data and results management.
 
 This readme covers each category and normal use-cases.
 
 ## Instruct training scripts
-The following scripts are used for fine-tuning. 
-For Ai2 users, these scripts all work best in interactive sessions (not in batch jobs). 
+The following scripts are used for fine-tuning.
+For Ai2 users, these scripts all work best in interactive sessions (not in batch jobs).
 
 1. `finetune_lora_with_acceralate.sh`: Script for running `open_instruct/finetune.py` with LoRA.
 2. `finetune_qlora_with_acceralate.sh`: Script for running `open_instruct/finetune.py` with QLoRA.
@@ -72,8 +72,8 @@ python scripts/submit_eval_jobs.py --model_name hf-online-dpo-llama-tulu2-longer
 ```
 Here, it is important to know that for using `oe-eval`, normally we run `--skip_oi_evals`, `run_safety_evaluations`, and `run_oe_eval_experiments`.
 
-2. `submit_finetune_jobs.py`: **Core script** for submitting multiple and configurable instruction tuning jobs. This script works for both single- and multi-node configurations. It by default reads configs in `configs/train_configs`, but also can take in CLI arguments matching those in `open_instruct/utils.py` `FlatArguments` class. 
-Example of running this is in `scripts/submit_finetune_jobs.sh`. 
+2. `submit_finetune_jobs.py`: **Core script** for submitting multiple and configurable instruction tuning jobs. This script works for both single- and multi-node configurations. It by default reads configs in `configs/train_configs`, but also can take in CLI arguments matching those in `open_instruct/utils.py` `FlatArguments` class.
+Example of running this is in `scripts/submit_finetune_jobs.sh`.
 ```
 python scripts/submit_finetune_job.py --config=configs/train_configs/sft/default.yaml  --learning_rate 1e-6 --exp_name sft_lr_search
 python scripts/submit_finetune_job.py --config=configs/train_configs/sft/default.yaml  --learning_rate 4e-6 --exp_name sft_lr_search
@@ -174,5 +174,5 @@ or single HuggingFace datasets,
 dataset_name: allenai/tulu-v2-sft-mixture
 ```
 **Currently the dataset mixer is only supported for SFT models, but this will be expanded.**
-With these options, the script will fail if multiple data args are passed, in the list of `dataset_mixer`, `train_file`, or `dataset_name`. 
+With these options, the script will fail if multiple data args are passed, in the list of `dataset_mixer`, `train_file`, or `dataset_name`.
 An internal arg, `dataset_mixer_list` was created to handle conversion from dict to string for Beaker jobs.

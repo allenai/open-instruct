@@ -11,4 +11,3 @@ if __name__ == "__main__":
     # export the evaluation results as excel
     evaluation_results = pd.read_sql_query("SELECT * from evaluation_record", DB_CONN)
     evaluation_results.to_excel("data/eval_annotations.xlsx", index=False)
-
