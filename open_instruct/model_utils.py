@@ -592,7 +592,6 @@ def push_folder_to_hub(
     if state.num_processes > 1 and state.process_index != 0:
         return
 
-    hf_repo_url = f"https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}"
     api = HfApi()
     if not api.repo_exists(hf_repo_id):
         api.create_repo(hf_repo_id, exist_ok=True, private=private)
@@ -605,7 +604,7 @@ def push_folder_to_hub(
         commit_message="upload checkpoint",
         run_as_future=False,
     )
-    print(f"🔥 pushed to {hf_repo_url}")
+    logger.info(f"🔥 pushed to https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}")
 
 
 # ----------------------------------------------------------------------------
