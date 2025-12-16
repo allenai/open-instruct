@@ -627,7 +627,10 @@ class TestModelDims(unittest.TestCase):
         mock_vllm_config.model_config = mock_model_config
         mock_vllm_config.parallel_config = mock.Mock()
 
-        with mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
+        with (
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+            mock.patch("torch.cuda.is_available", return_value=True),
+        ):
             vllm_dims = utils.ModelDims.from_vllm_config(mock_vllm_config)
 
         self.assertEqual(vllm_dims, expected_dims)
@@ -650,6 +653,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config) as mock_from_pretrained,
             mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+            mock.patch("torch.cuda.is_available", return_value=True),
         ):
             model_dims = utils.ModelDims.from_hf_config("test/model")
 
@@ -676,6 +680,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
             mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+            mock.patch("torch.cuda.is_available", return_value=True),
         ):
             model_dims = utils.ModelDims.from_hf_config("test/defaults")
 
@@ -684,6 +689,39 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
         self.assertEqual(model_dims.num_kv_heads, 8)
         self.assertIsNone(model_dims.sliding_window)
         self.assertEqual(model_dims.num_sliding_window_layers, 0)
+
+    def test_from_hf_config_sliding_window_no_layer_types(self):
+        config = SimpleNamespace(
+            hidden_size=2048,
+            intermediate_size=8192,
+            sliding_window=4096,
+            num_attention_heads=16,
+            num_hidden_layers=24,
+            vocab_size=32000,
+            num_key_value_heads=8,
+            head_dim=128,
+        )
+
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+            mock.patch("torch.cuda.is_available", return_value=True),
+        ):
+            model_dims = utils.ModelDims.from_hf_config("test/model")
+
+        self.assertEqual(model_dims.sliding_window, 4096)
+        self.assertEqual(model_dims.num_sliding_window_layers, 24)
+
+    def test_from_hf_config_cpu_only(self):
+        config = SimpleNamespace(hidden_size=1024, num_attention_heads=8, num_hidden_layers=12, vocab_size=64000)
+
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
+            mock.patch("torch.cuda.is_available", return_value=False),
+        ):
+            model_dims = utils.ModelDims.from_hf_config("test/cpu")
+
+        self.assertIsNone(model_dims.device_name)
 
 
 # useful for checking if public datasets are still available
