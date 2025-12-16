@@ -1,6 +1,6 @@
 #!/bin/bash
 
-EXP_NAME="olmo3_7b_rlzero_math_restart2k"
+EXP_NAME="olmo3_7b_rlzero_math"
 MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
 DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
@@ -23,7 +23,7 @@ uv run mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/olmo-instruct \
-    --priority urgent \
+    --priority high \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
