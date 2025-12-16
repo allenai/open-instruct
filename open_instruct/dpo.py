@@ -6,6 +6,8 @@ OLMo-core's native training infrastructure.
 """
 
 import enum
+import hashlib
+import json
 import logging
 import os
 import pathlib
@@ -45,7 +47,9 @@ from open_instruct.data_loader import HFDataLoader
 from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
+    compute_config_hash,
     get_cached_dataset_tulu,
+    load_dataset_configs,
 )
 from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
@@ -88,6 +92,29 @@ def config_to_json_serializable(obj: Any) -> Any:
     if isinstance(obj, enum.Enum):
         return obj.value
     return obj
+
+
+def compute_reference_logprobs_cache_hash(
+    model_name_or_path: str,
+    model_revision: str | None,
+    dpo_loss_type: DPOLossType,
+    concatenated_forward: bool,
+    packing: bool,
+    use_lora: bool,
+    dataset_config_hash: str,
+) -> str:
+    """Compute deterministic hash for reference logprobs cache."""
+    cache_key = {
+        "model_name_or_path": model_name_or_path,
+        "model_revision": model_revision,
+        "dpo_loss_type": dpo_loss_type.value,
+        "concatenated_forward": concatenated_forward,
+        "packing": packing,
+        "use_lora": use_lora,
+        "dataset_config_hash": dataset_config_hash,
+    }
+    config_str = json.dumps(cache_key, sort_keys=True)
+    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
 def build_reference_logprobs_cache(
@@ -371,7 +398,7 @@ class DPOExperimentConfig(config.Config):
     dataset_skip_cache: bool = False
     cache_dataset_only: bool = False
     dataset_config_hash: str | None = None
-    reference_logprobs_cache_path: str | None = None
+    reference_logprobs_cache_path: str | None = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
 
     push_to_hub: bool = True
     hf_entity: str | None = None
@@ -401,6 +428,29 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+
+    dcs = load_dataset_configs(
+        args.dataset_mixer_list,
+        args.dataset_mixer_list_splits,
+        args.dataset_transform_fn,
+        transform_fn_args,
+        args.dataset_target_columns,
+    )
+    dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
+
+    reference_cache_path = None
+    if args.reference_logprobs_cache_path:
+        ref_cache_hash = compute_reference_logprobs_cache_hash(
+            model_name_or_path=args.model_name_or_path,
+            model_revision=args.model_revision,
+            dpo_loss_type=args.dpo_loss_type,
+            concatenated_forward=args.concatenated_forward,
+            packing=args.packing,
+            use_lora=args.use_lora,
+            dataset_config_hash=dataset_config_hash,
+        )
+        reference_cache_path = pathlib.Path(args.reference_logprobs_cache_path) / f"{ref_cache_hash}.pt"
+        logger.info(f"Reference logprobs cache path: {reference_cache_path}")
 
     if args.cache_dataset_only:
         dataset = get_cached_dataset_tulu(
@@ -546,7 +596,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         full_dataset_size=len(dataset),
         use_lora=args.use_lora,
         device=device,
-        cache_path=args.reference_logprobs_cache_path,
+        cache_path=reference_cache_path,
     )
     logger.info("Reference logprobs cached.")
     data_loader_instance.reshuffle(epoch=0)

@@ -1,6 +1,7 @@
 """This module only exists because Olmo-core still uses Beaker v1, so we have to write our own BeakerCallback that works with v2.
 
 This module will be deleted once Olmo-core switches to Beaker v2."""
+
 import json
 import logging
 import os
