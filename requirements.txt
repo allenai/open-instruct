@@ -347,7 +347,7 @@ multidict==6.7.0
     # via
     #   aiohttp
     #   yarl
-multiprocess>=0.70.17
+multiprocess==0.70.16
     # via datasets
 networkx==3.5
     # via torch
