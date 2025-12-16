@@ -44,7 +44,6 @@ import socket
 import threading
 import time
 import traceback
-from argparse import Namespace
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
