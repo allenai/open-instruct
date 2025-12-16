@@ -80,7 +80,14 @@ from transformers.integrations import HfDeepSpeedConfig
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
-from open_instruct.data_types import CollatedBatchData, GenerationResult, PromptRequest, RequestInfo, TokenStatistics
+from open_instruct.data_types import (
+    CollatedBatchData,
+    GenerationResult,
+    PromptRequest,
+    RequestInfo,
+    ShutdownSentinel,
+    TokenStatistics,
+)
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -134,10 +141,6 @@ logger = logger_utils.setup_logger(__name__)
 
 INVALID_LOGPROB = 1.0
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
-
-
-class ShutdownSentinel:
-    """Sentinel value to signal thread shutdown via queue."""
 
 
 @dataclass
