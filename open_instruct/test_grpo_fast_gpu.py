@@ -232,5 +232,101 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         param_prompt_Q.put(None)
 
 
+class TestCheckpointRestoration(TestGrpoFastBase):
+    """Tests for checkpoint save/restore functionality."""
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
+    def test_num_total_tokens_restored_from_checkpoint(self):
+        """Test that num_total_tokens is correctly restored from checkpoint.
+
+        This test:
+        1. Runs GRPO training for 2 steps with checkpointing enabled
+        2. Captures the num_total_tokens value at checkpoint time
+        3. Restarts training from the checkpoint
+        4. Verifies num_total_tokens is restored correctly (not reset to 0)
+        """
+        import re
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            checkpoint_dir = os.path.join(tmpdir, "checkpoints")
+            output_dir = os.path.join(tmpdir, "output")
+
+            base_args = [
+                "uv",
+                "run",
+                "python",
+                "open_instruct/grpo_fast.py",
+                "--dataset_mixer_list",
+                "ai2-adapt-dev/rlvr_gsm8k_zs",
+                "8",
+                "--dataset_mixer_list_splits",
+                "train",
+                "--max_prompt_token_length",
+                "256",
+                "--response_length",
+                "128",
+                "--pack_length",
+                "512",
+                "--per_device_train_batch_size",
+                "1",
+                "--num_unique_prompts_rollout",
+                "2",
+                "--num_samples_per_prompt_rollout",
+                "2",
+                "--model_name_or_path",
+                "Qwen/Qwen2.5-0.5B",
+                "--temperature",
+                "0.7",
+                "--learning_rate",
+                "3e-7",
+                "--num_training_steps",
+                "2",
+                "--deepspeed_stage",
+                "2",
+                "--num_learners_per_node",
+                "1",
+                "--vllm_tensor_parallel_size",
+                "1",
+                "--vllm_gpu_memory_utilization",
+                "0.3",
+                "--vllm_enforce_eager",
+                "--single_gpu_mode",
+                "--checkpoint_state_freq",
+                "1",
+                "--checkpoint_state_dir",
+                checkpoint_dir,
+                "--output_dir",
+                output_dir,
+            ]
+
+            result1 = subprocess.run(base_args, capture_output=True, text=True, timeout=600)
+            self.assertEqual(result1.returncode, 0, f"First run failed: {result1.stderr}")
+
+            match = re.search(r"num_total_tokens.*?(\d+)", result1.stdout + result1.stderr)
+            self.assertIsNotNone(match, "Could not find num_total_tokens in first run logs")
+            expected_tokens = int(match.group(1))
+            self.assertGreater(expected_tokens, 0, "num_total_tokens should be > 0 after training")
+
+            resume_args = base_args + ["--num_training_steps", "3"]
+            result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=600)
+
+            restore_match = re.search(r"Restored num_total_tokens: (\d+)", result2.stdout + result2.stderr)
+
+            self.assertIsNotNone(
+                restore_match,
+                f"Bug: num_total_tokens was NOT restored from checkpoint. "
+                f"Expected 'Restored num_total_tokens: {expected_tokens}' in logs.",
+            )
+
+            if restore_match:
+                restored_tokens = int(restore_match.group(1))
+                self.assertEqual(
+                    restored_tokens,
+                    expected_tokens,
+                    f"num_total_tokens mismatch: expected {expected_tokens}, got {restored_tokens}",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
