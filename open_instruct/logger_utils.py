@@ -15,7 +15,7 @@
 import logging
 
 
-def setup_logger(name: str | None = None) -> logging.Logger:
+def setup_logger(name: str | None = None, rank: int = 0) -> logging.Logger:
     """Set up a logger with consistent formatting across the project.
 
     This function configures logging.basicConfig with a standard format
@@ -24,13 +24,14 @@ def setup_logger(name: str | None = None) -> logging.Logger:
 
     Args:
         name: Logger name (typically __name__). If None, returns root logger.
+        rank: Process rank in distributed training. Only rank 0 logs INFO.
 
     Returns:
         Logger instance with the specified name
     """
     if not logging.getLogger().handlers:
         logging.basicConfig(
-            level=logging.INFO,
+            level=logging.INFO if rank == 0 else logging.WARNING,
             format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
