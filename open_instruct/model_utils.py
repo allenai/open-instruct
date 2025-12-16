@@ -606,27 +606,25 @@ def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.T
 
 @retry_on_exception()
 def push_folder_to_hub(
-    accelerator: Accelerator | None,
-    output_dir: str,
-    hf_repo_id: str | None = None,
-    hf_repo_revision: str | None = None,
-    private: bool = True,
+    output_dir: str, hf_repo_id: str | None = None, hf_repo_revision: str | None = None, private: bool = True
 ):
-    if accelerator is None or accelerator.is_main_process:
-        hf_repo_url = f"https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}"
-        api = HfApi()
-        if not api.repo_exists(hf_repo_id):
-            api.create_repo(hf_repo_id, exist_ok=True, private=private)
-        if hf_repo_revision is not None:
-            api.create_branch(repo_id=hf_repo_id, branch=hf_repo_revision, exist_ok=True)
-        api.upload_folder(
-            repo_id=hf_repo_id,
-            revision=hf_repo_revision,
-            folder_path=output_dir,
-            commit_message="upload checkpoint",
-            run_as_future=False,
-        )
-        print(f"🔥 pushed to {hf_repo_url}")
+    """Push a folder to Hugging Face Hub.
+
+    This function should only run on the main process. Callers are expected to gate calls themselves.
+    """
+    api = HfApi()
+    if not api.repo_exists(hf_repo_id):
+        api.create_repo(hf_repo_id, exist_ok=True, private=private)
+    if hf_repo_revision is not None:
+        api.create_branch(repo_id=hf_repo_id, branch=hf_repo_revision, exist_ok=True)
+    api.upload_folder(
+        repo_id=hf_repo_id,
+        revision=hf_repo_revision,
+        folder_path=output_dir,
+        commit_message="upload checkpoint",
+        run_as_future=False,
+    )
+    logger.info(f"🔥 pushed to https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}")
 
 
 # ----------------------------------------------------------------------------
