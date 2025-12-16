@@ -398,7 +398,7 @@ class DPOExperimentConfig(config.Config):
     dataset_skip_cache: bool = False
     cache_dataset_only: bool = False
     dataset_config_hash: str | None = None
-    reference_logprobs_cache_path: str | None = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
+    reference_logprobs_cache_path: str = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
 
     push_to_hub: bool = True
     hf_entity: str | None = None
@@ -438,19 +438,17 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     )
     dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
 
-    reference_cache_path = None
-    if args.reference_logprobs_cache_path:
-        ref_cache_hash = compute_reference_logprobs_cache_hash(
-            model_name_or_path=args.model_name_or_path,
-            model_revision=args.model_revision,
-            dpo_loss_type=args.dpo_loss_type,
-            concatenated_forward=args.concatenated_forward,
-            packing=args.packing,
-            use_lora=args.use_lora,
-            dataset_config_hash=dataset_config_hash,
-        )
-        reference_cache_path = pathlib.Path(args.reference_logprobs_cache_path) / f"{ref_cache_hash}.pt"
-        logger.info(f"Reference logprobs cache path: {reference_cache_path}")
+    ref_cache_hash = compute_reference_logprobs_cache_hash(
+        model_name_or_path=args.model_name_or_path,
+        model_revision=args.model_revision,
+        dpo_loss_type=args.dpo_loss_type,
+        concatenated_forward=args.concatenated_forward,
+        packing=args.packing,
+        use_lora=args.use_lora,
+        dataset_config_hash=dataset_config_hash,
+    )
+    reference_cache_path = pathlib.Path(args.reference_logprobs_cache_path) / f"{ref_cache_hash}.pt"
+    logger.info(f"Reference logprobs cache path: {reference_cache_path}")
 
     if args.cache_dataset_only:
         dataset = get_cached_dataset_tulu(
