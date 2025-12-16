@@ -665,8 +665,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
         )
-        train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset = train_dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
+        train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
 
         dcs = load_dataset_configs(
