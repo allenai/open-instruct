@@ -25,9 +25,11 @@ with contextlib.suppress(Exception):
     import deepspeed
 
 # isort: on
+import hashlib
 import json
 import math
 import os
+import pathlib
 import random
 import shutil
 import time
@@ -39,6 +41,7 @@ from typing import Literal
 
 import datasets
 import torch
+import torch.distributed as dist
 import torch.utils
 import torch.utils.data
 import transformers
@@ -59,7 +62,9 @@ from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
+    compute_config_hash,
     get_cached_dataset_tulu,
+    load_dataset_configs,
     visualize_token,
 )
 from open_instruct.dpo_utils import (
@@ -70,7 +75,7 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
-from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
+from open_instruct.model_utils import TensorCache, push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -185,6 +190,8 @@ class FlatArguments:
     """The hash of the dataset configuration."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
+    reference_logprobs_cache_path: str = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
+    """The path to cache reference logprobs to disk."""
     dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
@@ -442,46 +449,76 @@ def build_deepspeed_config(
     return config
 
 
-def get_cache_ref_logprobs(
+def compute_reference_logprobs_cache_hash(
+    model_name_or_path: str,
+    model_revision: str | None,
+    dpo_loss_type: str,
+    concatenated_forward: bool,
+    packing: bool,
+    use_lora: bool,
+    dataset_config_hash: str,
+) -> str:
+    """Compute deterministic hash for reference logprobs cache."""
+    cache_key = {
+        "model_name_or_path": model_name_or_path,
+        "model_revision": model_revision,
+        "dpo_loss_type": dpo_loss_type,
+        "concatenated_forward": concatenated_forward,
+        "packing": packing,
+        "use_lora": use_lora,
+        "dataset_config_hash": dataset_config_hash,
+    }
+    config_str = json.dumps(cache_key, sort_keys=True)
+    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
+
+
+def build_reference_logprobs_cache(
     model: torch.nn.Module,
-    active_dataloader: torch.utils.data.DataLoader,
+    dataloader: torch.utils.data.DataLoader,
     accelerator: Accelerator,
     average_log_prob: bool,
-    last_checkpoint_path: str | None,
-    resume_step: int,
-    epoch_range: range,
     forward_fn: Callable,
-):
-    epoch_cached_reference_chosen_logps = []
-    epoch_cached_reference_rejected_logps = []
-    for epoch in epoch_range:
-        active_dataloader.set_epoch(epoch)
-        if last_checkpoint_path and resume_step is not None:
-            # We skip the first `n` batches in the dataloader when resuming from a checkpoint
-            active_dataloader = accelerator.skip_first_batches(active_dataloader, resume_step)
-        cached_reference_chosen_logps = []
-        cached_reference_rejected_logps = []
-        with torch.no_grad():
-            for batch in tqdm(
-                active_dataloader,
-                disable=not accelerator.is_local_main_process,
-                desc=f"Generating reference cache (epoch {epoch})",
-                bar_format="{l_bar}{bar}{r_bar}\n",
-            ):
-                if args.use_lora:
-                    with accelerator.unwrap_model(model).disable_adapter():
-                        reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
-                            model, batch, average_log_prob=average_log_prob
-                        )
-                else:
-                    reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
-                        model, batch, average_log_prob=average_log_prob
-                    )
-                cached_reference_chosen_logps.append(reference_chosen_logps.cpu())
-                cached_reference_rejected_logps.append(reference_rejected_logps.cpu())
-        epoch_cached_reference_chosen_logps.append(cached_reference_chosen_logps)
-        epoch_cached_reference_rejected_logps.append(cached_reference_rejected_logps)
-    return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
+    full_dataset_size: int,
+    use_lora: bool = False,
+    cache_path: str | pathlib.Path | None = None,
+) -> TensorCache:
+    """Build a TensorCache with reference logprobs by computing logprobs once for all samples."""
+    if cache_path is not None:
+        cache_path = pathlib.Path(cache_path)
+        if cache_path.exists():
+            logger.info(f"Loading reference logprobs cache from {cache_path}")
+            return TensorCache.from_disk(cache_path)
+
+    model.eval()
+    device = accelerator.device
+    chosen_tensor = torch.zeros(full_dataset_size, dtype=torch.float32, device=device)
+    rejected_tensor = torch.zeros(full_dataset_size, dtype=torch.float32, device=device)
+
+    with torch.no_grad():
+        for batch in tqdm(
+            dataloader, disable=not accelerator.is_local_main_process, desc="Caching reference logprobs"
+        ):
+            if use_lora:
+                with accelerator.unwrap_model(model).disable_adapter():
+                    chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+            else:
+                chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+
+            dataset_indices = batch["dataset_index"]
+            chosen_tensor[dataset_indices] = chosen_logps
+            rejected_tensor[dataset_indices] = rejected_logps
+
+    dist.all_reduce(chosen_tensor, op=dist.ReduceOp.SUM)
+    dist.all_reduce(rejected_tensor, op=dist.ReduceOp.SUM)
+
+    model.train()
+    cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
+
+    if cache_path is not None and accelerator.is_main_process:
+        logger.info(f"Saving reference logprobs cache to {cache_path}")
+        cache.to_disk(cache_path)
+
+    return cache
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
@@ -629,7 +666,29 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             dataset_skip_cache=args.dataset_skip_cache,
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
+        train_dataset = train_dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
         train_dataset.set_format(type="pt")
+
+        dcs = load_dataset_configs(
+            args.dataset_mixer_list,
+            args.dataset_mixer_list_splits,
+            args.dataset_transform_fn,
+            transform_fn_args,
+            args.dataset_target_columns,
+        )
+        dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
+        ref_cache_hash = compute_reference_logprobs_cache_hash(
+            model_name_or_path=args.model_name_or_path,
+            model_revision=args.model_revision,
+            dpo_loss_type=args.dpo_loss_type,
+            concatenated_forward=args.concatenated_forward,
+            packing=args.packing,
+            use_lora=args.use_lora,
+            dataset_config_hash=dataset_config_hash,
+        )
+        reference_cache_path = pathlib.Path(args.reference_logprobs_cache_path) / f"{ref_cache_hash}.pt"
+        logger.info(f"Reference logprobs cache path: {reference_cache_path}")
+
     if accelerator.is_main_process:
         visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
 
@@ -891,20 +950,20 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         if not args.concatenated_forward:
             raise NotImplementedError("seperate forward not implemented for packing/padding-free")
         forward_fn = partial(forward_fn, packing=True)
-    if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
-            model,
-            train_dataloader,
-            accelerator,
-            average_log_prob,
-            last_checkpoint_path,
-            resume_step,
-            range(starting_epoch, args.num_train_epochs),
-            forward_fn,
+    if args.dpo_loss_type in ["dpo", "dpo_norm", "wpo"]:
+        reference_cache = build_reference_logprobs_cache(
+            model=model,
+            dataloader=train_dataloader,
+            accelerator=accelerator,
+            average_log_prob=average_log_prob,
+            forward_fn=forward_fn,
+            full_dataset_size=len(train_dataset),
+            use_lora=args.use_lora,
+            cache_path=reference_cache_path,
         )
         print("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
-        torch.cuda.empty_cache()  # clear cache
+        torch.cuda.empty_cache()
 
     print("=============after cache logprobs; clear cache")
     print_gpu_stats(init_gpu_memory)
@@ -929,7 +988,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         else:
             active_dataloader = train_dataloader
         # we need to average the log probs for simpo loss
-        for step, batch in enumerate(active_dataloader):
+        for _step, batch in enumerate(active_dataloader):
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
             with accelerator.accumulate(model):
@@ -937,9 +996,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-                    p_device = policy_chosen_logps.device
-                    reference_chosen_logps = epoch_cached_reference_chosen_logps[epoch][step].to(p_device)
-                    reference_rejected_logps = epoch_cached_reference_rejected_logps[epoch][step].to(p_device)
+                    ref_logps = reference_cache[batch["dataset_index"]]
+                    reference_chosen_logps = ref_logps["chosen_logps"]
+                    reference_rejected_logps = ref_logps["rejected_logps"]
                     losses, _, _ = dpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
@@ -957,6 +1016,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         label_smoothing=args.dpo_label_smoothing,
                     )
                 elif args.dpo_loss_type == "wpo":
+                    ref_logps = reference_cache[batch["dataset_index"]]
+                    reference_chosen_logps = ref_logps["chosen_logps"]
+                    reference_rejected_logps = ref_logps["rejected_logps"]
                     losses, _, _ = wpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
