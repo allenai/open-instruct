@@ -2805,7 +2805,9 @@ def one_training_step(
             ray_get_with_progress(update_ref_policy_future, desc=f"Updating reference policy at step {training_step}")
 
     save_time = 0
-    if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
+    if args.save_freq > 0 and (
+        (training_step % args.save_freq == 0 and training_step > 1) or (args.eval_on_step_0 and training_step == 1)
+    ):
         with Timer("[Main Thread] 🗡️ Saving model") as timer:
             checkpoint_dir = f"{args.output_dir}_checkpoints"
             step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
@@ -3284,10 +3286,9 @@ def run_training(
         ) = load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
 
         if (
-            training_step % args.local_eval_every == 0
-            and eval_dataset is not None
-            and (args.eval_on_step_0 or training_step > 1)
-        ):
+            (training_step % args.local_eval_every == 0 and training_step > 1)
+            or (args.eval_on_step_0 and training_step == 1)
+        ) and eval_dataset is not None:
             for eval_index, eval_example in enumerate(eval_dataset):
                 add_prompt_to_generator(
                     eval_example,
