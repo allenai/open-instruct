@@ -966,9 +966,8 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
         verifiers[instance.name.lower()] = instance
 
     # if we have remap arg, remap!
-    remap_verifier = getattr(streaming_config, "remap_verifier", None) or getattr(args, "remap_verifier", None)
-    if remap_verifier:
-        remap = remap_verifier.split("=")
+    if streaming_config and streaming_config.remap_verifier:
+        remap = streaming_config.remap_verifier.split("=")
         assert len(remap) == 2, "Remap must be in the format old_name=new_name"
         old_name, new_name = remap
         # map so that the old name calls the new verifier
