@@ -487,7 +487,7 @@ def build_reference_logprobs_cache(
         cache_path = pathlib.Path(cache_path)
         if cache_path.exists():
             logger.info(f"Loading reference logprobs cache from {cache_path}")
-            return TensorCache.from_disk(cache_path)
+            return TensorCache.from_disk(cache_path, device=accelerator.device)
 
     model.eval()
     device = accelerator.device
@@ -508,8 +508,9 @@ def build_reference_logprobs_cache(
             chosen_tensor[dataset_indices] = chosen_logps
             rejected_tensor[dataset_indices] = rejected_logps
 
-    dist.all_reduce(chosen_tensor, op=dist.ReduceOp.SUM)
-    dist.all_reduce(rejected_tensor, op=dist.ReduceOp.SUM)
+    if dist.is_initialized():
+        dist.all_reduce(chosen_tensor, op=dist.ReduceOp.SUM)
+        dist.all_reduce(rejected_tensor, op=dist.ReduceOp.SUM)
 
     model.train()
     cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
