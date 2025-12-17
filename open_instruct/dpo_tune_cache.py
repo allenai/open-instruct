@@ -508,9 +508,13 @@ def build_reference_logprobs_cache(
             chosen_tensor[dataset_indices] = chosen_logps
             rejected_tensor[dataset_indices] = rejected_logps
 
+    # Use MAX instead of SUM because Accelerate's distributed sampler can duplicate
+    # examples across ranks when even_batches=True. MAX works because duplicate
+    # indices compute identical logprobs, so MAX of identical values is correct.
+    # TODO(finbarr): Refactor to use HFDataLoader and explicitly shard the dataset to prevent duplicates.
     if dist.is_initialized():
-        dist.all_reduce(chosen_tensor, op=dist.ReduceOp.SUM)
-        dist.all_reduce(rejected_tensor, op=dist.ReduceOp.SUM)
+        dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
+        dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
 
     model.train()
     cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
@@ -814,6 +818,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     )
 
     # debugging tool for fewer samples
+    original_dataset_size = len(train_dataset)
     if args.max_train_samples is not None:
         max_train_samples = min(len(train_dataset), args.max_train_samples)
         logger.info(f"Limiting training samples to {max_train_samples} from {len(train_dataset)}.")
@@ -958,7 +963,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             accelerator=accelerator,
             average_log_prob=average_log_prob,
             forward_fn=forward_fn,
-            full_dataset_size=len(train_dataset),
+            full_dataset_size=original_dataset_size,
             use_lora=args.use_lora,
             cache_path=reference_cache_path,
         )
