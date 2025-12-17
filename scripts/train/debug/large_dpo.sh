@@ -2,11 +2,11 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=allenai/Olmo-3-1025-7B
 LR=1e-6
-EXP_NAME=olmo3-7b-DPO-debug-${LR}
+EXP_NAME=olmo3-7b-DPO-debug-32k-${LR}
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --description "Multi-node DPO run with OLMo3-7B, 1k sequence length." \
+    --description "Multi-node DPO run with OLMo3-7B, 32k sequence length." \
     --workspace ai2/open-instruct-dev \
     --priority high \
     --image "$BEAKER_IMAGE" \
@@ -14,12 +14,17 @@ uv run python mason.py \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
-    --gpus 8 -- python open_instruct/dpo_tune_cache.py \
+    --gpus 8 -- accelerate launch \
+    --mixed_precision bf16 \
+    --num_processes 8 \
+    --use_deepspeed \
+    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_multinode_launcher standard \
+    open_instruct/dpo_tune_cache.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
-    --tokenizer_name_or_path "$MODEL_NAME" \
     --chat_template_name olmo \
-    --max_seq_length 1024 \
+    --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
     --learning_rate "$LR" \
