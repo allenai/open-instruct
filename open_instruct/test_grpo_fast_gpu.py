@@ -259,23 +259,23 @@ class TestCheckpointRestoration(TestGrpoFastBase):
                 "open_instruct/grpo_fast.py",
                 "--dataset_mixer_list",
                 "ai2-adapt-dev/rlvr_gsm8k_zs",
-                "64",
+                "16",
                 "--dataset_mixer_list_splits",
                 "train",
                 "--max_prompt_token_length",
-                "512",
+                "256",
                 "--response_length",
-                "512",
+                "128",
                 "--pack_length",
-                "1024",
+                "512",
                 "--per_device_train_batch_size",
                 "1",
                 "--num_unique_prompts_rollout",
-                "8",
+                "2",
                 "--num_samples_per_prompt_rollout",
-                "4",
+                "2",
                 "--model_name_or_path",
-                "Qwen/Qwen3-1.7B",
+                "Qwen/Qwen2.5-0.5B",
                 "--stop_strings",
                 "</answer>",
                 "--apply_r1_style_format_reward",
@@ -316,7 +316,7 @@ class TestCheckpointRestoration(TestGrpoFastBase):
                 output_dir,
             ]
 
-            result1 = subprocess.run(base_args, capture_output=True, text=True, timeout=900)
+            result1 = subprocess.run(base_args, capture_output=True, text=True, timeout=300)
             self.assertEqual(result1.returncode, 0, f"First run failed: {result1.stderr}")
 
             match = re.search(r"num_total_tokens.*?(\d+)", result1.stdout + result1.stderr)
@@ -325,7 +325,7 @@ class TestCheckpointRestoration(TestGrpoFastBase):
             self.assertGreater(expected_tokens, 0, "num_total_tokens should be > 0 after training")
 
             resume_args = base_args + ["--num_training_steps", "3"]
-            result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=900)
+            result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=300)
 
             restore_match = re.search(r"Restored num_total_tokens: (\d+)", result2.stdout + result2.stderr)
 
