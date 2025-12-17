@@ -99,7 +99,7 @@ class ModelConfig:
     """The model checkpoint for weights initialization."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
-    torch_dtype: str | None = None
+    dtype: str | None = None
     """Override the default `torch.dtype` and load the model under this dtype."""
     attn_implementation: Literal["flash_attention_2"] | None = None
     """Which attention implementation to use; you can run --attn_implementation=flash_attention_2, in which case
@@ -178,7 +178,7 @@ def load_ref_policy(
     ref_policy: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),

@@ -55,10 +55,10 @@ def make_diff(
         python weight_diff.py make_diff --path_raw <your_path_raw> --path_tuned <your_path_tuned> --path_diff <your_path_diff>
     """
     model_tuned: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
-        path_tuned, device_map={"": torch.device(device)}, torch_dtype=torch.float32, low_cpu_mem_usage=True
+        path_tuned, device_map={"": torch.device(device)}, dtype=torch.float32, low_cpu_mem_usage=True
     )
     model_raw: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
-        path_raw, device_map={"": torch.device(device)}, torch_dtype=torch.float32, low_cpu_mem_usage=True
+        path_raw, device_map={"": torch.device(device)}, dtype=torch.float32, low_cpu_mem_usage=True
     )
 
     tokenizer_tuned: transformers.PreTrainedTokenizer = transformers.AutoTokenizer.from_pretrained(path_tuned)
@@ -104,10 +104,10 @@ def recover(
         - to run inference on a reference model (e.g. to ensure diff is correct), set `--original_model <your_model_name>`.
     """
     model_raw: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
-        path_raw, device_map={"": torch.device(device)}, torch_dtype=torch.float32, low_cpu_mem_usage=True
+        path_raw, device_map={"": torch.device(device)}, dtype=torch.float32, low_cpu_mem_usage=True
     )
     model_recovered: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
-        path_diff, device_map={"": torch.device(device)}, torch_dtype=torch.float32, low_cpu_mem_usage=True
+        path_diff, device_map={"": torch.device(device)}, dtype=torch.float32, low_cpu_mem_usage=True
     )
 
     tokenizer_raw: transformers.PreTrainedTokenizer = transformers.LlamaTokenizer.from_pretrained(path_raw)
