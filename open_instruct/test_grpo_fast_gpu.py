@@ -232,8 +232,13 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         param_prompt_Q.put(None)
 
 
-class TestCheckpointRestoration(TestGrpoFastBase):
-    """Tests for checkpoint save/restore functionality."""
+class TestCheckpointRestoration(unittest.TestCase):
+    """Tests for checkpoint save/restore functionality.
+
+    Note: This class does NOT inherit from TestGrpoFastBase because it only
+    runs subprocess commands. Using the base class would create Ray resources
+    that conflict with the subprocess's own Ray cluster.
+    """
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_num_total_tokens_restored_from_checkpoint(self):
@@ -316,7 +321,10 @@ class TestCheckpointRestoration(TestGrpoFastBase):
                 output_dir,
             ]
 
-            result1 = subprocess.run(base_args, capture_output=True, text=True, timeout=300)
+            env = os.environ.copy()
+            env.pop("RAY_ADDRESS", None)
+
+            result1 = subprocess.run(base_args, capture_output=True, text=True, timeout=300, env=env)
             self.assertEqual(result1.returncode, 0, f"First run failed: {result1.stderr}")
 
             match = re.search(r"num_total_tokens.*?(\d+)", result1.stdout + result1.stderr)
@@ -325,7 +333,7 @@ class TestCheckpointRestoration(TestGrpoFastBase):
             self.assertGreater(expected_tokens, 0, "num_total_tokens should be > 0 after training")
 
             resume_args = base_args + ["--num_training_steps", "3"]
-            result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=300)
+            result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=300, env=env)
 
             restore_match = re.search(r"Restored num_total_tokens: (\d+)", result2.stdout + result2.stderr)
 
