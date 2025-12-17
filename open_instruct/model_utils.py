@@ -100,7 +100,7 @@ class ModelConfig:
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
-    """Override the default `torch.dtype` and load the model under this dtype."""
+    """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
     attn_implementation: Literal["flash_attention_2"] | None = None
     """Which attention implementation to use; you can run --attn_implementation=flash_attention_2, in which case
     you must install this manually by running `pip install flash-attn --no-build-isolation`"""
