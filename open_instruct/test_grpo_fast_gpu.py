@@ -322,7 +322,10 @@ class TestCheckpointRestoration(unittest.TestCase):
             ]
 
             env = os.environ.copy()
-            env.pop("RAY_ADDRESS", None)
+            env["RAY_ADDRESS"] = ""
+            ray_tmpdir = os.path.join(tmpdir, "ray_tmp")
+            os.makedirs(ray_tmpdir, exist_ok=True)
+            env["RAY_TMPDIR"] = ray_tmpdir
 
             result1 = subprocess.run(base_args, capture_output=True, text=True, timeout=300, env=env)
             self.assertEqual(result1.returncode, 0, f"First run failed: {result1.stderr}")
