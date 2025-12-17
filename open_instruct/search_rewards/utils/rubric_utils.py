@@ -1,9 +1,14 @@
 import asyncio
+import fcntl
 import json
 import logging
 import os
 import random
-from typing import Any, Dict, List, Tuple
+import socket
+import tempfile
+import time
+import uuid
+from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict
 
 from open_instruct.search_rewards.utils.run_utils import extract_json_from_response, run_litellm, run_litellm_async
@@ -585,3 +590,103 @@ def update_ground_truths_with_adaptive_rubrics(ground_truths, all_adaptive_rubri
     avg_num_adaptive_rubrics = sum(num_adaptive_rubrics) / len(num_adaptive_rubrics) if len(num_adaptive_rubrics) > 0 else 0.0
     avg_num_active_buffer_rubrics = sum(num_active_buffer_rubrics) / len(num_active_buffer_rubrics) if num_active_buffer_rubrics else 0.0
     return ground_truths, valid_adaptive_rubric_rate, avg_num_ground_truths, avg_num_adaptive_rubrics, avg_num_active_buffer_rubrics, rubric_buffer, skipped_count
+
+
+def save_adaptive_rubric_cache_safe(
+    cache_dir: str,
+    training_step: int,
+    decoded_responses: List[str],
+    ground_truths: List,
+    all_adaptive_rubrics: List,
+    num_subsampled_answers_list: List[int],
+    num_samples_per_prompt_rollout: int,
+    use_full_responses: bool,
+    answer_length_limit_in_words: Optional[int],
+) -> str:
+    """
+    Safely save adaptive rubric generation inputs and outputs for future training use.
+    
+    Uses atomic writes and file locking for multi-thread/multi-node safety:
+    1. Creates unique filename using hostname + PID + timestamp + UUID to avoid conflicts
+    2. Writes to a temporary file first, then atomically renames to final location
+    3. Uses fcntl file locking to prevent concurrent writes to the same file
+    
+    Args:
+        cache_dir: Directory to save cache files
+        training_step: Current training step number
+        decoded_responses: List of decoded response strings (inputs)
+        ground_truths: List of ground truth data (inputs)
+        all_adaptive_rubrics: List of generated adaptive rubrics (outputs)
+        num_subsampled_answers_list: List of subsampled answer counts (outputs)
+        num_samples_per_prompt_rollout: Number of samples per prompt (config)
+        use_full_responses: Whether full responses were used (config)
+        answer_length_limit_in_words: Word limit for answers (config)
+        
+    Returns:
+        Path to the saved cache file
+    """
+    # Create cache directory if it doesn't exist
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Create unique identifier for this save operation
+    hostname = socket.gethostname()
+    pid = os.getpid()
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    unique_id = uuid.uuid4().hex[:8]
+    
+    # Prepare cache data
+    cache_data = {
+        "training_step": training_step,
+        "timestamp": timestamp,
+        "hostname": hostname,
+        "pid": pid,
+        # Inputs to _generate_instance_wise_adaptive_rubrics
+        "inputs": {
+            "decoded_responses": decoded_responses,
+            "ground_truths": ground_truths,
+            "num_samples_per_prompt_rollout": num_samples_per_prompt_rollout,
+            "use_full_responses": use_full_responses,
+            "answer_length_limit_in_words": answer_length_limit_in_words,
+        },
+        # Outputs from _generate_instance_wise_adaptive_rubrics
+        "outputs": {
+            "all_adaptive_rubrics": all_adaptive_rubrics,
+            "num_subsampled_answers_list": num_subsampled_answers_list,
+        },
+    }
+    
+    # Generate final filename
+    final_filename = f"adaptive_rubric_cache_step{training_step}_{hostname}_{pid}_{timestamp}_{unique_id}.json"
+    final_path = os.path.join(cache_dir, final_filename)
+    
+    # Use atomic write: write to temp file, then rename
+    # Create temp file in the same directory to ensure atomic rename works (same filesystem)
+    fd, temp_path = tempfile.mkstemp(suffix=".tmp", prefix="adaptive_rubric_cache_", dir=cache_dir)
+    
+    try:
+        # Write data to temp file with file locking
+        with os.fdopen(fd, 'w') as f:
+            # Acquire exclusive lock for writing
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                json.dump(cache_data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())  # Ensure data is written to disk
+            finally:
+                # Release lock
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        
+        # Atomic rename (guaranteed atomic on POSIX systems within same filesystem)
+        os.rename(temp_path, final_path)
+        print(f"✅ Saved adaptive rubric cache to: {final_path}")
+        return final_path
+        
+    except Exception as e:
+        # Clean up temp file if something went wrong
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        print(f"❌ Failed to save adaptive rubric cache: {e}")
+        raise
