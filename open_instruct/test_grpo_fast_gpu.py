@@ -235,12 +235,19 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
 class TestCheckpointRestoration(TestGrpoFastBase):
     """Tests for checkpoint save/restore functionality."""
 
+    @unittest.skip("Slow integration test - spawns subprocess that conflicts with pytest Ray cluster")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_num_total_tokens_restored_from_checkpoint(self):
         """Test that num_total_tokens is correctly restored from checkpoint.
 
+        This test spawns a subprocess to run full GRPO training, which conflicts
+        with the Ray cluster already running in pytest. To run this test manually:
+
+        1. Run: ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh
+        2. Check logs for "Restored num_total_tokens:" after checkpoint resume
+
         This test:
-        1. Runs GRPO training for 2 steps with checkpointing enabled
+        1. Runs GRPO training for 1 step with checkpointing enabled
         2. Captures the num_total_tokens value at checkpoint time
         3. Restarts training from the checkpoint
         4. Verifies num_total_tokens is restored correctly (not reset to 0)
@@ -281,7 +288,7 @@ class TestCheckpointRestoration(TestGrpoFastBase):
                 "--learning_rate",
                 "3e-7",
                 "--num_training_steps",
-                "2",
+                "1",
                 "--deepspeed_stage",
                 "2",
                 "--num_learners_per_node",
@@ -308,7 +315,7 @@ class TestCheckpointRestoration(TestGrpoFastBase):
             expected_tokens = int(match.group(1))
             self.assertGreater(expected_tokens, 0, "num_total_tokens should be > 0 after training")
 
-            resume_args = base_args + ["--num_training_steps", "3"]
+            resume_args = base_args + ["--num_training_steps", "2"]
             result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=1200)
 
             restore_match = re.search(r"Restored num_total_tokens: (\d+)", result2.stdout + result2.stderr)
