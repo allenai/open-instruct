@@ -66,7 +66,6 @@ from open_instruct.utils import (
     ArgumentParserPlus,
     get_device_name,
     is_beaker_job,
-    is_on_gcp,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
@@ -507,12 +506,6 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
 
     dataset = dataset.shuffle(seed=args.seed)
     dataset.set_format(type="pt")
-
-    if args.async_checkpointing and is_on_gcp():
-        raise ValueError(
-            "async_checkpointing=True is not supported on GCP (augusta) due to gloo process group issues. "
-            "Set async_checkpointing=False. See: olmo_core/internal/cookbook.py"
-        )
 
     world_size = get_world_size() if is_distributed() else 1
 
