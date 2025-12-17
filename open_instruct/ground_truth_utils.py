@@ -54,21 +54,23 @@ class VerifierConfig:
     """For now this config exists to support LMJudgeVerifer, can be expanded to support other verifers"""
 
     @classmethod
-    def from_args(cls, args) -> "VerifierConfig":
+    def from_args(cls, *arg_sources) -> "VerifierConfig":
         """
-        Create a VerifierConfig from an Args object by automatically matching field names.
-        Only fields that exist in both Args and VerifierConfig will be passed through.
+        Create a VerifierConfig from multiple argument sources by automatically matching field names.
+        Only fields that exist in both the sources and VerifierConfig will be passed through.
+        Later sources override earlier ones if they have the same field.
         """
         import dataclasses
 
-        # Get all field names from VerifierConfig
         verifier_fields = {field.name for field in dataclasses.fields(cls)}
 
-        # Get all attributes from args that match VerifierConfig field names
         matching_kwargs = {}
-        for field_name in verifier_fields:
-            if hasattr(args, field_name):
-                matching_kwargs[field_name] = getattr(args, field_name)
+        for source in arg_sources:
+            if source is None:
+                continue
+            for field_name in verifier_fields:
+                if hasattr(source, field_name):
+                    matching_kwargs[field_name] = getattr(source, field_name)
 
         return cls(**matching_kwargs)
 
@@ -935,16 +937,19 @@ class CodeVerifier(VerifierFunction):
         return CodeVerifierConfig
 
 
-def build_all_verifiers(args) -> dict[str, VerifierFunction]:
+def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFunction]:
     """
-    Build all verifiers with the given judge config.
+    Build all verifiers with the given configs.
+    Args:
+        args: The main Args object
+        streaming_config: Optional StreamingDataLoaderConfig for additional fields
     """
     verifiers: dict[str, VerifierFunction] = {}
     for subclass in VerifierFunction.__subclasses__():
         if subclass == LMJudgeVerifier:
             continue
 
-        verifier_config = subclass.get_config_class().from_args(args)
+        verifier_config = subclass.get_config_class().from_args(args, streaming_config)
         instance = subclass(verifier_config)
         verifiers[instance.name.lower()] = instance
 
@@ -957,7 +962,7 @@ def build_all_verifiers(args) -> dict[str, VerifierFunction]:
             verifiers["code_stdio"] = instance
 
     for judge_type in JUDGE_PROMPT_MAP:
-        instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))
+        instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config))
         verifiers[instance.name.lower()] = instance
 
     # if we have remap arg, remap!

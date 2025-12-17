@@ -2187,7 +2187,7 @@ def main(
         non_stop_penalty_value=streaming_config.non_stop_penalty_value,
         only_reward_good_outputs=streaming_config.only_reward_good_outputs,
         additive_format_reward=streaming_config.additive_format_reward,
-        verifier_functions=build_all_verifiers(args),
+        verifier_functions=build_all_verifiers(args, streaming_config),
     )
     generation_configs = create_generation_configs(args, streaming_config)
 
