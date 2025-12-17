@@ -235,19 +235,12 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
 class TestCheckpointRestoration(TestGrpoFastBase):
     """Tests for checkpoint save/restore functionality."""
 
-    @unittest.skip("Slow integration test - spawns subprocess that conflicts with pytest Ray cluster")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_num_total_tokens_restored_from_checkpoint(self):
         """Test that num_total_tokens is correctly restored from checkpoint.
 
-        This test spawns a subprocess to run full GRPO training, which conflicts
-        with the Ray cluster already running in pytest. To run this test manually:
-
-        1. Run: ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh
-        2. Check logs for "Restored num_total_tokens:" after checkpoint resume
-
         This test:
-        1. Runs GRPO training for 1 step with checkpointing enabled
+        1. Runs GRPO training for 2 steps with checkpointing enabled
         2. Captures the num_total_tokens value at checkpoint time
         3. Restarts training from the checkpoint
         4. Verifies num_total_tokens is restored correctly (not reset to 0)
@@ -266,38 +259,54 @@ class TestCheckpointRestoration(TestGrpoFastBase):
                 "open_instruct/grpo_fast.py",
                 "--dataset_mixer_list",
                 "ai2-adapt-dev/rlvr_gsm8k_zs",
-                "8",
+                "64",
                 "--dataset_mixer_list_splits",
                 "train",
                 "--max_prompt_token_length",
-                "256",
-                "--response_length",
-                "128",
-                "--pack_length",
                 "512",
+                "--response_length",
+                "512",
+                "--pack_length",
+                "1024",
                 "--per_device_train_batch_size",
                 "1",
                 "--num_unique_prompts_rollout",
-                "2",
+                "8",
                 "--num_samples_per_prompt_rollout",
-                "2",
+                "4",
                 "--model_name_or_path",
-                "Qwen/Qwen2.5-0.5B",
+                "Qwen/Qwen3-1.7B",
+                "--stop_strings",
+                "</answer>",
+                "--apply_r1_style_format_reward",
+                "--apply_verifiable_reward",
+                "true",
                 "--temperature",
                 "0.7",
+                "--ground_truths_key",
+                "ground_truth",
+                "--chat_template_name",
+                "r1_simple_chat_postpend_think",
                 "--learning_rate",
                 "3e-7",
                 "--num_training_steps",
-                "1",
+                "2",
                 "--deepspeed_stage",
                 "2",
                 "--num_learners_per_node",
                 "1",
                 "--vllm_tensor_parallel_size",
                 "1",
+                "--beta",
+                "0.0",
+                "--seed",
+                "3",
+                "--vllm_sync_backend",
+                "gloo",
                 "--vllm_gpu_memory_utilization",
                 "0.3",
                 "--vllm_enforce_eager",
+                "--gradient_checkpointing",
                 "--single_gpu_mode",
                 "--checkpoint_state_freq",
                 "1",
@@ -307,7 +316,7 @@ class TestCheckpointRestoration(TestGrpoFastBase):
                 output_dir,
             ]
 
-            result1 = subprocess.run(base_args, capture_output=True, text=True, timeout=1200)
+            result1 = subprocess.run(base_args, capture_output=True, text=True, timeout=600)
             self.assertEqual(result1.returncode, 0, f"First run failed: {result1.stderr}")
 
             match = re.search(r"num_total_tokens.*?(\d+)", result1.stdout + result1.stderr)
@@ -315,8 +324,8 @@ class TestCheckpointRestoration(TestGrpoFastBase):
             expected_tokens = int(match.group(1))
             self.assertGreater(expected_tokens, 0, "num_total_tokens should be > 0 after training")
 
-            resume_args = base_args + ["--num_training_steps", "2"]
-            result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=1200)
+            resume_args = base_args + ["--num_training_steps", "3"]
+            result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=600)
 
             restore_match = re.search(r"Restored num_total_tokens: (\d+)", result2.stdout + result2.stderr)
 
