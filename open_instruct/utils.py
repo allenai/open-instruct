@@ -1824,7 +1824,7 @@ class ModelDims:
 
         self.num_params = self.num_params or self._calculate_num_params()
 
-        if self.device_name is None:
+        if self.device_name is None and torch.cuda.is_available():
             self.device_name = get_device_name(torch.cuda.get_device_name(0))
 
         assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
@@ -1861,15 +1861,19 @@ class ModelDims:
         intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
 
         sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
+        num_layers = model_config.get_num_layers(vllm_config.parallel_config)
         num_sliding_window_layers = 0
 
         if sliding_window is not None:
             layer_types = getattr(model_config.hf_text_config, "layer_types", None)
             if layer_types is not None:
-                num_sliding_window_layers = sum(1 for lt in layer_types if lt == "sliding_attention")
+                num_sliding_window_layers = layer_types.count("sliding_attention")
+            else:
+                # If "layer_types" is None, then we assume all layers are sliding layers.
+                num_sliding_window_layers = num_layers
 
         return cls(
-            num_layers=model_config.get_num_layers(vllm_config.parallel_config),
+            num_layers=num_layers,
             hidden_size=hidden_size,
             intermediate_size=intermediate_size,
             vocab_size=model_config.get_vocab_size(),
@@ -1878,7 +1882,38 @@ class ModelDims:
             head_dim=model_config.get_head_size(),
             sliding_window=sliding_window,
             num_sliding_window_layers=num_sliding_window_layers,
-            device_name=get_device_name(torch.cuda.get_device_name(0)),
+            device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
+        )
+
+    @classmethod
+    def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
+        """Create ModelDims from a HuggingFace model name or path."""
+        from transformers import AutoConfig
+
+        config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        hidden_size = config.hidden_size
+        intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)
+        sliding_window = getattr(config, "sliding_window", None)
+        num_layers = config.num_hidden_layers
+        num_sliding_window_layers = 0
+        if sliding_window is not None:
+            layer_types = getattr(config, "layer_types", None)
+            if layer_types is not None:
+                num_sliding_window_layers = layer_types.count("sliding_attention")
+            else:
+                num_sliding_window_layers = num_layers
+        head_dim = getattr(config, "head_dim", hidden_size // config.num_attention_heads)
+        return cls(
+            num_layers=num_layers,
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            vocab_size=config.vocab_size,
+            num_attn_heads=config.num_attention_heads,
+            num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
+            head_dim=head_dim,
+            sliding_window=sliding_window,
+            num_sliding_window_layers=num_sliding_window_layers,
+            device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
         )
 
     @classmethod

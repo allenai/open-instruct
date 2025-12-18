@@ -52,6 +52,7 @@ import socket
 import threading
 import time
 from argparse import Namespace
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from queue import Empty, Full, Queue
@@ -79,7 +80,14 @@ from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
-from open_instruct.data_types import ShutdownSentinel
+from open_instruct.data_types import (
+    CollatedBatchData,
+    GenerationResult,
+    PromptRequest,
+    RequestInfo,
+    ShutdownSentinel,
+    TokenStatistics,
+)
 from open_instruct.dataset_transformation import (
     INPUT_IDS_PROMPT_KEY,
     TokenizerConfig,
@@ -442,7 +450,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
@@ -2258,6 +2266,9 @@ def main(
             model_dims,
             checkpoint_state,
         )
+
+        if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
+            push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     except Exception as e:
         if args.send_slack_alerts:
             utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
@@ -2278,12 +2289,6 @@ def main(
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
     logger.info("finished training")
-
-    accelerator = Namespace()
-    accelerator.is_main_process = True  # hack
-    if args.push_to_hub:
-        logger.info("Pushing model to hub")
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
     # Check for runtime leaks before exiting
     logger.info("Checking for runtime leaks...")
