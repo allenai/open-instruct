@@ -235,8 +235,12 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
 class TestCheckpointRestoration(unittest.TestCase):
     """Tests for checkpoint save/restore functionality.
 
-    This test stops any existing Ray cluster in setUp to get exclusive GPU access,
-    following Ray's recommendation to use isolated clusters when tests need fresh state.
+    This test runs full GRPO training as a subprocess, which requires exclusive
+    GPU access and significant resources. It is skipped by default in CI to avoid
+    resource contention with other tests.
+
+    To run this test, set RUN_CHECKPOINT_TEST=1:
+        RUN_CHECKPOINT_TEST=1 pytest open_instruct/test_grpo_fast_gpu.py::TestCheckpointRestoration -v
     """
 
     def setUp(self):
@@ -246,6 +250,7 @@ class TestCheckpointRestoration(unittest.TestCase):
         subprocess.run(["ray", "stop", "--force"], capture_output=True)
         time.sleep(5)
 
+    @unittest.skipUnless(os.environ.get("RUN_CHECKPOINT_TEST") == "1", "Set RUN_CHECKPOINT_TEST=1 to run")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_num_total_tokens_restored_from_checkpoint(self):
         """Test that num_total_tokens is correctly restored from checkpoint.
