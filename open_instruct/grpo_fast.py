@@ -51,8 +51,6 @@ import shutil
 import socket
 import threading
 import time
-from argparse import Namespace
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from queue import Empty, Full, Queue
@@ -80,14 +78,7 @@ from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
-from open_instruct.data_types import (
-    CollatedBatchData,
-    GenerationResult,
-    PromptRequest,
-    RequestInfo,
-    ShutdownSentinel,
-    TokenStatistics,
-)
+from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
     INPUT_IDS_PROMPT_KEY,
     TokenizerConfig,
