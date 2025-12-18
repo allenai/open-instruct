@@ -15,6 +15,7 @@ dependencies = [
     "hf-transfer>=0.1.8",
     "litellm>=1.72.0,<1.75.2",  # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
+    "multiprocess<0.70.18",  # avoid AttributeError in ResourceTracker.__del__
     "nltk>=3.9.1",
     "numpy<2",
     "ai2-olmo-core==2.3.0",
@@ -78,7 +79,7 @@ link-mode = "hardlink"
 
 [dependency-groups]
 dev = [
-    "beaker-py>=2.5.0",
+    "beaker-py>=2.5.3",
     "mkdocs-material>=9.6.8",
     "pytest>=8.3.4",
     "ruff>=0.11.13",
@@ -159,5 +160,6 @@ include = [
     "open_instruct/rejection_sampling/prompt_templates.py",
     "open_instruct/search_utils/",
     "open_instruct/tool_utils/tools.py",
+    "open_instruct/rl_utils.py",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]
