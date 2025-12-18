@@ -462,7 +462,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
         )
@@ -511,7 +511,7 @@ class PolicyTrainerRayProcess(RayProcess):
             args.value_model_name_or_path,
             revision=args.value_model_revision,
             num_labels=1,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
         )

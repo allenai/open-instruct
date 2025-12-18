@@ -254,7 +254,7 @@ class TestRLUtils(unittest.TestCase):
         queries, responses, pad_token_id = get_test_data()
 
         value_model = transformers.AutoModelForSequenceClassification.from_pretrained(
-            MODEL_NAME, num_labels=1, torch_dtype=torch.bfloat16
+            MODEL_NAME, num_labels=1, dtype=torch.bfloat16
         )
         value_model.train()
         value_head = value_model.score
