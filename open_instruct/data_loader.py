@@ -69,7 +69,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Return an iterable over all batches in the epoch."""
         for i in range(self.batches_processed, self.effective_size):
             example = self.dataset[i]
-            yield example | {"prompt_id": f"{self._epoch}_{example['index']}"}
+            yield example | {"prompt_id": f"{self._epoch}_{example['index']}", "dataset_index": i}
 
     @property
     def total_batches(self) -> int:
