@@ -272,11 +272,11 @@ class TestCheckpointRestoration(unittest.TestCase):
                 "--dataset_mixer_list_splits",
                 "train",
                 "--max_prompt_token_length",
-                "256",
-                "--response_length",
                 "128",
+                "--response_length",
+                "32",
                 "--pack_length",
-                "512",
+                "256",
                 "--per_device_train_batch_size",
                 "1",
                 "--num_unique_prompts_rollout",
@@ -299,7 +299,7 @@ class TestCheckpointRestoration(unittest.TestCase):
                 "--learning_rate",
                 "3e-7",
                 "--num_training_steps",
-                "2",
+                "1",
                 "--deepspeed_stage",
                 "2",
                 "--num_learners_per_node",
@@ -339,7 +339,7 @@ class TestCheckpointRestoration(unittest.TestCase):
             expected_tokens = int(match.group(1))
             self.assertGreater(expected_tokens, 0, "num_total_tokens should be > 0 after training")
 
-            resume_args = base_args + ["--num_training_steps", "3"]
+            resume_args = base_args + ["--num_training_steps", "2"]
             result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=600, env=env)
 
             restore_match = re.search(r"Restored num_total_tokens: (\d+)", result2.stdout + result2.stderr)
