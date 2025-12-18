@@ -1643,6 +1643,7 @@ class DatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+        combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
         if dataset_skip_cache:
             return combined_dataset
 
@@ -1784,6 +1785,7 @@ class LocalDatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+        combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
 
         # Prepare return statistics
         all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}

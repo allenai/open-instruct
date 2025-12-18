@@ -38,8 +38,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=0
         )
 
-        dataset_with_indices = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
-        self._original_dataset = dataset_with_indices.shard(num_shards=world_size, index=rank)
+        self._original_dataset = dataset.shard(num_shards=world_size, index=rank)
         self.dataset = self._original_dataset.shuffle(seed=seed)
         self.seed = seed
         self._batch_size = batch_size
@@ -70,7 +69,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Return an iterable over all batches in the epoch."""
         for i in range(self.batches_processed, self.effective_size):
             example = self.dataset[i]
-            yield example | {"prompt_id": f"{self._epoch}_{example['dataset_index']}"}
+            yield example | {"prompt_id": f"{self._epoch}_{example['index']}"}
 
     @property
     def total_batches(self) -> int:
@@ -99,7 +98,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Exclude a dataset index from future iterations.
 
         Args:
-            index: The dataset_index to exclude.
+            index: The index to exclude.
         """
         self._excluded_indices.add(index)
 
@@ -114,7 +113,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.batches_processed = 0
         shuffled = self._original_dataset.shuffle(seed=self.seed + self._epoch)
         # If this is slow, we can speed it up by making this a boolean mask.
-        self.dataset = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
+        self.dataset = shuffled.filter(lambda x: x["index"] not in self._excluded_indices)
         self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
 
     def get_mock_batch(self) -> dict[str, Any]:
