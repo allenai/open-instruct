@@ -15,6 +15,7 @@ dependencies = [
     "hf-transfer>=0.1.8",
     "litellm>=1.72.0,<1.75.2",  # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
+    "multiprocess<0.70.18",
     "nltk>=3.9.1",
     "numpy<2",
     "ai2-olmo-core==2.3.0",
