@@ -1896,7 +1896,9 @@ class ModelDims:
         if sliding_window is not None:
             layer_types = getattr(config, "layer_types", None)
             if layer_types is not None:
-                num_sliding_window_layers = sum(1 for lt in layer_types if lt == "sliding_attention")
+                num_sliding_window_layers = layer_types.count("sliding_attention")
+            else:
+                num_sliding_window_layers = config.num_hidden_layers
         head_dim = getattr(config, "head_dim", hidden_size // config.num_attention_heads)
         return cls(
             num_layers=config.num_hidden_layers,
@@ -1908,7 +1910,7 @@ class ModelDims:
             head_dim=head_dim,
             sliding_window=sliding_window,
             num_sliding_window_layers=num_sliding_window_layers,
-            device_name=get_device_name(torch.cuda.get_device_name(0)),
+            device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
         )
 
     @property
