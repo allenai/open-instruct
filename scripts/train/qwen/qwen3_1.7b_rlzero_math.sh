@@ -21,7 +21,7 @@ if [[ "$1" == "$BEAKER_USER"* ]]; then
     shift
 fi
 
-cluster=ai2/augusta
+cluster=ai2/jupiter
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
@@ -33,7 +33,7 @@ uv run mason.py \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
-    --gpus 8 \
+    --gpus 4 \
     --budget ai2/oe-adapt \
     -- source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run open_instruct/grpo_fast.py \
@@ -46,7 +46,7 @@ uv run mason.py \
     --advantage_normalization_type centered \
     --active_sampling \
     --num_samples_per_prompt_rollout 16 \
-    --num_unique_prompts_rollout 32 \
+    --num_unique_prompts_rollout 16 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -60,10 +60,10 @@ uv run mason.py \
     --chat_template_name olmo_thinker_rlzero \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 1024000 \
+    --total_episodes 512000 \
     --deepspeed_stage 2 \
-    --num_learners_per_node 2 \
-    --vllm_num_engines 6 \
+    --num_learners_per_node 1 \
+    --vllm_num_engines 3 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
