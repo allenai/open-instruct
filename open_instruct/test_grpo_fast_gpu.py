@@ -241,8 +241,10 @@ class TestCheckpointRestoration(unittest.TestCase):
 
     def setUp(self):
         """Stop any existing Ray cluster to get exclusive GPU access."""
+        if ray.is_initialized():
+            ray.shutdown()
         subprocess.run(["ray", "stop", "--force"], capture_output=True)
-        time.sleep(2)
+        time.sleep(5)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_num_total_tokens_restored_from_checkpoint(self):
