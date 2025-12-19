@@ -82,7 +82,7 @@ class TestGeneration(TestGrpoFastBase):
             temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, stop=stop, logprobs=1
         )
         request = PromptRequest(
-            prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
+            prompt=prompt_token_ids, index=0, prompt_id="test_0", generation_config=generation_config
         )
 
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
@@ -213,7 +213,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         ray.get(engines[0].ready.remote())
         generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=5, seed=42)
         request = PromptRequest(
-            prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
+            prompt=prompt_token_ids, index=0, prompt_id="test_0", generation_config=generation_config
         )
 
         param_prompt_Q.put(request)

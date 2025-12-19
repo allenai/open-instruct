@@ -1587,7 +1587,7 @@ def accumulate_inference_batches(
         # Don't resample prompt that was solved at more than no_resample_positive_rate
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             total_no_resampled += 1
-            data_loader.exclude_index(result.dataset_index)
+            data_loader.exclude_index(result.index)
             logging.debug(
                 f"[Data Preparation Thread] Prompt solved at {percent_solved}, total no resampled: {total_no_resampled}"
             )
@@ -1615,7 +1615,8 @@ def accumulate_inference_batches(
             progress_bar.update(1)
 
         results.append(result)
-        prompt_data = prompt_dataset[result.dataset_index]
+        position = data_loader.get_position_for_index(result.index)
+        prompt_data = prompt_dataset[position]
         all_queries.extend(repeat_each([prompt_data[INPUT_IDS_PROMPT_KEY]], generation_config.n))
         all_ground_truths.extend(repeat_each([prompt_data[GROUND_TRUTHS_KEY]], generation_config.n))
         all_datasets.extend(repeat_each([prompt_data[VERIFIER_SOURCE_KEY]], generation_config.n))
@@ -1704,7 +1705,7 @@ def accumulate_inference_batches(
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=None,
+        index=None,
         prompt_id=None,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
@@ -2232,8 +2233,8 @@ def add_prompt_to_generator(
     Args:
         example: A dict containing:
             - INPUT_IDS_PROMPT_KEY: The tokenized prompt
-            - dataset_index: Index into the original dataset
-            - prompt_id: Unique identifier for this prompt (epoch_datasetIndex)
+            - index: Original row ID from the dataset
+            - prompt_id: Unique identifier for this prompt (epoch_index)
         param_prompt_Q: Queue to put the prompt request
         generation_config: Generation configuration
         is_eval: Whether this is an evaluation prompt
@@ -2242,7 +2243,7 @@ def add_prompt_to_generator(
         PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
-            dataset_index=example["dataset_index"],
+            index=example["index"],
             prompt_id=example["prompt_id"],
             is_eval=is_eval,
         )

@@ -47,6 +47,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._excluded_indices: set[int] = set()
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
+        self._index_to_position: dict[int, int] = {}
+        self._build_index_mapping()
 
     def __next__(self) -> dict[str, Any]:
         if self._current_iter is None:
@@ -65,11 +67,19 @@ class HFDataLoader(data_loader.DataLoaderBase):
             self.batches_processed = 0
             raise
 
+    def _build_index_mapping(self) -> None:
+        """Build a mapping from original row IDs to current positional indices."""
+        self._index_to_position = {self.dataset[i]["index"]: i for i in range(len(self.dataset))}
+
+    def get_position_for_index(self, index: int) -> int:
+        """Get the current positional index for an original row ID."""
+        return self._index_to_position[index]
+
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
         for i in range(self.batches_processed, self.effective_size):
             example = self.dataset[i]
-            yield example | {"prompt_id": f"{self._epoch}_{example['index']}", "dataset_index": i}
+            yield example | {"prompt_id": f"{self._epoch}_{example['index']}"}
 
     @property
     def total_batches(self) -> int:
@@ -115,6 +125,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         # If this is slow, we can speed it up by making this a boolean mask.
         self.dataset = shuffled.filter(lambda x: x["index"] not in self._excluded_indices)
         self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
+        self._build_index_mapping()
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
