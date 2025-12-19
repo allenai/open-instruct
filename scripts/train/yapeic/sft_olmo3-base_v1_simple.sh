@@ -1,7 +1,7 @@
 python mason.py \
     --cluster ai2/augusta \
-    --task_name sft_olmo3_pretrain_ckpt_25pct \
-    --description "SFT olmo3 from 25% pretrain" \
+    --task_name sft_olmo3-base_v1_simple \
+    --description "SFT olmo3-base, v1 simple template" \
     --workspace ai2/oe-data \
     --priority normal \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -19,18 +19,19 @@ python mason.py \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --hf_entity yapeichang \
-    --hf_repo_id sft_olmo3_pretrain_ckpt_25pct \
-    --exp_name sft_olmo3_pretrain_ckpt_25pct \
+    --hf_repo_id sft_olmo3-base_v1_simple \
+    --hf_repo_revision main \
+    --exp_name sft_olmo3-base_v1_simple \
     --model_name_or_path allenai/Olmo-3-1025-7B \
-    --model_revision stage1-step353000 \
+    --model_revision main \
     --tokenizer_name allenai/Olmo-3-1025-7B \
-    --tokenizer_revision stage1-step353000 \
+    --tokenizer_revision main \
     --chat_template_name olmo_no_system \
     --use_slow_tokenizer False \
     --dataset_transform_fn sft_messages_none_content_filter_v1 sft_tulu_tokenize_and_truncate_v1 sft_tulu_filter_v1 \
     --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/batch_runs_prefiltered_4_15_new_filtered_v14_pp_v11_tools_v5_ff_v2/sft_data/v1_fewshot_resources_simple.jsonl 1.0 \
     --clean_checkpoints_at_end false \
-    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/sft_olmo3_pretrain_ckpt_25pct_checkpoints \
+    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/sft_olmo3-base_v1_simple_checkpoints \
     --max_seq_length 8192 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \

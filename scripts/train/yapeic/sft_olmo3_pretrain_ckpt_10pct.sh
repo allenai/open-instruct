@@ -25,7 +25,7 @@ python mason.py \
     --model_revision stage1-step141000 \
     --tokenizer_name allenai/Olmo-3-1025-7B \
     --tokenizer_revision stage1-step141000 \
-    --chat_template_name olmo \
+    --chat_template_name olmo_no_system \
     --use_slow_tokenizer False \
     --dataset_transform_fn sft_messages_none_content_filter_v1 sft_tulu_tokenize_and_truncate_v1 sft_tulu_filter_v1 \
     --dataset_mixer_list /weka/oe-training-default/yapeic/proc-data/data/dclm/tutorial_subset/batch_runs_prefiltered_4_15_new_filtered_v14_pp_v11_tools_v5_ff_v2/sft_data/v1_fewshot_resources_simple.jsonl 1.0 \

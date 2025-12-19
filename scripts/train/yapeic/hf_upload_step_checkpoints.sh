@@ -13,7 +13,15 @@ settings=(
     # Olmo3-7B
     # "yapeichang/grpo_olmo3-7b-think_v1_binary_LC_sym_r2,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3-7b-think_v1_binary_LC_sym_r2_checkpoints"
     # "yapeichang/grpo_olmo3-7b-think_v1_binary_science_LC_sym_r2,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3-7b-think_v1_binary_science_LC_sym_r2_checkpoints"
-    "yapeichang/grpo_olmo3-7b-think_v1_binary_dining_LC_sym_r2,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3-7b-think_v1_binary_dining_LC_sym_r2_checkpoints"
+    # "yapeichang/grpo_olmo3-7b-think_v1_binary_dining_LC_sym_r2,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3-7b-think_v1_binary_dining_LC_sym_r2_checkpoints"
+    # "yapeichang/grpo_olmo3_pretrain_ckpt_100pct,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3_pretrain_ckpt_100pct_checkpoints"
+    # "yapeichang/grpo_olmo3_pretrain_ckpt_50pct,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3_pretrain_ckpt_50pct_checkpoints"
+    # "yapeichang/grpo_olmo3_pretrain_ckpt_25pct,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3_pretrain_ckpt_25pct_checkpoints"
+    # "yapeichang/grpo_olmo3_pretrain_sft_ckpt_100pct,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3_pretrain_sft_ckpt_100pct_checkpoints"
+    # "yapeichang/grpo_olmo3_pretrain_sft_ckpt_50pct,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3_pretrain_sft_ckpt_50pct_checkpoints"
+    # "yapeichang/grpo_olmo3_pretrain_sft_ckpt_25pct,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3_pretrain_sft_ckpt_25pct_checkpoints"
+    # "yapeichang/grpo_olmo3_pretrain_sft_ckpt_10pct,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3_pretrain_sft_ckpt_10pct_checkpoints"
+    "yapeichang/grpo_olmo3_pretrain_sft_ckpt_80pct,/weka/oe-adapt-default/allennlp/deletable_checkpoint/yapeic/grpo_olmo3_pretrain_sft_ckpt_80pct_checkpoints"
 )
 
 for setting in "${settings[@]}"; do

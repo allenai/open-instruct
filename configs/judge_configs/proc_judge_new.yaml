@@ -19,7 +19,7 @@ tasks:
             --max-model-len 32768 \
             --override-generation-config \"{\\\"temperature\\\": 0.0, \\\"max_new_tokens\\\": 4096}\" \
             --trust-remote-code \
-            --port 8002 \
+            --port 8003 \
             --enforce-eager \
             --hf-token $HF_TOKEN \
             --chat-template '/weka/oe-adapt-default/hamishi/qwen_no_think_config.jinja'"
@@ -30,7 +30,7 @@ tasks:
           weka: oe-adapt-default
     constraints:
       cluster:
-        - ai2/saturn
+        - ai2/ceres
     resources:
       gpuCount: 1
     context:
