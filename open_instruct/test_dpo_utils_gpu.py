@@ -28,6 +28,8 @@ class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
             packing=False,
             use_lora=False,
             dataset_config_hash="abc123",
+            max_train_samples=None,
+            use_qlora=False,
         )
         hash2 = compute_reference_logprobs_cache_hash(
             model_name_or_path="model/path",
@@ -37,6 +39,8 @@ class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
             packing=False,
             use_lora=False,
             dataset_config_hash="abc123",
+            max_train_samples=None,
+            use_qlora=False,
         )
         self.assertEqual(hash1, hash2)
         self.assertEqual(len(hash1), 16)
@@ -50,6 +54,8 @@ class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
             packing=False,
             use_lora=False,
             dataset_config_hash="abc123",
+            max_train_samples=None,
+            use_qlora=False,
         )
         hash2 = compute_reference_logprobs_cache_hash(
             model_name_or_path="model/path",
@@ -59,6 +65,8 @@ class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
             packing=False,
             use_lora=False,
             dataset_config_hash="abc123",
+            max_train_samples=None,
+            use_qlora=False,
         )
         self.assertNotEqual(hash1, hash2)
 

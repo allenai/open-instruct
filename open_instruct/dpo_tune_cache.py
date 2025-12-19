@@ -457,18 +457,24 @@ def compute_reference_logprobs_cache_hash(
     packing: bool,
     use_lora: bool,
     dataset_config_hash: str,
+    max_train_samples: int | None,
+    use_qlora: bool,
 ) -> str:
     """Compute deterministic hash for reference logprobs cache."""
-    cache_key = {
-        "model_name_or_path": model_name_or_path,
-        "model_revision": model_revision,
-        "dpo_loss_type": dpo_loss_type,
-        "concatenated_forward": concatenated_forward,
-        "packing": packing,
-        "use_lora": use_lora,
-        "dataset_config_hash": dataset_config_hash,
-    }
-    config_str = json.dumps(cache_key, sort_keys=True)
+    config_str = json.dumps(
+        {
+            "concatenated_forward": concatenated_forward,
+            "dataset_config_hash": dataset_config_hash,
+            "dpo_loss_type": dpo_loss_type,
+            "max_train_samples": max_train_samples,
+            "model_name_or_path": model_name_or_path,
+            "model_revision": model_revision,
+            "packing": packing,
+            "use_lora": use_lora,
+            "use_qlora": use_qlora,
+        },
+        sort_keys=True,
+    )
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
@@ -491,8 +497,8 @@ def build_reference_logprobs_cache(
 
     model.eval()
     device = accelerator.device
-    chosen_tensor = torch.zeros(full_dataset_size, dtype=torch.float32, device=device)
-    rejected_tensor = torch.zeros(full_dataset_size, dtype=torch.float32, device=device)
+    chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
+    rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
 
     with torch.no_grad():
         for batch in tqdm(
@@ -690,6 +696,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             packing=args.packing,
             use_lora=args.use_lora,
             dataset_config_hash=dataset_config_hash,
+            max_train_samples=args.max_train_samples,
+            use_qlora=args.use_qlora,
         )
         reference_cache_path = pathlib.Path(args.reference_logprobs_cache_path) / f"{ref_cache_hash}.pt"
         logger.info(f"Reference logprobs cache path: {reference_cache_path}")
