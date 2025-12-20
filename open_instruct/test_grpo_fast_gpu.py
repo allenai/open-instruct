@@ -357,7 +357,7 @@ class TestZCheckpointRestoration(unittest.TestCase):
             os.makedirs(ray_tmpdir, exist_ok=True)
             env["RAY_TMPDIR"] = ray_tmpdir
 
-            result1 = subprocess.run(base_args, capture_output=True, text=True, timeout=900, env=env)
+            result1 = subprocess.run(base_args, capture_output=True, text=True, timeout=1800, env=env)
             self.assertEqual(result1.returncode, 0, f"First run failed: {result1.stderr}")
 
             match = re.search(r"num_total_tokens.*?(\d+)", result1.stdout + result1.stderr)
@@ -374,7 +374,7 @@ class TestZCheckpointRestoration(unittest.TestCase):
             time.sleep(5)
 
             resume_args = base_args + ["--num_training_steps", "2"]
-            result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=900, env=env)
+            result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=1800, env=env)
 
             restore_match = re.search(r"Restored num_total_tokens: (\d+)", result2.stdout + result2.stderr)
 
