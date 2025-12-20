@@ -26,3 +26,32 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: uv run --frozen pytest
+
+  gpu-tests:
+    name: Run GPU tests
+    runs-on: 8-Core-XL-Runner-Ubuntu-Latest
+    timeout-minutes: 10
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.6"
+      - name: Set up Python
+        run: uv sync --frozen
+      - name: Run GPU tests on Beaker
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+        run: |
+          output=$(./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh 2>&1)
+          echo "$output"
+          exp_id=$(echo "$output" | grep -oP 'https://beaker.org/ex/\K[^\s]+' | head -1)
+          echo "Experiment ID: $exp_id"
+          beaker experiment await "$exp_id" 0 --index finalized --timeout 10m
+          status=$(beaker experiment get "$exp_id" --format json | jq -r '.[0].jobs[0].status.exitCode')
+          if [ "$status" != "0" ]; then
+            echo "GPU tests failed with exit code $status"
+            exit 1
+          fi
