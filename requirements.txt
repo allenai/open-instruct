@@ -356,8 +356,10 @@ multidict==6.7.0
     # via
     #   aiohttp
     #   yarl
-multiprocess==0.70.18
-    # via datasets
+multiprocess==0.70.17
+    # via
+    #   datasets
+    #   open-instruct
 networkx==3.6.1
     # via torch
 ninja==1.13.0
