@@ -72,7 +72,7 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-cache
 
-RUN uv run --no-sync -m nltk.downloader punkt punkt_tab
+RUN /stage/.venv/bin/python -m nltk.downloader punkt punkt_tab
 
 # Copy all application code at the end
 COPY configs configs
