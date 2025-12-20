@@ -341,6 +341,7 @@ class TestZCheckpointRestoration(unittest.TestCase):
                 "--vllm_enforce_eager",
                 "--gradient_checkpointing",
                 "--single_gpu_mode",
+                "--no-filter_zero_std_samples",
                 "--checkpoint_state_freq",
                 "1",
                 "--checkpoint_state_dir",
