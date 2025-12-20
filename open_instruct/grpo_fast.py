@@ -1615,7 +1615,7 @@ def accumulate_inference_batches(
             progress_bar.update(1)
 
         results.append(result)
-        position = data_loader.get_position_for_index(result.index) if data_loader is not None else result.index
+        position = data_loader._index_to_position[result.index] if data_loader is not None else result.index
         prompt_data = prompt_dataset[position]
         all_queries.extend(repeat_each([prompt_data[INPUT_IDS_PROMPT_KEY]], generation_config.n))
         all_ground_truths.extend(repeat_each([prompt_data[GROUND_TRUTHS_KEY]], generation_config.n))

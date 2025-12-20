@@ -296,10 +296,9 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 
         for _ in range(num_unique_prompts_rollout):
             result = inference_results_Q.get()
-            idx = result.index
 
             # Get query from dataset using index
-            example = mock_dataset[idx]
+            example = mock_dataset[result.index]
             q = example[INPUT_IDS_PROMPT_KEY]
             gt = example[GROUND_TRUTHS_KEY]
             d = example[VERIFIER_SOURCE_KEY]
@@ -372,9 +371,8 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 
         for _ in range(num_unique_prompts_rollout):
             result = inference_results_Q.get()
-            idx = result.index
 
-            example = mock_dataset[idx]
+            example = mock_dataset[result.index]
             q = example[INPUT_IDS_PROMPT_KEY]
             gt = example[GROUND_TRUTHS_KEY]
             d = example[VERIFIER_SOURCE_KEY]
@@ -421,10 +419,9 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 
         for _ in range(num_unique_prompts_rollout):
             result = inference_results_Q.get()
-            idx = result.index
 
             # Look up from dataset
-            example = mock_dataset[idx]
+            example = mock_dataset[result.index]
             q = example[INPUT_IDS_PROMPT_KEY]
             gt = example[GROUND_TRUTHS_KEY]
             d = example[VERIFIER_SOURCE_KEY]
@@ -649,8 +646,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
             results_list.append(result)
 
-            idx = result.index
-            example = mock_dataset[idx]
+            example = mock_dataset[result.index]
             q = example[INPUT_IDS_PROMPT_KEY]
             gt = example[GROUND_TRUTHS_KEY]
             d = example[VERIFIER_SOURCE_KEY]
@@ -691,9 +687,8 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             self.assertEqual(len(result.responses), expected_responses)
             total_responses += len(result.responses)
 
-            idx = result.index
-            example = mock_dataset[idx]
-            self.assertEqual(example[INPUT_IDS_PROMPT_KEY], queries[idx])
+            example = mock_dataset[result.index]
+            self.assertEqual(example[INPUT_IDS_PROMPT_KEY], queries[result.index])
 
         self.assertEqual(total_responses, num_prompts * num_samples)
 

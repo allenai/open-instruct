@@ -71,10 +71,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Build a mapping from original row IDs to current positional indices."""
         self._index_to_position = {self.dataset[i]["index"]: i for i in range(len(self.dataset))}
 
-    def get_position_for_index(self, index: int) -> int:
-        """Get the current positional index for an original row ID."""
-        return self._index_to_position[index]
-
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
         for i in range(self.batches_processed, self.effective_size):

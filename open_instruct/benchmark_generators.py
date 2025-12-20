@@ -328,11 +328,10 @@ def submission_thread(
 
         # Create individual PromptRequest for each prompt in the batch
         for i, prompt in enumerate(prompts):
-            idx = start_idx + i
             param_prompt_Q.put(
                 PromptRequest(
                     prompt=prompt,
-                    index=idx,
+                    index=start_idx + i,
                     prompt_id=f"batch_{batch_idx}_prompt_{i}",
                     generation_config=generation_config,
                 )
@@ -389,10 +388,12 @@ def run_benchmark(
     warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
     # Create individual PromptRequest for each warmup prompt
     for i, prompt in enumerate(warmup_prompts):
-        idx = warmup_start_idx + i
         param_prompt_Q.put(
             PromptRequest(
-                prompt=prompt, index=idx, prompt_id=f"warmup_prompt_{i}", generation_config=generation_config
+                prompt=prompt,
+                index=warmup_start_idx + i,
+                prompt_id=f"warmup_prompt_{i}",
+                generation_config=generation_config,
             )
         )
 

@@ -479,8 +479,7 @@ async def compute_rewards(
     actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset, is_eval: bool
 ) -> tuple[list[float], dict]:
     index_map = actor._eval_index_map if is_eval else actor._train_index_map
-    position = index_map[result.index]
-    example = dataset[position]
+    example = dataset[index_map[result.index]]
     decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
     k = len(result.responses)
@@ -554,9 +553,12 @@ class LLMRayActor:
         self.reward_config = reward_config
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
-        self._train_index_map: dict[int, int] = {}
-        self._eval_index_map: dict[int, int] = {}
-        self._build_index_maps()
+        self._train_index_map: dict[int, int] = (
+            {train_dataset[i]["index"]: i for i in range(len(train_dataset))} if train_dataset is not None else {}
+        )
+        self._eval_index_map: dict[int, int] = (
+            {eval_dataset[i]["index"]: i for i in range(len(eval_dataset))} if eval_dataset is not None else {}
+        )
         self.reward_fn = reward_config.build() if reward_config else None
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
@@ -569,13 +571,6 @@ class LLMRayActor:
         # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
         self._should_stop_value = False
-
-    def _build_index_maps(self) -> None:
-        """Build mappings from original row IDs to positional indices for datasets."""
-        if self.train_dataset is not None:
-            self._train_index_map = {self.train_dataset[i]["index"]: i for i in range(len(self.train_dataset))}
-        if self.eval_dataset is not None:
-            self._eval_index_map = {self.eval_dataset[i]["index"]: i for i in range(len(self.eval_dataset))}
 
     def _init_executor(self) -> None:
         max_workers = NUM_PREFETCH_WORKERS + (NUM_TOOL_WORKERS if self.tools else 0)
