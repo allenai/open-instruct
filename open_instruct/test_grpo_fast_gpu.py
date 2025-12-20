@@ -281,7 +281,7 @@ class TestZCheckpointRestoration(unittest.TestCase):
         import re
         import tempfile
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             checkpoint_dir = os.path.join(tmpdir, "checkpoints")
             output_dir = os.path.join(tmpdir, "output")
 
