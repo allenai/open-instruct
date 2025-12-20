@@ -86,7 +86,6 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 import tiktoken
 from openai import AsyncAzureOpenAI, AzureOpenAI
@@ -103,9 +102,9 @@ class Args:
     output_file: str
     batch: bool = False
     batch_check_interval: int = 10
-    api_key: Optional[str] = None
+    api_key: str | None = None
     api_version: str = "2024-12-01-preview"
-    azure_endpoint: Optional[str] = None
+    azure_endpoint: str | None = None
 
     def __post_init__(self):
         if self.api_key is None and "AZURE_OPENAI_API_KEY" in os.environ:
@@ -137,7 +136,7 @@ def main(args: Args):
         input_price_per_token /= 2
         output_price_per_token /= 2
     input_token_count = 0
-    with open(args.input_file, "r") as infile:
+    with open(args.input_file) as infile:
         for line in infile:
             data = json.loads(line)
             input_token_count += len(enc.encode(data["body"]["messages"][-1]["content"]))
@@ -149,8 +148,8 @@ def main(args: Args):
 
     if args.batch:
         client = AzureOpenAI(api_key=args.api_key, api_version=args.api_version, azure_endpoint=args.azure_endpoint)
-        # Upload a file with a purpose of "batch"
-        file = client.files.create(file=open(args.input_file, "rb"), purpose="batch")
+        with open(args.input_file, "rb") as input_file:
+            file = client.files.create(file=input_file, purpose="batch")
 
         print(file.model_dump_json(indent=2))
         file_id = file.id
@@ -204,7 +203,7 @@ def main(args: Args):
                 response = await client.chat.completions.create(**data["body"])
                 return response
 
-            with open(args.input_file, "r") as infile:
+            with open(args.input_file) as infile:
                 for line in infile:
                     data = json.loads(line)
                     tasks.append(create_task(data))
@@ -221,7 +220,7 @@ def main(args: Args):
 
     # estimate output token cost
     output_token_count = 0
-    with open(args.output_file, "r") as infile:
+    with open(args.output_file) as infile:
         for line in infile:
             data = json.loads(line)
             output_token_count += len(enc.encode(data["response"]["body"]["choices"][0]["message"]["content"]))

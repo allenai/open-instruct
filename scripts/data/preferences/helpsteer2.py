@@ -1,6 +1,5 @@
 import argparse
 from collections import defaultdict
-from typing import List, Optional
 
 import datasets
 
@@ -11,7 +10,7 @@ def average_score(example, aspects_to_consider):
     return sum(example[aspect] for aspect in aspects_to_consider) / len(aspects_to_consider)
 
 
-def binarize_dataset(dataset, aspects_to_ignore: List[str], min_score: Optional[float], margin: Optional[float]):
+def binarize_dataset(dataset, aspects_to_ignore: list[str], min_score: float | None, margin: float | None):
     aspects_to_consider = [aspect for aspect in ALL_ASPECTS if aspect not in aspects_to_ignore]
     prompt_groups = defaultdict(list)
 
@@ -54,14 +53,14 @@ def binarize_dataset(dataset, aspects_to_ignore: List[str], min_score: Optional[
 
 
 def main(
-    aspects_to_ignore: List[str],
-    min_score: Optional[float],
-    margin: Optional[float],
+    aspects_to_ignore: list[str],
+    min_score: float | None,
+    margin: float | None,
     push_to_hub: bool,
-    hf_entity: Optional[str],
+    hf_entity: str | None,
 ):
     # Load the HelpSteer 2 dataset
-    ds = datasets.load_dataset("nvidia/HelpSteer2")
+    ds = datasets.load_dataset("nvidia/HelpSteer2", num_proc=max_num_processes())
 
     # Binarize the dataset
     binarized_ds = binarize_dataset(ds["train"], aspects_to_ignore, min_score, margin)

@@ -1,16 +1,17 @@
 import re
 import time
+from typing import Any
 
 from open_instruct.search_utils.massive_ds import get_snippets_for_query
-from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
+from open_instruct.tool_utils.tools import Tool, ToolOutput
 
 
 class SearchTool(Tool):
-    def __init__(self, api_endpoint: str, *args, **kwargs):
+    def __init__(self, api_endpoint: str, *args: Any, **kwargs: Any) -> None:
         self.api_endpoint = api_endpoint
         self.start_str = "<query>"
         self.end_str = "</query>"
-        self.number_documents_to_search = kwargs.pop("number_documents_to_search", 3)
+        self.number_documents_to_search: int = kwargs.pop("number_documents_to_search", 3)
         super().__init__(*args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:

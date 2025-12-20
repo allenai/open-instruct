@@ -1,6 +1,6 @@
 exp_name="0302_qwen2.5_7B_math_grpo_fast1_${RANDOM}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2  \
+    --cluster ai2/jupiter  \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
@@ -17,7 +17,7 @@ python mason.py \
     --no_try_launch_beaker_eval_jobs \
     --try_launch_beaker_eval_jobs_on_weka \
     --local_rollout_batch_size 8 \
-    --kl_estimator kl3 \
+    --kl_estimator 2 \
     --learning_rate 5e-7 \
     --dataset_mixer_list ai2-adapt-dev/math_ground_truth_zs 1.0 \
     --dataset_mixer_list_splits train \

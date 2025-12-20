@@ -7,7 +7,7 @@ different number of completions per prompt.
 
 # Debug run (use an interactive session)
 
-This code supports HF models, local models and also API-based models (e.g., `gpt-4`). For generating completions, the code now accepts one model at a time, but we're working on adding an ensemble of models. Stay tuned. 
+This code supports HF models, local models and also API-based models (e.g., `gpt-4`). For generating completions, the code now accepts one model at a time, but we're working on adding an ensemble of models. Stay tuned.
 
 ```bash
 # 1. first sample a bunch of completions given prompts
@@ -83,7 +83,7 @@ python open_instruct/rejection_sampling/rejection_sampling.py \
 
 # Run through the entire dataset run
 
-To run through the entire dataset you would need a lot more GPUs to finish the generation more quickly. 
+To run through the entire dataset you would need a lot more GPUs to finish the generation more quickly.
 
 
 ```bash
@@ -123,14 +123,14 @@ if len(set([item.text for item in output.outputs])) == 1:
 # debug job submission; you should install your python on NFS and
 # make sure `which python` returns the python environment you are using
 python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/general-cirrascale-a100-80g-ib \
+    --cluster ai2/jupiter \
     --priority low \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 1 -- which python
 # sometimes we run into permission issues; need to run the following
 python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/general-cirrascale-a100-80g-ib \
+    --cluster ai2/jupiter \
     --priority low \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus 1 -- chmod -R 777 /net/nfs.cirrascale/allennlp/.cache/
 ```

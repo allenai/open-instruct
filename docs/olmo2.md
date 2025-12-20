@@ -1,6 +1,6 @@
 # OLMo 2 Commands
 
-Here we'll add commands and references to the training runs of OLMo 2. 
+Here we'll add commands and references to the training runs of OLMo 2.
 We'll prioritize the smaller models where more people are hoping to study and reproduce them.
 
 Core to training OLMo models (version 1 and 2) at least are to include the following flags: `--add_bos` and `--use_slow_tokenizer False` because of the tokenizer used.
@@ -16,7 +16,7 @@ We ran training for the 1B model in SFT on 1 node of 8 NVIDIA H100 GPUs.
 The command used internally is:
 ```
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/augusta \
     --workspace ai2/olmo-instruct \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -47,7 +47,6 @@ python mason.py \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --reduce_loss sum \
     --report_to wandb \
     --with_tracking \
     --logging_steps 1 \
@@ -79,7 +78,6 @@ accelerate launch \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
-    --reduce_loss sum \
     --report_to wandb \
     --with_tracking \
     --logging_steps 1 \
@@ -126,16 +124,16 @@ accelerate launch \
     --add_bos \
     --use_lora False \
     --dpo_loss_type dpo_norm \
-    --dpo_beta 5 
+    --dpo_beta 5
 ```
 
 For those internal to Ai2, see the [wandb logs](https://wandb.ai/ai2-llm/open_instruct_internal/runs/bcu4arvs/overview) or the [beaker job](https://beaker.allen.ai/orgs/ai2/workspaces/olmo-instruct/work/01JSMRC1TR1Q4MV7NY8WFSR4SA?).
 
 
-Example with DeepSpeed Stage 2: 
+Example with DeepSpeed Stage 2:
 ```
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/augusta \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -182,7 +180,7 @@ Example run with DeepSpeed Stage 3 (slower than stage 2):
 ```
 for lr in 2e-6; do
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \

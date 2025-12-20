@@ -46,7 +46,6 @@ accelerate launch \
     --with_tracking \
     --report_to wandb \
     --logging_steps 1 \
-    --reduce_loss sum \
     --model_revision main \
     --dataset_mixer_list allenai/tulu-3-sft-mixture 1.0 \
     --checkpointing_steps epoch \
@@ -60,12 +59,12 @@ accelerate launch \
 > If you have different number of GPUs, please adjust the `NUM_MACHINES`, `NUM_PROCESSES`, `PER_DEVICE_TRAIN_BATCH_SIZE`, and `GRADIENT_ACCUMULATION_STEPS` accordingly to reproduce the same effective batch size.
 > The effective batch size is calculated by multiplying:
 > - Number of GPUs / processes (NUM_PROCESSES)
-> - Train batch size per GPU (PER_DEVICE_TRAIN_BATCH_SIZE) 
+> - Train batch size per GPU (PER_DEVICE_TRAIN_BATCH_SIZE)
 > - Gradient accumulation steps (GRADIENT_ACCUMULATION_STEPS)
 > so we have
 > ```
 > 64 GPUs: 64 * 1 * 2 = 128 # from the example above
-> 8 GPUs:   8 * 1 * 16 = 128 # if you only 
+> 8 GPUs:   8 * 1 * 16 = 128 # if you only
 > ```
 > You can achieve the same effective batch size with fewer GPUs by increasing gradient accumulation steps proportionally (e.g., `NUM_PROCESSES=8, PER_DEVICE_TRAIN_BATCH_SIZE=1, and GRADIENT_ACCUMULATION_STEPS=16`)
 
@@ -111,7 +110,6 @@ accelerate launch \
     --with_tracking \
     --report_to wandb \
     --logging_steps 1 \
-    --reduce_loss sum \
     --model_revision main \
     --dataset_mixer_list allenai/tulu-3-sft-mixture 1.0 \
     --dataset_mix_dir output/sft_70B \
@@ -416,7 +414,7 @@ Couple of notes:
 
 ```bash
 TORCH_NCCL_ENABLE_MONITORING=0 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 --pure_docker_mode \
+    --cluster ai2/jupiter --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority urgent \
     --preemptible \
@@ -491,7 +489,7 @@ echo --- local_mini_batch_size=$local_mini_batch_size
 echo --- full_bsz=$full_bsz
 echo --- num_gradient_updates=$(($local_rollout_batch_size * $nspp / $local_mini_batch_size))
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
@@ -568,7 +566,7 @@ If you are running on a single node (8 GPUs), consider adjusting the commands as
  echo --- full_bsz=$full_bsz
  echo --- num_gradient_updates=$(($local_rollout_batch_size * $nspp / $local_mini_batch_size))
  python mason.py \
-     --cluster ai2/jupiter-cirrascale-2 \
+     --cluster ai2/jupiter \
      --workspace ai2/tulu-3-dev \
      --priority high \
      --preemptible \

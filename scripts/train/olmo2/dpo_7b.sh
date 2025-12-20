@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \

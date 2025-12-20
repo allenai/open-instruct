@@ -1,5 +1,4 @@
 # !/usr/bin/env python
-# coding=utf-8
 # Copyright 2024 AllenAI. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,16 +24,18 @@ from open_instruct.utils import ArgumentParserPlus, get_datasets
 # note that = is needed with our argparser
 
 
-def main():
-    parser = ArgumentParserPlus((FlatArguments))
-    args = parser.parse()
+def main() -> None:
+    parser = ArgumentParserPlus((FlatArguments,))  # type: ignore[arg-type]
+    (args,) = parser.parse()  # type: ignore[misc]
+    assert isinstance(args, FlatArguments)
 
     # assert that data_mixer is not none in config
     assert args.dataset_mixer is not None, "data_mixer is required in config"
+    configs = [args.dataset_config_name] if args.dataset_config_name else None
 
     raw_datasets = get_datasets(
         args.dataset_mixer,
-        configs=args.dataset_config_name,
+        configs=configs,
         splits=["train"],
         save_data_dir=args.dataset_mix_dir,  # location where dataset is saved as json
         columns_to_keep=["messages"],

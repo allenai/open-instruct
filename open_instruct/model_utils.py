@@ -14,31 +14,26 @@
 # limitations under the License.
 
 
+import asyncio
 import itertools
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Literal, Union
 
-try:
-    import deepspeed
-    from deepspeed.runtime.engine import DeepSpeedEngine
-except ImportError:
-    pass
-import asyncio
-
+import deepspeed
 import pandas as pd
 import torch
 import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
+from deepspeed.runtime.engine import DeepSpeedEngine
 from huggingface_hub import HfApi
 from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
-from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct import logger_utils
 from open_instruct.ground_truth_utils import VerifierFunction
@@ -51,12 +46,15 @@ logger = logger_utils.setup_logger(__name__)
 class Batch:
     """Container for batch data including queries, ground truths, and datasets."""
 
-    queries: List[List[int]]
-    ground_truths: List[List[int]]
-    datasets: List[str]
-    indices: Optional[List[int]]
+    queries: list[list[int]]
+    ground_truths: list[list[int]]
+    datasets: list[str]
+    raw_queries: list[str] | None
+    decoded_responses: list[str] | None
+    indices: list[int] | None
+    scores: list[float] | None
 
-    def __getitem__(self, key: Union[slice, int, List[int]]) -> "Batch":
+    def __getitem__(self, key: slice | int | list[int]) -> "Batch":
         """Enable indexing and slicing: batch[5], batch[start:end], or batch[[1,3,5]]."""
         if isinstance(key, slice):
             # Handle slice object: batch[start:end]
@@ -64,7 +62,10 @@ class Batch:
                 queries=self.queries[key],
                 ground_truths=self.ground_truths[key],
                 datasets=self.datasets[key],
-                indices=self.indices[key] if self.indices else None,
+                raw_queries=self.raw_queries[key] if self.raw_queries is not None else None,
+                decoded_responses=self.decoded_responses[key] if self.decoded_responses is not None else None,
+                indices=self.indices[key] if self.indices is not None else None,
+                scores=self.scores[key] if self.scores is not None else None,
             )
         elif isinstance(key, int):
             # Handle single index: batch[5]
@@ -72,7 +73,10 @@ class Batch:
                 queries=[self.queries[key]],
                 ground_truths=[self.ground_truths[key]],
                 datasets=[self.datasets[key]],
-                indices=[self.indices[key]] if self.indices else None,
+                raw_queries=[self.raw_queries[key]] if self.raw_queries is not None else None,
+                decoded_responses=[self.decoded_responses[key]] if self.decoded_responses is not None else None,
+                indices=[self.indices[key]] if self.indices is not None else None,
+                scores=[self.scores[key]] if self.scores is not None else None,
             )
         else:
             # Handle list of indices: batch[[1,3,5]]
@@ -80,22 +84,27 @@ class Batch:
                 queries=[self.queries[i] for i in key],
                 ground_truths=[self.ground_truths[i] for i in key],
                 datasets=[self.datasets[i] for i in key],
-                indices=[self.indices[i] for i in key] if self.indices else None,
+                raw_queries=[self.raw_queries[i] for i in key] if self.raw_queries is not None else None,
+                decoded_responses=[self.decoded_responses[i] for i in key]
+                if self.decoded_responses is not None
+                else None,
+                indices=[self.indices[i] for i in key] if self.indices is not None else None,
+                scores=[self.scores[i] for i in key] if self.scores is not None else None,
             )
 
 
 @dataclass
 class ModelConfig:
-    model_name_or_path: Optional[str] = None
+    model_name_or_path: str | None = None
     """The model checkpoint for weights initialization."""
-    model_revision: Optional[str] = None
+    model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
-    torch_dtype: Optional[str] = None
-    """Override the default `torch.dtype` and load the model under this dtype."""
-    attn_implementation: Optional[Literal["flash_attention_2"]] = None
+    dtype: str | None = None
+    """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
+    attn_implementation: Literal["flash_attention_2"] | None = None
     """Which attention implementation to use; you can run --attn_implementation=flash_attention_2, in which case
     you must install this manually by running `pip install flash-attn --no-build-isolation`"""
-    use_cache: Optional[bool] = None
+    use_cache: bool | None = None
     """Whether to use cache in the model."""
     gradient_checkpointing: bool = False
     """Whether to use gradient checkpointing in the model."""
@@ -103,15 +112,15 @@ class ModelConfig:
     # PEFT-related args
     use_peft: bool = False
     """Whether to use PEFT or not for training."""
-    lora_r: Optional[int] = 16
+    lora_r: int | None = 16
     """LoRA R value."""
-    lora_alpha: Optional[int] = 32
+    lora_alpha: int | None = 32
     """LoRA alpha."""
-    lora_dropout: Optional[float] = 0.05
+    lora_dropout: float | None = 0.05
     """LoRA dropout."""
-    lora_target_modules: Optional[List[str]] = None
+    lora_target_modules: list[str] | None = None
     """LoRA target modules."""
-    lora_modules_to_save: Optional[List[str]] = None
+    lora_modules_to_save: list[str] | None = None
     """Model layers to unfreeze & train"""
     lora_task_type: str = "CAUSAL_LM"
     """The task_type to pass for LoRA (use SEQ_CLS for reward modeling)"""
@@ -121,7 +130,7 @@ class ModelConfig:
     """use 8 bit precision for the base model - works only with LoRA"""
     load_in_4bit: bool = False
     """use 4 bit precision for the base model - works only with LoRA"""
-    bnb_4bit_quant_type: Optional[str] = "nf4"
+    bnb_4bit_quant_type: str | None = "nf4"
     """precise the quantization type (fp4 or nf4)"""
     use_bnb_nested_quant: bool = False
     """use nested quantization"""
@@ -139,6 +148,55 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
     for module in model.modules():
         if isinstance(module, torch.nn.Dropout):
             module.p = 0
+
+
+def load_ref_policy(
+    model_config: ModelConfig,
+    ds_config: dict,
+    deepspeed_stage: int,
+    local_rank: int,
+    device: torch.device,
+    rank: int,
+    checkpoint_path: str | None = None,
+) -> transformers.PreTrainedModel:
+    """Loads a reference policy model for evaluation.
+
+    Args:
+        model_config: Configuration containing model name and revision.
+        ds_config: DeepSpeed configuration dictionary.
+        deepspeed_stage: DeepSpeed ZeRO stage.
+        local_rank: Local GPU rank for device mapping.
+        device: Target device for loading checkpoint.
+        rank: Global process rank for logging.
+        checkpoint_path: Optional path to model checkpoint to load.
+
+    Returns:
+        Initialized reference policy model in evaluation mode.
+    """
+    # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+    # stage 2 is optimizer sharding which doesn't apply to inference
+    ref_policy: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
+        model_config.model_name_or_path,
+        revision=model_config.model_revision,
+        dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+        use_cache=False,
+        **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
+    )
+    disable_dropout_in_model(ref_policy)
+    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config)
+    ref_policy.eval()
+
+    if checkpoint_path:
+        state_dict = torch.load(checkpoint_path, map_location=device)
+        if hasattr(ref_policy, "module"):
+            # Needed if wrapped by DeepSpeed.
+            ref_policy.module.load_state_dict(state_dict)
+        else:
+            # If a vanilla HF model.
+            ref_policy.load_state_dict(state_dict)
+        logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
+    return ref_policy
 
 
 def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
@@ -189,7 +247,7 @@ def first_true_indices(bools: torch.Tensor, dtype=torch.long) -> torch.Tensor:
 
 def get_reward(
     model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int, context_length: int
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     This function computes reward scores for a batch of query responses based on a pre-trained reward model.
 
@@ -255,12 +313,13 @@ def get_reward(
 
 
 async def apply_verifiable_reward(
-    reward_fn_mapping: Dict[str, VerifierFunction],
-    responses: List[torch.Tensor],
-    decoded_responses: List[str],
-    batch: Batch,
+    reward_fn_mapping: dict[str, VerifierFunction],
+    responses: list[torch.Tensor],
+    decoded_responses: list[str],
+    ground_truths: list[float],
+    datasets: list[str],
     reward_mult: int = 10,
-    queries: Optional[List[str]] = None,
+    queries: list[str] | None = None,
 ):
     if queries is None:
         queries = [None] * len(responses)
@@ -270,19 +329,13 @@ async def apply_verifiable_reward(
     task_metadata = []
 
     for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
-        zip(responses, decoded_responses, batch.ground_truths, batch.datasets, queries)
+        zip(responses, decoded_responses, ground_truths, datasets, queries)
     ):
         # allow multiple ground truths and datasets for a single response
 
         # TODO: both code and lm_judge might have list of ground_truth *per instance*
-        if isinstance(ground_truth, str):
-            ground_truth_list = [ground_truth]
-        else:
-            ground_truth_list = ground_truth
-        if isinstance(dataset, str):
-            dataset_list = [dataset]
-        else:
-            dataset_list = dataset
+        ground_truth_list = [ground_truth] if isinstance(ground_truth, str) else ground_truth
+        dataset_list = [dataset] if isinstance(dataset, str) else dataset
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
 
         # Create async tasks for each ground truth/dataset pair
@@ -310,7 +363,7 @@ async def apply_verifiable_reward(
     # Execute all tasks in parallel
     if async_tasks:
         reward_results = await asyncio.gather(*async_tasks)
-        logger.info(f"Applied {len(reward_results)} ground truth rewards in parallel 🤗")
+        logger.debug(f"Applied {len(reward_results)} ground truth rewards in parallel 🤗")
     else:
         reward_results = []
 
@@ -337,108 +390,6 @@ async def apply_verifiable_reward(
     return response_rewards, response_per_func_rewards
 
 
-def forward(model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int) -> torch.nn.Module:
-    """
-    Performs a forward pass through the model with the given query responses and pad token ID.
-    Args:
-        model (`torch.nn.Module`):
-            The model to perform the forward pass.
-        query_responses (`torch.Tensor`):
-            The tensor containing the query responses.
-        pad_token_id (`int`):
-            The token ID representing the pad token.
-    Returns:
-        `torch.nn.Module`:
-            The output of the model, including hidden states.
-    """
-    attention_mask = query_responses != pad_token_id
-    position_ids = attention_mask.cumsum(1) - attention_mask.long()
-    input_ids = torch.masked_fill(query_responses, ~attention_mask, 0)
-    return model(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        position_ids=position_ids,
-        return_dict=True,
-        output_hidden_states=True,
-    )
-
-
-def truncate_response(stop_token_id: int, pad_token_id: int, responses: torch.Tensor):
-    """
-    Truncates the responses at the first occurrence of the stop token, filling the rest with pad tokens.
-    Args:
-        stop_token_id (`int`):
-            The token ID representing the stop token where truncation occurs.
-        pad_token_id (`int`):
-            The token ID representing the pad token used to fill the truncated responses.
-        responses (`torch.Tensor`):
-            The tensor containing the responses to be truncated.
-    Returns:
-        `torch.Tensor`:
-            The truncated responses tensor with pad tokens filled after the stop token.
-    """
-    trunc_idxs = first_true_indices(responses == stop_token_id).unsqueeze(-1)
-    new_size = [1] * (len(responses.size()) - 1) + [responses.shape[1]]
-    idxs = torch.arange(responses.shape[1], device=responses.device).view(*new_size)
-    postprocessed_responses = torch.masked_fill(responses, idxs > trunc_idxs, pad_token_id)
-    return postprocessed_responses
-
-
-def generate(
-    lm_backbone: torch.nn.Module, queries: torch.Tensor, pad_token_id: int, generation_config: dict
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Generates sequences from the language model backbone in a way that does not affect padding tokens.
-    Args:
-        lm_backbone (`torch.nn.Module`):
-            The language model backbone used for generation.
-        queries (`torch.Tensor`):
-            The tensor containing the input queries.
-        pad_token_id (`int`):
-            The token ID representing the pad token.
-        generation_config (`dict`):
-            The configuration dictionary for generation settings.
-    Returns:
-        tuple:
-            - `generated_sequences` (`torch.Tensor`):
-                The concatenated tensor of input queries and generated sequences.
-            - `logits` (`torch.Tensor`):
-                The logits output from the generation process.
-    """
-    context_length = queries.shape[1]
-    attention_mask = queries != pad_token_id
-    input_ids = torch.masked_fill(queries, ~attention_mask, 0)
-    output = lm_backbone.generate(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        # position_ids=attention_mask.cumsum(1) - attention_mask.long(), # not needed: already adjusted in generations
-        # https://github.com/huggingface/transformers/blob/ac33aeeeee2a7a89b89c93c2962e6feb90daef0a/src/transformers/models/gpt2/modeling_gpt2.py#L1227-L1250
-        generation_config=generation_config,
-        return_dict_in_generate=True,
-        output_logits=True,
-    )
-    logits = torch.stack(output.logits, 1)
-    return torch.cat((queries, output.sequences[:, context_length:]), dim=1), logits
-
-
-@torch.no_grad()
-def batch_generation(
-    model: torch.nn.Module,
-    queries: torch.Tensor,
-    local_rollout_forward_batch_size: int,
-    pad_token_id: int,
-    generation_config: dict,
-):
-    query_responses = []
-    logitss = []
-    for i in range(0, queries.shape[0], local_rollout_forward_batch_size):
-        query = queries[i : i + local_rollout_forward_batch_size]
-        query_response, logits = generate(model, query, pad_token_id, generation_config)
-        query_responses.append(query_response)
-        logitss.append(logits)
-    return torch.cat(query_responses, 0), torch.cat(logitss, 0)
-
-
 def get_olmo3_generation_config(tokenizer):
     return transformers.GenerationConfig(
         temperature=None,
@@ -450,17 +401,17 @@ def get_olmo3_generation_config(tokenizer):
 def save_with_accelerate(
     accelerator: Accelerator,
     model: torch.nn.Module,
-    tokenizer: PreTrainedTokenizer,
+    tokenizer: transformers.PreTrainedTokenizer,
     output_dir: str,
     use_lora: bool = False,
-    model_attribute_to_save: Optional[str] = None,
+    model_attribute_to_save: str | None = None,
     chat_template_name: str = "tulu",
 ) -> None:
     """`model_attribute_to_save` is for used to save PPO's policy instead of the full model"""
     # set the generation config to an empty setting to be safe.
     # we usually do greedy decoding for generation, so this should be okay.
     # otherwise, we get an error thrown at save time.
-    if "olmo" in chat_template_name:
+    if chat_template_name and "olmo" in chat_template_name:
         # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
         logger.info(f"Detected olmo chat template: {chat_template_name}, updating model generation config.")
         model.generation_config = get_olmo3_generation_config(tokenizer)
@@ -469,7 +420,7 @@ def save_with_accelerate(
             temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
         )
 
-    unwrapped_model: PreTrainedModel = accelerator.unwrap_model(model)
+    unwrapped_model: transformers.PreTrainedModel = accelerator.unwrap_model(model)
     if model_attribute_to_save is not None:
         unwrapped_model = getattr(unwrapped_model, model_attribute_to_save)
     # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
@@ -514,8 +465,10 @@ def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.T
     """
     torch compiled version of the common `log_softmax -> gather` operation.
 
+
     The compiled version of this opration avoids the (significant) memory overhead of
     allocating a new (batch_size, seq_len, vocab_size) tensor to store the logprobs.
+
 
     See https://github.com/allenai/open-instruct/pull/584
     """
@@ -525,27 +478,25 @@ def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.T
 
 @retry_on_exception()
 def push_folder_to_hub(
-    accelerator: Accelerator,
-    output_dir: str,
-    hf_repo_id: Optional[str] = None,
-    hf_repo_revision: Optional[str] = None,
-    private: bool = True,
+    output_dir: str, hf_repo_id: str | None = None, hf_repo_revision: str | None = None, private: bool = True
 ):
-    if accelerator.is_main_process:
-        hf_repo_url = f"https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}"
-        api = HfApi()
-        if not api.repo_exists(hf_repo_id):
-            api.create_repo(hf_repo_id, exist_ok=True, private=private)
-        if hf_repo_revision is not None:
-            api.create_branch(repo_id=hf_repo_id, branch=hf_repo_revision, exist_ok=True)
-        api.upload_folder(
-            repo_id=hf_repo_id,
-            revision=hf_repo_revision,
-            folder_path=output_dir,
-            commit_message="upload checkpoint",
-            run_as_future=False,
-        )
-        print(f"🔥 pushed to {hf_repo_url}")
+    """Push a folder to Hugging Face Hub.
+
+    This function should only run on the main process. Callers are expected to gate calls themselves.
+    """
+    api = HfApi()
+    if not api.repo_exists(hf_repo_id):
+        api.create_repo(hf_repo_id, exist_ok=True, private=private)
+    if hf_repo_revision is not None:
+        api.create_branch(repo_id=hf_repo_id, branch=hf_repo_revision, exist_ok=True)
+    api.upload_folder(
+        repo_id=hf_repo_id,
+        revision=hf_repo_revision,
+        folder_path=output_dir,
+        commit_message="upload checkpoint",
+        run_as_future=False,
+    )
+    logger.info(f"🔥 pushed to https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}")
 
 
 # ----------------------------------------------------------------------------
@@ -712,3 +663,31 @@ def exact_div(a, b, custom_error_message=""):
     if a != q * b:
         raise ValueError(f"{custom_error_message}, inexact division: {a} / {b} = {a / b}")
     return q
+
+
+def estimate_kl(ref_logprobs_diff: torch.Tensor, ratio: torch.Tensor) -> torch.Tensor:
+    """Compute 4 different KL divergence estimators between current and reference policies.
+
+    Args:
+        ref_logprobs_diff: Log probability difference (new_logprobs - ref_logprobs), clamped
+            to [-40, 40] for numerical stability. Shape: [B, T] or similar.
+        ratio: Importance sampling ratio exp(new_logprobs - old_logprobs) between current
+            policy and the policy at the start of the training step. Shape: [B, T] or similar.
+
+    Returns:
+        Tensor of shape [4, B, T] containing 4 KL estimators stacked along dim 0:
+            [0]: linear approximation (ref_logprobs_diff)
+            [1]: quadratic approximation (ref_logprobs_diff^2 / 2)
+            [2]: numerically stable form (expm1(-ref_logprobs_diff) + ref_logprobs_diff)
+            [3]: importance-weighted (ratio * ref_logprobs_diff)
+
+        We tend to prefer [2] as a reasonable default.
+    """
+    return torch.stack(
+        [
+            ref_logprobs_diff,
+            (ref_logprobs_diff) ** 2 / 2,
+            torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff,
+            ratio * ref_logprobs_diff,
+        ]
+    )

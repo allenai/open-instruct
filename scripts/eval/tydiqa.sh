@@ -28,7 +28,7 @@ python -m eval.tydiqa.run_eval \
     --tokenizer ../hf_llama_model/7B \
     --eval_batch_size 40 \
     --load_in_8bit \
-    --no_context  
+    --no_context
 
 # Evaluating Tulu 7B model, with gold passage provided
 # For Tulu, we use chat format.
@@ -116,7 +116,7 @@ python -m eval.tydiqa.run_eval \
     --save_dir results/tydiqa/chatgpt-no-context-1shot \
     --openai_engine "gpt-3.5-turbo-0301" \
     --eval_batch_size 20 \
-    --no_context 
+    --no_context
 
 
 # Evaluating gpt4, with gold passage provided
@@ -139,4 +139,4 @@ python -m eval.tydiqa.run_eval \
     --save_dir results/tydiqa/gpt4-no-context-1shot \
     --openai_engine "gpt-4-0314" \
     --eval_batch_size 20 \
-    --no_context 
+    --no_context

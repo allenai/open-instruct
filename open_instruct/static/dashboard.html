@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ActorManager Dashboard</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+    <div class="refresh-indicator"></div>
+    <div class="container">
+        <h1>🎛️ ActorManager Dashboard</h1>
+        <div id="status-container">
+            <div class="status-card">
+                <div class="status-label">Loading...</div>
+            </div>
+        </div>
+        <h2>📊 Queue Status</h2>
+        <div id="queue-container">
+            <div class="queue-card">
+                <div class="queue-name">Loading queues...</div>
+            </div>
+        </div>
+        <h2>⚡ Token Throughput</h2>
+        <div id="token-container">
+            <div class="token-card">
+                <div class="token-grid">
+                    <div class="token-stat">
+                        <div class="token-label">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <h2>⏱️ Performance Metrics</h2>
+        <div id="timing-container">
+            <div class="token-card" style="border-left-color: #9C27B0;">
+                <div class="token-grid">
+                    <div class="token-stat">
+                        <div class="token-label">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <h2>💾 KV Cache</h2>
+        <div id="kv-cache-container">
+            <div class="token-card" style="border-left-color: #FF9800;">
+                <div class="token-grid">
+                    <div class="token-stat">
+                        <div class="token-label">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        async function updateStatus() {
+            const response = await fetch('/api/status');
+            const data = await response.json();
+
+            const statusClass = data.should_stop ? 'active' : 'inactive';
+            const statusText = data.should_stop ? 'TRUE' : 'FALSE';
+
+            document.getElementById('status-container').innerHTML = `
+                <div class="status-card ${statusClass}">
+                    <div class="status-label">Should Stop Status</div>
+                    <div class="status-value ${statusClass}">${statusText}</div>
+                    <div class="timestamp">Last updated: ${data.last_updated}</div>
+                </div>
+            `;
+
+            // Update queue visualizations
+            if (data.queues) {
+                let queueHtml = '';
+                for (const [queueName, queueInfo] of Object.entries(data.queues)) {
+                    const percentage = queueInfo.maxsize > 0
+                        ? Math.round((queueInfo.current / queueInfo.maxsize) * 100)
+                        : 0;
+
+                    let barClass = '';
+                    if (percentage >= 90) {
+                        barClass = 'danger';
+                    } else if (percentage >= 70) {
+                        barClass = 'warning';
+                    }
+
+                    queueHtml += `
+                        <div class="queue-card">
+                            <div class="queue-name">${queueName}</div>
+                            <div class="queue-stats">
+                                Current: ${queueInfo.current} / Max: ${queueInfo.maxsize}
+                                (${percentage}% full)
+                            </div>
+                            <div class="progress-bar-container">
+                                <div class="progress-text">${queueInfo.current} / ${queueInfo.maxsize}</div>
+                                <div class="progress-bar ${barClass}" style="width: ${percentage}%;">
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                if (queueHtml === '') {
+                    queueHtml = `
+                        <div class="queue-card">
+                            <div class="queue-name">No queues configured</div>
+                        </div>
+                    `;
+                }
+
+                document.getElementById('queue-container').innerHTML = queueHtml;
+            }
+
+            // Update token statistics
+            if (data.token_stats) {
+                const stats = data.token_stats;
+                const formatNumber = (num) => {
+                    if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
+                    if (num >= 1000) return (num / 1000).toFixed(2) + 'K';
+                    return num.toFixed(0);
+                };
+
+                document.getElementById('token-container').innerHTML = `
+                    <div class="token-card">
+                        <div class="token-grid">
+                            <div class="token-stat">
+                                <div class="token-label">Prefill Tokens/Sec</div>
+                                <div class="token-value">${stats.prefill_tokens_per_sec.toFixed(1)}</div>
+                                <div class="token-rate">Avg over ${stats.sample_count} samples | Total: ${formatNumber(stats.total_prefill_tokens)}</div>
+                            </div>
+                            <div class="token-stat">
+                                <div class="token-label">Decode Tokens/Sec</div>
+                                <div class="token-value">${stats.decode_tokens_per_sec.toFixed(1)}</div>
+                                <div class="token-rate">Avg over ${stats.sample_count} samples | Total: ${formatNumber(stats.total_decode_tokens)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Update timing statistics
+            if (data.timing_stats) {
+                const timing = data.timing_stats;
+                const formatTime = (seconds) => {
+                    if (seconds >= 60) return (seconds / 60).toFixed(2) + ' min';
+                    return seconds.toFixed(2) + ' sec';
+                };
+
+                document.getElementById('timing-container').innerHTML = `
+                    <div class="token-card" style="border-left-color: #9C27B0;">
+                        <div class="token-grid">
+                            <div class="token-stat">
+                                <div class="token-label">Avg Training Step Time</div>
+                                <div class="token-value" style="color: #9C27B0;">${formatTime(timing.avg_training_step_time)}</div>
+                                <div class="token-rate">Moving avg: last ${timing.training_step_count} of 100 steps</div>
+                            </div>
+                            <div class="token-stat">
+                                <div class="token-label">Avg Batch Generation Time</div>
+                                <div class="token-value" style="color: #9C27B0;">${formatTime(timing.avg_batch_generation_time)}</div>
+                                <div class="token-rate">Moving avg: last ${timing.batch_generation_count} of 100 batches</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Update KV cache statistics
+            if (data.concurrency_per_engine !== null && data.concurrency_per_engine !== undefined) {
+                let kvCacheHtml = `
+                    <div class="token-card" style="border-left-color: #FF9800;">
+                        <div class="token-grid">
+                            <div class="token-stat">
+                                <div class="token-label">Concurrency Per Engine</div>
+                                <div class="token-value" style="color: #FF9800;">${data.concurrency_per_engine}</div>
+                                <div class="token-rate">Maximum concurrent generations per vLLM engine</div>
+                            </div>
+                `;
+
+                if (data.total_concurrency !== null && data.total_concurrency !== undefined) {
+                    kvCacheHtml += `
+                            <div class="token-stat">
+                                <div class="token-label">Total Concurrency (All Engines)</div>
+                                <div class="token-value" style="color: #FF9800;">${data.total_concurrency}</div>
+                                <div class="token-rate">Total concurrent generations across all engines</div>
+                            </div>
+                    `;
+                }
+
+                if (data.batch_size !== null && data.batch_size !== undefined) {
+                    kvCacheHtml += `
+                            <div class="token-stat">
+                                <div class="token-label">Batch Size</div>
+                                <div class="token-value" style="color: #FF9800;">${data.batch_size}</div>
+                                <div class="token-rate">Total prompts to generate per training step</div>
+                            </div>
+                    `;
+                }
+
+                kvCacheHtml += `
+                        </div>
+                    </div>
+                `;
+
+                document.getElementById('kv-cache-container').innerHTML = kvCacheHtml;
+            }
+        }
+
+        // Update immediately and then every second
+        updateStatus();
+        setInterval(updateStatus, 1000);
+    </script>
+</body>
+</html>

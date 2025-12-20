@@ -22,6 +22,8 @@ import argparse
 
 from datasets import Dataset, concatenate_datasets, load_dataset
 
+import open_instruct.utils as open_instruct_utils
+
 
 def remove_specified_columns(dataset: Dataset, columns_to_remove: list) -> Dataset:
     """Removes specified columns from the dataset."""
@@ -36,6 +38,7 @@ def remove_specified_columns(dataset: Dataset, columns_to_remove: list) -> Datas
 
     return dataset
 
+
 def main():
     parser = argparse.ArgumentParser(description="Filter and merge Hugging Face datasets.")
 
@@ -43,7 +46,7 @@ def main():
     parser.add_argument(
         "--base_ds",
         default="allenai/tulu-3-sft-mixture-filter-datecutoff",
-        help="Name or path of the base dataset to load (from HF Hub or local)."
+        help="Name or path of the base dataset to load (from HF Hub or local).",
     )
 
     # Remove sources
@@ -51,7 +54,7 @@ def main():
         "--remove_sources",
         nargs="*",
         default=[],
-        help="List of sources to remove from the base dataset. If empty, no removal is done."
+        help="List of sources to remove from the base dataset. If empty, no removal is done.",
     )
 
     # Add datasets (list)
@@ -59,39 +62,35 @@ def main():
         "--add_ds",
         nargs="*",
         default=[],
-        help="Name(s) or path(s) of one or more datasets to load from HF Hub and append. If empty, no datasets are added."
+        help="Name(s) or path(s) of one or more datasets to load from HF Hub and append. If empty, no datasets are added.",
     )
 
     # Push options
     parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Whether to push the combined dataset to the Hugging Face Hub."
+        "--push_to_hub", action="store_true", help="Whether to push the combined dataset to the Hugging Face Hub."
     )
     parser.add_argument(
         "--repo_id",
         type=str,
         default=None,
-        help="HF Hub repo ID to push the final dataset. Required if --push_to_hub is used."
+        help="HF Hub repo ID to push the final dataset. Required if --push_to_hub is used.",
     )
 
     # Remove column with keys
     parser.add_argument(
-        "--remove_keys",
-        nargs="*",
-        default=[],
-        help="List of columns to remove from the final dataset."
+        "--remove_keys", nargs="*", default=[], help="List of columns to remove from the final dataset."
     )
 
     args = parser.parse_args()
 
     # 1. Load the base dataset
     print(f"Loading base dataset: {args.base_ds}")
-    base_ds = load_dataset(args.base_ds, split="train")
+    base_ds = load_dataset(args.base_ds, split="train", num_proc=open_instruct_utils.max_num_processes())
 
     # 2. Filter out unwanted sources, if any
     if len(args.remove_sources) > 0:
         print(f"Removing rows with source in: {args.remove_sources}")
+
         def keep_example(example):
             return example["source"] not in args.remove_sources
 
@@ -107,7 +106,7 @@ def main():
         combined_ds = filtered_ds
 
         for ds_name in args.add_ds:
-            add_ds = load_dataset(ds_name, split="train")
+            add_ds = load_dataset(ds_name, split="train", num_proc=open_instruct_utils.max_num_processes())
             # add column to add_ds where 'source' is the name of the column (it shouldnt be in it for subset)
             source = [ds_name] * len(add_ds)
             add_ds = add_ds.add_column("source", source)
@@ -131,6 +130,7 @@ def main():
         print("Push completed.")
 
     print("Done!")
+
 
 if __name__ == "__main__":
     main()

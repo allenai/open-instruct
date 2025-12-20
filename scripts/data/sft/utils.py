@@ -1,11 +1,13 @@
 import os
 import re
 import tempfile
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import datasets
 from datasets import Dataset, load_dataset
 from huggingface_hub import HfApi
+
+import open_instruct.utils as open_instruct_utils
 
 
 def should_be_filtered_by_keyword(example, verbose=False):
@@ -79,20 +81,19 @@ def convert_sft_dataset(
     apply_keyword_filters: bool = True,
     apply_empty_message_filters: bool = True,
     push_to_hub: bool = False,
-    hf_entity: Optional[str] = None,
-    converted_dataset_name: Optional[str] = None,
-    local_save_dir: Optional[str] = None,
-    convert_fn: Optional[Callable] = None,
-    readme_content: Optional[str] = None,
+    hf_entity: str | None = None,
+    converted_dataset_name: str | None = None,
+    local_save_dir: str | None = None,
+    convert_fn: Callable | None = None,
+    readme_content: str | None = None,
     num_proc: int = 16,
 ):
-    datasets.disable_caching() # force the latest dataset to be downloaded and reprocessed again
+    datasets.disable_caching()  # force the latest dataset to be downloaded and reprocessed again
 
-    assert ds is not None or hf_dataset_id is not None, \
-        "Either ds or hf_dataset_id must be provided."
+    assert ds is not None or hf_dataset_id is not None, "Either ds or hf_dataset_id must be provided."
 
     if ds is None:
-        ds = load_dataset(hf_dataset_id)
+        ds = load_dataset(hf_dataset_id, num_proc=open_instruct_utils.max_num_processes())
 
     if convert_fn:
         print("Converting dataset to messages format...")

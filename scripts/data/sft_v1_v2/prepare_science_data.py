@@ -18,14 +18,7 @@ def load_jsonl(fname):
         return [json.loads(line) for line in f]
 
 
-names = [
-    "evidence_inference",
-    "qasper_truncated_4000",
-    "scifact_json",
-    "scitldr_aic",
-    "scierc_ner",
-    "scierc_relation"
-]
+names = ["evidence_inference", "qasper_truncated_4000", "scifact_json", "scitldr_aic", "scierc_ner", "scierc_relation"]
 
 # This is an instruction dataset about several science tasks that David and some other collaborators created.
 # Please contact us if you want to use the raw files

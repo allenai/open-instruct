@@ -2,7 +2,7 @@ base=SFT
 description="test of https://github.com/allenai/open-instruct/pull/631"
 exp_name=rlvr_tulu3.1_8b_${base}_grpo_fast_code
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/augusta \
     --image saurabhs/code_dev \
     --pure_docker_mode \
     --workspace ai2/oe-adapt-code \
@@ -17,7 +17,7 @@ python mason.py \
     --num_unique_prompts_rollout 48 \
     --num_samples_per_prompt_rollout 16 \
     --try_launch_beaker_eval_jobs_on_weka \
-    --kl_estimator kl3 \
+    --kl_estimator 2 \
     --learning_rate 5e-7 \
     --dataset_mixer_list saurabh5/open-code-reasoning-rlvr 1.0 saurabh5/tulu-3-personas-code-rlvr 1.0 saurabh5/rlvr_acecoder 1.0 saurabh5/the-algorithm-python 1.0 saurabh5/llama-nemotron-rlvr 1.0 \
     --dataset_mixer_list_splits train \
@@ -49,7 +49,7 @@ python mason.py \
     --local_eval_every 125 \
     --save_freq 200 \
     --gradient_checkpointing \
-    --with_tracking 
+    --with_tracking
 
 
 # --oe_eval_tasks gsm8k::tulu,bbh:cot-v1::tulu,codex_humanevalplus:0-shot-chat-n5,mbppplus::openinstruct,truthfulqa::tulu,cruxeval_input:pass@5,cruxeval_output:pass@5,ifeval::tulu \

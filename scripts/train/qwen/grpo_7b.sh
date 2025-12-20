@@ -1,6 +1,6 @@
 # https://wandb.ai/ai2-llm/open_instruct_internal/runs/96221yio/overview
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -15,7 +15,7 @@ python mason.py \
     --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning \
     --oe_eval_max_length 8192 \
     --local_rollout_batch_size 4 \
-    --kl_estimator kl3 \
+    --kl_estimator 2 \
     --learning_rate 5e-7 \
     --dataset_mixer_list ai2-adapt-dev/math_ground_truth_zs 1.0 \
     --dataset_mixer_list_splits train \

@@ -2,17 +2,12 @@ import argparse
 
 from datasets import load_dataset
 
+import open_instruct.utils as open_instruct_utils
 from scripts.data.sft.utils import convert_sft_dataset
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Process LIMA dataset and optionally upload to Hugging Face Hub."
-    )
-    parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Upload the dataset to Hugging Face Hub",
-    )
+    parser = argparse.ArgumentParser(description="Process LIMA dataset and optionally upload to Hugging Face Hub.")
+    parser.add_argument("--push_to_hub", action="store_true", help="Upload the dataset to Hugging Face Hub")
     parser.add_argument(
         "--hf_entity",
         type=str,
@@ -40,9 +35,7 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "--apply_empty_message_filters",
-        action="store_true",
-        help="Apply empty message filters to the dataset.",
+        "--apply_empty_message_filters", action="store_true", help="Apply empty message filters to the dataset."
     )
     args = parser.parse_args()
 
@@ -54,7 +47,9 @@ if __name__ == "__main__":
             else:
                 messages.append({"role": "assistant", "content": example["conversations"][i]})
         if len(messages) % 2 != 0:
-            print(f"Warning: an example has an odd number of messages: ({len(messages)}). We will cut the last message.")
+            print(
+                f"Warning: an example has an odd number of messages: ({len(messages)}). We will cut the last message."
+            )
             messages = messages[:-1]
         return {"messages": messages}
 
@@ -73,7 +68,7 @@ if __name__ == "__main__":
         "for more information about this dataset and the license."
     )
 
-    ds = load_dataset("GAIR/lima")["train"]
+    ds = load_dataset("GAIR/lima", num_proc=open_instruct_utils.max_num_processes())["train"]
     convert_sft_dataset(
         ds=ds,
         hf_dataset_id=None,

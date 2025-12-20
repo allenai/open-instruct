@@ -12,7 +12,7 @@ for split_var in split_int_mix_3; do
     exp_name="${exp_name}_${RANDOM}"
 
     uv run python mason.py \
-        --cluster ai2/augusta-google-1 \
+        --cluster ai2/augusta \
         --image "$BEAKER_IMAGE" \
         --pure_docker_mode \
         --workspace ai2/olmo-instruct \
@@ -20,6 +20,8 @@ for split_var in split_int_mix_3; do
         --preemptible \
         --num_nodes 2 \
         --max_retries 0 \
+        # torch compile caching seems consistently broken, but the actual compiling isn't.
+        # Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
         --env VLLM_DISABLE_COMPILE_CACHE=1 \
         --env HOSTED_VLLM_API_BASE=http://saturn-cs-aus-253.reviz.ai2.in:8001/v1 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -35,12 +37,11 @@ for split_var in split_int_mix_3; do
         --learning_rate 1e-6 \
         --per_device_train_batch_size 1 \
         --output_dir /output \
-        --kl_estimator kl3 \
+        --kl_estimator 2 \
         --dataset_mixer_list "${split_value}" \
         --dataset_mixer_list_splits "train" \
         --dataset_mixer_eval_list "hamishivi/omega-combined 8 allenai/IF_multi_constraints_upto5 8 saurabh5/rlvr_acecoder_filtered 8 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2 4 hamishivi/virtuoussy_multi_subject_rlvr 4" \
         --dataset_mixer_eval_list_splits train \
-        --max_token_length 10240 \
         --max_prompt_token_length 2048 \
         --response_length 8192 \
         --pack_length 12384 \

@@ -10,7 +10,7 @@ echo "Training model using $NUM_GPUS GPUs, $BATCH_SIZE_PER_GPU batch size per GP
 accelerate launch \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
-    open_instruct/dpo_tune.py \
+    open_instruct/dpo_tune_cache.py \
     --model_name_or_path allenai/tulu-2-7b \
     --use_qlora \
     --use_lora \

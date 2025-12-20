@@ -232,7 +232,7 @@ for TASK in "${all_mmlu_tasks[@]}"; do
             --beaker-image "costah/oe-eval-olmo1124-11142024" \
             --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default"}' \
             ${REVISION_ARG} \
-            --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
+            --cluster ai2/neptune,ai2/saturn,ai2/jupiter \
             --beaker-retries 2 \
             --beaker-priority "$PRIORITY"
     else

@@ -2,7 +2,6 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -23,7 +22,7 @@ class Args:
     max_wait_time_for_beaker_dataset_upload_seconds: int = 60 * 30  # 30 minutes
     check_interval_seconds: int = 60
     upload_to_hf: str = "allenai/tulu-3-evals"
-    run_id: Optional[str] = None
+    run_id: str | None = None
 
 
 def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
@@ -47,7 +46,6 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
                 --use_hf_tokenizer_template \
                 --beaker_image nathanl/open_instruct_auto \
                 --skip_oi_evals \
-                --run_safety_evaluations \
                 --run_oe_eval_experiments \
                 --upload_to_hf {args.upload_to_hf}"""
             if args.run_id:
@@ -60,6 +58,30 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
             print(f"Beaker evaluation jobs: Stderr:\n{stderr.decode()}")
             print(f"Beaker evaluation jobs: process return code: {process.returncode}")
 
+            safety_command = f"""
+            python scripts/submit_eval_jobs.py \
+                --model_name {args.model_name} \
+                --location {beaker_dataset_ids[-1]} \
+                --is_tuned \
+                --workspace tulu-3-results \
+                --preemptible \
+                --use_hf_tokenizer_template \
+                --beaker_image nathanl/open_instruct_auto \
+                --skip_oi_evals \
+                --run_oe_eval_experiments \
+                --oe_eval_task_suite "SAFETY_EVAL" \
+                --upload_to_hf {args.upload_to_hf}"""
+            if args.run_id:
+                safety_command += f" --run_id {args.run_id}"
+
+            safety_process = subprocess.Popen(
+                ["bash", "-c", safety_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            safety_stdout, safety_stderr = safety_process.communicate()
+
+            print(f"Beaker safety evaluation jobs: Stdout:\n{safety_stdout.decode()}")
+            print(f"Beaker safety evaluation jobs: Stderr:\n{safety_stderr.decode()}")
+            print(f"Beaker safety evaluation jobs: process return code: {safety_process.returncode}")
 
             return
         time.sleep(args.check_interval_seconds)

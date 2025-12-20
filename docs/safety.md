@@ -4,9 +4,9 @@ We are using the Ai2 Safety Evaluation suite for safety evals. This contains a b
 
 ## Running at Ai2
 
-This should be the most relevant thing for internal Ai2 users of open-instruct. To run evals, simply add `--run_safety_evaluations` when calling `submit_eval_jobs.py`. This will auto-add a job that uploads and runs the safety evaluations (and uploads to the leaderboard if the appropriate flag is set). This uses the `hamishivi/safety-eval` image, which is build from [the eval-safety fork](https://github.com/nouhadziri/safety-eval-fork).
+This should be the most relevant thing for internal Ai2 users of open-instruct. To run evals, use the task suite `SAFETY_EVAL` or `SAFETY_EVAL_REASONING` when calling `submit_eval_jobs.py`. This will create a job that uploads and runs the safety evaluations (and uploads to the leaderboard if the appropriate flag is set).
 
-An example command would be:
+An example command on a reasoning model would be:
 ```bash
 python scripts/submit_eval_jobs.py \
     --model_name <model name> \
@@ -17,10 +17,23 @@ python scripts/submit_eval_jobs.py \
       --beaker_image nathanl/open_instruct_auto \
       --upload_to_hf allenai/tulu-3-evals \
       --run_oe_eval_experiments \
-      --run_safety_evaluations
+      --oe_eval_task_suite "SAFETY_EVAL_REASONING"
 ```
 
-Use the `--use_alternate_safety_image` to change the safety image, for example: `--use_alternate_safety_image hamishivi/safety_eval_olmo`.
+An example command on a non-reasoning model would be:
+```bash
+python scripts/submit_eval_jobs.py \
+    --model_name <model name> \
+      --location <beaker id> \
+      --is_tuned --workspace tulu-3-results \
+      --preemptible \
+      --use_hf_tokenizer_template \
+      --beaker_image nathanl/open_instruct_auto \
+      --upload_to_hf allenai/tulu-3-evals \
+      --run_oe_eval_experiments \
+      --oe_eval_task_suite "SAFETY_EVAL"
+```
+
 
 ## Running on an interactive session
 
@@ -49,6 +62,3 @@ PYTHONPATH=safety-eval python evaluation/run_all_generation_benchmarks.py    \
 
 You can change the safety classifier used for evaluation by specifying the `classifier_model_name` in the yaml file.
 For example, when you want to use the HarmBench's classifiers for evaluation on HarmBench, you can use `HarmbenchClassifier` as the `classifier_model_name`. Please check out the `evaluation/tasks/generation/harmbench/default.yaml` and `evaluation/tasks/classification/harmbench/harmbench_classsifier.yaml` to see the classifier's specification.
-
-
-

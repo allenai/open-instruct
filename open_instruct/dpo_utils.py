@@ -18,7 +18,6 @@ Adapted from https://github.com/eric-mitchell/direct-preference-optimization/blo
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -40,7 +39,7 @@ def dpo_loss(
     beta: float,
     reference_free: bool = False,
     label_smoothing: float = 0.0,
-) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
     """Compute the DPO loss for a batch of policy and reference model log probabilities.
 
     Args:
@@ -87,7 +86,7 @@ def wpo_loss(
     label_smoothing: float = 0.0,
     chosen_loss_mask: torch.BoolTensor = None,
     rejected_loss_mask: torch.BoolTensor = None,
-) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
     pi_logratios = policy_chosen_logps - policy_rejected_logps
     ref_logratios = reference_chosen_logps - reference_rejected_logps
 
@@ -116,7 +115,7 @@ def simpo_loss(
     beta: float,
     gamma_beta_ratio: float,
     label_smoothing: float = 0.0,
-) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
     """Compute the SimPO loss for a batch of policy model log probabilities.
 
     Args:
@@ -175,8 +174,8 @@ def _get_batch_logps(
 
 
 def process_batch(
-    batch: Dict[str, Union[List, torch.LongTensor]], prefix: str, pad_value: int = 0
-) -> Dict[str, torch.LongTensor]:
+    batch: dict[str, list | torch.LongTensor], prefix: str, pad_value: int = 0
+) -> dict[str, torch.LongTensor]:
     """Process either chosen or rejected inputs separately.
 
     Args:
@@ -195,7 +194,7 @@ def process_batch(
     return processed
 
 
-def concatenated_inputs(batch: Dict[str, Union[List, torch.LongTensor]]) -> Dict[str, torch.LongTensor]:
+def concatenated_inputs(batch: dict[str, list | torch.LongTensor]) -> dict[str, torch.LongTensor]:
     """Concatenate the chosen and rejected inputs into a single tensor.
 
     Args:
@@ -224,11 +223,11 @@ def concatenated_inputs(batch: Dict[str, Union[List, torch.LongTensor]]) -> Dict
 
 def concatenated_forward(
     model: nn.Module,
-    batch: Dict[str, Union[List, torch.LongTensor]],
+    batch: dict[str, list | torch.LongTensor],
     average_log_prob: bool = False,
     output_router_logits: bool = False,
     packing: bool = False,
-) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
+) -> tuple[torch.FloatTensor, torch.FloatTensor]:
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
     We do this to avoid doing two forward passes, because it's faster for FSDP.
@@ -270,10 +269,10 @@ def concatenated_forward(
 
 def separate_forward(
     model: nn.Module,
-    batch: Dict[str, Union[List, torch.LongTensor]],
+    batch: dict[str, list | torch.LongTensor],
     average_log_prob: bool = False,
     output_router_logits: bool = False,
-) -> Tuple[torch.FloatTensor, torch.FloatTensor, Union[torch.FloatTensor, None]]:
+) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor | None]:
     """Run the model on chosen and rejected inputs separately.
 
     Args:
@@ -336,7 +335,7 @@ def separate_forward(
     return chosen_logps, rejected_logps, aux_loss
 
 
-def pad_to_length(tensor: torch.Tensor, length: int, pad_value: Union[int, float], dim: int = -1) -> torch.Tensor:
+def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float, dim: int = -1) -> torch.Tensor:
     if tensor.size(dim) >= length:
         return tensor
     else:

@@ -1,5 +1,4 @@
 from collections import defaultdict
-from typing import Tuple
 
 import pandas as pd
 import torch
@@ -32,7 +31,7 @@ def find_shared_text(chosen_text: str, rejected_text: str):
 
 def evaluate(
     model: PreTrainedModel, dataloader: DataLoader, tokenizer: PreTrainedTokenizer, max_sampled_texts: int = 0
-) -> Tuple[dict, dict]:
+) -> tuple[dict, dict]:
     model.eval()
     total_loss = 0
     total_accuracy = 0
@@ -69,7 +68,7 @@ def evaluate(
                     for chosen, rejected in zip(chosen_rewards, rejected_rewards)
                 ]
                 correct_prediction = [
-                    bool((chosen > rejected)) for chosen, rejected in zip(chosen_rewards, rejected_rewards)
+                    bool(chosen > rejected) for chosen, rejected in zip(chosen_rewards, rejected_rewards)
                 ]
                 shared_texts = [
                     find_shared_text(chosen_text, rejected_text)

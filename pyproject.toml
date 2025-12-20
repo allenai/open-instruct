@@ -3,35 +3,36 @@ name = "open-instruct"
 version = "0.1.0"
 description = "Train open, instruction-following language models"
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = "==3.12.*"
 dependencies = [
-    "accelerate>=1.1.1",
+    "accelerate>=1.10.1",
     "antlr4-python3-runtime==4.11",
+    "backoff>=2.2.1",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
     "datasets>=4.0.0",
     "debugpy>=1.8.13",
-    "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
+    "deepspeed<0.17.3",  # version 17.3 and up break our training code right now
     "hf-transfer>=0.1.8",
-    "litellm>=1.72.0",
+    "litellm>=1.72.0,<1.75.2",  # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
+    "multiprocess<0.70.18",  # avoid AttributeError in ResourceTracker.__del__
     "nltk>=3.9.1",
     "numpy<2",
+    "ai2-olmo-core==2.3.0",
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
-    "ray[default]>=2.44.1",
+    "ray[default]>=2.49.2",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.7.0,<2.8",
-    "transformers>=4.52.4,<4.54.0", # see https://github.com/vllm-project/vllm-ascend/issues/2046
-    "vllm==0.9.1",
+    "torch>=2.8.0,<2.9",
+    "transformers>=4.57.0",
+    "vllm==0.11.0",
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
-    "pytest-xdist==3.8.0",
-    "flash-attn>=2.8.0.post2; platform_system != 'Darwin'",
+    "flash-attn>=2.8.3; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
-    "flashinfer-python==0.2.8; platform_system == 'Linux' and platform_machine == 'x86_64'",
 ]
 
 [build-system]
@@ -78,13 +79,15 @@ link-mode = "hardlink"
 
 [dependency-groups]
 dev = [
-    "beaker-py>=1.32.2,<2.0",
+    "beaker-py>=2.5.3",
     "mkdocs-material>=9.6.8",
-    "markdown-include>=0.8.1",
     "pytest>=8.3.4",
     "ruff>=0.11.13",
+    "ty>=0.0.1a13",
     "parameterized>=0.9.0",
     "rich>=13.7.0",
+    "responses>=0.25.8",
+    "pre-commit>=4.5.0",
 ]
 
 [tool.pytest.ini_options]
@@ -123,8 +126,12 @@ docstring-code-format = false
 # E = pycodestyle errors (flake8)
 # W = pycodestyle warnings (flake8)
 # I = isort
-select = ["F", "E", "W", "I"]
+# SIM = flake8-simplify
+# UP = pyupgrade
+# B = flake8-bugbear
+select = ["F", "E", "W", "I", "SIM", "UP", "B"]
 ignore = [
+    "B905", # zip() without explicit strict= parameter
     "C408", # dict() calls (stylistic)
     "C901", # function complexity
     "E501", # Line too long (handled by line-length setting)
@@ -136,3 +143,23 @@ known-first-party = ["open-instruct"]
 case-sensitive = false
 # Disable split-on-trailing-comma to work with skip-magic-trailing-comma
 split-on-trailing-comma = false
+
+[tool.ty.src]
+include = [
+    "open_instruct/actor_manager.py",
+    "open_instruct/benchmark_generators.py",
+    "open_instruct/code_utils/api.py",
+    "open_instruct/context_window_checker.py",
+    "open_instruct/dataset_processor.py",
+    "open_instruct/data_loader.py",
+    "open_instruct/data_types.py",
+    "open_instruct/logger_utils.py",
+    "open_instruct/mix_data.py",
+    "open_instruct/mix_data_preferences.py",
+    "open_instruct/padding_free_collator.py",
+    "open_instruct/rejection_sampling/prompt_templates.py",
+    "open_instruct/search_utils/",
+    "open_instruct/tool_utils/tools.py",
+    "open_instruct/rl_utils.py",
+]
+exclude = ["scripts/", "decontamination/", "human_eval/"]

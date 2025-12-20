@@ -2,17 +2,14 @@ import argparse
 
 from datasets import load_dataset
 
+import open_instruct.utils as open_instruct_utils
 from scripts.data.sft.utils import convert_sft_dataset
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Process Table-GPT dataset and optionally upload to Hugging Face Hub."
     )
-    parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Upload the dataset to Hugging Face Hub",
-    )
+    parser.add_argument("--push_to_hub", action="store_true", help="Upload the dataset to Hugging Face Hub")
     parser.add_argument(
         "--hf_entity",
         type=str,
@@ -40,16 +37,14 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "--apply_empty_message_filters",
-        action="store_true",
-        help="Apply empty message filters to the dataset.",
+        "--apply_empty_message_filters", action="store_true", help="Apply empty message filters to the dataset."
     )
     args = parser.parse_args()
 
     conversion_func = lambda example: {
         "messages": [
             {"role": "user", "content": example["prompt"]},
-            {"role": "assistant", "content": example["completion"]}
+            {"role": "assistant", "content": example["completion"]},
         ]
     }
 
@@ -68,7 +63,7 @@ if __name__ == "__main__":
         "for more information about this dataset and the license."
     )
 
-    ds = load_dataset("LipengCS/Table-GPT", "All")
+    ds = load_dataset("LipengCS/Table-GPT", "All", num_proc=open_instruct_utils.max_num_processes())
     convert_sft_dataset(
         ds=ds,
         hf_dataset_id=None,
@@ -81,4 +76,3 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=readme_content,
     )
-
