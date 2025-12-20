@@ -285,79 +285,43 @@ class TestZCheckpointRestoration(unittest.TestCase):
             checkpoint_dir = os.path.join(tmpdir, "checkpoints")
             output_dir = os.path.join(tmpdir, "output")
 
-            base_args = [
-                "uv",
-                "run",
-                "python",
-                "open_instruct/grpo_fast.py",
-                "--dataset_mixer_list",
-                "ai2-adapt-dev/rlvr_gsm8k_zs",
-                "16",
-                "--dataset_mixer_list_splits",
-                "train",
-                "--max_prompt_token_length",
-                "128",
-                "--response_length",
-                "32",
-                "--pack_length",
-                "256",
-                "--per_device_train_batch_size",
-                "1",
-                "--num_unique_prompts_rollout",
-                "2",
-                "--num_samples_per_prompt_rollout",
-                "4",
-                "--model_name_or_path",
-                "Qwen/Qwen2.5-0.5B",
-                "--stop_strings",
-                "</answer>",
-                "--apply_r1_style_format_reward",
-                "--apply_verifiable_reward",
-                "true",
-                "--temperature",
-                "1.0",
-                "--ground_truths_key",
-                "ground_truth",
-                "--chat_template_name",
-                "r1_simple_chat_postpend_think",
-                "--learning_rate",
-                "3e-7",
-                "--num_training_steps",
-                "1",
-                "--deepspeed_stage",
-                "2",
-                "--num_learners_per_node",
-                "1",
-                "--vllm_tensor_parallel_size",
-                "1",
-                "--beta",
-                "0.0",
-                "--seed",
-                "3",
-                "--vllm_sync_backend",
-                "gloo",
-                "--vllm_gpu_memory_utilization",
-                "0.3",
-                "--vllm_enforce_eager",
-                "--gradient_checkpointing",
-                "--single_gpu_mode",
-                "--filter_zero_std_samples",
-                "False",
-                "--checkpoint_state_freq",
-                "1",
-                "--checkpoint_state_dir",
-                checkpoint_dir,
-                "--output_dir",
-                output_dir,
-            ]
+            base_grpo_args = (
+                "python open_instruct/grpo_fast.py "
+                "--dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 16 "
+                "--dataset_mixer_list_splits train "
+                "--max_prompt_token_length 128 "
+                "--response_length 32 "
+                "--pack_length 256 "
+                "--per_device_train_batch_size 1 "
+                "--num_unique_prompts_rollout 2 "
+                "--num_samples_per_prompt_rollout 4 "
+                "--model_name_or_path Qwen/Qwen2.5-0.5B "
+                "--stop_strings '</answer>' "
+                "--apply_r1_style_format_reward "
+                "--apply_verifiable_reward true "
+                "--temperature 1.0 "
+                "--ground_truths_key ground_truth "
+                "--chat_template_name r1_simple_chat_postpend_think "
+                "--learning_rate 3e-7 "
+                "--num_training_steps 1 "
+                "--deepspeed_stage 2 "
+                "--num_learners_per_node 1 "
+                "--vllm_tensor_parallel_size 1 "
+                "--beta 0.0 "
+                "--seed 3 "
+                "--vllm_sync_backend gloo "
+                "--vllm_gpu_memory_utilization 0.3 "
+                "--vllm_enforce_eager "
+                "--gradient_checkpointing "
+                "--single_gpu_mode "
+                "--filter_zero_std_samples False "
+                "--checkpoint_state_freq 1 "
+                f"--checkpoint_state_dir {checkpoint_dir} "
+                f"--output_dir {output_dir}"
+            )
 
-            env = os.environ.copy()
-            env["RAY_ADDRESS"] = ""
-            ray_tmpdir = os.path.join(tmpdir, "ray_tmp")
-            os.makedirs(ray_tmpdir, exist_ok=True)
-            env["RAY_TMPDIR"] = ray_tmpdir
-
-            result1 = subprocess.run(base_args, capture_output=True, text=True, timeout=1800, env=env)
+            cmd1 = f"source configs/beaker_configs/ray_node_setup.sh && {base_grpo_args}"
+            result1 = subprocess.run(["bash", "-c", cmd1], capture_output=True, text=True, timeout=600)
             self.assertEqual(result1.returncode, 0, f"First run failed: {result1.stderr}")
 
             match = re.search(r"num_total_tokens.*?(\d+)", result1.stdout + result1.stderr)
@@ -373,8 +337,9 @@ class TestZCheckpointRestoration(unittest.TestCase):
                 torch.cuda.ipc_collect()
             time.sleep(5)
 
-            resume_args = base_args + ["--num_training_steps", "2"]
-            result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=1800, env=env)
+            resume_grpo_args = base_grpo_args.replace("--num_training_steps 1", "--num_training_steps 2")
+            cmd2 = f"source configs/beaker_configs/ray_node_setup.sh && {resume_grpo_args}"
+            result2 = subprocess.run(["bash", "-c", cmd2], capture_output=True, text=True, timeout=600)
 
             restore_match = re.search(r"Restored num_total_tokens: (\d+)", result2.stdout + result2.stderr)
 
