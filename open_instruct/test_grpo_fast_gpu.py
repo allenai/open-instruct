@@ -7,6 +7,7 @@ To run:
     ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
 """
 
+import gc
 import json
 import logging
 import os
@@ -232,25 +233,41 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         param_prompt_Q.put(None)
 
 
-class TestCheckpointRestoration(unittest.TestCase):
+class TestZCheckpointRestoration(unittest.TestCase):
     """Tests for checkpoint save/restore functionality.
 
     This test runs full GRPO training as a subprocess, which requires exclusive
-    GPU access and significant resources. It is skipped by default in CI to avoid
-    resource contention with other tests.
-
-    To run this test, set RUN_CHECKPOINT_TEST=1:
-        RUN_CHECKPOINT_TEST=1 pytest open_instruct/test_grpo_fast_gpu.py::TestCheckpointRestoration -v
+    GPU access and significant resources. It is named with a Z prefix to ensure
+    it runs last alphabetically (after TestGeneration and TestVLLMQueueSystem),
+    giving other tests time to release GPU resources first.
     """
 
     def setUp(self):
-        """Stop any existing Ray cluster to get exclusive GPU access."""
+        """Stop any existing Ray cluster and clean up GPU resources."""
         if ray.is_initialized():
             ray.shutdown()
         subprocess.run(["ray", "stop", "--force"], capture_output=True)
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+
         time.sleep(5)
 
-    @unittest.skipUnless(os.environ.get("RUN_CHECKPOINT_TEST") == "1", "Set RUN_CHECKPOINT_TEST=1 to run")
+    def tearDown(self):
+        """Clean up Ray and GPU resources after test."""
+        if ray.is_initialized():
+            ray.shutdown()
+        subprocess.run(["ray", "stop", "--force"], capture_output=True)
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_num_total_tokens_restored_from_checkpoint(self):
         """Test that num_total_tokens is correctly restored from checkpoint.
@@ -345,6 +362,14 @@ class TestCheckpointRestoration(unittest.TestCase):
             self.assertIsNotNone(match, "Could not find num_total_tokens in first run logs")
             expected_tokens = int(match.group(1))
             self.assertGreater(expected_tokens, 0, "num_total_tokens should be > 0 after training")
+
+            subprocess.run(["ray", "stop", "--force"], capture_output=True)
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+            time.sleep(5)
 
             resume_args = base_args + ["--num_training_steps", "2"]
             result2 = subprocess.run(resume_args, capture_output=True, text=True, timeout=900, env=env)

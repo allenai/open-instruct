@@ -2725,6 +2725,7 @@ def run_training(
             [engine.check_background_threads.remote() for engine in vllm_engines],
             desc="Checking vLLM engine health",
             enable=False,
+            timeout=60,
         )
 
     # Send initial data to ensure we have a N-step offset.
