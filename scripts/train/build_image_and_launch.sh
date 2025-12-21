@@ -31,9 +31,13 @@ if [[ -n "$existing_image_desc" ]] && [[ "$existing_image_desc" == *"$git_hash"*
   echo "Beaker image already exists for commit $git_hash, skipping Docker build and upload."
 else
   echo "Creating new beaker image for commit $git_hash..."
-  docker build --platform=linux/amd64 \
+  CACHE_REPO="${DOCKER_CACHE_REPO:-ghcr.io/allenai/open-instruct:buildcache}"
+  docker buildx build --platform=linux/amd64 \
     --build-arg GIT_COMMIT="$git_hash" \
     --build-arg GIT_BRANCH="$git_branch" \
+    --cache-from type=registry,ref="$CACHE_REPO" \
+    --cache-to type=registry,ref="$CACHE_REPO",mode=max \
+    --load \
     . -t "$image_name"
 
   beaker image rename "$beaker_user/$image_name" "" || echo "Image not found, skipping rename."
