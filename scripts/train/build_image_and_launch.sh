@@ -32,11 +32,13 @@ if [[ -n "$existing_image_desc" ]] && [[ "$existing_image_desc" == *"$git_hash"*
 else
   echo "Creating new beaker image for commit $git_hash..."
   CACHE_REPO="${DOCKER_CACHE_REPO:-ghcr.io/allenai/open-instruct:buildcache}"
+  CACHE_ARGS="--cache-from type=registry,ref=$CACHE_REPO"
+  [ "${DOCKER_CACHE_PUSH:-}" = "1" ] && CACHE_ARGS="$CACHE_ARGS --cache-to type=registry,ref=$CACHE_REPO,mode=max"
+
   docker buildx build --platform=linux/amd64 \
     --build-arg GIT_COMMIT="$git_hash" \
     --build-arg GIT_BRANCH="$git_branch" \
-    --cache-from type=registry,ref="$CACHE_REPO" \
-    --cache-to type=registry,ref="$CACHE_REPO",mode=max \
+    $CACHE_ARGS \
     --load \
     . -t "$image_name"
 
