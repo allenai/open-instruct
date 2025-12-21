@@ -41,6 +41,8 @@ jobs:
           version: "0.8.6"
       - name: Set up Python
         run: uv sync --frozen
+      - name: Install Beaker CLI
+        run: curl -s https://beaker.org/install | sudo bash
       - name: Run GPU tests on Beaker
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
