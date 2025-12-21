@@ -72,7 +72,11 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
 
-COPY configs scripts mason.py open_instruct ./
+# Separate COPY commands required: Docker copies directory *contents*, not the directory itself
+COPY configs configs
+COPY scripts scripts
+COPY mason.py mason.py
+COPY open_instruct open_instruct
 COPY oe-eval-interna[l] oe-eval-internal/
 
 ARG GIT_COMMIT="" \
