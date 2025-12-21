@@ -49,8 +49,13 @@ jobs:
         run: |
           output=$(./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh 2>&1)
           echo "$output"
-          exp_id=$(echo "$output" | grep -oP 'https://beaker.org/ex/\K[^\s]+' | head -1)
-          echo "Experiment ID: $exp_id"
+          exp_url=$(echo "$output" | grep -oP 'https://beaker.org/ex/[^\s]+' | head -1)
+          exp_id=$(echo "$exp_url" | grep -oP 'https://beaker.org/ex/\K[^\s]+')
+          echo ""
+          echo "=========================================="
+          echo "Waiting for tests to finish on Beaker: $exp_url"
+          echo "=========================================="
+          echo ""
           beaker experiment await "$exp_id" 0 --index finalized --timeout 10m
           status=$(beaker experiment get "$exp_id" --format json | jq -r '.[0].jobs[0].status.exitCode')
           if [ "$status" != "0" ]; then
