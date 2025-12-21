@@ -1,8 +1,8 @@
 #!/bin/bash
 # Test that num_total_tokens is correctly restored from checkpoint.
 # This test runs full GRPO training twice:
-# 1. First run: train for 1 step, checkpoint
-# 2. Second run: resume from checkpoint
+# 1. First run: train for 8 episodes, checkpoint
+# 2. Second run: resume from checkpoint, train until 16 episodes
 # 3. Verify num_total_tokens was restored
 
 set -e
@@ -57,10 +57,10 @@ COMMON_ARGS=(
 )
 
 echo ""
-echo "=== First run: Train for 1 step ==="
+echo "=== First run: Train for 8 episodes ==="
 python open_instruct/grpo_fast.py \
     "${COMMON_ARGS[@]}" \
-    --num_training_steps 1 \
+    --total_episodes 8 \
     2>&1 | tee /tmp/grpo_run1.log
 
 EXPECTED_TOKENS=$(grep -oP 'num_total_tokens.*?(\d+)' /tmp/grpo_run1.log | grep -oP '\d+' | tail -1)
@@ -83,7 +83,7 @@ echo ""
 echo "=== Second run: Resume from checkpoint ==="
 python open_instruct/grpo_fast.py \
     "${COMMON_ARGS[@]}" \
-    --num_training_steps 2 \
+    --total_episodes 16 \
     2>&1 | tee /tmp/grpo_run2.log
 
 RESTORED_TOKENS=$(grep -oP 'Restored num_total_tokens: (\d+)' /tmp/grpo_run2.log | grep -oP '\d+' | tail -1)
