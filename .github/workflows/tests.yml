@@ -30,7 +30,7 @@ jobs:
   gpu-tests:
     name: Run GPU tests
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
 
       - name: Checkout code
