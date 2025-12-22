@@ -1,9 +1,11 @@
+import pathlib
+import tempfile
 import unittest
 
 import torch
 
 import open_instruct.model_utils
-from open_instruct.model_utils import Batch
+from open_instruct.model_utils import Batch, TensorCache
 
 
 class TestBatchSlicing(unittest.TestCase):
@@ -58,6 +60,47 @@ class TestLogSoftmaxAndGather(unittest.TestCase):
         self.assertEqual(result.shape, (batch_size, seq_len))
         self.assertTrue(torch.all(result <= 0))
         self.assertTrue(torch.all(torch.isfinite(result)))
+
+
+class TestTensorCache(unittest.TestCase):
+    def test_tensor_cache_getitem(self):
+        cache = TensorCache(
+            tensors={"chosen_logps": torch.tensor([1.0, 2.0, 3.0]), "rejected_logps": torch.tensor([4.0, 5.0, 6.0])}
+        )
+        indices = torch.tensor([0, 2])
+        result = cache[indices]
+        self.assertTrue(torch.equal(result["chosen_logps"], torch.tensor([1.0, 3.0])))
+        self.assertTrue(torch.equal(result["rejected_logps"], torch.tensor([4.0, 6.0])))
+
+    def test_tensor_cache_to_disk_and_from_disk(self):
+        cache = TensorCache(tensors={"chosen_logps": torch.tensor([1.0, 2.0, 3.0])})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = pathlib.Path(tmpdir) / "cache.pt"
+            cache.to_disk(path)
+            loaded = TensorCache.from_disk(path)
+            self.assertTrue(torch.equal(loaded.tensors["chosen_logps"], cache.tensors["chosen_logps"]))
+
+    def test_tensor_cache_device_handling(self):
+        cache = TensorCache(tensors={"values": torch.tensor([1.0, 2.0, 3.0, 4.0])})
+        indices = torch.tensor([1, 3])
+        result = cache[indices]
+        self.assertEqual(result["values"].device, cache.tensors["values"].device)
+        self.assertTrue(torch.equal(result["values"], torch.tensor([2.0, 4.0])))
+
+    def test_tensor_cache_to_method(self):
+        cache = TensorCache(tensors={"values": torch.tensor([1.0, 2.0, 3.0])})
+        moved_cache = cache.to("cpu")
+        self.assertEqual(moved_cache.tensors["values"].device, torch.device("cpu"))
+        self.assertTrue(torch.equal(moved_cache.tensors["values"], torch.tensor([1.0, 2.0, 3.0])))
+
+    def test_tensor_cache_from_disk_with_device(self):
+        cache = TensorCache(tensors={"values": torch.tensor([1.0, 2.0, 3.0])})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = pathlib.Path(tmpdir) / "cache.pt"
+            cache.to_disk(path)
+            loaded = TensorCache.from_disk(path, device="cpu")
+            self.assertEqual(loaded.tensors["values"].device, torch.device("cpu"))
+            self.assertTrue(torch.equal(loaded.tensors["values"], cache.tensors["values"]))
 
 
 if __name__ == "__main__":
