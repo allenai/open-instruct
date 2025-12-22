@@ -731,54 +731,7 @@ class PolicyTrainerRayProcess(RayProcess):
             lr_scheduler=scheduler,
             dist_init_required=True,
         )
-        optimization_steps_done = 0
-        checkpoint_state = None
-        if args.checkpoint_state_dir:
-            # check if the dir exists
-            if not os.path.exists(args.checkpoint_state_dir):
-                logger.warning(
-                    f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
-                )
-            else:
-                path, states = self.model.load_checkpoint(
-                    args.checkpoint_state_dir,
-                    load_module_strict=True,
-                    load_optimizer_states=True,
-                    load_lr_scheduler_states=True,
-                    load_module_only=False,
-                )
-                if path is None:
-                    raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
-                checkpoint_state = states
-                optimization_steps_done = states["training_step"]
-
-                rng_states = states["rng_states"]
-                torch.set_rng_state(rng_states["torch_cpu_rng_state"])
-                np.random.set_state(rng_states["numpy_rng_state"])
-                random.setstate(rng_states["python_rng_state"])
-
-                if torch.cuda.is_available() and "torch_cuda_rng_states" in rng_states:
-                    # device_str, e.g. "cuda:0"
-                    for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
-                        device_id = int(device_str.split(":")[1])
-                        torch.cuda.set_rng_state(rng_state, device_id)
-                    if "torch_cuda_rng_state_all" in rng_states:
-                        torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
-
-                logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
-
-                # Save reference policy path to load later (after ref_policy is initialized)
-                self.ref_policy_checkpoint_path = None
-                if args.load_ref_policy and states.get("ref_policy_saved", False):
-                    ref_policy_dir = os.path.join(args.checkpoint_state_dir, "ref_policy")
-                    model_path = os.path.join(ref_policy_dir, "pytorch_model.bin")
-                    if os.path.exists(model_path):
-                        self.ref_policy_checkpoint_path = model_path
-                        logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
-
-                logger.info(
-                    f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
-                )
+        checkpoint_state, optimization_steps_done = self.maybe_load_checkpoint(args)
         self.model.train()
 
         # reference model
@@ -805,6 +758,54 @@ class PolicyTrainerRayProcess(RayProcess):
             )
         self.local_metrics = utils.MetricsTracker(device=self.device)
         return optimization_steps_done, checkpoint_state
+
+    def maybe_load_checkpoint(self, args: Args) -> tuple[dict | None, int]:
+        optimization_steps_done = 0
+        checkpoint_state = None
+        if args.checkpoint_state_dir:
+            if not os.path.exists(args.checkpoint_state_dir):
+                logger.warning(
+                    f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
+                )
+            else:
+                path, states = self.model.load_checkpoint(
+                    args.checkpoint_state_dir,
+                    load_module_strict=True,
+                    load_optimizer_states=True,
+                    load_lr_scheduler_states=True,
+                    load_module_only=False,
+                )
+                if path is None:
+                    raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
+                checkpoint_state = states
+                optimization_steps_done = states["training_step"]
+
+                rng_states = states["rng_states"]
+                torch.set_rng_state(rng_states["torch_cpu_rng_state"])
+                np.random.set_state(rng_states["numpy_rng_state"])
+                random.setstate(rng_states["python_rng_state"])
+
+                if torch.cuda.is_available() and "torch_cuda_rng_states" in rng_states:
+                    for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
+                        device_id = int(device_str.split(":")[1])
+                        torch.cuda.set_rng_state(rng_state, device_id)
+                    if "torch_cuda_rng_state_all" in rng_states:
+                        torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
+
+                logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
+
+                self.ref_policy_checkpoint_path = None
+                if args.load_ref_policy and states.get("ref_policy_saved", False):
+                    ref_policy_dir = os.path.join(args.checkpoint_state_dir, "ref_policy")
+                    model_path = os.path.join(ref_policy_dir, "pytorch_model.bin")
+                    if os.path.exists(model_path):
+                        self.ref_policy_checkpoint_path = model_path
+                        logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
+
+                logger.info(
+                    f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
+                )
+        return checkpoint_state, optimization_steps_done
 
     def forward(
         self,
