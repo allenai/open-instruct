@@ -2122,9 +2122,7 @@ def load_tools(args: Args) -> dict[str, Tool]:
             from open_instruct.tool_utils.tools import PythonCodeTool
 
             tool_instance = PythonCodeTool(
-                start_str="<code>",
-                end_str="</code>",
-                api_endpoint=args.code_tool_api_endpoint,
+                start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint
             )
         else:
             raise ValueError(f"Unknown tool: {tool}")
