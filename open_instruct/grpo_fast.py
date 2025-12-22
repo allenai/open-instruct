@@ -111,7 +111,13 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
+from open_instruct.rl_utils import (
+    PackedSequences,
+    Timer,
+    calculate_sequence_length_metrics,
+    masked_mean,
+    pack_sequences,
+)
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -1807,13 +1813,6 @@ def data_preparation_thread(
         getting_response_time = timer.duration
         scores = np.array(batch.scores)
 
-        good_outputs = [
-            len(result.request_info.tool_outputs[i]) > 0
-            and result.request_info.tool_calleds[i]
-            and not result.request_info.timeouts[i]
-            and not result.request_info.tool_errors[i]
-            for i in range(len(result.request_info.tool_outputs))
-        ]
         scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
         mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
         mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
@@ -1826,23 +1825,21 @@ def data_preparation_thread(
         else:
             raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
-        if args.mask_truncated_completions:
-            stop_idxes = torch.tensor(
-                [i for i in range(len(result.finish_reasons)) if result.finish_reasons[i] == "stop"]
-            )
-            num_truncated = len(result.finish_reasons) - len(stop_idxes)
-            if num_truncated > 0:
-                logger.info(
-                    f"[Truncated completions filtering] Filtered {num_truncated} responses that didn't finish with 'stop'. "
-                    f"Retention rate: {len(stop_idxes) / len(result.finish_reasons):.2%}"
-                )
-            scores = scores[stop_idxes]
-            advantages = advantages[stop_idxes]
-            batch = batch[stop_idxes.tolist()]
-            result.responses = [result.responses[i] for i in stop_idxes]
-            result.masks = [result.masks[i] for i in stop_idxes]
-            result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
-            result.logprobs = [result.logprobs[i] for i in stop_idxes]
+        # metrics that need to be calculated before any filtering
+        stop_rate = np.mean([finish_reason == "stop" for finish_reason in result.finish_reasons])
+        good_outputs = [
+            len(result.request_info.tool_outputs[i]) > 0
+            and result.request_info.tool_calleds[i]
+            and not result.request_info.timeouts[i]
+            and not result.request_info.tool_errors[i]
+            for i in range(len(result.request_info.tool_outputs))
+        ]
+
+        sequence_length_metrics = calculate_sequence_length_metrics(result, scores, args.max_possible_score)
+
+        result, batch, scores, advantages, num_masked_truncated = maybe_mask_truncated_completions(
+            args.mask_truncated_completions, result, batch, scores, advantages
+        )
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1902,18 +1899,7 @@ def data_preparation_thread(
         else:
             real_num_responses = len(result.responses)
             expected_num_responses = args.num_samples_per_prompt_rollout * args.num_unique_prompts_rollout
-
             unsolved_num_responses = (scores < args.max_possible_score).sum()
-            sequence_lengths = np.array([len(response) for response in result.responses])
-            sequence_length_solved = (
-                np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == args.max_possible_score])
-            )
-            sequence_length_unsolved = (
-                np.array([]) if np.all(scores == args.max_possible_score) else np.array(sequence_lengths[scores == 0])
-            )
-            stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
-                result.finish_reasons
-            )
 
             batch_metrics = asdict(batch_stats)
             batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics.items()}
@@ -1923,19 +1909,9 @@ def data_preparation_thread(
                 "real_batch_size_ratio": real_num_responses / expected_num_responses,
                 "unsolved_batch_size_ratio": unsolved_num_responses / real_num_responses,
                 "packed_ratio": len(packed_sequences.query_responses) / real_num_responses,
+                "val/masked_truncated_responses": num_masked_truncated,
                 "val/solve_rate_hist": None,
                 "val/total_reward_groups": real_num_responses / args.num_samples_per_prompt_rollout,
-                "val/sequence_lengths": sequence_lengths.mean(),
-                "val/sequence_lengths_min": sequence_lengths.min(),
-                "val/sequence_lengths_max": sequence_lengths.max(),
-                "val/sequence_lengths_unsolved": (
-                    0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
-                ),
-                "val/sequence_lengths_solved": (
-                    0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean()
-                ),
-                "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
-                "val/sequence_lengths_solved_hist": sequence_length_solved,
                 "val/stop_rate": stop_rate,
                 "val/advantages_mean": advantages.mean(),
                 "val/advantages_min": advantages.min(),
@@ -1948,6 +1924,7 @@ def data_preparation_thread(
                 "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
                 "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
                 "time/getting_response": getting_response_time,
+                **sequence_length_metrics,
                 **reward_metrics,
                 **batch_metrics_prefixed,
             }
@@ -2441,6 +2418,34 @@ def one_training_step(
         wandb.log(metrics, step=episode)
 
 
+def maybe_mask_truncated_completions(
+    mask_truncated_completions: bool,
+    result: GenerationResult,
+    batch: Batch,
+    scores: list[float],
+    advantages: list[float],
+) -> tuple[GenerationResult, Batch, list[float], list[float], int]:
+    """if mask_truncated_completions, remove all samples with finish_reason == 'stop'"""
+    num_masked_truncated = 0
+    if mask_truncated_completions:
+        stop_idxes = torch.tensor([i for i in range(len(result.finish_reasons)) if result.finish_reasons[i] == "stop"])
+        num_masked_truncated = len(result.finish_reasons) - len(stop_idxes)
+        if num_masked_truncated > 0:
+            logger.info(
+                f"[Truncated completions filtering] Filtered {num_masked_truncated} responses that didn't finish with 'stop'. "
+                f"Retention rate: {len(stop_idxes) / len(result.finish_reasons):.2%}"
+            )
+        scores = scores[stop_idxes]
+        advantages = advantages[stop_idxes]
+        batch = batch[stop_idxes.tolist()]
+        result.responses = [result.responses[i] for i in stop_idxes]
+        result.masks = [result.masks[i] for i in stop_idxes]
+        result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
+        result.logprobs = [result.logprobs[i] for i in stop_idxes]
+
+    return result, batch, scores, advantages, num_masked_truncated
+
+
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
 def maybe_save_checkpoint(
     args: Args,
@@ -2513,9 +2518,7 @@ def maybe_evaluate(
         logger.info("[Main Thread] 📊 Evaluation responses received")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
-        eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
-            eval_result.finish_reasons
-        )
+        eval_stop_rate = np.mean([finish_reason == "stop" for finish_reason in eval_result.finish_reasons])
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
         eval_metrics = {
             "eval/scores": np.array(eval_batch.scores).mean(),

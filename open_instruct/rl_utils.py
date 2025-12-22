@@ -9,6 +9,7 @@ import torch
 from rich.pretty import pprint
 
 from open_instruct import logger_utils
+from open_instruct.queue_types import GenerationResult
 
 T = TypeVar("T")
 logger = logger_utils.setup_logger(__name__)
@@ -244,6 +245,26 @@ def calculate_advantages_packed(
     advantages = np.stack(advantages_reversed[::-1], axis=1)
     returns = advantages + values
     return advantages, returns
+
+
+def calculate_sequence_length_metrics(results: list[GenerationResult], scores: list[float], max_possible_score: float):
+    """Calculate metrics relating to result sequence lengths for
+    - mean, min, max, hist of all lengths
+    - mean, hist of correct lengths
+    - mean, hist of incorrect results
+    """
+    sequence_lengths = np.array([len(response) for response in results.responses])
+    sequence_length_solved = sequence_lengths[scores == max_possible_score]
+    sequence_length_unsolved = sequence_lengths[scores < max_possible_score]
+    return {
+        "val/sequence_lengths": sequence_lengths.mean(),
+        "val/sequence_lengths_min": sequence_lengths.min(),
+        "val/sequence_lengths_max": sequence_lengths.max(),
+        "val/sequence_lengths_unsolved": (sequence_length_unsolved.mean() if len(sequence_length_unsolved) > 0 else 0),
+        "val/sequence_lengths_solved": (sequence_length_solved.mean() if len(sequence_length_solved) > 0 else 0),
+        "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
+        "val/sequence_lengths_solved_hist": sequence_length_solved,
+    }
 
 
 def masked_mean(
