@@ -92,6 +92,10 @@ dev = [
 
 [tool.pytest.ini_options]
 addopts = "--ignore=oe-eval-internal/"
+filterwarnings = [
+    "ignore:.*sentry_sdk.Hub.*:sentry_sdk.utils.SentryHubDeprecationWarning",
+    "ignore:builtin type SwigPy.*:DeprecationWarning",
+]
 
 
 [tool.black]
