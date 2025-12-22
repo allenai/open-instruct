@@ -1499,8 +1499,7 @@ def accumulate_inference_batches(
     num_prompts: int,
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
-    prompt_dataset: Dataset,
-    data_loader: data_loader_lib.HFDataLoader | None = None,
+    data_loader: data_loader_lib.HFDataLoader,
     prompt_Q: ray_queue.Queue | None = None,
     actor_manager=None,
     timeout: float | None = None,
@@ -1516,10 +1515,7 @@ def accumulate_inference_batches(
         args: Arguments containing vllm_num_engines and batch size info
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
-        data_loader: Iterator over the dataloader for replenishing prompts. Required when
-            replenish_prompts=True or no_resampling_pass_rate is set. Can be None for
-            evaluation where all prompts are pre-queued.
-        prompt_dataset: Dataset containing prompts
+        data_loader: DataLoader for looking up prompt data by index and replenishing prompts.
         prompt_Q: Queue containing prompts to send to generator. Required when
             replenish_prompts=True. Can be None for evaluation where no replenishment is needed.
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
@@ -1536,13 +1532,8 @@ def accumulate_inference_batches(
         Tuple of (combined_result, Batch with queries, ground_truths, datasets, prompt_lengths, response_lengths)
         or (ShutdownSentinel, None, None, None) if shutdown signal received
     """
-    if no_resampling_pass_rate is not None:
-        assert data_loader is not None, "no_resampling requires data_loader"
-
     if replenish_prompts:
-        assert prompt_Q is not None and data_loader is not None and prompt_dataset is not None, (
-            "replenish_prompts requires prompt_Q, data_loader, and prompt_dataset"
-        )
+        assert prompt_Q is not None, "replenish_prompts requires prompt_Q"
     results = []
     all_queries = []
     all_ground_truths = []
@@ -1615,8 +1606,7 @@ def accumulate_inference_batches(
             progress_bar.update(1)
 
         results.append(result)
-        position = data_loader._index_to_position[result.index] if data_loader is not None else result.index
-        prompt_data = prompt_dataset[position]
+        prompt_data = data_loader[result.index]
         all_queries.extend(repeat_each([prompt_data[INPUT_IDS_PROMPT_KEY]], generation_config.n))
         all_ground_truths.extend(repeat_each([prompt_data[GROUND_TRUTHS_KEY]], generation_config.n))
         all_datasets.extend(repeat_each([prompt_data[VERIFIER_SOURCE_KEY]], generation_config.n))
@@ -1752,7 +1742,6 @@ def data_preparation_thread(
     generation_config,
     resume_training_step: int,
     data_loader: data_loader_lib.HFDataLoader,
-    train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
 ):
@@ -1767,7 +1756,6 @@ def data_preparation_thread(
                 model_dims=model_dims,
                 tokenizer=tokenizer,
                 data_loader=data_loader,
-                prompt_dataset=train_dataset,
                 prompt_Q=prompt_Q,
                 actor_manager=actor_manager,
                 active_sampling=args.active_sampling,
@@ -2483,6 +2471,7 @@ def maybe_evaluate(
     tokenizer,
     episode,
     eval_dataset: Dataset,
+    eval_data_loader: data_loader_lib.HFDataLoader,
     eval_generation_config,
     model_dims: utils.ModelDims,
     actor_manager=None,
@@ -2504,7 +2493,7 @@ def maybe_evaluate(
             num_prompts=len(eval_dataset),
             model_dims=model_dims,
             tokenizer=tokenizer,
-            prompt_dataset=eval_dataset,
+            data_loader=eval_data_loader,
             actor_manager=actor_manager,
             timeout=timeout,
             active_sampling=False,
@@ -2711,7 +2700,6 @@ def run_training(
         generation_configs["train"],
         resume_training_step,
         data_loader,
-        train_dataset,
         actor_manager,
         model_dims,
     )
@@ -2850,6 +2838,7 @@ def run_training(
             tokenizer,
             episode,
             eval_dataset,
+            eval_data_loader,
             generation_configs["eval"],
             model_dims,
             actor_manager,

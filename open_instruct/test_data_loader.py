@@ -266,6 +266,32 @@ class TestHFDataLoader(unittest.TestCase):
 
         self.assertEqual(len(all_prompt_ids), len(set(all_prompt_ids)))
 
+    def test_getitem_by_index(self):
+        dataset = self._create_test_dataset(20)
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+        )
+
+        for batch in loader:
+            original_index = batch["index"]
+            retrieved = loader[original_index]
+            self.assertEqual(retrieved["index"], original_index)
+
+    def test_getitem_after_reshuffle(self):
+        dataset = self._create_test_dataset(20)
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+        )
+
+        indices_before = [batch["index"] for batch in loader]
+        loader.reshuffle()
+        indices_after = [batch["index"] for batch in loader]
+
+        self.assertNotEqual(indices_before, indices_after)
+        for idx in indices_after:
+            retrieved = loader[idx]
+            self.assertEqual(retrieved["index"], idx)
+
 
 if __name__ == "__main__":
     unittest.main()

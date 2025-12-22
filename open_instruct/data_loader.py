@@ -67,6 +67,11 @@ class HFDataLoader(data_loader.DataLoaderBase):
             self.batches_processed = 0
             raise
 
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        """Look up an example by its original dataset index."""
+        position = self._index_to_position[index]
+        return self.dataset[position]
+
     def _build_index_mapping(self) -> None:
         """Build a mapping from original row IDs to current positional indices."""
         self._index_to_position = {self.dataset[i]["index"]: i for i in range(len(self.dataset))}
