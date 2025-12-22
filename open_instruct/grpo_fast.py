@@ -112,6 +112,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
+from open_instruct.tool_utils.tools import Tool
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -2091,6 +2092,49 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
     return train_dataset, eval_dataset
 
 
+def load_tools(args: Args) -> dict[str, Tool]:
+    """Load tool instances and register their stop strings.
+
+    Args:
+        args: Parsed training arguments with tool configuration.
+
+    Returns:
+        A mapping from tool end strings to tool instances.
+
+    Raises:
+        ValueError: If an unknown tool is requested.
+    """
+    tool_objects: dict[str, Tool] = {}
+    if not args.tools:
+        return tool_objects
+
+    for tool in args.tools:
+        if tool.lower() == "search":
+            from open_instruct.search_utils.search_tool import SearchTool
+
+            tool_instance = SearchTool(
+                start_str="<query>",
+                end_str="</query>",
+                api_endpoint=args.search_api_endpoint,
+                number_documents_to_search=args.number_documents_to_search,
+            )
+        elif tool.lower() == "code":
+            from open_instruct.tool_utils.tools import PythonCodeTool
+
+            tool_instance = PythonCodeTool(
+                start_str="<code>",
+                end_str="</code>",
+                api_endpoint=args.code_tool_api_endpoint,
+            )
+        else:
+            raise ValueError(f"Unknown tool: {tool}")
+
+        tool_objects[tool_instance.end_str] = tool_instance
+        args.stop_strings.append(tool_instance.end_str)
+
+    return tool_objects
+
+
 def create_model_and_optimizer(
     args: Args,
     tc: TokenizerConfig,
@@ -2104,7 +2148,7 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     train_dataset,
     eval_dataset,
-) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict, int, int]:
+) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, Tool], int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -2120,30 +2164,7 @@ def create_model_and_optimizer(
 
     # Set up tools
     max_len = args.max_prompt_token_length + args.response_length
-    tool_objects = {}
-    if args.tools:
-        for tool in args.tools:
-            if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
-
-                tool = SearchTool(
-                    start_str="<query>",
-                    end_str="</query>",
-                    api_endpoint=args.search_api_endpoint,
-                    number_documents_to_search=args.number_documents_to_search,
-                )
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
-            elif tool.lower() == "code":
-                from open_instruct.tool_utils.tools import PythonCodeTool
-
-                tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
-            else:
-                raise ValueError(f"Unknown tool: {tool}")
+    tool_objects = load_tools(args)
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
