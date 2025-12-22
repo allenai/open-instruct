@@ -40,7 +40,7 @@ from open_instruct.dataset_transformation import (
     VERIFIER_SOURCE_KEY,
 )
 from open_instruct.model_utils import Batch
-from open_instruct.rl_utils import PackedSequences, pack_sequences
+from open_instruct.rl_utils import PackedSequences, pack_sequences, prepend_packed_sequences, slice_packed_sequences
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
@@ -756,9 +756,9 @@ def prepare_collated_data_for_workers(
     total_sequences = len(packed_sequences.query_responses)
     if total_sequences % world_size != 0:
         new_total = (total_sequences // world_size) * world_size
-        logger.warning(
-            f"Total packed sequences ({total_sequences}) is not evenly divisible by world_size ({world_size}). "
-            f"Truncating to {new_total} sequences (dropping {total_sequences - new_total})."
+        logger.info(
+            f"Total packed sequences ({total_sequences}) not divisible by world_size ({world_size}). "
+            f"Using {new_total} sequences, {total_sequences - new_total} will carry over."
         )
     B = total_sequences // world_size
     collated_data = []
@@ -892,6 +892,8 @@ class DataPreparationActor:
                 is_eval=False,
             )
 
+        leftover_packed = None
+
         for step in range(self.training_step, self.num_training_steps):
             if self.shutdown_requested:
                 return
@@ -995,6 +997,19 @@ class DataPreparationActor:
             ]
             packed_sequences.advantages = packed_advantages
 
+            if leftover_packed is not None:
+                packed_sequences = prepend_packed_sequences(leftover_packed, packed_sequences)
+                logger.info(f"Prepended {len(leftover_packed.query_responses)} leftover sequences")
+                leftover_packed = None
+
+            num_packed = len(packed_sequences.query_responses)
+            usable_count = (num_packed // self.dp_world_size) * self.dp_world_size
+
+            if usable_count == 0:
+                leftover_packed = packed_sequences
+                logger.warning(f"Only {num_packed} sequences, need {self.dp_world_size}. Carrying all to next step.")
+                continue
+
             if self.allow_world_padding:
                 pad_sequences_for_world_size(
                     packed_sequences, self.dp_world_size, self.tokenizer.pad_token_id, self.tokenizer.eos_token_id
@@ -1003,6 +1018,10 @@ class DataPreparationActor:
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id
             )
+
+            if usable_count < num_packed:
+                leftover_packed = slice_packed_sequences(packed_sequences, usable_count, num_packed)
+                logger.info(f"Carrying over {num_packed - usable_count} sequences to next step")
 
             if len(result.responses) == 0:
                 step_metrics = {}
