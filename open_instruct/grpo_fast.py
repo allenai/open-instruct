@@ -633,16 +633,17 @@ def prepare_collated_data_for_workers(
             collated_vllm_logprobs.append(
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
             )
-        collated_data.append(
-            CollatedBatchData(
-                query_responses=collated_query_responses,
-                attention_masks=collated_attention_masks,
-                position_ids=collated_position_ids,
-                advantages=collated_advantages,
-                response_masks=collated_response_masks,
-                vllm_logprobs=collated_vllm_logprobs,
-            )
+        batch_data = CollatedBatchData(
+            query_responses=collated_query_responses,
+            attention_masks=collated_attention_masks,
+            position_ids=collated_position_ids,
+            advantages=collated_advantages,
+            response_masks=collated_response_masks,
+            vllm_logprobs=collated_vllm_logprobs,
         )
+        # Assign the same batch data to all SP ranks within this DP group
+        for sp_j in range(sequence_parallel_size):
+            collated_data[i * sequence_parallel_size + sp_j] = batch_data
     return collated_data
 
 
