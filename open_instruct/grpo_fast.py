@@ -32,10 +32,14 @@ import contextlib
 import os
 import pathlib
 from concurrent import futures
+from datetime import timedelta
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
+    from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
+    from deepspeed.runtime.utils import move_to_device
+    from deepspeed.utils import groups
 
 from open_instruct import utils
 
@@ -52,7 +56,6 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from datetime import timedelta
 from queue import Empty, Full, Queue
 from typing import Any, Literal
 
@@ -116,6 +119,7 @@ from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
+    UlyssesSPSplitter,
     _z3_params_to_fetch,
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
@@ -212,8 +216,6 @@ class Args:
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
     """How many train steps to save the model"""
-    allow_world_padding: bool = False
-    """Whether to allow world padding. This is useful for model sweeps, but wastes compute."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
 
@@ -339,6 +341,9 @@ class Args:
     num_learners_per_node: list[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
+    sequence_parallel_size: int = 1
+    """sequence parallel size - how many GPUs we will parallelize sequences across during training.
+    Useful for super-long context lengths."""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
     vllm_tensor_parallel_size: int = 1
@@ -461,6 +466,12 @@ class Args:
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
+        assert (
+            self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout
+            >= sum(self.num_learners_per_node) // self.sequence_parallel_size
+        ), (
+            "num_samples_per_prompt_rollout * num_unique_prompts_rollout must be greater than or equal to world_size // sequence_parallel_size to ensure we have a batch for each rank in distributed training."
+        )
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
         )
@@ -560,6 +571,7 @@ def prepare_collated_data_for_workers(
     world_size: int,
     per_device_train_batch_size: int,
     pad_token_id: int,
+    sequence_parallel_size: int = 1,
     pin_memory: bool = True,
 ) -> list[CollatedBatchData]:
     """Distributes and collates packed sequences for distributed training.
@@ -574,6 +586,7 @@ def prepare_collated_data_for_workers(
         world_size: Number of distributed workers.
         per_device_train_batch_size: Batch size for each device's micro-batch.
         pad_token_id: Token ID used for padding sequences.
+        sequence_parallel_size: Sequence parallel size.
         pin_memory: Whether to pin memory for faster data transfer to GPU.
 
     Returns:
@@ -581,9 +594,10 @@ def prepare_collated_data_for_workers(
         for query_responses, attention_masks, position_ids,
         advantages, response_masks, and vllm_logprobs.
     """
-    B = len(packed_sequences.query_responses) // world_size  # essentially doing `drop_last=True`, which is fine.
-    collated_data = []
-    for i in range(world_size):
+    dp_world_size = world_size // sequence_parallel_size
+    B = len(packed_sequences.query_responses) // dp_world_size  # essentially doing `drop_last=True`, which is fine.
+    collated_data = [None] * world_size
+    for i in range(dp_world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
         per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
         per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
@@ -619,16 +633,17 @@ def prepare_collated_data_for_workers(
             collated_vllm_logprobs.append(
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
             )
-        collated_data.append(
-            CollatedBatchData(
-                query_responses=collated_query_responses,
-                attention_masks=collated_attention_masks,
-                position_ids=collated_position_ids,
-                advantages=collated_advantages,
-                response_masks=collated_response_masks,
-                vllm_logprobs=collated_vllm_logprobs,
-            )
+        batch_data = CollatedBatchData(
+            query_responses=collated_query_responses,
+            attention_masks=collated_attention_masks,
+            position_ids=collated_position_ids,
+            advantages=collated_advantages,
+            response_masks=collated_response_masks,
+            vllm_logprobs=collated_vllm_logprobs,
         )
+        # Assign the same batch data to all SP ranks within this DP group
+        for sp_j in range(sequence_parallel_size):
+            collated_data[i * sequence_parallel_size + sp_j] = batch_data
     return collated_data
 
 
@@ -686,6 +701,7 @@ class PolicyTrainerRayProcess(RayProcess):
             stage=args.deepspeed_stage,
             bf16=True,
             zpg=args.deepspeed_zpg,
+            sequence_parallel_size=args.sequence_parallel_size,
         )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
@@ -698,6 +714,18 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
+
+        # set sequence parallel
+        self.mpu = None
+        if args.sequence_parallel_size > 1:
+            self.mpu = UlyssesSPAttentionHF.register_with_transformers(
+                model_name_or_path=model_config.model_name_or_path,
+                core_attn_implementation="flash_attention_2",
+                sequence_parallel_size=args.sequence_parallel_size,
+                max_length=args.pack_length,
+                micro_batch_size=args.per_device_train_batch_size,
+                seq_length_is_variable=True,
+            )
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -729,7 +757,8 @@ class PolicyTrainerRayProcess(RayProcess):
             optimizer=self.optimizer,
             config=ds_config,
             lr_scheduler=scheduler,
-            dist_init_required=True,
+            dist_init_required=False,
+            mpu=self.mpu,
         )
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
@@ -739,6 +768,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
                 )
             else:
+                old_mpu = None
+                if self.mpu is not None:
+                    old_mpu = self.mpu
+                    self.model.mpu = None
                 path, states = self.model.load_checkpoint(
                     args.checkpoint_state_dir,
                     load_module_strict=True,
@@ -746,6 +779,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     load_lr_scheduler_states=True,
                     load_module_only=False,
                 )
+                if old_mpu is not None:
+                    self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 optimization_steps_done = states["training_step"]
@@ -800,8 +835,24 @@ class PolicyTrainerRayProcess(RayProcess):
                 checkpoint_path=self.ref_policy_checkpoint_path
                 if hasattr(self, "ref_policy_checkpoint_path")
                 else None,
+                mpu=self.mpu,
             )
         self.local_metrics = utils.MetricsTracker(device=self.device)
+
+        if self.mpu is not None:
+            self.sp_group = groups._get_sequence_parallel_group()
+            self.sp_world_size = groups._get_sequence_parallel_world_size()
+            self.sp_rank = groups._get_sequence_parallel_rank()
+            self.splitter = UlyssesSPSplitter(
+                sp_rank=self.sp_rank,
+                sp_group=self.sp_group,
+                sp_world_size=self.sp_world_size,
+                device=self.device,
+                pad_token_id=self.tokenizer.pad_token_id,
+            )
+        else:
+            self.splitter = None
+
         return optimization_steps_done
 
     def forward(
@@ -881,32 +932,37 @@ class PolicyTrainerRayProcess(RayProcess):
         refss = []
         if self.args.gather_whole_model:
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
+                # First pass: collect metadata
+                params_metadata = []
                 for name, param in model.named_parameters():
-                    count += 1  # empty_cache at last param
-                    # Fire all vllm engines for broadcast
-                    if torch.distributed.get_rank() == 0:
-                        shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
-                        refs = [
-                            engine.update_weight.remote(
-                                name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
-                            )
-                            for engine in self.vllm_engines
-                        ]
-                        refss.extend(refs)
+                    shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
+                    params_metadata.append((name, str(param.dtype), shape))
+
+                # Fire all vllm engines for broadcast
+                if torch.distributed.get_rank() == 0:
+                    refss = [
+                        engine.update_weights.remote(params_metadata, empty_cache=True) for engine in self.vllm_engines
+                    ]
+
+                # Second pass: broadcast data
+                for name, param in model.named_parameters():
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         else:  # broadcast each parameter independently
+            # First pass: collect metadata
+            params_metadata = []
             for name, param in model.named_parameters():
-                count += 1
-                if torch.distributed.get_rank() == 0:
-                    shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
-                    refs = [
-                        engine.update_weight.remote(
-                            name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
-                        )
-                        for engine in self.vllm_engines
-                    ]
-                    refss.extend(refs)
+                shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
+                params_metadata.append((name, str(param.dtype), shape))
+
+            # Fire all vllm engines for broadcast
+            if torch.distributed.get_rank() == 0:
+                refss = [
+                    engine.update_weights.remote(params_metadata, empty_cache=True) for engine in self.vllm_engines
+                ]
+
+            # Second pass: broadcast data
+            for name, param in model.named_parameters():
                 with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
@@ -999,6 +1055,18 @@ class PolicyTrainerRayProcess(RayProcess):
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
 
+        # Apply sequence parallel splitting if enabled
+        if self.splitter is not None:
+            with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
+                sharded_batches = self.splitter.split_collated_batch(data_BT)
+                data_BT = sharded_batches[self.sp_rank]
+                # Move to device and ensure response_masks are boolean
+                for f in dataclasses.fields(data_BT):
+                    tensors = getattr(data_BT, f.name)
+                    setattr(data_BT, f.name, move_to_device(tensors, self.device))
+                data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
+
+        # Calculate the logprob of the reference policy
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
@@ -1081,9 +1149,13 @@ class PolicyTrainerRayProcess(RayProcess):
                         max_diff = masked_diff_BT.max()
                         std_diff = masked_diff_BT[valid_mask_BT].std() if valid_mask_BT.sum() > 1 else 0.0
 
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = (
+                            mean_diff.item() if isinstance(mean_diff, torch.Tensor) else mean_diff
+                        )
                         self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = std_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = (
+                            std_diff.item() if isinstance(std_diff, torch.Tensor) else std_diff
+                        )
 
                         reverse_kl_BT = torch.exp(vllm_logprobs_BT) * (vllm_logprobs_BT - local_logprobs_BT)
                         masked_reverse_kl_BT = torch.masked_fill(reverse_kl_BT, ~valid_mask_BT, 0.0)
@@ -1196,8 +1268,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         loss = masked_mean(pg_loss_max_BT, response_mask_BT, None, loss_denominator)
 
                     # we already took world size into account via the tokens
+                    # but deepspeed will try to average over ranks, so multiply back
+                    # up, adjusting for the sequence parallel size (adjust by dp world size).
                     if dist.is_available() and dist.is_initialized():
-                        loss *= dist.get_world_size()
+                        loss *= dist.get_world_size() // self.args.sequence_parallel_size
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
@@ -1218,7 +1292,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
                         if self.args.record_entropy:
                             loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
-
             with torch.no_grad():
                 if args.load_ref_policy:
                     for j in range(4):
@@ -1236,7 +1309,6 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
         args = self.args
-
         # Save comprehensive RNG states for each rank
         rng_states = {
             "torch_cpu_rng_state": torch.get_rng_state(),
@@ -1273,6 +1345,11 @@ class PolicyTrainerRayProcess(RayProcess):
             client_state["ref_policy_saved"] = True
 
         # Save the main model checkpoint with enhanced client state
+        # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
+        old_mpu = None
+        if self.model.mpu is not None:
+            old_mpu = self.mpu
+            self.model.mpu = None
         self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
 
         # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
@@ -1285,6 +1362,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
                     checkpoint_state_dir, args.gs_checkpoint_state_dir
                 )
+        # add back the mpu
+        if old_mpu is not None:
+            self.model.mpu = old_mpu
 
     def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
         output_path = pathlib.Path(output_dir)
@@ -1294,15 +1374,16 @@ class PolicyTrainerRayProcess(RayProcess):
             return
 
         model_to_save = self.model
-        if chat_template_name is not None and "olmo" in chat_template_name:
-            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
-
         if self.rank == 0:
             output_path.mkdir(parents=True, exist_ok=True)
 
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
             model_to_save = model_to_save.module
+
+        if chat_template_name is not None and "olmo" in chat_template_name:
+            # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         # gather parameters
         output_state_dict = {}
@@ -1845,6 +1926,7 @@ def data_preparation_thread(
             result.logprobs = [result.logprobs[i] for i in stop_idxes]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
+            dp_world_size = args.world_size // args.sequence_parallel_size
             packed_sequences = pack_sequences(
                 queries=batch.queries,
                 responses=result.responses,
@@ -1852,6 +1934,7 @@ def data_preparation_thread(
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
+                min_num_batches=dp_world_size,
                 mask_tool_use=args.mask_tool_use,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
@@ -1865,33 +1948,14 @@ def data_preparation_thread(
             ]
             packed_sequences.advantages = packed_advantages
 
-        # if we have less batches than world size, we need to pad out so each world is fine
-        # ideally, you should avoid this since its wasting computation.
-        if args.allow_world_padding:
-            with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
-                shortfall = args.world_size - len(packed_sequences.query_responses)
-                if shortfall > 0:
-                    logger.warning(
-                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
-                    )
-                    # construct "dummy" sequences for padding out the world size
-                    dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
-                    dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-                    dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-                    dummy_response_mask = torch.zeros_like(dummy_qr)
-                    dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
-                    # pad out the world size
-                    for _ in range(shortfall):
-                        packed_sequences.query_responses.append(dummy_qr)
-                        packed_sequences.attention_masks.append(dummy_attention)
-                        packed_sequences.position_ids.append(dummy_position_ids)
-                        packed_sequences.response_masks.append(dummy_response_mask)
-                        packed_sequences.advantages.append(dummy_advantage)
-
         collated_data = prepare_collated_data_for_workers(
-            packed_sequences, args.world_size, args.per_device_train_batch_size, tokenizer.pad_token_id
+            packed_sequences,
+            args.world_size,
+            args.per_device_train_batch_size,
+            tokenizer.pad_token_id,
+            sequence_parallel_size=args.sequence_parallel_size,
         )
-        B = len(packed_sequences.query_responses) // args.world_size
+        B = len(packed_sequences.query_responses) // (args.world_size // args.sequence_parallel_size)
 
         # Create a result package with metrics and data
         if len(result.responses) == 0:

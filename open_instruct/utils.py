@@ -20,6 +20,7 @@ os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
     from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+    import deepspeed.comm as dist
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
@@ -56,6 +57,7 @@ import numpy as np
 import ray
 import requests
 import torch
+import torch.nn.functional as F
 import vllm.config
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
@@ -68,6 +70,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils
+from open_instruct.data_types import CollatedBatchData
 
 WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
 GCP_CLUSTERS = ["ai2/augusta"]
@@ -1406,6 +1409,7 @@ def get_train_ds_config(
     zpg=8,
     grad_accum_dtype=None,
     disable_trace_cache=False,
+    sequence_parallel_size=1,
 ):
     device = "cpu" if offload else "none"
     zero_opt_dict = {
@@ -1428,7 +1432,7 @@ def get_train_ds_config(
         zero_opt_dict["stage3_max_live_parameters"] = 0
         zero_opt_dict["stage3_max_reuse_distance"] = 0
 
-    return {
+    config = {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
         "bf16": {"enabled": bf16},
@@ -1437,6 +1441,11 @@ def get_train_ds_config(
         "wall_clock_breakdown": False,
         "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
     }
+
+    if sequence_parallel_size > 1:
+        config["sequence_parallel_size"] = sequence_parallel_size
+
+    return config
 
 
 def get_eval_ds_config(
@@ -2576,6 +2585,59 @@ def get_beaker_experiment_url() -> str | None:
         return url
     except Exception:
         return None
+
+
+class UlyssesSPSplitter:
+    """Splits CollatedBatchData for Ulysses sequence parallelism.
+
+    Adapted from the UlyssesSPDataLoaderAdapter
+    (https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py#L427)
+    Rather than wrapping a dataloader, we just want to split a given batch into the shards across sp group.
+    """
+
+    def __init__(self, sp_rank: int, sp_group, sp_world_size, device, pad_token_id):
+        self.sp_rank = sp_rank
+        self.sp_group = sp_group
+        self.sp_world_size = sp_world_size
+        self.device = device
+        self.pad_token_id = pad_token_id
+
+    def split_collated_batch(self, data: CollatedBatchData) -> list[CollatedBatchData]:
+        """Split a CollatedBatchData across sequence parallel ranks."""
+        fields = [f.name for f in dataclasses.fields(data)]
+
+        # Find max sequence length across all ranks
+        local_max = max(t.shape[-1] for t in getattr(data, fields[0]))
+        local_seqlen = torch.tensor([local_max], dtype=torch.int64, device=self.device)
+        seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
+        dist.all_gather(seqlens, local_seqlen, group=self.sp_group)
+        max_seqlen = max(x.item() for x in seqlens)
+
+        # Round up to be divisible by sp_world_size
+        max_seqlen = ((max_seqlen + self.sp_world_size - 1) // self.sp_world_size) * self.sp_world_size
+        chunk_len = max_seqlen // self.sp_world_size
+
+        # Pad all tensors to max_seqlen and gather across ranks
+        gathered: dict[str, list] = {}
+        for field in fields:
+            tensors = getattr(data, field)
+            pad_value = self.pad_token_id if field == "query_responses" else 0
+            padded = [F.pad(t.to(self.device), (0, max_seqlen - t.shape[-1]), value=pad_value) for t in tensors]
+            all_tensors = [None] * self.sp_world_size
+            dist.all_gather_object(all_tensors, padded, group=self.sp_group)
+            gathered[field] = all_tensors
+
+        # Build sharded CollatedBatchData for each rank
+        results = []
+        for rank in range(self.sp_world_size):
+            kwargs = {}
+            for field in fields:
+                kwargs[field] = [
+                    t[:, chunk_len * self.sp_rank : chunk_len * (self.sp_rank + 1)].cpu()
+                    for t in gathered[field][rank]
+                ]
+            results.append(CollatedBatchData(**kwargs))
+        return results
 
 
 def get_denominator(loss_denominator: str | float) -> float | str:
