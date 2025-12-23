@@ -158,6 +158,7 @@ def load_ref_policy(
     device: torch.device,
     rank: int,
     checkpoint_path: str | None = None,
+    mpu: torch.distributed.distributed_c10d.ProcessGroup | None = None,
 ) -> transformers.PreTrainedModel:
     """Loads a reference policy model for evaluation.
 
@@ -169,6 +170,7 @@ def load_ref_policy(
         device: Target device for loading checkpoint.
         rank: Global process rank for logging.
         checkpoint_path: Optional path to model checkpoint to load.
+        mpu: Optional model parallel unit for sequence parallelism.
 
     Returns:
         Initialized reference policy model in evaluation mode.
@@ -184,7 +186,7 @@ def load_ref_policy(
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
     disable_dropout_in_model(ref_policy)
-    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config)
+    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
     ref_policy.eval()
 
     if checkpoint_path:
