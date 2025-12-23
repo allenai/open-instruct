@@ -86,8 +86,44 @@ def pack_sequences(
     pack_length: int,
     pad_token_id: int,
     vllm_logprobs: List[List[float]],
+    min_num_batches: int = 1,
     mask_tool_use: bool = False,
 ) -> PackedSequences:
+    """Pack query-response pairs into sequences for training.
+
+    Args:
+        queries: List of query token sequences
+        responses: List of response token sequences
+        masks: List of tool masks for each response
+        pack_length: Maximum length of each packed sequence
+        pad_token_id: Token ID used for padding
+        vllm_logprobs: Log probabilities from vLLM for each response
+        min_num_batches: Minimum number of packed batches to produce.
+            Used to ensure we have a batch for each rank in distributed training.
+
+    Returns:
+        PackedSequences containing the packed training data.
+    """
+    # Calculate total tokens and max sequence length to determine effective pack_length
+    total_tokens = 0
+    max_seq_len = 0
+    for query, response in zip(queries, responses):
+        query_len = sum(1 for t in query if t != pad_token_id)
+        response_len = sum(1 for t in response if t != pad_token_id)
+        seq_len = query_len + response_len
+        total_tokens += seq_len
+        max_seq_len = max(max_seq_len, seq_len)
+
+    # Reduce pack_length if needed to ensure min_num_batches
+    if total_tokens > 0 and min_num_batches > 1:
+        target_pack_length = total_tokens // min_num_batches
+        # Must be at least as large as the longest individual sequence
+        effective_pack_length = max(target_pack_length, max_seq_len)
+        # Don't exceed the original pack_length
+        effective_pack_length = min(effective_pack_length, pack_length)
+    else:
+        effective_pack_length = pack_length
+
     assert not any(pad_token_id in query for query in queries)
     # TODO: for some reason vLLM *can* generate the padding token in the responses; investigate
     # assert not any(pad_token_id in response for response in responses)
@@ -145,7 +181,7 @@ def pack_sequences(
             f"This can happen if vLLM returns N-1 logprobs for N tokens (missing first token logprob)."
         )
         combined_logprobs = query_logprobs + response_logprobs
-        if len(query_response) + len(cur_data) > pack_length:
+        if len(query_response) + len(cur_data) > effective_pack_length:
             query_responses.append(cur_data)
             response_masks.append(cur_response_mask)
             attention_masks.append(cur_attention_mask)
