@@ -1267,10 +1267,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         loss = masked_mean(pg_loss_max_BT, response_mask_BT, None, loss_denominator)
 
                     # we already took world size into account via the tokens
-                    # divide by sequence parallel to total sp size
-                    # TODO: is this correct?
+                    # but deepspeed will try to average over ranks, so multiply back
+                    # up, adjusting for the sequence parallel size (adjust by dp world size).
                     if dist.is_available() and dist.is_initialized():
-                        loss *= dist.get_world_size()
+                        loss *= ( dist.get_world_size() // self.args.sequence_parallel_size )
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
