@@ -469,7 +469,10 @@ class Args:
                 f"vllm_num_engines={self.vllm_num_engines}, vllm will be generating data for multiple "
                 "batches simultaneously. This is fine but might be unexpected behaviour."
             )
-        # Initialize stop_strings if None
+        # ensure enough samples for all ranks
+        assert self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout >= sum(
+            self.num_learners_per_node
+        ), "You must have at least as many samples as training GPUs (DP ranks) for distributed training!"
         if self.stop_strings is None:
             self.stop_strings = []
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
