@@ -216,8 +216,6 @@ class Args:
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
     """How many train steps to save the model"""
-    allow_world_padding: bool = False
-    """Whether to allow world padding. This is useful for model sweeps, but wastes compute."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
 
@@ -469,6 +467,9 @@ class Args:
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
+        assert self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout >= self.world_size // self.sequence_parallel_size, (
+            "num_samples_per_prompt_rollout * num_unique_prompts_rollout must be greater than or equal to world_size // sequence_parallel_size to ensure we have a batch for each rank in distributed training."
+        )
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
         )
@@ -2236,6 +2237,7 @@ def data_preparation_thread(
             result.logprobs = [result.logprobs[i] for i in stop_idxes]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
+            dp_world_size = args.world_size // args.sequence_parallel_size
             packed_sequences = pack_sequences(
                 queries=batch.queries,
                 responses=result.responses,
@@ -2243,6 +2245,7 @@ def data_preparation_thread(
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
+                min_num_batches=dp_world_size,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
@@ -2254,39 +2257,6 @@ def data_preparation_thread(
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
-
-        # if we have less batches than world size, we need to pad out so each world is fine
-        # ideally, you should avoid this since its wasting computation.
-        if args.allow_world_padding:
-            with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
-                dp_world_size = args.world_size // args.sequence_parallel_size
-                shortfall = dp_world_size - len(packed_sequences.query_responses)
-                if shortfall > 0:
-                    logger.warning(
-                        f"Padding {shortfall} sequences for world size (DP world size {dp_world_size}). In future, you should adjust your compute this."
-                    )
-                    # construct "dummy" sequences for padding out the world size
-                    # Ensure dummy sequence is long enough for Sequence Parallelism
-                    # Each rank needs at least 2 tokens (so slicing [:-1] leaves 1)
-                    min_seq_len = max(2, 2 * args.sequence_parallel_size)
-
-                    dummy_tokens = [tokenizer.pad_token_id] * (min_seq_len - 1) + [tokenizer.eos_token_id]
-                    dummy_qr = torch.tensor(dummy_tokens, dtype=torch.long)
-                    dummy_tool_mask = torch.zeros_like(dummy_qr)
-                    dummy_attention = torch.ones_like(dummy_qr)
-                    dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-                    dummy_response_mask = torch.zeros_like(dummy_qr)
-                    dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
-                    dummy_vllm_logprobs = torch.zeros_like(dummy_qr, dtype=torch.float)
-                    # pad out the world size
-                    for _ in range(shortfall):
-                        packed_sequences.query_responses.append(dummy_qr)
-                        packed_sequences.tool_masks.append(dummy_tool_mask)
-                        packed_sequences.attention_masks.append(dummy_attention)
-                        packed_sequences.position_ids.append(dummy_position_ids)
-                        packed_sequences.response_masks.append(dummy_response_mask)
-                        packed_sequences.advantages.append(dummy_advantage)
-                        packed_sequences.vllm_logprobs.append(dummy_vllm_logprobs)
 
         collated_data = prepare_collated_data_for_workers(
             packed_sequences,
