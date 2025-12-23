@@ -38,7 +38,6 @@ os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
     from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
-    from deepspeed.runtime.utils import move_to_device
     from deepspeed.utils import groups
 
 from open_instruct import utils
@@ -1040,6 +1039,11 @@ class PolicyTrainerRayProcess(RayProcess):
         Returns:
             Dictionary of training metrics (loss, KL, entropy, etc.).
         """
+        # do splitting before GPU transfer so we only move data once
+        if self.splitter is not None:
+            with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
+                data_BT = self.splitter.split_collated_batch(data_BT)
+
         for f in dataclasses.fields(data_BT):
             to_device_inplace(getattr(data_BT, f.name), self.device)
         data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
@@ -1051,17 +1055,6 @@ class PolicyTrainerRayProcess(RayProcess):
             logger.warning(f"{leftover} samples are dropped due to batch size {self.args.num_mini_batches}")
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
-
-        # Apply sequence parallel splitting if enabled
-        if self.splitter is not None:
-            with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
-                sharded_batches = self.splitter.split_collated_batch(data_BT)
-                data_BT = sharded_batches[self.sp_rank]
-                # Move to device and ensure response_masks are boolean
-                for f in dataclasses.fields(data_BT):
-                    tensors = getattr(data_BT, f.name)
-                    setattr(data_BT, f.name, move_to_device(tensors, self.device))
-                data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
 
         # Calculate the logprob of the reference policy
         ref_logprobs_BT: list[torch.Tensor] = []

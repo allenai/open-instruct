@@ -2602,11 +2602,12 @@ class UlyssesSPSplitter:
         self.device = device
         self.pad_token_id = pad_token_id
 
-    def split_collated_batch(self, data: CollatedBatchData) -> list[CollatedBatchData]:
-        """Split a CollatedBatchData across sequence parallel ranks."""
+    def split_collated_batch(self, data: CollatedBatchData) -> CollatedBatchData:
+        """Get this rank's shard of a CollatedBatchData for sequence parallelism.
+        """
         fields = [f.name for f in dataclasses.fields(data)]
 
-        # Find max sequence length across all ranks
+        # Find max sequence length across all ranks to ensure consistent padding
         local_max = max(t.shape[-1] for t in getattr(data, fields[0]))
         local_seqlen = torch.tensor([local_max], dtype=torch.int64, device=self.device)
         seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
@@ -2617,27 +2618,23 @@ class UlyssesSPSplitter:
         max_seqlen = ((max_seqlen + self.sp_world_size - 1) // self.sp_world_size) * self.sp_world_size
         chunk_len = max_seqlen // self.sp_world_size
 
-        # Pad all tensors to max_seqlen and gather across ranks
-        gathered: dict[str, list] = {}
+        # Compute start and end indices for this rank's chunk
+        start_idx = chunk_len * self.sp_rank
+        end_idx = chunk_len * (self.sp_rank + 1)
+
+        # Pad tensors and extract this rank's shard on CPU, then move to device
+        # This is more efficient than moving full tensors to GPU first
+        kwargs = {}
         for field in fields:
             tensors = getattr(data, field)
             pad_value = self.pad_token_id if field == "query_responses" else 0
-            padded = [F.pad(t.to(self.device), (0, max_seqlen - t.shape[-1]), value=pad_value) for t in tensors]
-            all_tensors = [None] * self.sp_world_size
-            dist.all_gather_object(all_tensors, padded, group=self.sp_group)
-            gathered[field] = all_tensors
+            sharded = []
+            for t in tensors:
+                padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
+                sharded.append(padded_sliced)
+            kwargs[field] = sharded
 
-        # Build sharded CollatedBatchData for each rank
-        results = []
-        for rank in range(self.sp_world_size):
-            kwargs = {}
-            for field in fields:
-                kwargs[field] = [
-                    t[:, chunk_len * self.sp_rank : chunk_len * (self.sp_rank + 1)].cpu()
-                    for t in gathered[field][rank]
-                ]
-            results.append(CollatedBatchData(**kwargs))
-        return results
+        return CollatedBatchData(**kwargs)
 
 
 def get_denominator(loss_denominator: str | float) -> float | str:
