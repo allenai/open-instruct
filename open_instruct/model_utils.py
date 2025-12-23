@@ -158,6 +158,7 @@ def load_ref_policy(
     device: torch.device,
     rank: int,
     checkpoint_path: str | None = None,
+    mpu: torch.distributed.distributed_c10d.ProcessGroup | None = None,
 ) -> transformers.PreTrainedModel:
     """Loads a reference policy model for evaluation.
 
@@ -184,18 +185,22 @@ def load_ref_policy(
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
     disable_dropout_in_model(ref_policy)
-    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config)
+    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
     ref_policy.eval()
 
     if checkpoint_path:
-        state_dict = torch.load(checkpoint_path, map_location=device)
-        if hasattr(ref_policy, "module"):
-            # Needed if wrapped by DeepSpeed.
-            ref_policy.module.load_state_dict(state_dict)
-        else:
-            # If a vanilla HF model.
-            ref_policy.load_state_dict(state_dict)
-        logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
+        try:
+            state_dict = torch.load(checkpoint_path, map_location=device)
+            if hasattr(ref_policy, "module"):
+                # Needed if wrapped by DeepSpeed.
+                ref_policy.module.load_state_dict(state_dict)
+            else:
+                # If a vanilla HF model.
+                ref_policy.load_state_dict(state_dict)
+            logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
+        except Exception as e:
+            logger.error(f"{rank=}: Failed to load reference policy checkpoint from {checkpoint_path}: {e}")
+            logger.error(f"{rank=}: Falling back to loading reference policy from checkpoint")
     return ref_policy
 
 
