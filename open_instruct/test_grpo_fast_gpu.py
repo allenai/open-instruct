@@ -290,6 +290,7 @@ class TestZCheckpointRestoration(unittest.TestCase):
                 "--single_gpu_mode",
                 "--filter_zero_std_samples False",
                 "--checkpoint_state_freq 1",
+                "--push_to_hub False",
                 f"--checkpoint_state_dir {checkpoint_dir}",
                 f"--output_dir {output_dir}",
             ]
