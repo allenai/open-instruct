@@ -212,6 +212,8 @@ class Args:
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
     """How many train steps to save the model"""
+    allow_world_padding: bool = False
+    """Whether to allow world padding. This is useful for model sweeps, but wastes compute."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
 
@@ -875,7 +877,6 @@ class PolicyTrainerRayProcess(RayProcess):
         # avoid OOM
         torch.cuda.empty_cache()
         model = self.model.module
-        count, num_params = 0, len(list(model.named_parameters()))
         refss = []
         if self.args.gather_whole_model:
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
@@ -892,7 +893,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     ]
 
                 # Second pass: broadcast data
-                for name, param in model.named_parameters():
+                for _, param in model.named_parameters():
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         else:  # broadcast each parameter independently
@@ -909,7 +910,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 ]
 
             # Second pass: broadcast data
-            for name, param in model.named_parameters():
+            for _, param in model.named_parameters():
                 with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
@@ -1867,6 +1868,29 @@ def data_preparation_thread(
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
+
+        # if we have less batches than world size, we need to pad out so each world is fine
+        # ideally, you should avoid this since its wasting computation.
+        if args.allow_world_padding:
+            with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
+                shortfall = args.world_size - len(packed_sequences.query_responses)
+                if shortfall > 0:
+                    logger.warning(
+                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
+                    )
+                    # construct "dummy" sequences for padding out the world size
+                    dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
+                    dummy_attention = torch.tensor([1, 1], dtype=torch.long)
+                    dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
+                    dummy_response_mask = torch.zeros_like(dummy_qr)
+                    dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
+                    # pad out the world size
+                    for _ in range(shortfall):
+                        packed_sequences.query_responses.append(dummy_qr)
+                        packed_sequences.attention_masks.append(dummy_attention)
+                        packed_sequences.position_ids.append(dummy_position_ids)
+                        packed_sequences.response_masks.append(dummy_response_mask)
+                        packed_sequences.advantages.append(dummy_advantage)
 
         collated_data = prepare_collated_data_for_workers(
             packed_sequences, args.world_size, args.per_device_train_batch_size, tokenizer.pad_token_id
