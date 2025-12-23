@@ -104,11 +104,13 @@ def pack_sequences(
     Returns:
         PackedSequences containing the packed training data.
     """
+    assert not any(pad_token_id in query for query in queries)
+
     # Calculate total tokens and max sequence length to determine effective pack_length
     total_tokens = 0
     max_seq_len = 0
     for query, response in zip(queries, responses):
-        query_len = sum(1 for t in query if t != pad_token_id)
+        query_len = len(query)
         response_len = sum(1 for t in response if t != pad_token_id)
         seq_len = query_len + response_len
         total_tokens += seq_len
@@ -124,7 +126,6 @@ def pack_sequences(
     else:
         effective_pack_length = pack_length
 
-    assert not any(pad_token_id in query for query in queries)
     # TODO: for some reason vLLM *can* generate the padding token in the responses; investigate
     # assert not any(pad_token_id in response for response in responses)
 
