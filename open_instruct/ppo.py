@@ -44,7 +44,6 @@ import socket
 import threading
 import time
 import traceback
-from argparse import Namespace
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
@@ -364,8 +363,8 @@ class Args:
     # Tool settings
     tools: list[str] | None = None
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: list[int] = field(default_factory=lambda: [5])
-    """Maximum number of tool calls allowed. Can be either a single integer (applies to all tools) or a list of integers
+    max_tool_calls: tuple[int, ...] = (5,)
+    """Maximum number of tool calls allowed. Can be either a single integer (applies to all tools) or a tuple of integers
     with length 1 (applies to all tools) or matching the length of the tools list (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
@@ -463,7 +462,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
         )
@@ -512,7 +511,7 @@ class PolicyTrainerRayProcess(RayProcess):
             args.value_model_name_or_path,
             revision=args.value_model_revision,
             num_labels=1,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
         )
@@ -1649,21 +1648,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     num_total_tokens = 0
     start_time = time.time()
     training_start_time = time.time()  # Track overall training start time
+    maybe_update_beaker_description(
+        current_step=resume_training_step - 1,
+        total_steps=args.num_training_steps,
+        start_time=training_start_time,
+        wandb_url=wandb_url,
+    )
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            # Update Beaker progress every 10 steps or on first/last step
-            if (
-                training_step == resume_training_step
-                or training_step % 10 == 0
-                or training_step == args.num_training_steps
-            ):
-                maybe_update_beaker_description(
-                    current_step=training_step,
-                    total_steps=args.num_training_steps,
-                    start_time=training_start_time,
-                    wandb_url=wandb_url,
-                )
-
             print("-" * 100)
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
@@ -1744,10 +1736,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 }
                 scalar_metrics = {}
                 for key, value in metrics.items():
-                    if isinstance(value, (float, int)):
+                    if isinstance(value, float | int):
                         writer.add_scalar(key, value, episode)
                         scalar_metrics[key] = value
-                    if isinstance(value, (np.ndarray, list)) and len(value) > 0:
+                    if isinstance(value, np.ndarray | list) and len(value) > 0:
                         writer.add_histogram(key, value, episode)
                 print_rich_single_line_metrics(scalar_metrics)
 
@@ -1829,6 +1821,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             except Empty:
                 print("[Main Thread] 🙈 Evaluation responses not received")
 
+            maybe_update_beaker_description(
+                current_step=training_step,
+                total_steps=args.num_training_steps,
+                start_time=training_start_time,
+                wandb_url=wandb_url,
+            )
+
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
             ray.get(
@@ -1881,11 +1880,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
     print("finished training")
 
-    accelerator = Namespace()
-    accelerator.is_main_process = True  # hack
-    if args.push_to_hub:
+    if args.push_to_hub and (not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0):
         print("Pushing model to hub")
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
 
 if __name__ == "__main__":

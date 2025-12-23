@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 from huggingface_hub import snapshot_download
@@ -25,20 +24,21 @@ python mason.py \
 
 @dataclass
 class Args:
-    model_name_or_path: Optional[str] = None
-    model_revision: Optional[str] = None
-    tokenizer_name_or_path: Optional[str] = None
-    tokenizer_revision: Optional[str] = None
-    dataset_name: Optional[str] = None
+    model_name_or_path: str | None = None
+    model_revision: str | None = None
+    tokenizer_name_or_path: str | None = None
+    tokenizer_revision: str | None = None
+    dataset_name: str | None = None
     """The name of the dataset to use (via the datasets library)."""
-    dataset_mixer: Optional[dict] = None
+    dataset_mixer: dict | None = None
     """A dictionary of datasets (local or HF) to sample from."""
-    dataset_mixer_list: Optional[list[str]] = None
+    dataset_mixer_list: list[str] | None = None
     """A list of datasets (local or HF) to sample from."""
-    dataset_mix_dir: Optional[str] = None
+    dataset_mix_dir: str | None = None
     """The directory to save the mixed dataset to disk."""
-    dataset_config_name: Optional[str] = None
+    dataset_config_name: str | None = None
     """The configuration name of the dataset to use (via the datasets library)."""
+
 
 def main(args: Args):
     if args.dataset_name is not None:
@@ -67,11 +67,8 @@ def main(args: Args):
             revision=args.tokenizer_revision or args.model_revision,
         )
         AutoModelForCausalLM.from_pretrained(
-            args.model_name_or_path,
-            revision=args.model_revision,
-            torch_dtype=torch.bfloat16,
+            args.model_name_or_path, revision=args.model_revision, dtype=torch.bfloat16
         )
-
 
 
 if __name__ == "__main__":

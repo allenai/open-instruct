@@ -5,14 +5,6 @@ on:
 
   # Adding a comment to trigger a run.
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
-  # pull_request:
-  #   branches: [main]
-  #   paths:
-  #     - 'open_instruct/**'
-  #     - '!open_instruct/README.md'
-  #     - 'requirements.txt'
-  #     - 'Dockerfile'
-  #     - '.github/workflows/beaker-experiment.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -52,15 +44,32 @@ jobs:
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # Get the user who triggered the manual dispatch
             echo "trigger_info=Manual dispatch by ${{ github.actor }}" >> $GITHUB_OUTPUT
-          else
-            # For scheduled runs
-            echo "trigger_info=Scheduled run" >> $GITHUB_OUTPUT
           fi
+
+      - name: Get changed files using git diff
+        id: changed-files
+        run: |
+          COMMON_ANCESTOR=$(git merge-base HEAD origin/main)
+
+          CHANGED_FILES=$(git diff --name-only ${COMMON_ANCESTOR} HEAD)
+          printf 'Changed files:\n%s\n' "$CHANGED_FILES"
+
+          declare -A CHANGE_PATTERNS=(
+            [dpo_changed]="open_instruct/(dpo_tune_cache|dpo_utils)\.py"
+            [finetune_changed]="open_instruct/finetune\.py"
+            [grpo_changed]="(^|/)Dockerfile$|(^|/)mason\.py$|^open_instruct/"
+          )
+
+          for OUTPUT_KEY in "${!CHANGE_PATTERNS[@]}"; do
+            PATTERN="${CHANGE_PATTERNS[$OUTPUT_KEY]}"
+            MATCHED=$(grep -qE "$PATTERN" <<< "$CHANGED_FILES" && echo true || echo false)
+            echo "${OUTPUT_KEY}=${MATCHED}" >> "$GITHUB_OUTPUT"
+          done
 
       - name: Setup Python environment
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -69,109 +78,214 @@ jobs:
         uses: allenai/setup-beaker@v2
         with:
           token: ${{ secrets.BEAKER_TOKEN }}
-          workspace: ai2/tulu-thinker
+          workspace: ai2/open-instruct-dev
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
         run: |
           # Install development dependencies needed for mason.py
           uv sync --frozen
 
-      - name: Build image and launch experiment
+      - name: Build image and launch experiments
         id: launch
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+          DOCKER_CACHE_PUSH: "1"
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DPO_CHANGED: ${{ steps.changed-files.outputs.dpo_changed }}
+          FINETUNE_CHANGED: ${{ steps.changed-files.outputs.finetune_changed }}
+          GRPO_CHANGED: ${{ steps.changed-files.outputs.grpo_changed }}
         run: |
           set -euo pipefail
 
-          # Make scripts executable
-          chmod +x scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh
-
-          echo "Building Docker image and launching experiment..."
+          echo "Building Docker image and launching experiments..."
           echo "Git commit: $(git rev-parse --short HEAD)"
 
-          # Build image and launch experiment
-          # Use tee to both stream output and capture it for parsing
-          ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_integration_test.sh 2>&1 | tee /tmp/beaker_output.log || {
-            EXIT_CODE=$?
-            echo "ERROR: build_image_and_launch.sh failed with exit code $EXIT_CODE"
-            exit $EXIT_CODE
+          EXPERIMENT_IDS=()
+          EXPERIMENT_NAMES=()
+
+          launch_and_capture() {
+            local SCRIPT_PATH="$1"
+            local EXPERIMENT_NAME="$2"
+            local LOG_FILE="/tmp/beaker_output_${EXPERIMENT_NAME}.log"
+
+            if ! ./scripts/train/build_image_and_launch.sh "$SCRIPT_PATH" 2>&1 | tee "$LOG_FILE"; then
+              local EXIT_CODE=${PIPESTATUS[0]}
+              echo "ERROR: ${EXPERIMENT_NAME}.sh failed with exit code $EXIT_CODE"
+              return $EXIT_CODE
+            fi
+
+            local EXPERIMENT_ID
+            EXPERIMENT_ID=$(grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' "$LOG_FILE" | tail -1)
+            if [ -z "$EXPERIMENT_ID" ]; then
+              echo "ERROR: Failed to extract experiment ID from ${EXPERIMENT_NAME}.sh output"
+              echo "DEBUG: Full output log:"
+              cat "$LOG_FILE"
+              echo "---"
+              echo "Please check that the experiment was created successfully."
+              return 1
+            fi
+
+            EXPERIMENT_IDS+=("$EXPERIMENT_ID")
+            EXPERIMENT_NAMES+=("$EXPERIMENT_NAME")
+            echo "Launched ${EXPERIMENT_NAME} experiment: $EXPERIMENT_ID"
           }
 
-          # Extract experiment ID from the saved output
-          EXPERIMENT_ID=$(grep -oP 'https://beaker.org/ex/\K[a-zA-Z0-9]+' /tmp/beaker_output.log | tail -1)
-          if [ -z "$EXPERIMENT_ID" ]; then
-            echo "ERROR: Failed to extract experiment ID from output"
-            echo "DEBUG: Full output log:"
-            cat /tmp/beaker_output.log
-            echo "---"
-            echo "Please check that the experiment was created successfully."
+          EXPERIMENT_DEFINITIONS=(
+            "grpo|scripts/train/debug/grpo_integration_test.sh|always"
+            "dpo|scripts/train/debug/dpo_integration_test.sh|${DPO_CHANGED}"
+            "sft|scripts/train/debug/sft_integration_test.sh|${FINETUNE_CHANGED}"
+          )
+
+          for DEFINITION in "${EXPERIMENT_DEFINITIONS[@]}"; do
+            IFS='|' read -r EXP_NAME EXP_SCRIPT EXP_CONDITION <<< "$DEFINITION"
+            if [ "$EXP_CONDITION" != "true" ] && [ "$EXP_CONDITION" != "always" ]; then
+              echo "Skipping ${EXP_NAME} experiment (condition not met)"
+              continue
+            fi
+
+            echo "=== Launching ${EXP_NAME} ==="
+            if ! launch_and_capture "$EXP_SCRIPT" "$EXP_NAME"; then
+              EXIT_CODE=$?
+              exit $EXIT_CODE
+            fi
+          done
+
+          if [ ${#EXPERIMENT_IDS[@]} -eq 0 ]; then
+            echo "ERROR: No experiments were launched."
             exit 1
           fi
 
-          echo "experiment_id=$EXPERIMENT_ID" >> $GITHUB_OUTPUT
-          echo "Experiment ID: $EXPERIMENT_ID"
-          echo "Experiment URL: https://beaker.org/ex/$EXPERIMENT_ID"
+          GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          SANITIZED_BRANCH=$(echo "$GIT_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
+          INTEGRATION_IMAGE="open-instruct-integration-test-${SANITIZED_BRANCH}"
+          echo "Integration image tag: ${INTEGRATION_IMAGE}"
 
-      - name: Wait for Beaker experiment completion
+          if ! docker image inspect "$INTEGRATION_IMAGE" >/dev/null 2>&1; then
+            echo "Local image ${INTEGRATION_IMAGE} not found; attempting to pull from Beaker."
+            BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+            if beaker image pull "$BEAKER_USER/$INTEGRATION_IMAGE"; then
+              for CANDIDATE in "$BEAKER_USER/$INTEGRATION_IMAGE" "ai2/$BEAKER_USER/$INTEGRATION_IMAGE"; do
+                if docker image inspect "$CANDIDATE" >/dev/null 2>&1; then
+                  docker tag "$CANDIDATE" "$INTEGRATION_IMAGE"
+                  break
+                fi
+              done
+            else
+              echo "ERROR: Unable to pull ${BEAKER_USER}/${INTEGRATION_IMAGE} from Beaker."
+              exit 1
+            fi
+          fi
+
+          if ! docker image inspect "$INTEGRATION_IMAGE" >/dev/null 2>&1; then
+            echo "ERROR: Integration image ${INTEGRATION_IMAGE} unavailable locally after build/pull."
+            exit 1
+          fi
+
+          echo "experiment_ids=${EXPERIMENT_IDS[*]}" >> $GITHUB_OUTPUT
+          echo "experiment_names=${EXPERIMENT_NAMES[*]}" >> $GITHUB_OUTPUT
+          echo "integration_image=${INTEGRATION_IMAGE}" >> $GITHUB_OUTPUT
+          echo "All experiments launched successfully!"
+          echo "Experiment IDs: ${EXPERIMENT_IDS[*]}"
+
+      - name: Wait for all Beaker experiments completion
+        id: wait
+        if: success() && steps.launch.outputs.experiment_ids != ''
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: |
-          EXPERIMENT_ID="${{ steps.launch.outputs.experiment_id }}"
-          echo "Waiting for experiment $EXPERIMENT_ID to complete..."
+          set -euo pipefail
 
-          # Maximum wait time: 20 minutes (1200 seconds)
-          MAX_WAIT_TIME=1200
-          CHECK_INTERVAL=30
-          ELAPSED_TIME=0
+          EXPERIMENT_IDS=(${{ steps.launch.outputs.experiment_ids }})
+          EXPERIMENT_NAMES=(${{ steps.launch.outputs.experiment_names }})
 
-          while [ $ELAPSED_TIME -lt $MAX_WAIT_TIME ]; do
-            # Get job status directly
-            JOB_STATUS=$(beaker experiment get $EXPERIMENT_ID --format json | jq -r '.[0].jobs[0].status' 2>/dev/null || echo "null")
+          if [ ${#EXPERIMENT_IDS[@]} -eq 0 ]; then
+            echo "ERROR: No experiments detected despite launch step succeeding."
+            exit 1
+          fi
 
-            # Check if exitCode exists (experiment is done)
-            if [ "$JOB_STATUS" = "null" ]; then
-              EXIT_CODE="pending"
-            else
-              EXIT_CODE=$(echo "$JOB_STATUS" | jq -r '.exitCode // "pending"')
-            fi
+          FAILED_FILE=$(mktemp)
+          declare -A PIDS
 
-            if [ "$EXIT_CODE" = "pending" ]; then
-              echo "=== Experiment still running (elapsed: ${ELAPSED_TIME}s) ==="
-            else
-              echo "=== Experiment finished with exit code: $EXIT_CODE (elapsed: ${ELAPSED_TIME}s) ==="
-            fi
+          for i in "${!EXPERIMENT_IDS[@]}"; do
+            EXP_ID="${EXPERIMENT_IDS[$i]}"
+            EXP_NAME="${EXPERIMENT_NAMES[$i]:-experiment_$i}"
 
-            # Stream new logs since last check
-            echo "--- Recent logs ---"
-            beaker experiment logs $EXPERIMENT_ID 2>/dev/null | tail -n 50 || echo "No logs available yet"
-            echo "--- End of logs ---"
-
-            # Check if experiment has completed
-            if [ "$EXIT_CODE" != "pending" ]; then
-              if [ "$EXIT_CODE" = "0" ]; then
-                echo "✅ Experiment completed successfully!"
-                # Show final logs
-                echo "=== Final logs ==="
-                beaker experiment logs $EXPERIMENT_ID | tail -n 100
-                exit 0
+            (
+              echo "Waiting for ${EXP_NAME} to succeed: https://beaker.org/ex/${EXP_ID}"
+              if beaker experiment await "$EXP_ID" 0 finalized --index --timeout 20m --interval 30s; then
+                echo "  [${EXP_NAME}] ✅ succeeded"
               else
-                echo "❌ Experiment failed with exit code $EXIT_CODE"
-                # Show error logs
-                echo "=== Error logs ==="
-                beaker experiment logs $EXPERIMENT_ID | tail -n 200
-                exit 1
+                echo "  [${EXP_NAME}] ❌ did not reach finalized status within timeout"
+                echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
               fi
-            fi
-
-            # Wait before next check
-            sleep $CHECK_INTERVAL
-            ELAPSED_TIME=$((ELAPSED_TIME + CHECK_INTERVAL))
+            ) &
+            PIDS[$i]=$!
           done
 
-          echo "⏱️ Timeout: Experiment did not complete within 20 minutes"
-          exit 1
+          for pid in "${PIDS[@]}"; do
+            wait "$pid" || true
+          done
+
+          if [ -s "$FAILED_FILE" ]; then
+            echo ""
+            echo "❌ One or more experiments failed or timed out. Showing logs:"
+            FAILED_EXP_IDS=()
+            FAILED_EXP_NAMES=()
+            while IFS='|' read -r EXP_ID EXP_NAME; do
+              echo ""
+              echo "=== Error logs for ${EXP_NAME} (${EXP_ID}) ==="
+              beaker experiment logs "$EXP_ID" | tail -n 200 || true
+              FAILED_EXP_IDS+=("$EXP_ID")
+              FAILED_EXP_NAMES+=("$EXP_NAME")
+            done < "$FAILED_FILE"
+            echo "failed_experiment_ids=${FAILED_EXP_IDS[*]}" >> $GITHUB_OUTPUT
+            echo "failed_experiment_names=${FAILED_EXP_NAMES[*]}" >> $GITHUB_OUTPUT
+            rm -f "$FAILED_FILE"
+            exit 1
+          fi
+
+          rm -f "$FAILED_FILE"
+          echo ""
+          echo "✅ All experiments completed successfully!"
+
+      - name: Check image
+        if: success()
+        run: |
+          IMAGE="${{ steps.launch.outputs.integration_image }}"
+          if [ -z "$IMAGE" ]; then
+            echo "ERROR: No integration image specified"
+            exit 1
+          fi
+          docker run --rm "$IMAGE"
+
+      - name: Push image to Beaker
+        if: success()
+        env:
+          BEAKER_TARGET_IMAGE: open_instruct_auto
+          SOURCE_IMAGE: ${{ steps.launch.outputs.integration_image }}
+        run: |
+          set -euo pipefail
+
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DESCRIPTION="Created from commit: ${SHORT_SHA} (GitHub run ${GITHUB_RUN_ID})"
+          BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+
+          echo "Renaming ${BEAKER_USER}/${BEAKER_TARGET_IMAGE} to release prior alias (if present)."
+          beaker image rename "${BEAKER_USER}/${BEAKER_TARGET_IMAGE}" "" || true
+
+          echo "Publishing ${BEAKER_TARGET_IMAGE} with updated image and description."
+          beaker image create --name "$BEAKER_TARGET_IMAGE" --description "$DESCRIPTION" "$SOURCE_IMAGE"
 
       - name: Summary
         if: always()
@@ -179,13 +293,36 @@ jobs:
           echo "## Beaker Experiment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ steps.get-trigger-info.outputs.trigger_info }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Docker Image:** Built locally by build_image_and_launch.sh" >> $GITHUB_STEP_SUMMARY
-          if [ -n "${{ steps.launch.outputs.experiment_id }}" ]; then
-            echo "**Beaker Experiment:** [View on Beaker](https://beaker.org/ex/${{ steps.launch.outputs.experiment_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Experiments Launched:" >> $GITHUB_STEP_SUMMARY
+
+          EXPERIMENT_IDS=(${{ steps.launch.outputs.experiment_ids }})
+          EXPERIMENT_NAMES=(${{ steps.launch.outputs.experiment_names }})
+          FAILED_EXP_IDS="${{ steps.wait.outputs.failed_experiment_ids }}"
+          FAILED_EXP_NAMES="${{ steps.wait.outputs.failed_experiment_names }}"
+
+          declare -A FAILED_MAP
+          if [ -n "$FAILED_EXP_NAMES" ]; then
+            FAILED_IDS=($FAILED_EXP_IDS)
+            FAILED_NAMES=($FAILED_EXP_NAMES)
+            for i in "${!FAILED_NAMES[@]}"; do
+              FAILED_MAP["${FAILED_NAMES[$i]}"]="${FAILED_IDS[$i]}"
+            done
           fi
+
+          for i in "${!EXPERIMENT_IDS[@]}"; do
+            EXP_ID="${EXPERIMENT_IDS[$i]}"
+            EXP_NAME="${EXPERIMENT_NAMES[$i]}"
+            if [ -n "${FAILED_MAP[$EXP_NAME]}" ]; then
+              echo "- **$EXP_NAME** ❌: [View on Beaker](https://beaker.org/ex/$EXP_ID)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- **$EXP_NAME** ✅: [View on Beaker](https://beaker.org/ex/$EXP_ID)" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ **Status:** Experiment completed successfully!" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **Status:** All experiments completed successfully and image pushed!" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Status:** Experiment failed or timed out" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Status:** Experiments failed or timed out (image not pushed)" >> $GITHUB_STEP_SUMMARY
           fi

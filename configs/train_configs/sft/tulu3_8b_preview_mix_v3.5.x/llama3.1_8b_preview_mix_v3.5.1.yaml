@@ -4,10 +4,10 @@ use_flash_attn: true
 tokenizer_name: meta-llama/Llama-3.1-8B
 use_slow_tokenizer: true
 dataset_mixer:
-    # For this mix, we try to replce the datasets in v3.4 with 
+    # For this mix, we try to replce the datasets in v3.4 with
     # the filtered and clearner versions, processed by us
     # ------------------------------------------------------
-    # no_robot dataset, human written, for general chat. 
+    # no_robot dataset, human written, for general chat.
     # License: CC-By-NC-4.0
     # Total: 9500
     ai2-adapt-dev/no_robots_converted: 9500

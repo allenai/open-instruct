@@ -57,8 +57,8 @@ import numpy as np
 import ray
 import requests
 import torch
-import vllm.config
 import torch.nn.functional as F
+import vllm.config
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -70,6 +70,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils
+from open_instruct.data_types import CollatedBatchData
 
 WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
 GCP_CLUSTERS = ["ai2/augusta"]
@@ -78,10 +79,48 @@ INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
+DISK_USAGE_WARNING_THRESHOLD = 0.85
+CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://", "/filestore")
 
 logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+def warn_if_low_disk_space(
+    path: str, *, threshold: float = DISK_USAGE_WARNING_THRESHOLD, send_slack_alerts: bool = False
+) -> None:
+    """Warns when disk usage exceeds the provided threshold.
+
+    Args:
+        path: Filesystem path to check disk usage for.
+        threshold: Usage ratio (0.0-1.0) above which to warn.
+        send_slack_alerts: Whether to also send a Slack alert when warning.
+    """
+    if path.startswith(CLOUD_PATH_PREFIXES):
+        return
+
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError as e:
+        logger.warning(f"Skipping disk usage check for {path}, encountered OS error: {e}")
+        return
+
+    if usage.total == 0:
+        return
+
+    used_ratio = usage.used / usage.total
+    if used_ratio >= threshold:
+        used_percent = used_ratio * 100
+        free_gib = usage.free / (1024**3)
+        total_gib = usage.total / (1024**3)
+        warning_message = (
+            f"Disk usage near capacity for {path}: {used_percent:.1f}% used "
+            f"({free_gib:.1f} GiB free of {total_gib:.1f} GiB). Checkpointing may fail."
+        )
+        logger.warning(warning_message)
+        if send_slack_alerts:
+            send_slack_message(f"{warning_message}")
 
 
 class MetricsTracker:
@@ -160,10 +199,13 @@ def ray_get_with_progress(
     if enable:
         futures_iter = tqdm(futures_iter, total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n")
 
-    for future in futures_iter:
-        idx = fut_to_idx[future]
-        results[idx] = future.result()
-        completion_times[idx] = time.perf_counter() - t0
+    try:
+        for future in futures_iter:
+            idx = fut_to_idx[future]
+            results[idx] = future.result()
+            completion_times[idx] = time.perf_counter() - t0
+    except TimeoutError as e:
+        raise TimeoutError(f"{desc} failed.") from e
 
     return results, completion_times
 
@@ -887,10 +929,7 @@ def get_beaker_experiment_info(experiment_id: str) -> dict | None:
 
 def beaker_experiment_succeeded(experiment_id: str) -> bool:
     experiment = get_beaker_experiment_info(experiment_id)
-    if "replicas" in experiment["jobs"][0]["execution"]["spec"]:
-        num_replicas = experiment["jobs"][0]["execution"]["spec"]["replicas"]
-    else:
-        num_replicas = 1
+    num_replicas = experiment["jobs"][0]["execution"]["spec"].get("replicas", 1)
     if not experiment:
         return False
     pprint(experiment)
@@ -1033,7 +1072,10 @@ def maybe_update_beaker_description(
         return
 
     if experiment_id not in original_descriptions:
-        original_descriptions[experiment_id] = spec.description or ""
+        raw_description = spec.description or ""
+        if "git_commit:" in raw_description:
+            raw_description = raw_description.split("git_commit:")[0].strip()
+        original_descriptions[experiment_id] = raw_description
 
     # Build description from scratch each time
     description_components = [
@@ -1105,7 +1147,8 @@ def download_from_hf(model_name_or_path: str, revision: str) -> None:
     return output
 
 
-def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
+def download_from_gs_bucket(src_paths: list[str], dest_path: str) -> None:
+    os.makedirs(dest_path, exist_ok=True)
     cmd = [
         "gsutil",
         "-o",
@@ -1115,9 +1158,9 @@ def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
         "-m",
         "cp",
         "-r",
-        src_path,
-        dest_path,
     ]
+    cmd.extend(src_paths)
+    cmd.append(dest_path)
     print(f"Downloading from GS bucket with command: {cmd}")
     live_subprocess_output(cmd)
 
@@ -1790,7 +1833,7 @@ class ModelDims:
 
         self.num_params = self.num_params or self._calculate_num_params()
 
-        if self.device_name is None:
+        if self.device_name is None and torch.cuda.is_available():
             self.device_name = get_device_name(torch.cuda.get_device_name(0))
 
         assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
@@ -1827,15 +1870,19 @@ class ModelDims:
         intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
 
         sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
+        num_layers = model_config.get_num_layers(vllm_config.parallel_config)
         num_sliding_window_layers = 0
 
         if sliding_window is not None:
             layer_types = getattr(model_config.hf_text_config, "layer_types", None)
             if layer_types is not None:
-                num_sliding_window_layers = sum(1 for lt in layer_types if lt == "sliding_attention")
+                num_sliding_window_layers = layer_types.count("sliding_attention")
+            else:
+                # If "layer_types" is None, then we assume all layers are sliding layers.
+                num_sliding_window_layers = num_layers
 
         return cls(
-            num_layers=model_config.get_num_layers(vllm_config.parallel_config),
+            num_layers=num_layers,
             hidden_size=hidden_size,
             intermediate_size=intermediate_size,
             vocab_size=model_config.get_vocab_size(),
@@ -1844,7 +1891,38 @@ class ModelDims:
             head_dim=model_config.get_head_size(),
             sliding_window=sliding_window,
             num_sliding_window_layers=num_sliding_window_layers,
-            device_name=get_device_name(torch.cuda.get_device_name(0)),
+            device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
+        )
+
+    @classmethod
+    def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
+        """Create ModelDims from a HuggingFace model name or path."""
+        from transformers import AutoConfig
+
+        config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        hidden_size = config.hidden_size
+        intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)
+        sliding_window = getattr(config, "sliding_window", None)
+        num_layers = config.num_hidden_layers
+        num_sliding_window_layers = 0
+        if sliding_window is not None:
+            layer_types = getattr(config, "layer_types", None)
+            if layer_types is not None:
+                num_sliding_window_layers = layer_types.count("sliding_attention")
+            else:
+                num_sliding_window_layers = num_layers
+        head_dim = getattr(config, "head_dim", hidden_size // config.num_attention_heads)
+        return cls(
+            num_layers=num_layers,
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            vocab_size=config.vocab_size,
+            num_attn_heads=config.num_attention_heads,
+            num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
+            head_dim=head_dim,
+            sliding_window=sliding_window,
+            num_sliding_window_layers=num_sliding_window_layers,
+            device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
         )
 
     @property
@@ -2475,19 +2553,27 @@ def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, An
     return combined
 
 
-def send_slack_alert(error: Exception) -> None:
-    """Sends an alert about a training failure to a Slack webhook (if the env var SLACK_WEBHOOK is set)."""
+def send_slack_message(message: str) -> None:
+    """Sends a message to a Slack webhook if configured.
+
+    Args:
+        message: Message body to send to Slack.
+    """
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
     if not slack_webhook_url:
         logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
         return
+
     beaker_url = get_beaker_experiment_url()
-    beaker_message = f"Check it out: {beaker_url}. " if beaker_url else ""
-    message = f"<!here> A RL job has died. {beaker_message}Error message: {str(error)}."
-    payload = {"text": message}
-    response = requests.post(slack_webhook_url, json=payload)
-    if not response.ok:
-        logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
+    beaker_suffix = f" Check it out: {beaker_url}" if beaker_url else ""
+
+    payload = {"text": f"{message}{beaker_suffix}"}
+    try:
+        response = requests.post(slack_webhook_url, json=payload)
+        if not response.ok:
+            logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
+    except requests.RequestException as exc:
+        logger.warning("Failed to send Slack alert due to network error: %s", exc)
 
 
 def get_beaker_experiment_url() -> str | None:
@@ -2502,17 +2588,66 @@ def get_beaker_experiment_url() -> str | None:
 
 
 class UlyssesSPSplitter:
+    """Splits batches for Ulysses sequence parallelism.
+
+    Adapted from the UlyssesSPDataLoaderAdapter
+    (https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py#L427)
+    Rather than wrapping a dataloader, we just want to split a given batch into the shards across sp group.
+    """
+
+    # Mapping between CollatedBatchData field names and internal dict keys
+    _FIELD_TO_KEY = {
+        "query_responses": "input_ids",
+        "attention_masks": "attention_mask",
+        "position_ids": "position_ids",
+        "advantages": "advantages",
+        "response_masks": "response_masks",
+        "vllm_logprobs": "vllm_logprobs",
+    }
+    _KEY_TO_FIELD = {v: k for k, v in _FIELD_TO_KEY.items()}
+
     def __init__(self, sp_rank: int, sp_group, sp_world_size, device, pad_token_id):
-        """
-        Adapted from the UlyssesSPDataLoaderAdapter
-        (https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py#L427)
-        Rather than wrapping a dataloader, we just want to split a given batch into the shards across sp group.
-        """
         self.sp_rank = sp_rank
         self.sp_group = sp_group
         self.sp_world_size = sp_world_size
         self.device = device
         self.pad_token_id = pad_token_id
+
+    def split_collated_batch(self, data: CollatedBatchData) -> list[CollatedBatchData]:
+        """Split a CollatedBatchData across sequence parallel ranks.
+
+        Args:
+            data: The CollatedBatchData to split.
+
+        Returns:
+            List of CollatedBatchData, one per SP rank.
+        """
+        # Pad tensors to be divisible by sp_world_size
+        padded_fields = {}
+        for field_name, key in self._FIELD_TO_KEY.items():
+            tensors = getattr(data, field_name)
+            padded = []
+            for tensor in tensors:
+                if torch.is_tensor(tensor):
+                    seq_length = tensor.shape[1]
+                    if seq_length % self.sp_world_size != 0:
+                        padding_length = self.sp_world_size - (seq_length % self.sp_world_size)
+                        padding = torch.zeros(
+                            (tensor.shape[0], padding_length), dtype=tensor.dtype, device=tensor.device
+                        )
+                        tensor = torch.cat((tensor, padding), dim=1)
+                padded.append(tensor)
+            padded_fields[key] = padded
+
+        # Use the existing split_batch logic
+        sharded_dicts = self.split_batch(padded_fields)
+
+        # Convert back to CollatedBatchData
+        results = []
+        for shard in sharded_dicts:
+            kwargs = {self._KEY_TO_FIELD[k]: v for k, v in shard.items() if k in self._KEY_TO_FIELD}
+            results.append(CollatedBatchData(**kwargs))
+        return results
 
     def split_batch(self, batch):
         micro_batches = defaultdict(dict)

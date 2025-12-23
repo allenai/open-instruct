@@ -61,7 +61,6 @@ python mason.py \
         --llm_judge_max_tokens 2048 \
         --llm_judge_max_context_length 32768 \
         --clip_higher 0.272 \
-        --use_fp8_kv_cache False \
         --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
         --code_pass_rate_reward_threshold 0.99 \
         --oe_eval_max_length 32768 \

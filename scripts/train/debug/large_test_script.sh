@@ -57,11 +57,11 @@ uv run python mason.py \
         --gradient_checkpointing \
         --try_launch_beaker_eval_jobs_on_weka True \
         --with_tracking \
-	--update_progress_every 1 \
         --vllm_enable_prefix_caching \
         --oe_eval_max_length 32768 \
         --oe_eval_tasks "codex_humanevalplus:0-shot-chat-v1::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \
-        --dataset_skip_cache True \
+		--checkpoint_state_freq 2 \
+        --checkpoint_state_dir /tmp/checkpoint_test \
         --active_sampling \
         --async_steps 4 \
 	--push_to_hub False

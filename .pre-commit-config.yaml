@@ -1,0 +1,31 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: ^(mkdocs\.yml|configs/)
+      - id: check-toml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-case-conflict
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
+    hooks:
+      - id: ruff
+        args: [--fix, --config, pyproject.toml]
+        files: ^(open_instruct/|[^/]*mason\.py$)
+      - id: ruff-format
+        args: [--config, pyproject.toml]
+        files: ^(open_instruct/|[^/]*mason\.py$)
+
+  - repo: local
+    hooks:
+      - id: export-requirements
+        name: Export requirements.txt from uv.lock
+        entry: uv export --format requirements-txt --no-hashes --all-extras --no-emit-project --output-file requirements.txt
+        language: system
+        pass_filenames: false
+        files: ^uv\.lock$

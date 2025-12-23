@@ -1,6 +1,5 @@
 import argparse
 from collections import defaultdict
-from typing import Optional
 
 import datasets
 
@@ -18,7 +17,7 @@ def weighted_score(example, weights):
     return sum(weights[aspect] * example[aspect] for aspect in ALL_ASPECTS)
 
 
-def binarize_dataset(dataset, min_score: Optional[float]):
+def binarize_dataset(dataset, min_score: float | None):
     prompt_groups = defaultdict(list)
 
     for example in dataset:
@@ -58,7 +57,7 @@ def binarize_dataset(dataset, min_score: Optional[float]):
     return datasets.Dataset.from_list(binarized_data)
 
 
-def main(min_score: Optional[float], push_to_hub: bool, hf_entity: Optional[str]):
+def main(min_score: float | None, push_to_hub: bool, hf_entity: str | None):
     # Load the HelpSteer 2 dataset
     ds = datasets.load_dataset("nvidia/HelpSteer2", num_proc=max_num_processes())
 

@@ -23,6 +23,7 @@ import os
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
+
 # isort: on
 import json
 import math
@@ -674,7 +675,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     trust_remote_code=tc.trust_remote_code,
                     quantization_config=bnb_config,
                     device_map=device_map,
-                    torch_dtype=torch.bfloat16,
+                    dtype=torch.bfloat16,
                     attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 )
             elif args.use_liger_kernel:
@@ -702,7 +703,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     config=config,
                     trust_remote_code=tc.trust_remote_code,
                     low_cpu_mem_usage=args.low_cpu_mem_usage,
-                    torch_dtype=torch.bfloat16,
+                    dtype=torch.bfloat16,
                     attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 )
         else:
@@ -1136,8 +1137,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             eval_priority=args.eval_priority,
             oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
         )
-    if args.push_to_hub:
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+    if args.push_to_hub and accelerator.is_main_process:
+        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     accelerator.wait_for_everyone()
     if args.with_tracking:
         accelerator.end_training()

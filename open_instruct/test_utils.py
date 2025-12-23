@@ -14,14 +14,15 @@
 # Copied from https://github.com/huggingface/alignment-handbook/blob/main/tests/test_data.py
 import json
 import pathlib
+import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
+import ray
 import responses
-import torch
-import vllm
 from dateutil import parser
 from parameterized import parameterized
 
@@ -240,26 +241,162 @@ class TestBeakerDescription(unittest.TestCase):
         self.assertIn("https://wandb.ai/team/project/runs/xyz789", desc)
         self.assertNotIn("% complete", desc)
 
+    @mock.patch("os.environ.get")
+    @mock.patch("beaker.Beaker.from_env")
+    @mock.patch("open_instruct.utils.is_beaker_job")
+    def test_description_does_not_duplicate_on_restart(
+        self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get
+    ):
+        """Test that description doesn't duplicate when job restarts (fresh original_descriptions dict)."""
+        env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
 
-class TestSlackAlert(unittest.TestCase):
+        previous_run_description = (
+            "Single GPU on Beaker with tool use test script. "
+            "git_commit: e6df3c9c git_branch: finbarr/async-reward "
+            "https://wandb.ai/ai2-llm/open_instruct_internal/runs/n53oxnzb "
+            "[5.0% complete (step 1/20), eta 0m]"
+        )
+        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+            mock_beaker_from_env, mock_is_beaker_job, previous_run_description
+        )
+
+        wandb_url = "https://wandb.ai/ai2-llm/open_instruct_internal/runs/n53oxnzb"
+        original_descriptions = {}
+
+        utils.maybe_update_beaker_description(
+            current_step=2,
+            total_steps=20,
+            start_time=time.time(),
+            wandb_url=wandb_url,
+            original_descriptions=original_descriptions,
+        )
+
+        self.assertEqual(len(description_history), 1)
+        desc = description_history[0]
+
+        git_commit_count = desc.count("git_commit:")
+        git_branch_count = desc.count("git_branch:")
+        wandb_count = desc.count("wandb.ai")
+
+        self.assertEqual(
+            git_commit_count, 1, f"git_commit should appear once, but appears {git_commit_count} times in: {desc}"
+        )
+        self.assertEqual(
+            git_branch_count, 1, f"git_branch should appear once, but appears {git_branch_count} times in: {desc}"
+        )
+        self.assertEqual(wandb_count, 1, f"wandb URL should appear once, but appears {wandb_count} times in: {desc}")
+        self.assertIn("Single GPU on Beaker with tool use test script.", desc)
+
+
+class TestSlackMessage(unittest.TestCase):
     @responses.activate
     @mock.patch("open_instruct.utils.get_beaker_experiment_url")
     @mock.patch("os.environ.get")
-    def test_send_slack_alert_with_beaker_url(self, mock_environ_get, mock_get_beaker_url):
+    def test_send_slack_message_with_beaker_url(self, mock_environ_get, mock_get_beaker_url):
         webhook_url = "https://hooks.slack.com/services/test"
         mock_environ_get.return_value = webhook_url
-        mock_get_beaker_url.return_value = "https://beaker.org/ex/test-123"
+        mock_get_beaker_url.return_value = "https://beaker.org/ex/test-456"
 
         responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
 
-        test_error = ValueError("Test error message")
-        utils.send_slack_alert(test_error)
+        utils.send_slack_message("<!here> Disk is nearly full.")
 
         self.assertEqual(len(responses.calls), 1)
         request_body = json.loads(responses.calls[0].request.body)
-        self.assertIn("<!here> A RL job has died.", request_body["text"])
-        self.assertIn("https://beaker.org/ex/test-123", request_body["text"])
-        self.assertIn("Test error message", request_body["text"])
+        self.assertIn("https://beaker.org/ex/test-456", request_body["text"])
+        self.assertIn("Disk is nearly full", request_body["text"])
+
+
+class TestWarnIfLowDiskSpace(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("gcs", "gs://bucket/path"),
+            ("s3", "s3://bucket/path"),
+            ("azure", "az://container/path"),
+            ("hdfs", "hdfs://cluster/path"),
+            ("gcs localpath", "/filestore/path"),
+        ]
+    )
+    def test_cloud_paths_skipped(self, name, path):
+        with mock.patch("shutil.disk_usage") as mock_disk_usage:
+            utils.warn_if_low_disk_space(path)
+            mock_disk_usage.assert_not_called()
+
+    @mock.patch("shutil.disk_usage")
+    def test_no_warning_below_threshold(self, mock_disk_usage):
+        mock_disk_usage.return_value = mock.Mock(total=100, used=50, free=50)
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/tmp/test", threshold=0.85)
+            mock_warning.assert_not_called()
+
+    @mock.patch("shutil.disk_usage")
+    def test_warning_above_threshold(self, mock_disk_usage):
+        mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/tmp/test", threshold=0.85)
+            mock_warning.assert_called_once()
+            self.assertIn("90.0%", mock_warning.call_args[0][0])
+
+    @responses.activate
+    @mock.patch("shutil.disk_usage")
+    @mock.patch("open_instruct.utils.get_beaker_experiment_url")
+    @mock.patch("os.environ.get")
+    def test_slack_alert_sent_when_enabled(self, mock_environ_get, mock_get_beaker_url, mock_disk_usage):
+        webhook_url = "https://hooks.slack.com/services/test"
+        mock_environ_get.return_value = webhook_url
+        mock_get_beaker_url.return_value = None
+        mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
+        responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
+
+        utils.warn_if_low_disk_space("/tmp/test", send_slack_alerts=True)
+
+        self.assertEqual(len(responses.calls), 1)
+        request_body = json.loads(responses.calls[0].request.body)
+        self.assertIn("Disk usage near capacity", request_body["text"])
+
+    @mock.patch("shutil.disk_usage")
+    def test_zero_total_disk_space_returns_early(self, mock_disk_usage):
+        mock_disk_usage.return_value = mock.Mock(total=0, used=0, free=0)
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/tmp/test")
+            mock_warning.assert_not_called()
+
+    def test_disk_usage_warns_for_failing_path(self):
+        with mock.patch.object(utils.logger, "warning") as mock_warning:
+            utils.warn_if_low_disk_space("/non/existant/path")
+            mock_warning.assert_called()
+
+
+class TestDownloadFromGsBucket(unittest.TestCase):
+    def test_download_from_gs_bucket(self):
+        src_paths = ["gs://bucket/data1", "gs://bucket/data2"]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest_path = pathlib.Path(tmp_dir) / "downloads"
+            captured_cmd: dict[str, list[str]] = {}
+
+            def mock_live_subprocess_output(cmd):
+                captured_cmd["cmd"] = cmd
+
+            with mock.patch.object(utils, "live_subprocess_output", side_effect=mock_live_subprocess_output):
+                utils.download_from_gs_bucket(src_paths=src_paths, dest_path=str(dest_path))
+
+            expected_cmd = [
+                "gsutil",
+                "-o",
+                "GSUtil:parallel_thread_count=1",
+                "-o",
+                "GSUtil:sliced_object_download_threshold=150",
+                "-m",
+                "cp",
+                "-r",
+                *src_paths,
+                str(dest_path),
+            ]
+
+            self.assertEqual(captured_cmd["cmd"], expected_cmd)
+            self.assertTrue(dest_path.exists())
 
 
 class TestUtilityFunctions(unittest.TestCase):
@@ -471,37 +608,129 @@ class TestModelDims(unittest.TestCase):
         self.assertLessEqual(metrics["learner_mfu"], 100)
 
     def test_model_dims_match_vllm_config(self):
-        model_name = "Qwen/Qwen2.5-7B"
-        expected_dims = MODEL_DIMS[model_name]
+        expected_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
 
-        mock_platform = mock.Mock()
-        mock_platform.device_type = "cuda"
-        mock_platform.is_cuda_alike.return_value = True
-        mock_platform.supported_dtypes = [torch.float16, torch.bfloat16, torch.float32]
-        mock_platform.get_device_total_memory.return_value = 80 * 1024**3
-        mock_platform.get_device_name.return_value = "NVIDIA H100 80GB HBM3"
+        mock_hf_text_config = mock.Mock()
+        mock_hf_text_config.intermediate_size = 18944
+        mock_hf_text_config.sliding_window = None
+        mock_hf_text_config.num_attention_heads = 28
+        mock_hf_text_config.num_key_value_heads = 4
 
-        mock_model_cls = mock.Mock()
-        mock_model_cls.supports_multimodal.return_value = False
-        mock_model_cls.is_attention_free.return_value = False
-        mock_model_cls.is_attention_free = False
+        mock_model_config = mock.Mock()
+        mock_model_config.get_hidden_size.return_value = 3584
+        mock_model_config.get_num_layers.return_value = 28
+        mock_model_config.get_vocab_size.return_value = 152064
+        mock_model_config.get_head_size.return_value = 128
+        mock_model_config.hf_text_config = mock_hf_text_config
 
-        def mock_inspect_return(*args, **kwargs):
-            return mock_model_cls, "Qwen2ForCausalLM"
+        mock_vllm_config = mock.Mock()
+        mock_vllm_config.model_config = mock_model_config
+        mock_vllm_config.parallel_config = mock.Mock()
 
         with (
-            mock.patch("vllm.platforms.current_platform", mock_platform),
-            mock.patch(
-                "vllm.model_executor.models.registry.ModelRegistry.inspect_model_cls", side_effect=mock_inspect_return
-            ),
             mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+            mock.patch("torch.cuda.is_available", return_value=True),
         ):
-            engine_args = vllm.EngineArgs(model=model_name, load_format="dummy", max_model_len=512)
-            vllm_config = engine_args.create_engine_config()
-            vllm_dims = utils.ModelDims.from_vllm_config(vllm_config)
-        vllm_dims.device_name = "h100"
+            vllm_dims = utils.ModelDims.from_vllm_config(mock_vllm_config)
 
         self.assertEqual(vllm_dims, expected_dims)
+
+
+class TestModelDimsFromHFConfig(unittest.TestCase):
+    def test_from_hf_config_with_sliding_window(self):
+        config = SimpleNamespace(
+            hidden_size=2048,
+            intermediate_size=8192,
+            sliding_window=4096,
+            layer_types=["sliding_attention", "attention"],
+            num_attention_heads=16,
+            num_hidden_layers=24,
+            vocab_size=32000,
+            num_key_value_heads=8,
+            head_dim=128,
+        )
+
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config) as mock_from_pretrained,
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+            mock.patch("torch.cuda.is_available", return_value=True),
+        ):
+            model_dims = utils.ModelDims.from_hf_config("test/model")
+
+        mock_from_pretrained.assert_called_once_with("test/model", trust_remote_code=True)
+        self.assertEqual(
+            model_dims,
+            utils.ModelDims(
+                num_layers=24,
+                hidden_size=2048,
+                intermediate_size=8192,
+                vocab_size=32000,
+                num_attn_heads=16,
+                head_dim=128,
+                num_kv_heads=8,
+                sliding_window=4096,
+                num_sliding_window_layers=1,
+                device_name="h100",
+            ),
+        )
+
+    def test_from_hf_config_defaults(self):
+        config = SimpleNamespace(hidden_size=1024, num_attention_heads=8, num_hidden_layers=12, vocab_size=64000)
+
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+            mock.patch("torch.cuda.is_available", return_value=True),
+        ):
+            model_dims = utils.ModelDims.from_hf_config("test/defaults")
+        self.assertEqual(
+            model_dims,
+            utils.ModelDims(
+                num_layers=12,
+                hidden_size=1024,
+                intermediate_size=4096,
+                vocab_size=64000,
+                num_attn_heads=8,
+                head_dim=128,
+                num_kv_heads=8,
+                sliding_window=None,
+                num_sliding_window_layers=0,
+                device_name="h100",
+            ),
+        )
+
+    def test_from_hf_config_sliding_window_no_layer_types(self):
+        config = SimpleNamespace(
+            hidden_size=2048,
+            intermediate_size=8192,
+            sliding_window=4096,
+            num_attention_heads=16,
+            num_hidden_layers=24,
+            vocab_size=32000,
+            num_key_value_heads=8,
+            head_dim=128,
+        )
+
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+            mock.patch("torch.cuda.is_available", return_value=True),
+        ):
+            model_dims = utils.ModelDims.from_hf_config("test/model")
+
+        self.assertEqual(model_dims.sliding_window, 4096)
+        self.assertEqual(model_dims.num_sliding_window_layers, 24)
+
+    def test_from_hf_config_cpu_only(self):
+        config = SimpleNamespace(hidden_size=1024, num_attention_heads=8, num_hidden_layers=12, vocab_size=64000)
+
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
+            mock.patch("torch.cuda.is_available", return_value=False),
+        ):
+            model_dims = utils.ModelDims.from_hf_config("test/cpu")
+
+        self.assertIsNone(model_dims.device_name)
 
 
 # useful for checking if public datasets are still available
@@ -543,3 +772,23 @@ class TestGetDenominator(unittest.TestCase):
     def test_invalid_inputs(self, input_val, error_msg):
         with self.assertRaisesRegex(ValueError, error_msg):
             utils.get_denominator(input_val)
+
+
+class TestRayGetWithProgress(unittest.TestCase):
+    def setUp(self):
+        ray.init(num_cpus=2, num_gpus=0)
+
+    def tearDown(self):
+        ray.shutdown()
+
+    def test_timeout_error_includes_desc(self):
+        @ray.remote
+        def slow_task():
+            time.sleep(10)
+            return "done"
+
+        refs = [slow_task.remote()]
+        desc = "Test slow operation"
+
+        with pytest.raises(TimeoutError, match=desc):
+            utils.ray_get_with_progress(refs, desc=desc, enable=False, timeout=0.1)

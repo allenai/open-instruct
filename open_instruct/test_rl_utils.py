@@ -6,6 +6,7 @@ import unittest
 import numpy as np
 import torch
 import transformers
+from parameterized import parameterized
 
 from open_instruct import rl_utils
 
@@ -163,6 +164,39 @@ class TestRLUtils(unittest.TestCase):
         for seq in packed_with_min.query_responses:
             self.assertGreater(len(seq), 0)
 
+    @parameterized.expand(
+        [
+            # Pack 0: [1, 2, 3, 10, 11, 12] (q0 + r0), Pack 1: [4, 5, 20, 21] (q1 + r1)
+            # Query tokens are always False.
+            # With mask_tool_use=True, response tokens use mask values: [1,0,1] -> [T,F,T], [0,1] -> [F,T]
+            ("with_masking", True, [False, False, False, True, False, True], [False, False, False, True]),
+            # With mask_tool_use=False, all response tokens are True regardless of mask values.
+            ("without_masking", False, [False, False, False, True, True, True], [False, False, True, True]),
+        ]
+    )
+    def test_pack_sequences_mask_tool_use(self, name, mask_tool_use, expected_mask_0, expected_mask_1):
+        queries = [[1, 2, 3], [4, 5]]
+        responses = [[10, 11, 12], [20, 21]]
+        masks = [[1, 0, 1], [0, 1]]
+        vllm_logprobs = [[0.0, 0.0, 0.0], [0.0, 0.0]]
+        pad_token_id = 0
+
+        packed = rl_utils.pack_sequences(
+            queries=queries,
+            responses=responses,
+            masks=masks,
+            pack_length=8,
+            pad_token_id=pad_token_id,
+            vllm_logprobs=vllm_logprobs,
+            mask_tool_use=mask_tool_use,
+        )
+
+        self.assertEqual(len(packed.response_masks), 2)
+        self.assertEqual(packed.response_masks[0].dtype, torch.long)
+        self.assertEqual(packed.response_masks[1].dtype, torch.long)
+        torch.testing.assert_close(packed.response_masks[0].bool(), torch.tensor(expected_mask_0, dtype=torch.bool))
+        torch.testing.assert_close(packed.response_masks[1].bool(), torch.tensor(expected_mask_1, dtype=torch.bool))
+
     def test_calculate_advantages_packed(self):
         """Test that calculate_advantages_packed produces same results as unpacked version."""
         _, _, pad_token_id = get_test_data()
@@ -260,7 +294,7 @@ class TestRLUtils(unittest.TestCase):
         queries, responses, pad_token_id = get_test_data()
 
         value_model = transformers.AutoModelForSequenceClassification.from_pretrained(
-            MODEL_NAME, num_labels=1, torch_dtype=torch.bfloat16
+            MODEL_NAME, num_labels=1, dtype=torch.bfloat16
         )
         value_model.train()
         value_head = value_model.score

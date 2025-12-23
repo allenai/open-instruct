@@ -1,19 +1,17 @@
 import random
-from typing import List
 
 from datasets import Dataset, load_dataset
-import open_instruct.utils as open_instruct_utils
 from tqdm import tqdm
+
+import open_instruct.utils as open_instruct_utils
 
 NVIDIA_OCR = "nvidia/OpenCodeReasoning"
 MY_OCR = "saurabh5/open-code-reasoning-rlvr"
 SFT_REPO = "saurabh5/open-code-reasoning-sft"
 
 
-
-
 def main():
-    ocr_split0 = load_dataset(NVIDIA_OCR, 'split_0', split="split_0", num_proc=open_instruct_utils.max_num_processes())
+    ocr_split0 = load_dataset(NVIDIA_OCR, "split_0", split="split_0", num_proc=open_instruct_utils.max_num_processes())
     my_ocr = load_dataset(MY_OCR, split="train", num_proc=open_instruct_utils.max_num_processes())
 
     id_to_data = {}
@@ -31,9 +29,9 @@ def main():
                 **og_row,
                 "messages": [
                     {"role": "user", "content": og_row["input"]},
-                    {"role": "assistant", "content": og_row["output"]}
+                    {"role": "assistant", "content": og_row["output"]},
                 ],
-                "num_outputs": len(datapoints_with_id)
+                "num_outputs": len(datapoints_with_id),
             }
             sft_data.append(sft_row)
 
@@ -42,8 +40,7 @@ def main():
     dataset.push_to_hub(SFT_REPO)
 
 
-
-def create_sft_dataset_with_n_outputs(n_outputs: List[int]):
+def create_sft_dataset_with_n_outputs(n_outputs: list[int]):
     sft_base = load_dataset(SFT_REPO, split="train", num_proc=open_instruct_utils.max_num_processes())
     # for each id, sample exactly n_outputs datapoints
     id_to_data = {}
@@ -62,6 +59,7 @@ def create_sft_dataset_with_n_outputs(n_outputs: List[int]):
         dataset = Dataset.from_list(results)
         print(f"Pushing {dataset_name} to hub")
         dataset.push_to_hub(dataset_name)
+
 
 if __name__ == "__main__":
     create_sft_dataset_with_n_outputs([1, 4, 16, 32])
