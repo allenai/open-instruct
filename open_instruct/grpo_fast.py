@@ -1146,13 +1146,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         max_diff = masked_diff_BT.max()
                         std_diff = masked_diff_BT[valid_mask_BT].std() if valid_mask_BT.sum() > 1 else 0.0
 
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = (
-                            mean_diff.item() if isinstance(mean_diff, torch.Tensor) else mean_diff
-                        )
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item()
                         self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = (
-                            std_diff.item() if isinstance(std_diff, torch.Tensor) else std_diff
-                        )
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = std_diff.item()
 
                         reverse_kl_BT = torch.exp(vllm_logprobs_BT) * (vllm_logprobs_BT - local_logprobs_BT)
                         masked_reverse_kl_BT = torch.masked_fill(reverse_kl_BT, ~valid_mask_BT, 0.0)
@@ -1371,16 +1367,15 @@ class PolicyTrainerRayProcess(RayProcess):
             return
 
         model_to_save = self.model
+        if chat_template_name is not None and "olmo" in chat_template_name:
+            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
+
         if self.rank == 0:
             output_path.mkdir(parents=True, exist_ok=True)
 
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
             model_to_save = model_to_save.module
-
-        if chat_template_name is not None and "olmo" in chat_template_name:
-            # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
-            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         # gather parameters
         output_state_dict = {}
