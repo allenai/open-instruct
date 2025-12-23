@@ -64,6 +64,12 @@ class WorkerWrap:
         # if empty_cache:
         #     torch.cuda.empty_cache()
 
+    def update_weights(self, params_list, empty_cache=False):
+        """Update multiple weights sequentially."""
+        for i, (name, dtype, shape) in enumerate(params_list):
+            is_last = i == len(params_list) - 1
+            self.update_weight(name, dtype, shape, empty_cache=(empty_cache and is_last))
+
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles=None, empty_cache=False):
         import torch
 
