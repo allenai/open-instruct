@@ -2092,21 +2092,24 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
     return train_dataset, eval_dataset
 
 
-def load_tools(args: Args) -> dict[str, Tool]:
-    """Load tool instances and register their stop strings.
+def load_tools(args: Args) -> tuple[dict[str, Tool], list[str]]:
+    """Load tool instances and collect their stop strings.
 
     Args:
         args: Parsed training arguments with tool configuration.
 
     Returns:
-        A mapping from tool end strings to tool instances.
+        A tuple containing:
+            - A mapping from tool end strings to tool instances.
+            - A list of stop strings for the loaded tools.
 
     Raises:
         ValueError: If an unknown tool is requested.
     """
     tool_objects: dict[str, Tool] = {}
+    stop_strings: list[str] = []
     if not args.tools:
-        return tool_objects
+        return tool_objects, stop_strings
 
     for tool in args.tools:
         if tool.lower() == "search":
@@ -2128,9 +2131,9 @@ def load_tools(args: Args) -> dict[str, Tool]:
             raise ValueError(f"Unknown tool: {tool}")
 
         tool_objects[tool_instance.end_str] = tool_instance
-        args.stop_strings.append(tool_instance.end_str)
+        stop_strings.append(tool_instance.end_str)
 
-    return tool_objects
+    return tool_objects, stop_strings
 
 
 def create_model_and_optimizer(
@@ -2161,7 +2164,8 @@ def create_model_and_optimizer(
 
     # Set up tools
     max_len = args.max_prompt_token_length + args.response_length
-    tool_objects = load_tools(args)
+    tool_objects, new_stop_strings = load_tools(args)
+    args.stop_strings.extend(new_stop_strings)
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
