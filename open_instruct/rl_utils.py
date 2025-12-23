@@ -106,23 +106,20 @@ def pack_sequences(
     """
     assert not any(pad_token_id in query for query in queries)
 
-    # Calculate total tokens and max sequence length to determine effective pack_length
+    # Calculate total tokens to determine effective pack_length
     total_tokens = 0
-    max_seq_len = 0
     for query, response in zip(queries, responses):
         query_len = len(query)
         response_len = sum(1 for t in response if t != pad_token_id)
-        seq_len = query_len + response_len
-        total_tokens += seq_len
-        max_seq_len = max(max_seq_len, seq_len)
+        total_tokens += query_len + response_len
 
     # Reduce pack_length if needed to ensure min_num_batches
+    # Note: sequences longer than effective_pack_length will naturally get their own pack(s)
+    # since the packing loop starts a new pack when a sequence doesn't fit
     if total_tokens > 0 and min_num_batches > 1:
         target_pack_length = total_tokens // min_num_batches
-        # Must be at least as large as the longest individual sequence
-        effective_pack_length = max(target_pack_length, max_seq_len)
         # Don't exceed the original pack_length
-        effective_pack_length = min(effective_pack_length, pack_length)
+        effective_pack_length = min(target_pack_length, pack_length)
     else:
         effective_pack_length = pack_length
 
@@ -183,13 +180,15 @@ def pack_sequences(
         )
         combined_logprobs = query_logprobs + response_logprobs
         if len(query_response) + len(cur_data) > effective_pack_length:
-            query_responses.append(cur_data)
-            response_masks.append(cur_response_mask)
-            attention_masks.append(cur_attention_mask)
-            num_actions.append(cur_num_actions)
-            packed_seq_lens.append(cur_packed_seq_lens)
-            dones.append(cur_dones)
-            packed_vllm_logprobs.append(cur_vllm_logprobs)
+            # Only flush if there's data (handles case where single sequence exceeds pack_length)
+            if len(cur_data) > 0:
+                query_responses.append(cur_data)
+                response_masks.append(cur_response_mask)
+                attention_masks.append(cur_attention_mask)
+                num_actions.append(cur_num_actions)
+                packed_seq_lens.append(cur_packed_seq_lens)
+                dones.append(cur_dones)
+                packed_vllm_logprobs.append(cur_vllm_logprobs)
             cur_data = []
             cur_response_mask = []
             cur_attention_mask = []
