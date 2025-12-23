@@ -192,8 +192,8 @@ def load_ref_policy(
     ref_policy.eval()
 
     if checkpoint_path:
-        # Only catch errors gracefully if ref policy won't be updated (static reference can use base model)
-        # If ref policy will be updated via polyak averaging, we need the exact checkpoint - fail fast
+        # Only catch errors gracefully if ref policy won't be updated,
+        # since then we can just re-use the original reference model ckpt.
         if ref_policy_update_freq is None or alpha == 0:
             try:
                 state_dict = torch.load(checkpoint_path, map_location=device)
@@ -208,13 +208,11 @@ def load_ref_policy(
                 logger.error(f"{rank=}: Failed to load reference policy checkpoint from {checkpoint_path}: {e}")
                 logger.error(f"{rank=}: Falling back to using base model as reference policy")
         else:
-            # Fail fast if ref policy will be updated - we need the exact checkpoint for polyak updates
+            # if we are updating the reference, then we need to load the checkpoint.
             state_dict = torch.load(checkpoint_path, map_location=device)
             if hasattr(ref_policy, "module"):
-                # Needed if wrapped by DeepSpeed.
                 ref_policy.module.load_state_dict(state_dict)
             else:
-                # If a vanilla HF model.
                 ref_policy.load_state_dict(state_dict)
             logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
     return ref_policy
