@@ -179,16 +179,15 @@ def pack_sequences(
             f"This can happen if vLLM returns N-1 logprobs for N tokens (missing first token logprob)."
         )
         combined_logprobs = query_logprobs + response_logprobs
-        if len(query_response) + len(cur_data) > effective_pack_length:
-            # Only flush if there's data (handles case where single sequence exceeds pack_length)
-            if len(cur_data) > 0:
-                query_responses.append(cur_data)
-                response_masks.append(cur_response_mask)
-                attention_masks.append(cur_attention_mask)
-                num_actions.append(cur_num_actions)
-                packed_seq_lens.append(cur_packed_seq_lens)
-                dones.append(cur_dones)
-                packed_vllm_logprobs.append(cur_vllm_logprobs)
+        # only flush if we have data and we exceed the pack length.
+        if len(query_response) + len(cur_data) > effective_pack_length and len(cur_data) > 0:
+            query_responses.append(cur_data)
+            response_masks.append(cur_response_mask)
+            attention_masks.append(cur_attention_mask)
+            num_actions.append(cur_num_actions)
+            packed_seq_lens.append(cur_packed_seq_lens)
+            dones.append(cur_dones)
+            packed_vllm_logprobs.append(cur_vllm_logprobs)
             cur_data = []
             cur_response_mask = []
             cur_attention_mask = []
