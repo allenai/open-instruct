@@ -112,7 +112,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
-from open_instruct.tool_utils.tools import Tool
+from open_instruct.tool_utils import tools
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -2092,7 +2092,7 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
     return train_dataset, eval_dataset
 
 
-def load_tools(args: Args) -> tuple[dict[str, Tool], list[str]]:
+def load_tools(args: Args) -> tuple[dict[str, tools.Tool], list[str]]:
     """Load tool instances and collect their stop strings.
 
     Args:
@@ -2106,7 +2106,7 @@ def load_tools(args: Args) -> tuple[dict[str, Tool], list[str]]:
     Raises:
         ValueError: If an unknown tool is requested.
     """
-    tool_objects: dict[str, Tool] = {}
+    tool_objects: dict[str, tools.Tool] = {}
     stop_strings: list[str] = []
     if not args.tools:
         return tool_objects, stop_strings
@@ -2122,9 +2122,7 @@ def load_tools(args: Args) -> tuple[dict[str, Tool], list[str]]:
                 number_documents_to_search=args.number_documents_to_search,
             )
         elif tool.lower() == "code":
-            from open_instruct.tool_utils.tools import PythonCodeTool
-
-            tool_instance = PythonCodeTool(
+            tool_instance = tools.PythonCodeTool(
                 start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint
             )
         else:
@@ -2149,7 +2147,7 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     train_dataset,
     eval_dataset,
-) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, Tool], int, int]:
+) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, tools.Tool], int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
