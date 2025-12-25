@@ -2603,8 +2603,7 @@ class UlyssesSPSplitter:
         self.pad_token_id = pad_token_id
 
     def split_collated_batch(self, data: CollatedBatchData) -> CollatedBatchData:
-        """Get this rank's shard of a CollatedBatchData for sequence parallelism.
-        """
+        """Get this rank's shard of a CollatedBatchData for sequence parallelism."""
         fields = [f.name for f in dataclasses.fields(data)]
 
         # Find max sequence length across all ranks to ensure consistent padding

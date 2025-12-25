@@ -1922,7 +1922,6 @@ def data_preparation_thread(
                 vllm_logprobs=result.logprobs,
                 min_num_batches=dp_world_size,
                 mask_tool_use=args.mask_tool_use,
-                min_num_batches=args.world_size,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
