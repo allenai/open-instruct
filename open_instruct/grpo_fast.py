@@ -205,15 +205,13 @@ class Args:
     total_episodes: int = 100000
     """The total number of episodes in the dataset"""
     world_size: int | None = None
-    """RUNTIME VALUE: The number of processes (GPUs) to use"""
+    """RUNTIME VALUE: The number of processes (GPUs) to use for training ONLY"""
     num_training_steps: int | None = None
     """RUNTIME VALUE: The number of training_steps to train"""
     local_eval_every: int = 100
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
     """How many train steps to save the model"""
-    allow_world_padding: bool = False
-    """Whether to allow world padding. This is useful for model sweeps, but wastes compute."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
 
@@ -471,7 +469,10 @@ class Args:
                 f"vllm_num_engines={self.vllm_num_engines}, vllm will be generating data for multiple "
                 "batches simultaneously. This is fine but might be unexpected behaviour."
             )
-        # Initialize stop_strings if None
+        # ensure enough samples for all ranks
+        assert self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout >= sum(
+            self.num_learners_per_node
+        ), "You must have at least as many samples as training GPUs (DP ranks) for distributed training!"
         if self.stop_strings is None:
             self.stop_strings = []
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
@@ -1853,6 +1854,7 @@ def data_preparation_thread(
                 pad_token_id=tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
                 mask_tool_use=args.mask_tool_use,
+                min_num_batches=args.world_size,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
@@ -1864,29 +1866,6 @@ def data_preparation_thread(
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
-
-        # if we have less batches than world size, we need to pad out so each world is fine
-        # ideally, you should avoid this since its wasting computation.
-        if args.allow_world_padding:
-            with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
-                shortfall = args.world_size - len(packed_sequences.query_responses)
-                if shortfall > 0:
-                    logger.warning(
-                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
-                    )
-                    # construct "dummy" sequences for padding out the world size
-                    dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
-                    dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-                    dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-                    dummy_response_mask = torch.zeros_like(dummy_qr)
-                    dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
-                    # pad out the world size
-                    for _ in range(shortfall):
-                        packed_sequences.query_responses.append(dummy_qr)
-                        packed_sequences.attention_masks.append(dummy_attention)
-                        packed_sequences.position_ids.append(dummy_position_ids)
-                        packed_sequences.response_masks.append(dummy_response_mask)
-                        packed_sequences.advantages.append(dummy_advantage)
 
         collated_data = prepare_collated_data_for_workers(
             packed_sequences, args.world_size, args.per_device_train_batch_size, tokenizer.pad_token_id
