@@ -2621,8 +2621,7 @@ class UlyssesSPSplitter:
         start_idx = chunk_len * self.sp_rank
         end_idx = chunk_len * (self.sp_rank + 1)
 
-        # Pad tensors and extract this rank's shard on CPU, then move to device
-        # This is more efficient than moving full tensors to GPU first
+        # slice and pad tensors for this sp rank
         kwargs = {}
         for field in fields:
             tensors = getattr(data, field)

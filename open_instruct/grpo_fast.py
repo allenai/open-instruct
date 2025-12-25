@@ -1057,7 +1057,6 @@ class PolicyTrainerRayProcess(RayProcess):
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
 
-        # Calculate the logprob of the reference policy
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
@@ -1257,8 +1256,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     # we already took world size into account via the tokens
                     # but deepspeed will try to average over ranks, so multiply back
                     # up, adjusting for the sequence parallel size (adjust by dp world size).
-                    if dist.is_available() and dist.is_initialized():
-                        loss *= dist.get_world_size() // self.args.sequence_parallel_size
+                    loss *= self.args.world_size // self.args.sequence_parallel_size
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
