@@ -81,6 +81,7 @@ MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 DISK_USAGE_WARNING_THRESHOLD = 0.85
 CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://", "/filestore")
+INVALID_LOGPROB = 1.0  # Sentinel value for masked/invalid log probabilities
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -2625,7 +2626,12 @@ class UlyssesSPSplitter:
         kwargs = {}
         for field in fields:
             tensors = getattr(data, field)
-            pad_value = self.pad_token_id if field == "query_responses" else 0
+            if field == "query_responses":
+                pad_value = self.pad_token_id
+            elif field == "vllm_logprobs":
+                pad_value = INVALID_LOGPROB
+            else:
+                pad_value = 0
             sharded = []
             for t in tensors:
                 padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]

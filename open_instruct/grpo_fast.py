@@ -115,6 +115,7 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
 from open_instruct.utils import (
+    INVALID_LOGPROB,
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
@@ -142,7 +143,6 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 
-INVALID_LOGPROB = 1.0
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 
 
