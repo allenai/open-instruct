@@ -1135,9 +1135,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         valid_mask_BT = response_mask_BT & ~torch.isnan(vllm_logprobs_BT)
                         logprob_diff_BT = (local_logprobs_BT - vllm_logprobs_BT).abs()
                         masked_diff_BT = torch.masked_fill(logprob_diff_BT, ~valid_mask_BT, 0.0)
-                        mean_diff = masked_diff_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
+                        zero_tensor = torch.zeros(1)  # convenience tensor so we can assume metrics are tensors
+                        mean_diff = (
+                            masked_diff_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else zero_tensor
+                        )
                         max_diff = masked_diff_BT.max()
-                        std_diff = masked_diff_BT[valid_mask_BT].std() if valid_mask_BT.sum() > 1 else 0.0
+                        std_diff = masked_diff_BT[valid_mask_BT].std() if valid_mask_BT.sum() > 1 else zero_tensor
 
                         self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item()
                         self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
@@ -1146,7 +1149,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         reverse_kl_BT = torch.exp(vllm_logprobs_BT) * (vllm_logprobs_BT - local_logprobs_BT)
                         masked_reverse_kl_BT = torch.masked_fill(reverse_kl_BT, ~valid_mask_BT, 0.0)
                         mean_reverse_kl = (
-                            masked_reverse_kl_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
+                            masked_reverse_kl_BT.sum() / valid_mask_BT.sum()
+                            if valid_mask_BT.sum() > 0
+                            else zero_tensor
                         )
                         self.local_metrics["debug/vllm_local_reverse_kl"] = mean_reverse_kl.item()
 
