@@ -13,6 +13,7 @@
 # limitations under the License.
 # Copied from https://github.com/huggingface/alignment-handbook/blob/main/tests/test_data.py
 import json
+import os
 import pathlib
 import tempfile
 import time
@@ -776,6 +777,7 @@ class TestGetDenominator(unittest.TestCase):
 
 class TestRayGetWithProgress(unittest.TestCase):
     def setUp(self):
+        os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
         ray.init(num_cpus=2, num_gpus=0)
 
     def tearDown(self):
