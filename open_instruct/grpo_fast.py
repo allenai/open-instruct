@@ -838,6 +838,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 if hasattr(self, "ref_policy_checkpoint_path")
                 else None,
                 mpu=self.mpu,
+                ref_policy_update_freq=args.ref_policy_update_freq,
+                alpha=args.alpha,
             )
         self.local_metrics = utils.MetricsTracker(device=self.device)
 

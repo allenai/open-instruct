@@ -150,6 +150,40 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
             module.p = 0
 
 
+def maybe_load_checkpoint(
+    model: torch.nn.Module, checkpoint_path: str, device: torch.device, rank: int, throw_on_error: bool = True
+) -> None:
+    """Load a checkpoint into a model, with optional error handling.
+
+    Args:
+        model: The model to load the checkpoint into.
+        checkpoint_path: Path to the checkpoint file.
+        device: Device to load the checkpoint onto.
+        rank: Global process rank for logging.
+        throw_on_error: if true, throw an error if the checkpoint fails to load.
+    """
+
+    def _load_checkpoint(path: str, dev: torch.device):
+        state_dict = torch.load(path, map_location=dev)
+        if hasattr(model, "module"):
+            # Needed if wrapped by DeepSpeed.
+            model.module.load_state_dict(state_dict)
+        else:
+            # If a vanilla HF model.
+            model.load_state_dict(state_dict)
+        logger.info(f"{rank=}: Loaded checkpoint from {path}")
+
+    if not throw_on_error:
+        try:
+            _load_checkpoint(checkpoint_path, device)
+        except Exception as e:
+            logger.error(
+                f"{rank=}: Falling back to using base reference, Failed to load checkpoint from {checkpoint_path}: {e}"
+            )
+    else:
+        _load_checkpoint(checkpoint_path, device)
+
+
 def load_ref_policy(
     model_config: ModelConfig,
     ds_config: dict,
@@ -159,6 +193,8 @@ def load_ref_policy(
     rank: int,
     checkpoint_path: str | None = None,
     mpu: torch.distributed.distributed_c10d.ProcessGroup | None = None,
+    ref_policy_update_freq: int | None = None,
+    alpha: float = 0.0,
 ) -> transformers.PreTrainedModel:
     """Loads a reference policy model for evaluation.
 
@@ -171,6 +207,8 @@ def load_ref_policy(
         rank: Global process rank for logging.
         checkpoint_path: Optional path to model checkpoint to load.
         mpu: Optional model parallel unit for sequence parallelism.
+        ref_policy_update_freq: Frequency of reference policy updates. If None, no updates occur.
+        alpha: Alpha value for polyak updates. If 0, no updates occur.
 
     Returns:
         Initialized reference policy model in evaluation mode.
@@ -190,14 +228,14 @@ def load_ref_policy(
     ref_policy.eval()
 
     if checkpoint_path:
-        state_dict = torch.load(checkpoint_path, map_location=device)
-        if hasattr(ref_policy, "module"):
-            # Needed if wrapped by DeepSpeed.
-            ref_policy.module.load_state_dict(state_dict)
-        else:
-            # If a vanilla HF model.
-            ref_policy.load_state_dict(state_dict)
-        logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
+        # throw an error if we fail to load AND we are updating the reference.
+        maybe_load_checkpoint(
+            model=ref_policy,
+            checkpoint_path=checkpoint_path,
+            device=device,
+            rank=rank,
+            throw_on_error=ref_policy_update_freq is not None and alpha != 0,
+        )
     return ref_policy
 
 
