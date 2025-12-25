@@ -6,7 +6,7 @@ beaker experiment create configs/judge_configs/general_verifier_judge.yaml \
     --priority high
 
 # then get the machine url. We set
-JUDGE_BASE_URL=http://saturn-cs-aus-236.reviz.ai2.in:8000/v1
+JUDGE_BASE_URL=http://saturn-cs-aus-476.reviz.ai2.in:8002/v1
 
 # finally, launch the training job:
 python mason.py \
