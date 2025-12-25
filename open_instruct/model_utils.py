@@ -150,6 +150,40 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
             module.p = 0
 
 
+def maybe_load_checkpoint(
+    model: torch.nn.Module, checkpoint_path: str, device: torch.device, rank: int, throw_on_error: bool = True
+) -> None:
+    """Load a checkpoint into a model, with optional error handling.
+
+    Args:
+        model: The model to load the checkpoint into.
+        checkpoint_path: Path to the checkpoint file.
+        device: Device to load the checkpoint onto.
+        rank: Global process rank for logging.
+        throw_on_error: if true, throw an error if the checkpoint fails to load.
+    """
+
+    def _load_checkpoint(path: str, dev: torch.device):
+        state_dict = torch.load(path, map_location=dev)
+        if hasattr(model, "module"):
+            # Needed if wrapped by DeepSpeed.
+            model.module.load_state_dict(state_dict)
+        else:
+            # If a vanilla HF model.
+            model.load_state_dict(state_dict)
+        logger.info(f"{rank=}: Loaded checkpoint from {path}")
+
+    if not throw_on_error:
+        try:
+            _load_checkpoint(checkpoint_path, device)
+        except Exception as e:
+            logger.error(
+                f"{rank=}: Falling back to using base reference, Failed to load checkpoint from {checkpoint_path}: {e}"
+            )
+    else:
+        _load_checkpoint(checkpoint_path, device)
+
+
 def load_ref_policy(
     model_config: ModelConfig,
     ds_config: dict,
@@ -192,28 +226,14 @@ def load_ref_policy(
     ref_policy.eval()
 
     if checkpoint_path:
-
-        def _load_checkpoint(path: str, dev: torch.device):
-            state_dict = torch.load(path, map_location=dev)
-            if hasattr(ref_policy, "module"):
-                # Needed if wrapped by DeepSpeed.
-                ref_policy.module.load_state_dict(state_dict)
-            else:
-                # If a vanilla HF model.
-                ref_policy.load_state_dict(state_dict)
-            logger.info(f"{rank=}: Loaded reference policy checkpoint from {path}")
-
-        # Only catch errors gracefully if ref policy won't be updated,
-        # since then we can just re-use the original reference model ckpt.
-        # if we are updating the reference, then we need to load the checkpoint.
-        if ref_policy_update_freq is None or alpha == 0:
-            try:
-                _load_checkpoint(checkpoint_path, device)
-            except Exception as e:
-                logger.error(f"{rank=}: Failed to load reference policy checkpoint from {checkpoint_path}: {e}")
-                logger.error(f"{rank=}: Falling back to using base model as reference policy")
-        else:
-            _load_checkpoint(checkpoint_path, device)
+        # throw an error if we fail to load AND we are updating the reference.
+        maybe_load_checkpoint(
+            model=ref_policy,
+            checkpoint_path=checkpoint_path,
+            device=device,
+            rank=rank,
+            throw_on_error=ref_policy_update_freq is not None and alpha != 0,
+        )
     return ref_policy
 
 
