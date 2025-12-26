@@ -1091,16 +1091,23 @@ class PolicyTrainerRayProcess(RayProcess):
 
         local_step = 0
         num_samples = len(data_BT.query_responses)
+        # Pre-compute token counts per sample (for weighted averaging across SP ranks)
+        # This only needs to be done once since response_masks don't change across epochs
+        token_counts_per_sample = torch.tensor(
+            [data_BT.response_masks[i][:, 1:].sum().float().item() for i in range(num_samples)], device=self.device
+        )
+        total_valid_tokens = token_counts_per_sample.sum().item()
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B: dict[str, torch.Tensor] = {
-                "kl": torch.zeros(4, num_samples),
-                "kl_loss": torch.zeros(num_samples),
-                "pg_clipfrac": torch.zeros(num_samples),
-                "pg_loss": torch.zeros(num_samples),
-                "loss": torch.zeros(num_samples),
-                "ratio": torch.zeros(num_samples),
-                "entropy": torch.zeros(num_samples),
+                "kl": torch.zeros(4, num_samples, device=self.device),
+                "kl_loss": torch.zeros(num_samples, device=self.device),
+                "pg_clipfrac": torch.zeros(num_samples, device=self.device),
+                "pg_loss": torch.zeros(num_samples, device=self.device),
+                "loss": torch.zeros(num_samples, device=self.device),
+                "ratio": torch.zeros(num_samples, device=self.device),
+                "entropy": torch.zeros(num_samples, device=self.device),
+                "token_count": token_counts_per_sample,  # Pre-computed token counts (already on device)
             }
             for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
@@ -1285,18 +1292,42 @@ class PolicyTrainerRayProcess(RayProcess):
                         if self.args.record_entropy:
                             loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
             with torch.no_grad():
-                if args.load_ref_policy:
-                    for j in range(4):
-                        self.local_metrics[f"objective/kl{j}_avg"] = loss_stats_B["kl"][j].mean()
-                    self.local_metrics["loss/kl_avg"] = loss_stats_B["kl_loss"].mean()
-                self.local_metrics["loss/policy_avg"] = loss_stats_B["pg_loss"].mean()
-                self.local_metrics["loss/total_avg"] = loss_stats_B["loss"].mean()
-                self.local_metrics["policy/clipfrac_avg"] = loss_stats_B["pg_clipfrac"].mean()
-                self.local_metrics["val/ratio"] = loss_stats_B["ratio"].mean()
-                self.local_metrics["val/ratio_var"] = loss_stats_B["ratio"].var()
-                if self.args.record_entropy:
-                    self.local_metrics["policy/entropy_avg"] = loss_stats_B["entropy"].mean()
+                # Compute weighted averages using token counts (important for sequence parallel)
+                token_counts = loss_stats_B["token_count"]
+                total_tokens = token_counts.sum()
+                if total_tokens > 0:
+                    weights = token_counts / total_tokens
+                    if args.load_ref_policy:
+                        for j in range(4):
+                            self.local_metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum()
+                        self.local_metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum()
+                    self.local_metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum()
+                    self.local_metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum()
+                    self.local_metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum()
+                    self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
+                    # Weighted variance: sum(w * (x - weighted_mean)^2)
+                    weighted_mean_ratio = (loss_stats_B["ratio"] * weights).sum()
+                    self.local_metrics["val/ratio_var"] = (
+                        weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2
+                    ).sum()
+                    if self.args.record_entropy:
+                        self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
+                else:
+                    # No valid tokens in this rank's chunk - set metrics to 0
+                    if args.load_ref_policy:
+                        for j in range(4):
+                            self.local_metrics[f"objective/kl{j}_avg"] = 0.0
+                        self.local_metrics["loss/kl_avg"] = 0.0
+                    self.local_metrics["loss/policy_avg"] = 0.0
+                    self.local_metrics["loss/total_avg"] = 0.0
+                    self.local_metrics["policy/clipfrac_avg"] = 0.0
+                    self.local_metrics["val/ratio"] = 0.0
+                    self.local_metrics["val/ratio_var"] = 0.0
+                    if self.args.record_entropy:
+                        self.local_metrics["policy/entropy_avg"] = 0.0
                 self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
+                # Store total token count for this rank (for weighted averaging across ranks)
+                self.local_metrics["_token_count"] = total_valid_tokens
                 return self.local_metrics.get_metrics_list()
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
@@ -2450,7 +2481,40 @@ def one_training_step(
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
-    average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
+    # Compute token-weighted average for metrics (important for sequence parallel)
+    # Metrics that are averages over tokens should be weighted by token count
+    token_counts = [m.get("_token_count", 1.0) for m in metrics_list]
+    total_tokens = sum(token_counts)
+    if total_tokens > 0:
+        weights = [tc / total_tokens for tc in token_counts]
+    else:
+        weights = [1.0 / len(metrics_list)] * len(metrics_list)
+
+    # Metrics that should be token-weighted (averages over tokens)
+    token_weighted_metrics = {
+        "objective/kl0_avg",
+        "objective/kl1_avg",
+        "objective/kl2_avg",
+        "objective/kl3_avg",
+        "loss/kl_avg",
+        "loss/policy_avg",
+        "loss/total_avg",
+        "policy/clipfrac_avg",
+        "policy/entropy_avg",
+        "val/ratio",
+        "val/ratio_var",
+    }
+    average_metrics = {}
+    for k in metrics_list[0]:
+        if k == "_token_count":
+            # Don't include internal token count in final metrics
+            continue
+        if k in token_weighted_metrics:
+            # Token-weighted average
+            average_metrics[k] = sum(m[k] * w for m, w in zip(metrics_list, weights))
+        else:
+            # Simple average for other metrics (e.g., lr)
+            average_metrics[k] = sum(m[k] for m in metrics_list) / len(metrics_list)
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
