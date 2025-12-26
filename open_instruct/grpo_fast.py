@@ -2176,7 +2176,7 @@ def create_model_and_optimizer(
         model_config.model_revision,
         args.seed,
         args.vllm_enable_prefix_caching,
-        args.max_prompt_token_length + args.response_length,
+        args.max_prompt_token_length + args.response_length,  # max_model_len, total length to generate
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
