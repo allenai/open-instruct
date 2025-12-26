@@ -284,7 +284,11 @@ def calculate_advantages_packed(
 def masked_mean(
     values: torch.Tensor, mask: torch.Tensor, axis: int | None = None, denominator: float | None = None
 ) -> torch.Tensor:
-    """Compute mean of tensor with masked values."""
+    """Compute mean of tensor with masked values.
+
+    Returns 0 if mask is empty (no valid elements) to avoid division by zero.
+    This can happen with sequence parallel when a chunk contains only query/padding tokens.
+    """
     extra_dims = values.ndim - mask.ndim
     if axis is None:
         sum_dims = tuple(range(extra_dims, values.ndim))
@@ -294,5 +298,9 @@ def masked_mean(
         sum_dims = axis
     numerator = (values * mask).sum(dim=sum_dims)
     denom = mask.sum(dim=axis) if denominator is None else denominator
-    result = numerator / denom
+    # Handle empty mask case (e.g., SP chunk with no response tokens)
+    if isinstance(denom, torch.Tensor):
+        result = torch.where(denom > 0, numerator / denom, torch.zeros_like(numerator))
+    else:
+        result = numerator / denom if denom > 0 else torch.zeros_like(numerator)
     return result.flatten(extra_dims).mean(-1) if result.ndim > extra_dims else result
