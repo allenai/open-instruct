@@ -680,6 +680,12 @@ class PolicyTrainerRayProcess(RayProcess):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
+        # Pre-initialize torch.distributed WITHOUT device_id to avoid NCCL hangs.
+        # DeepSpeed 0.17.3 and up sets device_id in init_process_group which can cause hangs
+        # when multiple process groups exist (e.g., for weight sync to vLLM).
+        # By initializing first, DeepSpeed will detect it and wrap it instead of re-initializing.
+        if not torch.distributed.is_initialized():
+            torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=args.backend_timeout))
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(
@@ -866,6 +872,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
+            torch.cuda.set_device(self.local_rank)
             self.model_update_group = vllm_utils.init_process_group(
                 backend=backend,
                 init_method=f"tcp://{master_address}:{master_port}",
@@ -880,6 +887,9 @@ class PolicyTrainerRayProcess(RayProcess):
     def broadcast_to_vllm(self):
         # avoid OOM
         torch.cuda.empty_cache()
+        # Ensure CUDA device is set before broadcast operations.
+        # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
+        torch.cuda.set_device(self.local_rank)
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
