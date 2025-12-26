@@ -2092,24 +2092,21 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
     return train_dataset, eval_dataset
 
 
-def load_tools(args: Args) -> tuple[dict[str, tools.Tool], list[str]]:
-    """Load tool instances and collect their stop strings.
+def load_tools(args: Args) -> dict[str, tools.Tool]:
+    """Load tool instances based on args.tools configuration.
 
     Args:
         args: Parsed training arguments with tool configuration.
 
     Returns:
-        A tuple containing:
-            - A mapping from tool end strings to tool instances.
-            - A list of stop strings for the loaded tools.
+        A mapping from tool end strings to tool instances.
 
     Raises:
         ValueError: If an unknown tool is requested.
     """
     tool_objects: dict[str, tools.Tool] = {}
-    stop_strings: list[str] = []
     if not args.tools:
-        return tool_objects, stop_strings
+        return tool_objects
 
     for tool in args.tools:
         if tool.lower() == "search":
@@ -2129,9 +2126,8 @@ def load_tools(args: Args) -> tuple[dict[str, tools.Tool], list[str]]:
             raise ValueError(f"Unknown tool: {tool}")
 
         tool_objects[tool_instance.end_str] = tool_instance
-        stop_strings.append(tool_instance.end_str)
 
-    return tool_objects, stop_strings
+    return tool_objects
 
 
 def create_model_and_optimizer(
@@ -2160,10 +2156,8 @@ def create_model_and_optimizer(
         for model in policy_group.models
     ]
 
-    # Set up tools
-    max_len = args.max_prompt_token_length + args.response_length
-    tool_objects, new_stop_strings = load_tools(args)
-    args.stop_strings.extend(new_stop_strings)
+    tool_objects = load_tools(args)
+    args.stop_strings.extend(tool_objects.keys())
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -2182,7 +2176,7 @@ def create_model_and_optimizer(
         model_config.model_revision,
         args.seed,
         args.vllm_enable_prefix_caching,
-        max_len,
+        args.max_prompt_token_length + args.response_length,
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
