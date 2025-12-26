@@ -65,6 +65,7 @@ import torch
 import torch.distributed as dist
 import torch.utils
 import torch.utils.data
+import wandb
 from datasets import Dataset
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
@@ -76,7 +77,6 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-import wandb
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
@@ -680,7 +680,7 @@ class PolicyTrainerRayProcess(RayProcess):
         random.seed(worker_seed)
 
         # Pre-initialize torch.distributed WITHOUT device_id to avoid NCCL hangs.
-        # DeepSpeed 0.17.3+ sets device_id in init_process_group which can cause hangs
+        # DeepSpeed 0.17.3 and up sets device_id in init_process_group which can cause hangs
         # when multiple process groups exist (e.g., for weight sync to vLLM).
         # By initializing first, DeepSpeed will detect it and wrap it instead of re-initializing.
         if not torch.distributed.is_initialized():
