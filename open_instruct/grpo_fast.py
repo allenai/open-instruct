@@ -485,6 +485,16 @@ class Args:
         assert self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout >= sum(
             self.num_learners_per_node
         ), "You must have at least as many samples as training GPUs (DP ranks) for distributed training!"
+        # assert that we are only doing sequence parallel if we are using zero-3
+        if self.deepspeed_stage != 3 and self.sequence_parallel_size > 1:
+            raise ValueError(
+                f"Sequence parallel is only supported for DeepSpeed stage 3!, got deepspeed_stage={self.deepspeed_stage} and sequence_parallel_size={self.sequence_parallel_size}"
+            )
+        # ensure we have enough ranks for sequence parallel
+        if self.sequence_parallel_size > sum(self.num_learners_per_node):
+            raise ValueError(
+                f"You must have at least as many ranks as sequence parallel size!, got sequence_parallel_size={self.sequence_parallel_size} and world_size={sum(self.num_learners_per_node)}"
+            )
         if self.stop_strings is None:
             self.stop_strings = []
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
