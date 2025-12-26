@@ -339,7 +339,7 @@ def init_process_group(
     store: Store | None = None,
     group_name: str | None = None,
     pg_options: Any | None = None,
-    device_id: torch.device | None = None,
+    device_id: torch.device | int | None = None,
 ) -> ProcessGroup:
     assert (store is None) or (init_method is None), "Cannot specify both init_method and store."
 
