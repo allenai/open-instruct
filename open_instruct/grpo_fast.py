@@ -1093,9 +1093,7 @@ class PolicyTrainerRayProcess(RayProcess):
         num_samples = len(data_BT.query_responses)
         # Pre-compute token counts per sample (for weighted averaging across SP ranks)
         # This only needs to be done once since response_masks don't change across epochs
-        token_counts_per_sample = torch.tensor(
-            [data_BT.response_masks[i][:, 1:].sum().float().item() for i in range(num_samples)], device=self.device
-        )
+        token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         total_valid_tokens = token_counts_per_sample.sum().item()
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
