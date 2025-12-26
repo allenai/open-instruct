@@ -1,0 +1,1049 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/data/preference-data/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+    
+    
+      
+        <title>Current preference datasets - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.618322db.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#current-preference-datasets" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Current preference datasets
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/ai2_internal_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/trained_model.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    None
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/ppo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proximal Policy Optimization (PPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#chat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chat
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Chat">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#maintained-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Maintained here
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stored-on-hf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stored on HF
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ultrafeedback-replication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UltraFeedback Replication
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ultrainteract-variants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UltraInteract Variants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tulu-25-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tulu 2.5 Data
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="current-preference-datasets">Current preference datasets</h1>
+<p>To build all the datasets at once (use this carefully), run:
+<div class="highlight"><pre><span></span><code>sh scripts/data/preferences/prepare_all.sh
+</code></pre></div></p>
+<h2 id="chat">Chat</h2>
+<h3 id="maintained-here">Maintained here</h3>
+<p>First, older popular datasets. Build these datasets (a subset only) with:
+<div class="highlight"><pre><span></span><code>python scripts/data/preferences/webgpt.py --push_to_hub --hf_entity=ai2-adapt-dev
+python scripts/data/preferences/hh-harmless.py --push_to_hub --hf_entity=ai2-adapt-dev
+python scripts/data/preferences/hh-helpful.py --push_to_hub --hf_entity=ai2-adapt-dev
+</code></pre></div>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/webgpt-binarized">ai2-adapt-dev/webgpt-binarized</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/hh-rlhf-harmless">ai2-adapt-dev/hh-rlhf-harmless</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/hh-rlhf-helpful">ai2-adapt-dev/hh-rlhf-helpful</a></p>
+<p>Next, Nvidia's recent HelpSteer 2.
+They are created with:
+<div class="highlight"><pre><span></span><code>python scripts/data/preferences/helpsteer2.py --push_to_hub --min_score 2.5 --hf_entity=ai2-adapt-dev
+python scripts/data/preferences/helpsteer2.py --push_to_hub --min_score 2 --hf_entity=ai2-adapt-dev
+python scripts/data/preferences/helpsteer2.py --push_to_hub --min_score 2 --hf_entity=ai2-adapt-dev --aspects_to_ignore verbosity
+python scripts/data/preferences/helpsteer2.py --push_to_hub --hf_entity=ai2-adapt-dev --aspects_to_ignore verbosity
+</code></pre></div>
+The binarization weighting that Nvidia recommends can be used with:
+<div class="highlight"><pre><span></span><code>python scripts/data/preferences/helpsteer2_nvidia.py --push_to_hub --hf_entity ai2-adapt-dev
+</code></pre></div>
+Some examples include:
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/helpsteer-2-binarized-above-2.0-margin-0.5-ignore-verbosity">ai2-adapt-dev/helpsteer-2-binarized-above-2.0-margin-0.5-ignore-verbosity</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/helpsteer-2-binarized-ignore-verbosity">ai2-adapt-dev/helpsteer-2-binarized-ignore-verbosity</a>: This ignores verbosity aspect, which is unclear in the paper.
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/helpsteer2-binarized-nvidia-spec">ai2-adapt-dev/helpsteer2-binarized-nvidia-spec</a>: This uses the specific weighting that Nvidia converged on in their HelpSteer2 paper training multiple types of reward models.</p>
+<p>Also, specific splits of Nectar (randomly binarized from top 3 completions and a bottom completion) are included with:
+<div class="highlight"><pre><span></span><code>python scripts/data/preferences/nectar.py --push_to_hub --hf_entity ai2-adapt-dev
+python scripts/data/preferences/nectar.py --push_to_hub --subset anthropic-hh --hf_entity ai2-adapt-dev
+python scripts/data/preferences/nectar.py --push_to_hub --deduplication --hf_entity ai2-adapt-dev
+</code></pre></div>
+The default split is <code>lmsys-chat-1m</code>.
+The last example is called "deduplication" due to potential overlap with UltraFeedback, given they source from the same underlying dataset. Basic tests showed they did not use the same prompts, but slight modifications could've occured.
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/nectar_binarized-anthropic-hh">ai2-adapt-dev/nectar_binarized-anthropic-hh</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/nectar_binarized-lmsys-chat-1m">ai2-adapt-dev/nectar_binarized-lmsys-chat-1m</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/nectar_binarized-dedup-ultrafeedb">ai2-adapt-dev/nectar_binarized-dedup-ultrafeedback</a>ack</p>
+<h3 id="stored-on-hf">Stored on HF</h3>
+<ul>
+<li><a href="https://huggingface.co/datasets/allenai/ultrafeedback_binarized_cleaned_train">allenai/ultrafeedback_binarized_cleaned_train</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/summarize_from_feedback">ai2-adapt-dev/summarize_from_feedback</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/DaringAnteater-prefs">ai2-adapt-dev/DaringAnteater-prefs</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/DaringAnteater-prefs-RM-filter">ai2-adapt-dev/DaringAnteater-prefs-RM-filter</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/WildChat-prefs-280824">ai2-adapt-dev/WildChat-prefs-280824</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/helpsteer2-binarized-mean-aspects">ai2-adapt-dev/helpsteer2-binarized-mean-aspects</a>: Similar to our other HelpSteer splits, less processing.</li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/Skywork-Magpie">ai2-adapt-dev/Skywork-Magpie</a>: Subset of the <a href="https://huggingface.co/datasets/Skywork/Skywork-Reward-Preference-80K-v0.1">Skywork Preference Dataset</a> for only the <a href="https://arxiv.org/abs/2406.08464">Magpie</a> splits.</li>
+</ul>
+<h3 id="ultrafeedback-replication">UltraFeedback Replication</h3>
+<p><strong>The current replications have fewer prompts than the original. These are built by splitting the original and recreating completions. We are working on merging them.</strong></p>
+<p>Build these datasets with:
+<div class="highlight"><pre><span></span><code>python scripts/data/preferences/ultrafeedback.py --push_to_hub --hf_entity=ai2-adapt-dev
+</code></pre></div>
+The master version of the UltraFeedback pipeline replication can be found here:
+<a href="https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-pipeline-replication">ai2-adapt-dev/ultrafeedback-pipeline-replication</a></p>
+<p>UltraFeedback variants explore different combinations of prompt sources, model diversity, sampling methods, and prompt templates:</p>
+<ul>
+<li>Setup 0: Replication of original UltraFeedback</li>
+<li>Setup 1-2: Custom prompts with UltraFeedback methodology</li>
+<li>Setup 3-4: Custom prompts with varied model diversity and principle sampling</li>
+<li>Setup 5: Custom prompts with UltraFeedback template</li>
+<li>
+<p>Setup 6: Increased model diversity</p>
+</li>
+<li>
+<p><a href="https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p0">ai2-adapt-dev/ultrafeedback-replication-p0</a></p>
+</li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p1">ai2-adapt-dev/ultrafeedback-replication-p1</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p2">ai2-adapt-dev/ultrafeedback-replication-p2</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p3">ai2-adapt-dev/ultrafeedback-replication-p3</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p4">ai2-adapt-dev/ultrafeedback-replication-p4</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p5">ai2-adapt-dev/ultrafeedback-replication-p5</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p6">ai2-adapt-dev/ultrafeedback-replication-p6</a></li>
+</ul>
+<h2 id="ultrainteract-variants">UltraInteract Variants</h2>
+<p>Build these datasets with:
+<div class="highlight"><pre><span></span><code>python scripts/data/preferences/ultrainteract.py --push_to_hub --hf_entity=ai2-adapt-dev
+</code></pre></div>
+Split by category and by selecting the longest conversations per prompt or a random length per prompt.
+From <a href="https://huggingface.co/datasets/openbmb/UltraInteract_pair">UltraInteract_pair</a>.</p>
+<ul>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/UltraInteract_pair_maxlen_Coding">ai2-adapt-dev/UltraInteract_pair_maxlen_Coding</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/UltraInteract_pair_randomlen_Coding">ai2-adapt-dev/UltraInteract_pair_randomlen_Coding</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/UltraInteract_pair_maxlen_Math_CoT">ai2-adapt-dev/UltraInteract_pair_maxlen_Math_CoT</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/UltraInteract_pair_randomlen_Math_CoT">ai2-adapt-dev/UltraInteract_pair_randomlen_Math_CoT</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/UltraInteract_pair_maxlen_Math_PoT">ai2-adapt-dev/UltraInteract_pair_maxlen_Math_PoT</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/UltraInteract_pair_randomlen_Math_PoT">ai2-adapt-dev/UltraInteract_pair_randomlen_Math_PoT</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/UltraInteract_pair_maxlen_Logic">ai2-adapt-dev/UltraInteract_pair_maxlen_Logic</a></li>
+<li><a href="https://huggingface.co/datasets/ai2-adapt-dev/UltraInteract_pair_randomlen_Logic">ai2-adapt-dev/UltraInteract_pair_randomlen_Logic</a></li>
+</ul>
+<h2 id="tulu-25-data">Tulu 2.5 Data</h2>
+<p>Build these datasets with:
+<div class="highlight"><pre><span></span><code>python scripts/data/preferences/split_tulu2.5_prefs.py --push_to_hub --hf_entity=ai2-adapt-dev
+</code></pre></div>
+Split from <a href="https://huggingface.co/datasets/allenai/tulu-2.5-preference-data">this dataset</a> for easier mixing:
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-alpaca_farm_gpt4_pref">ai2-adapt-dev/tulu-2.5-prefs-alpaca_farm_gpt4_pref</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-alpaca_farm_human_pref">ai2-adapt-dev/tulu-2.5-prefs-alpaca_farm_human_pref</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-argilla_dpo_mix">ai2-adapt-dev/tulu-2.5-prefs-argilla_dpo_mix</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-capybara">ai2-adapt-dev/tulu-2.5-prefs-capybara</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-chatbot_arena_2023">ai2-adapt-dev/tulu-2.5-prefs-chatbot_arena_2023</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-chatbot_arena_2024">ai2-adapt-dev/tulu-2.5-prefs-chatbot_arena_2024</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-helpsteer">ai2-adapt-dev/tulu-2.5-prefs-helpsteer</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-hh_rlhf">ai2-adapt-dev/tulu-2.5-prefs-hh_rlhf</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-hh_rlhf_60k">ai2-adapt-dev/tulu-2.5-prefs-hh_rlhf_60k</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-nectar">ai2-adapt-dev/tulu-2.5-prefs-nectar</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-nectar_60k">ai2-adapt-dev/tulu-2.5-prefs-nectar_60k</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-orca_dpo_pairs">ai2-adapt-dev/tulu-2.5-prefs-orca_dpo_pairs</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-preference_big_mixture">ai2-adapt-dev/tulu-2.5-prefs-preference_big_mixture</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-prm800k_pairs_phase2">ai2-adapt-dev/tulu-2.5-prefs-prm800k_pairs_phase2</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-shp_2">ai2-adapt-dev/tulu-2.5-prefs-shp_2</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-stack_exchange_60k">ai2-adapt-dev/tulu-2.5-prefs-stack_exchange_60k</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-stack_exchange_paired">ai2-adapt-dev/tulu-2.5-prefs-stack_exchange_paired</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_evol_instruct">ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_evol_instruct</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_false_qa">ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_false_qa</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_flan_v2">ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_flan_v2</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_lower_10k">ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_lower_10k</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_mean_aspects">ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_mean_aspects</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_middle_10k">ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_middle_10k</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_overall">ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_overall</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_sharegpt">ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_sharegpt</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_top_10k">ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_top_10k</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_truthful_qa">ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_truthful_qa</a>
+* <a href="https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_ultrachat">ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_ultrachat</a></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

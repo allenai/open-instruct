@@ -1,0 +1,1364 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/algorithms/online_dpo/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+    
+    
+      
+        <title>Reward model training - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.618322db.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#reward-model-training" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Reward model training
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/ai2_internal_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../trained_model.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    None
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ppo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proximal Policy Optimization (PPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#get-started" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Get started
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Get started">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#level-0-single-gpu-quick-debug-should-take-less-than-10-minutes-to-finish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Level 0: single GPU; quick debug. Should take less than 10 minutes to finish
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#old-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Old examples
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Old examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#level-1-8-gpu-tldr-summarization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LEVEL 1: 8 GPU; TL;DR summarization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#level-2-8-gpu-huggingface-no-robot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LEVEL 2: 8 GPU; Huggingface no robot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#level-3-8-gpu-training-on-ultrafeedback-rm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LEVEL 3: 8 GPU; Training on ultrafeedback RM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#if-you-want-to-use-beaker-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        If you want to use beaker datasets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#quality-of-life-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quality of life tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#explanation-of-the-logged-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explanation of the logged metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation details
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="reward-model-training">Reward model training</h1>
+<p><code>open_instruct/online_dpo.py</code> contains the script for training online DPO models.</p>
+<h2 id="get-started">Get started</h2>
+<p>In the sections below, we will include some examples on how to train models and demonstrating different features. A couple of notes:</p>
+<ul>
+<li>You should adjust your <code>per_device_train_batch_size</code> and <code>gradient_accumulation_steps</code> accordingly to maximize throughput on a particular GPU type.</li>
+<li>If you set <code>take_top_bottom_generation</code>, you can use a <code>num_generation_per_prompt</code> larger than 2 -- it just takes the top and bottom scoring generations for each prompt.</li>
+<li>For the examples below, we use <code>mason.py</code> to invoke experiment orchastration on Ai2's cluster. For external users, you can copy the command after the <code>--</code> and run it on your system or debug locally. For example: the documentation will have commands like the following, but you can just run <code>$YOUR_COMMAND</code> on your system and make sure it matches <code>$NUM_GPUS</code>.<ul>
+<li>You can you <code>--image costah/open_instruct_onlinedpo2</code> to specify a custom image or if you don't specify any it's going to use the default image.</li>
+<li>If you installed your python on NFS you can run a debug mode by <strong>not toggling</strong> <code>--pure_docker_mode</code> and it will mount your python environment on the docker container.</li>
+</ul>
+</li>
+</ul>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>mason.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--cluster<span class="w"> </span>ai2/jupiter<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--image<span class="w"> </span>costah/open_instruct_onlinedpo2<span class="w"> </span>--pure_docker_mode<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--priority<span class="w"> </span>preemptible<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--budget<span class="w"> </span>ai2/jupiter<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpus<span class="w"> </span><span class="nv">$NUM_GPUS</span><span class="w"> </span>--<span class="w"> </span><span class="nv">$YOUR_COMMAND</span>
+</code></pre></div>
+<p><strong>WARNING: This script is not battle-tested. There may be bugs and issues -- please report them! Use at your own risk.</strong></p>
+<h3 id="level-0-single-gpu-quick-debug-should-take-less-than-10-minutes-to-finish">Level 0: single GPU; quick debug. Should take less than 10 minutes to finish</h3>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>open_instruct/online_dpo_vllm_thread.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer_list<span class="w"> </span>trl-internal-testing/tldr-preference-sft-trl-style<span class="w"> </span><span class="m">1</span>.0<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer_eval_list<span class="w"> </span>trl-internal-testing/tldr-preference-sft-trl-style<span class="w"> </span><span class="m">1</span>.0<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer_list_splits<span class="w"> </span>train<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer_eval_list_splits<span class="w"> </span>validation<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_token_length<span class="w"> </span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_prompt_token_length<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name_or_path<span class="w"> </span>cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--reward_model_path<span class="w"> </span>cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--non_stop_penalty<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--stop_token<span class="w"> </span>eos<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--chat_template<span class="w"> </span>simple_concat_with_space<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--learning_rate<span class="w"> </span>3e-6<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--total_episodes<span class="w"> </span><span class="m">3000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--per_device_train_batch_size<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--per_device_eval_batch_size<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gradient_accumulation_steps<span class="w"> </span><span class="m">64</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_token_length<span class="w"> </span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_prompt_token_length<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--beta<span class="w"> </span><span class="m">0</span>.1<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--output_dir<span class="w"> </span>models/rm/rm_sentiment_1b<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--single_gpu_mode<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--hf_metadata_dataset<span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--no_try_launch_beaker_eval_jobs<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gradient_checkpointing<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--with_tracking<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--push_to_hub<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--vllm_gpu_memory_utilization<span class="w"> </span><span class="m">0</span>.5<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--actor_num_gpus_per_node<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--local_mini_batch_size<span class="w"> </span><span class="m">32</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num_mini_batches<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--vllm_sync_backend<span class="w"> </span>gloo
+
+<span class="c1"># LEVEL 0.1: two GPU; quick debug; using 1 GPU for training and 1 GPU for vllm generation via --vllm_device cuda:1</span>
+python<span class="w"> </span>open_instruct/online_dpo_vllm_thread.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer_list<span class="w"> </span>trl-internal-testing/tldr-preference-sft-trl-style<span class="w"> </span><span class="m">1</span>.0<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer_eval_list<span class="w"> </span>trl-internal-testing/tldr-preference-sft-trl-style<span class="w"> </span><span class="m">1</span>.0<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer_list_splits<span class="w"> </span>train<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer_eval_list_splits<span class="w"> </span>validation<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_token_length<span class="w"> </span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_prompt_token_length<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name_or_path<span class="w"> </span>cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--reward_model_path<span class="w"> </span>cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--non_stop_penalty<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--stop_token<span class="w"> </span>eos<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--chat_template<span class="w"> </span>simple_concat_with_space<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--learning_rate<span class="w"> </span>3e-6<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--total_episodes<span class="w"> </span><span class="m">3000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--per_device_train_batch_size<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--per_device_eval_batch_size<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gradient_accumulation_steps<span class="w"> </span><span class="m">64</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_token_length<span class="w"> </span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_prompt_token_length<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num_train_epochs<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--beta<span class="w"> </span><span class="m">0</span>.1<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--output_dir<span class="w"> </span>models/rm/rm_sentiment_1b<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--single_gpu_mode<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--vllm_gpu_memory_utilization<span class="w"> </span><span class="m">0</span>.5<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--actor_num_gpus_per_node<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--local_mini_batch_size<span class="w"> </span><span class="m">32</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num_mini_batches<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--vllm_sync_backend<span class="w"> </span>gloo
+<span class="w">    </span>--no_try_launch_beaker_eval_jobs<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gradient_checkpointing<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--with_tracking<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--push_to_hub
+</code></pre></div>
+<h2 id="old-examples">Old examples</h2>
+<p>These examples use the older form of the script available at https://github.com/allenai/open-instruct/blob/efa36849bd65db7614e6729344df94ace83b7228/open_instruct/online_dpo_vllm_thread.py. These require older package versions, use at your own risk.</p>
+<h3 id="level-1-8-gpu-tldr-summarization">LEVEL 1: 8 GPU; TL;DR summarization</h3>
+<p>Here we are using --vllm_device cuda:7 to say we want to launch the vllm generation engine on the 8th GPU (or GPU_7 using 0 index)
+<div class="highlight"><pre><span></span><code><span class="c1"># for running TL;DR you can likely use GPUs with less memory</span>
+python<span class="w"> </span>mason.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--image<span class="w"> </span>nathanl/open_instruct_auto<span class="w"> </span>--pure_docker_mode<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--cluster<span class="w"> </span>ai2/jupiter<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--priority<span class="w"> </span>normal<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--resumable<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--preemptible<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--budget<span class="w"> </span>ai2/jupiter<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpus<span class="w"> </span><span class="m">8</span><span class="w"> </span>--<span class="w"> </span>accelerate<span class="w"> </span>launch<span class="w"> </span>--num_processes<span class="w"> </span><span class="m">7</span><span class="w"> </span>--config_file<span class="w"> </span>configs/ds_configs/deepspeed_zero3.yaml<span class="w"> </span><span class="se">\</span>
+<span class="w">     </span>open_instruct/online_dpo_vllm_thread.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer<span class="w"> </span><span class="s1">&#39;{&quot;trl-internal-testing/tldr-preference-sft-trl-style&quot;: 1.0}&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_train_splits<span class="w"> </span>train<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_eval_mixer<span class="w"> </span><span class="s1">&#39;{&quot;trl-internal-testing/tldr-preference-sft-trl-style&quot;: 1.0}&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_eval_splits<span class="w"> </span>validation<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_token_length<span class="w"> </span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_prompt_token_length<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--learning_rate<span class="w"> </span>3e-6<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--output_dir<span class="w"> </span>models/minimal/online_dpo_vllm_thread_tldr<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--per_device_train_batch_size<span class="w"> </span><span class="m">16</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--local_rollout_forward_batch_size<span class="w"> </span><span class="m">32</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gradient_accumulation_steps<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num_epochs<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num_mini_batches<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--total_episodes<span class="w"> </span><span class="m">1000000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name_or_path<span class="w"> </span>cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr<span class="w">  </span><span class="se">\</span>
+<span class="w">    </span>--reward_model_path<span class="w"> </span>cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--non_stop_penalty<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--stop_token<span class="w"> </span>eos<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--beta<span class="w"> </span><span class="m">0</span>.1<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--response_length<span class="w"> </span><span class="m">53</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--with_tracking<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--push_to_hub<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--hf_metadata_dataset<span class="w"> </span><span class="s1">&#39;&quot;&quot;&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--no_try_launch_beaker_eval_jobs<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--single_gpu_mode
+</code></pre></div></p>
+<ul>
+<li>Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/fub45jhm</li>
+<li>Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread__cleanrl_EleutherAI_pythia-1b-deduped__sft__tldr/tree/online_dpo_vllm_thread__1__1726080959</li>
+</ul>
+<h3 id="level-2-8-gpu-huggingface-no-robot">LEVEL 2: 8 GPU; Huggingface no robot</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># for running chat based models you should use an 8xH100 node.</span>
+python<span class="w"> </span>mason.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--cluster<span class="w"> </span>ai2/jupiter<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--image<span class="w"> </span>nathanl/open_instruct_auto<span class="w"> </span>--pure_docker_mode<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--workspace<span class="w"> </span>ai2/tulu-3-dev<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--priority<span class="w"> </span>high<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--preemptible<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--budget<span class="w"> </span>ai2/jupiter<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpus<span class="w"> </span><span class="m">8</span><span class="w"> </span>--<span class="w"> </span>accelerate<span class="w"> </span>launch<span class="w"> </span>--num_processes<span class="w"> </span><span class="m">7</span><span class="w"> </span>--config_file<span class="w"> </span>configs/ds_configs/deepspeed_zero3.yaml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>open_instruct/online_dpo_vllm_thread.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--exp_name<span class="w"> </span><span class="s2">&quot;online_dpo_vllm_thread_beta_0.03&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer<span class="w"> </span><span class="s1">&#39;{&quot;HuggingFaceH4/no_robots&quot;: 1.0}&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_train_splits<span class="w"> </span>train<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_eval_mixer<span class="w"> </span><span class="s1">&#39;{&quot;HuggingFaceH4/no_robots&quot;: 1.0}&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_eval_splits<span class="w"> </span><span class="nb">test</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_token_length<span class="w"> </span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_prompt_token_length<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--learning_rate<span class="w"> </span>8e-7<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--output_dir<span class="w"> </span>/output/<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--chat_template<span class="w"> </span>tulu<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--per_device_train_batch_size<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--per_device_eval_batch_size<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gradient_accumulation_steps<span class="w"> </span><span class="m">32</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--local_rollout_forward_batch_size<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--vllm_device<span class="w"> </span>cuda:7<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num_epochs<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num_mini_batches<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--total_episodes<span class="w"> </span><span class="m">100000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name_or_path<span class="w"> </span>allenai/open_instruct_dev<span class="w">  </span><span class="se">\</span>
+<span class="w">    </span>--model_revision<span class="w"> </span>costa_finetune_tulu3_8b_norobot__meta-llama_Meta-Llama-3.1-8B__42__1725559869<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--reward_model_path<span class="w"> </span>vwxyzjn/reward_modeling__allenai_open_instruct_dev<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--reward_model_revision<span class="w"> </span>reward_modeling__1__1725760619<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--non_stop_penalty<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--stop_token<span class="w"> </span>eos<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--penalty_reward_value<span class="w"> </span>-10.0<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--beta<span class="w"> </span><span class="m">0</span>.03<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num_evals<span class="w"> </span><span class="m">3</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--seed<span class="w"> </span><span class="m">3</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--response_length<span class="w"> </span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gradient_checkpointing<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--with_tracking<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--push_to_hub
+</code></pre></div>
+<ul>
+<li>Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/do4nuqhh</li>
+<li>Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/online_dpo_vllm_thread_beta_0.03__3__1726200312</li>
+</ul>
+<h3 id="level-3-8-gpu-training-on-ultrafeedback-rm">LEVEL 3: 8 GPU; Training on ultrafeedback RM</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># for running chat based models you should use an 8xH100 node.</span>
+python<span class="w"> </span>mason.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--cluster<span class="w"> </span>ai2/jupiter<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--image<span class="w"> </span>nathanl/open_instruct_auto<span class="w"> </span>--pure_docker_mode<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--workspace<span class="w"> </span>ai2/tulu-3-dev<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--priority<span class="w"> </span>high<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--preemptible<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--budget<span class="w"> </span>ai2/jupiter<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpus<span class="w"> </span><span class="m">8</span><span class="w"> </span>--<span class="w"> </span>accelerate<span class="w"> </span>launch<span class="w"> </span>--num_processes<span class="w"> </span><span class="m">7</span><span class="w"> </span>--config_file<span class="w"> </span>configs/ds_configs/deepspeed_zero3.yaml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>open_instruct/online_dpo_vllm_thread.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--exp_name<span class="w"> </span><span class="s2">&quot;online_dpo_vllm_thread_beta_0.03&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer<span class="w"> </span><span class="s1">&#39;{&quot;allenai/ultrafeedback_binarized_cleaned&quot;: 1.0}&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--sft_messages_key<span class="w"> </span>chosen<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_train_splits<span class="w"> </span>train_prefs<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_eval_mixer<span class="w"> </span><span class="s1">&#39;{&quot;allenai/ultrafeedback_binarized_cleaned&quot;: 1.0}&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_eval_splits<span class="w"> </span>test_prefs<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_token_length<span class="w"> </span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max_prompt_token_length<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--learning_rate<span class="w"> </span>8e-7<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--output_dir<span class="w"> </span>/output/<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--chat_template<span class="w"> </span>tulu<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--per_device_train_batch_size<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--per_device_eval_batch_size<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gradient_accumulation_steps<span class="w"> </span><span class="m">32</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--local_rollout_forward_batch_size<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--vllm_device<span class="w"> </span>cuda:7<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num_epochs<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num_mini_batches<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--total_episodes<span class="w"> </span><span class="m">300000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name_or_path<span class="w"> </span>allenai/open_instruct_dev<span class="w">  </span><span class="se">\</span>
+<span class="w">    </span>--model_revision<span class="w"> </span>finetune__meta-llama_Meta-Llama-3.1-8B__42__1725751338<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--reward_model_path<span class="w"> </span>vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--reward_model_revision<span class="w"> </span>reward_modeling__1__1726175049<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--non_stop_penalty<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--stop_token<span class="w"> </span>eos<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--penalty_reward_value<span class="w"> </span>-10.0<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--beta<span class="w"> </span><span class="m">0</span>.03<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num_evals<span class="w"> </span><span class="m">3</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--response_length<span class="w"> </span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gradient_checkpointing<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--with_tracking<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--push_to_hub
+</code></pre></div>
+<ul>
+<li>Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/le8luk2u</li>
+<li>Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/online_dpo_vllm_thread_beta_0.03__1__1726282895</li>
+</ul>
+<h3 id="if-you-want-to-use-beaker-datasets">If you want to use beaker datasets</h3>
+<p>If you want to use beaker datasets, you need to mount your datasets using --beaker_datasets.
+An example command with beaker datasets models:</p>
+<div class="highlight"><pre><span></span><code>python mason.py \
+    --cluster ai2/jupiter \
+    --image nathanl/open_instruct_auto \
+    --pure_docker_mode \
+    --workspace ai2/tulu-3-dev \
+    --priority high \
+    --preemptible \
+    --budget ai2/jupiter \
+    --beaker_datasets /model:01J6DC8YQ291QA3QEYQTM3CBHE /reward_model:01J834TT3SB6PTB3QYPH33YJ6M \
+    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+    open_instruct/online_dpo_vllm_thread.py \
+    --exp_name &quot;online_dpo_vllm_thread_beta_0.03&quot; \
+    --dataset_mixer &#39;{&quot;allenai/ultrafeedback_binarized_cleaned&quot;: 1.0}&#39; \
+    --sft_messages_key chosen \
+    --dataset_train_splits train_prefs \
+    --dataset_eval_mixer &#39;{&quot;allenai/ultrafeedback_binarized_cleaned&quot;: 1.0}&#39; \
+    --dataset_eval_splits test_prefs \
+    --max_token_length 1024 \
+    --max_prompt_token_length 512 \
+    --learning_rate 8e-7 \
+    --output_dir /output/ \
+    --chat_template tulu \
+    --per_device_train_batch_size 2 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 32 \
+    --local_rollout_forward_batch_size 1 \
+    --vllm_device cuda:7 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 300000 \
+    --model_name_or_path /model \
+    --reward_model_path /reward_model \
+    --non_stop_penalty \
+    --stop_token eos \
+    --penalty_reward_value -10.0 \
+    --beta 0.03 \
+    --num_evals 3 \
+    --response_length 1024 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --push_to_hub
+</code></pre></div>
+<h3 id="quality-of-life-tools">Quality of life tools</h3>
+<p>Note that when running with <code>--push_to_hub</code> and <code>--with_tracking</code>, the HF repo is automatically tracked to wandb, so we link the tracked run and the trained model.</p>
+<p><img alt="reward modeling tracked hf repo" src="../reward_modeling_hf_repo.png" /></p>
+<p>Furthermore, we also track the dataset length visualization in wandb (see detail in <a href="#dataset-processing">here</a>)</p>
+<p><img alt="token length visualization in wandb" src="../reward_modeling_token_wandb.png" /></p>
+<p>Finally, we also include samples</p>
+<p><img alt="reward modeling preference sample texts" src="../reward_modeling_preference_sample_texts.png" /></p>
+<h2 id="explanation-of-the-logged-metrics">Explanation of the logged metrics</h2>
+<ul>
+<li><code>episode</code>: the global episode number training has gone through (e.g., <code>3000</code> means we have trained on 3000 data points already)</li>
+<li><code>lr</code>: the current learning rate</li>
+<li><code>epoch</code>: the fraction or multiple of the epoch (e.g., <code>2.7</code> means we have trained on the dataset for 2 epochs and 70% of the third epoch)</li>
+<li><code>objective/kl</code>: the KL divergence between the current policy and the reference policy (sum of the KL divergence of each response token)</li>
+<li><code>objective/scores</code>: the scores of the current response, rated by a reward model</li>
+<li><code>objective/rlhf_reward</code>: the RLHF reward, which is <code>objective/scores</code> - <code>beta</code> * <code>objective/kl</code></li>
+<li><code>objective/non_score_reward</code>: <code>beta</code> * <code>objective/kl</code></li>
+<li><code>objective/entropy</code>: the entropy of the current policy</li>
+<li><code>objective/scores_margin</code>: the difference between the chosen response scores and the rejected response scores. We pick the chosen response to be the response with higher scores, and the rejected response to be the response with lower scores</li>
+<li><code>objective/loss</code>: the DPO loss</li>
+<li><code>logps/chosen</code>: the log probability of the chosen response</li>
+<li><code>logps/rejected</code>: the log probability of the rejected response</li>
+<li><code>reward/chosen</code>: the implicit DPO reward of the chosen response</li>
+<li><code>reward/rejected</code>: the implicit DPO reward of the rejected response</li>
+<li><code>reward_margin</code>: the difference between the implicit PDO chosen reward and the implicit rejected reward</li>
+<li><code>time/from_scratch</code>: the time taken to train the model from scratch</li>
+<li><code>time/training</code>: the time taken to do one training step</li>
+<li><code>val/sequence_lengths</code>: the length of the sequences in the generated responses</li>
+<li><code>val/num_stop_token_ids</code>: the number of stop tokens in the generated responses</li>
+</ul>
+<h2 id="implementation-details">Implementation details</h2>
+<p>These are relevant implementation details on reward modeling:</p>
+<ol>
+<li>The tokenizer pads from the left, so it's straightforward to do generations.</li>
+<li>Disable dropout in the model: this is an implementation detail in PPO training (see p.3. in https://arxiv.org/pdf/1909.08593).</li>
+<li>Layer initialization: we initialize the score's weight according to <code>std=1 / np.sqrt(model.config.hidden_size + 1)</code> (see p. 11 in https://arxiv.org/abs/2009.01325)</li>
+<li>Vocab size for RM and Policy: we use the same vocab size for the reward model and the policy model. This is to ensure that the reward model can score all the tokens in the policy model. We added a <code>ValueError</code> for situations when <code>policy.config.vocab_size != reward_model.config.vocab_size</code>.</li>
+<li>Retrain on the same prompts: say we only have 10k prompts but we specified <code>--episodes 100k</code>, we will shuffle the prompts at every 10k episodes and retrain on them.</li>
+<li>Truncate responses at the stop token: we truncate the responses at the <code>--stop_token eos</code> to ensure the generation is stopped at the stop token.</li>
+<li>Non-stop penalty: we use a non-stop penalty to the reward model to penalize the model for not stopping at the stop token. For example, if the model does not end at the stop token, we penalize the model by <code>-10.0</code> (see <code>--penalty_reward_value -10.0</code>).</li>
+<li>Async training and generation: we follow the architecture in https://arxiv.org/abs/2310.00036 to do rollout and training asynchronously. This is to ensure that the training is not bottlenecked by the generation.</li>
+<li>We also optimizes online DPO runtime by re-using the model training logprob to save an additional forward pass; notice that this does impact KL calculation and causes some numerical issues. See https://github.com/allenai/open-instruct/pull/364 for more detail.</li>
+</ol>
+<p><div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">queue</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Agent</span><span class="p">():</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">param</span> <span class="o">=</span> <span class="mi">1</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">learn</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">param</span> <span class="o">+=</span> <span class="mi">1</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">query_generator_fn</span><span class="p">():</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">100</span><span class="p">):</span>
+        <span class="k">yield</span> <span class="n">i</span>
+
+
+<span class="n">ITER</span> <span class="o">=</span> <span class="mi">7</span>
+<span class="n">batch_size</span> <span class="o">=</span> <span class="mi">32</span>
+<span class="n">agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">()</span>
+<span class="n">data_Q</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">Queue</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">param_and_query_Q</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">Queue</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">actor</span><span class="p">():</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">ITER</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">params</span><span class="p">,</span> <span class="n">query</span> <span class="o">=</span> <span class="n">param_and_query_Q</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">params</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[actor] generating data π_</span><span class="si">{</span><span class="n">params</span><span class="si">}</span><span class="s2"> -&gt; p_</span><span class="si">{</span><span class="n">query</span><span class="si">}</span><span class="s2"> D_π_</span><span class="si">{</span><span class="n">data</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="c1"># simulate data generation</span>
+        <span class="n">data_Q</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">query</span><span class="p">,</span> <span class="n">data</span><span class="p">))</span>
+
+<span class="n">actor_thread</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">actor</span><span class="p">)</span>
+<span class="n">actor_thread</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+
+<span class="c1"># initial param put</span>
+<span class="n">generator</span> <span class="o">=</span> <span class="n">query_generator_fn</span><span class="p">()</span>
+<span class="n">next_queries</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">generator</span><span class="p">)</span>
+<span class="n">param_and_query_Q</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">agent</span><span class="o">.</span><span class="n">param</span><span class="p">,</span> <span class="n">next_queries</span><span class="p">))</span>
+
+<span class="c1"># cleanba style stuff</span>
+<span class="n">async_mode</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">ITER</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+    <span class="n">queries</span> <span class="o">=</span> <span class="n">next_queries</span>
+    <span class="k">if</span> <span class="n">async_mode</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">g</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">next_queries</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">generator</span><span class="p">)</span>
+        <span class="n">param_and_query_Q</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">agent</span><span class="o">.</span><span class="n">param</span><span class="p">,</span> <span class="n">queries</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">g</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">next_queries</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">generator</span><span class="p">)</span>
+            <span class="n">param_and_query_Q</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">agent</span><span class="o">.</span><span class="n">param</span><span class="p">,</span> <span class="n">next_queries</span><span class="p">))</span> <span class="c1"># note the indent here is different</span>
+    <span class="n">_</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="n">data_Q</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+    <span class="n">old_param</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">param</span>
+    <span class="n">agent</span><span class="o">.</span><span class="n">learn</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="c1"># simulate training</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;--[leaner] get π_</span><span class="si">{</span><span class="n">old_param</span><span class="si">}</span><span class="s2"> -&gt;  p_</span><span class="si">{</span><span class="n">queries</span><span class="si">}</span><span class="s2"> D_π_</span><span class="si">{</span><span class="n">data</span><span class="si">}</span><span class="s2"> -&gt; π_</span><span class="si">{</span><span class="n">agent</span><span class="o">.</span><span class="n">param</span><span class="si">}</span><span class="s2">, time: </span><span class="si">{</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">start_time</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="n">actor_thread</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>[actor] generating data π_1 -&gt; p_1 D_π_1
+[actor] generating data π_1 -&gt; p_1 D_π_1
+--[leaner] get π_1 -&gt;  p_1 D_π_1 -&gt; π_2, time: 2.0022709369659424
+[actor] generating data π_2 -&gt; p_1 D_π_2
+--[leaner] get π_2 -&gt;  p_1 D_π_1 -&gt; π_3, time: 3.003502607345581
+[actor] generating data π_3 -&gt; p_2 D_π_3
+--[leaner] get π_3 -&gt;  p_2 D_π_2 -&gt; π_4, time: 4.004725933074951
+[actor] generating data π_4 -&gt; p_3 D_π_4
+--[leaner] get π_4 -&gt;  p_3 D_π_3 -&gt; π_5, time: 5.005916118621826
+[actor] generating data π_5 -&gt; p_4 D_π_5
+--[leaner] get π_5 -&gt;  p_4 D_π_4 -&gt; π_6, time: 6.007085800170898
+[actor] generating data π_6 -&gt; p_5 D_π_6
+--[leaner] get π_6 -&gt;  p_5 D_π_5 -&gt; π_7, time: 7.007669448852539
+--[leaner] get π_7 -&gt;  p_6 D_π_6 -&gt; π_8, time: 8.009439706802368
+</code></pre></div></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
