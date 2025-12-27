@@ -49,6 +49,6 @@ python open_instruct/grpo_fast.py \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
-    --tool_config.tools code \
-    --tool_config.python.api_endpoint http://0.0.0.0:1212/execute \
+    --tools code \
+    --code_api_endpoint http://0.0.0.0:1212/execute \
     # --with_tracking

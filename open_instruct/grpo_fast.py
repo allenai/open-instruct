@@ -112,7 +112,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
-from open_instruct.tools.config import ToolConfig, ToolSetup, build_tools_from_config, get_available_tools
+from open_instruct.tools.config import ToolArgs, ToolSetup, build_tools_from_config
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -427,10 +427,7 @@ class Args:
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
-    # Tool settings - uses ToolConfig for composable, dynamic tool configuration
-    # Individual tool configs are nested (e.g., --tool_config.python.api_endpoint)
-    tool_config: ToolConfig = field(default_factory=ToolConfig)
-    """Tool configuration with nested individual tool configs."""
+    # Tool settings (main tool args are in ToolArgs dataclass)
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
 
@@ -496,16 +493,7 @@ class Args:
             if self.gs_checkpoint_state_dir is not None:
                 download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if self.tool_config.tools is not None and len(self.tool_config.tools) > 0:
-            available_tools = get_available_tools()
-            for tool in self.tool_config.tools:
-                if tool.lower() not in available_tools:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: {available_tools}")
-            assert len(self.tool_config.tools) == len(set(self.tool_config.tools)), "Duplicate tools are not allowed"
-            if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
-                assert self.tool_config.mask_tool_use, (
-                    "Must mask tool use when using vLLM logprobs or truncated importance sampling."
-                )
+        # Tool validation is now in ToolArgs.__post_init__
         if not self.load_ref_policy and self.beta != 0.0:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
@@ -1845,7 +1833,7 @@ def data_preparation_thread(
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
-                mask_tool_use=args.tool_config.mask_tool_use,
+                mask_tool_use=tool_args.mask_tool_use,
                 min_num_batches=args.world_size,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
@@ -1956,7 +1944,7 @@ def data_preparation_thread(
         )
 
 
-def setup_runtime_variables(args: Args) -> Args:
+def setup_runtime_variables(args: Args, tool_args: ToolArgs) -> Args:
     """Set up runtime variables for the experiment."""
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
@@ -1981,7 +1969,7 @@ def setup_runtime_variables(args: Args) -> Args:
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = args.tool_config.tools is not None and len(args.tool_config.tools) > 0
+    args.tool_use = tool_args.tools is not None and len(tool_args.tools) > 0
     return args
 
 
@@ -2090,7 +2078,8 @@ def create_model_and_optimizer(
 
     # Set up tools using the composable tool configuration
     max_len = args.max_prompt_token_length + args.response_length
-    tool_setup: ToolSetup = build_tools_from_config(args.tool_config)
+    tool_config = tool_args.to_tool_config()
+    tool_setup: ToolSetup = build_tools_from_config(tool_config)
     tool_objects = tool_setup.tools
 
     # Add tool stop strings to args.stop_strings
@@ -2120,8 +2109,8 @@ def create_model_and_optimizer(
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
-        max_tool_calls=args.tool_config.max_tool_calls,
-        mask_tool_use=args.tool_config.mask_tool_use,
+        max_tool_calls=tool_args.max_tool_calls,
+        mask_tool_use=tool_args.mask_tool_use,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
@@ -2820,9 +2809,9 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: ToolArgs):
     tokenizer = make_tokenizer(tc, model_config)
-    args = setup_runtime_variables(args)
+    args = setup_runtime_variables(args, tool_args)
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -2981,10 +2970,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
-    args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
+    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig, ToolArgs))
+    args, tokenizer_config, model_config, tool_args = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
+    assert isinstance(tool_args, ToolArgs)
 
-    main(args, tokenizer_config, model_config)
+    main(args, tokenizer_config, model_config, tool_args)

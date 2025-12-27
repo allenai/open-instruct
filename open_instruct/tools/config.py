@@ -2,7 +2,9 @@
 Tool configuration system for composable tool arguments.
 
 Each tool defines its own Config dataclass (in tools.py) with a from_config() classmethod.
-This module composes them into ToolConfig for the main Args.
+This module provides:
+- ToolArgs: flat dataclass for CLI argument parsing (HfArgumentParser compatible)
+- ToolConfig: internal structured config used by build_tools_from_config
 """
 
 from dataclasses import dataclass, field, fields
@@ -61,6 +63,90 @@ def get_available_parsers() -> list[str]:
     return ["legacy", "vllm", "dr_tulu"]
 
 
+# =============================================================================
+# ToolArgs - Flat dataclass for HfArgumentParser
+# =============================================================================
+
+
+@dataclass
+class ToolArgs:
+    """
+    Flat tool arguments for CLI parsing with HfArgumentParser.
+
+    This dataclass is passed to ArgumentParserPlus alongside Args, TokenizerConfig, etc.
+    Use to_tool_config() to convert to the internal ToolConfig structure.
+    """
+
+    # General tool settings
+    tools: list[str] | None = None
+    """List of tools to enable. Available: code, search, serper_search, massive_ds_search, s2_search, you_search, mcp."""
+    max_tool_calls: tuple[int, ...] = (5,)
+    """Maximum number of tool calls allowed per generation."""
+    mask_tool_use: bool = True
+    """Whether to mask the tool output in training."""
+    tool_parser: str = "legacy"
+    """Tool parser: 'legacy' (<tag>...</tag>), 'vllm' (native vLLM), or 'dr_tulu' (MCP-based)."""
+
+    # Code tool settings
+    code_api_endpoint: str | None = None
+    """API endpoint for code execution tool."""
+    code_timeout_seconds: int = 3
+    """Timeout for code execution in seconds."""
+
+    # Massive DS search settings
+    search_api_endpoint: str | None = None
+    """API endpoint for massive_ds search tool."""
+    search_num_documents: int = 3
+    """Number of documents to return from massive_ds search."""
+
+    # Serper (Google) search settings
+    serper_num_results: int = 5
+    """Number of results from Serper (Google) search."""
+
+    # Semantic Scholar settings
+    s2_num_results: int = 10
+    """Number of results from Semantic Scholar."""
+
+    # You.com settings
+    you_num_results: int = 10
+    """Number of results from You.com."""
+
+    def __post_init__(self) -> None:
+        """Validate tool arguments."""
+        if self.tools:
+            available = get_available_tools()
+            for tool in self.tools:
+                if tool.lower() not in available:
+                    raise ValueError(f"Unknown tool: {tool}. Available tools: {available}")
+
+        available_parsers = get_available_parsers()
+        if self.tool_parser not in available_parsers:
+            raise ValueError(f"Unknown parser: {self.tool_parser}. Available parsers: {available_parsers}")
+
+    def to_tool_config(self) -> "ToolConfig":
+        """Convert flat ToolArgs to internal ToolConfig structure."""
+        return ToolConfig(
+            tools=self.tools,
+            max_tool_calls=self.max_tool_calls,
+            mask_tool_use=self.mask_tool_use,
+            parser=self.tool_parser,
+            python=PythonCodeToolConfig(
+                api_endpoint=self.code_api_endpoint, timeout_seconds=self.code_timeout_seconds
+            ),
+            serper_search=SerperSearchToolConfig(number_of_results=self.serper_num_results),
+            massive_ds_search=SearchToolConfig(
+                api_endpoint=self.search_api_endpoint, number_documents=self.search_num_documents
+            ),
+            s2_search=S2SearchToolConfig(number_of_results=self.s2_num_results),
+            you_search=YouSearchToolConfig(number_of_results=self.you_num_results),
+        )
+
+
+# =============================================================================
+# ToolConfig - Internal structured configuration
+# =============================================================================
+
+
 def _validate_registry_against_config(config_cls: type) -> None:
     """
     Validate that all config_attr entries in TOOL_REGISTRY have corresponding fields in ToolConfig.
@@ -77,56 +163,27 @@ def _validate_registry_against_config(config_cls: type) -> None:
         )
 
 
-# =============================================================================
-# Composed Tool Configuration
-# =============================================================================
-
-
 @dataclass
 class ToolConfig:
     """
-    Composed tool configuration that embeds individual tool configs.
-    This gets nested in the main Args dataclass.
+    Internal structured tool configuration.
 
-    CLI usage: --tool_config.tools search,code --tool_config.python.api_endpoint http://...
+    This is created from ToolArgs.to_tool_config() and used by build_tools_from_config().
     """
 
     # General tool settings
     tools: list[str] | None = None
-    """List of tools to enable. Available: code, search (Serper/Google), serper_search, massive_ds_search, s2_search, you_search, mcp, snippet_search, google_search, massive_serve, browse_webpage"""
     max_tool_calls: tuple[int, ...] = (5,)
-    """Maximum number of tool calls allowed per generation."""
     mask_tool_use: bool = True
-    """Whether to mask the tool output in training."""
     parser: str = "legacy"
-    """Tool parser: 'legacy' (<tag>...</tag>), 'vllm' (native vLLM), or 'dr_tulu' (MCP-based)."""
 
     # Individual tool configurations (nested)
-    # These must match the config_attr entries in TOOL_REGISTRY
     python: PythonCodeToolConfig = field(default_factory=PythonCodeToolConfig)
-    """Python code execution tool configuration."""
     serper_search: SerperSearchToolConfig = field(default_factory=SerperSearchToolConfig)
-    """Serper (Google Search) tool configuration. This is the default search tool."""
     massive_ds_search: SearchToolConfig = field(default_factory=SearchToolConfig)
-    """Massive DS search tool configuration."""
     s2_search: S2SearchToolConfig = field(default_factory=S2SearchToolConfig)
-    """Semantic Scholar search tool configuration."""
     you_search: YouSearchToolConfig = field(default_factory=YouSearchToolConfig)
-    """You.com search tool configuration."""
     mcp: MCPToolConfig = field(default_factory=MCPToolConfig)
-    """MCP tools configuration."""
-
-    def __post_init__(self) -> None:
-        """Validate that requested tools and parser exist."""
-        if self.tools:
-            available = get_available_tools()
-            for tool in self.tools:
-                if tool.lower() not in available:
-                    raise ValueError(f"Unknown tool: {tool}. Available tools: {available}")
-
-        available_parsers = get_available_parsers()
-        if self.parser not in available_parsers:
-            raise ValueError(f"Unknown parser: {self.parser}. Available parsers: {available_parsers}")
 
 
 # Validate registry at module load time

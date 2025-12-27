@@ -3,8 +3,8 @@
 #
 # Note: The default search tool uses Serper (Google Search).
 # Set SERPER_API_KEY environment variable to use it.
-# For massive-ds search, use --tool_config.tools massive_ds_search and
-# set --tool_config.massive_ds_search.api_endpoint accordingly.
+# For massive-ds search, use --tools massive_ds_search and
+# set --search_api_endpoint accordingly.
 
 # Check if we're using local code server or remote
 USE_LOCAL_CODE_SERVER=${USE_LOCAL_CODE_SERVER:-false}
@@ -62,6 +62,6 @@ uv run open_instruct/grpo_fast.py \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
-    --tool_config.tools search code \
-    --tool_config.python.api_endpoint "$CODE_SERVER_ENDPOINT" \
+    --tools search code \
+    --code_api_endpoint "$CODE_SERVER_ENDPOINT" \
     --push_to_hub false

@@ -103,7 +103,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, calculate_advantages_packed, pack_sequences
-from open_instruct.tools.config import ToolConfig, build_tools_from_config
+from open_instruct.tools.config import ToolArgs, build_tools_from_config
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -361,10 +361,7 @@ class Args:
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
-    # Tool settings - uses ToolConfig for composable, dynamic tool configuration
-    # Individual tool configs are nested (e.g., --tool_config.python.api_endpoint)
-    tool_config: ToolConfig = field(default_factory=ToolConfig)
-    """Tool configuration with nested individual tool configs."""
+    # Tool settings (main tool args are in ToolArgs dataclass)
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs from the tools or not."""
 
@@ -1373,7 +1370,7 @@ def data_preparation_thread(
         )
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: ToolArgs, reward_fn: Callable):
     # ------------------------------------------------------------
     # Setup tokenizer
     tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
@@ -1420,7 +1417,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = args.tool_config.tools is not None and len(args.tool_config.tools) > 0
+    args.tool_use = tool_args.tools is not None and len(tool_args.tools) > 0
 
     # ------------------------------------------------------------
     # Setup experiment tracking and seeds
@@ -1508,7 +1505,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # make tool list
     tool_objects = {}
     # Set up tools using the composable tool configuration
-    tool_setup = build_tools_from_config(args.tool_config)
+    tool_config = tool_args.to_tool_config()
+    tool_setup = build_tools_from_config(tool_config)
     tool_objects = tool_setup.tools
 
     vllm_engines = create_vllm_engines(
@@ -1525,7 +1523,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
-        max_tool_calls=args.tool_config.max_tool_calls,
+        max_tool_calls=tool_args.max_tool_calls,
     )
     resume_training_step = ray.get(inits)[0] + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
@@ -1860,11 +1858,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
-    args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
+    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig, ToolArgs))
+    args, tokenizer_config, model_config, tool_args = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
+    assert isinstance(tool_args, ToolArgs)
 
     reward_fn_mapping = build_all_verifiers(args)
 
@@ -1940,4 +1939,4 @@ if __name__ == "__main__":
 
         return scores, metrics
 
-    main(args, tokenizer_config, model_config, reward_fn)
+    main(args, tokenizer_config, model_config, tool_args, reward_fn)

@@ -9,10 +9,11 @@ This module provides:
 """
 
 from open_instruct.tools.base import Tool, ToolCall, ToolOutput, ToolParser
-from open_instruct.tools.config import ToolConfig, ToolSetup, build_tools_from_config, get_available_tools
+from open_instruct.tools.config import ToolArgs, ToolConfig, ToolSetup, build_tools_from_config, get_available_tools
 
 __all__ = [
     "Tool",
+    "ToolArgs",
     "ToolCall",
     "ToolConfig",
     "ToolOutput",
