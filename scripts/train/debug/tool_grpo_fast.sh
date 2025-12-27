@@ -6,9 +6,10 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
-# note: you might have to setup your own search api endpoint. I've been using massive-serve:
-# https://github.com/RulinShao/massive-serve
-# and then set the search_api_endpoint accordingly.
+# Note: The default search tool uses Serper (Google Search).
+# Set SERPER_API_KEY environment variable to use it.
+# For massive-ds search, use --tool_config.tools massive_ds_search and
+# set --tool_config.massive_ds_search.api_endpoint accordingly.
 uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/augusta \
@@ -70,8 +71,7 @@ uv run python mason.py \
     --save_freq 100 \
     --try_launch_beaker_eval_jobs_on_weka False \
     --vllm_num_engines 1 \
-    --max_tool_calls 5 \
     --vllm_enable_prefix_caching \
-    --tools code search \
-    --search_api_endpoint "http://saturn-cs-aus-248.reviz.ai2.in:47479/search" \
-    --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute
+    --tool_config.tools code search \
+    --tool_config.max_tool_calls 5 \
+    --tool_config.python.api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute

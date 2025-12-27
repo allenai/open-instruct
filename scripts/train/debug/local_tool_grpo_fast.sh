@@ -1,4 +1,36 @@
 #!/bin/bash
+# Local tool use training script with code execution and search
+#
+# Note: The default search tool uses Serper (Google Search).
+# Set SERPER_API_KEY environment variable to use it.
+# For massive-ds search, use --tool_config.tools massive_ds_search and
+# set --tool_config.massive_ds_search.api_endpoint accordingly.
+
+# Check if we're using local code server or remote
+USE_LOCAL_CODE_SERVER=${USE_LOCAL_CODE_SERVER:-false}
+CODE_SERVER_ENDPOINT=${CODE_SERVER_ENDPOINT:-https://open-instruct-tool-server-10554368204.us-central1.run.app/execute}
+
+if [ "$USE_LOCAL_CODE_SERVER" = true ]; then
+    # Start the code server in the background
+    echo "Starting code execution server on port 1212..."
+    cd open_instruct/tools/code_server
+    uv run uvicorn server:app --host 0.0.0.0 --port 1212 &
+    CODE_SERVER_PID=$!
+    cd - > /dev/null
+
+    # Wait for server to start
+    sleep 3
+    CODE_SERVER_ENDPOINT="http://0.0.0.0:1212/execute"
+
+    # Cleanup function to kill server on exit
+    cleanup() {
+        echo "Stopping code server (PID: $CODE_SERVER_PID)..."
+        kill $CODE_SERVER_PID 2>/dev/null
+    }
+    trap cleanup EXIT
+fi
+
+# Run training
 uv run open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 64 \
     --dataset_mixer_list_splits train \
@@ -30,7 +62,6 @@ uv run open_instruct/grpo_fast.py \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
-    --tools search code \
-    --search_api_endpoint "http://saturn-cs-aus-232.reviz.ai2.in:44177/search" \
-    --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
+    --tool_config.tools search code \
+    --tool_config.python.api_endpoint "$CODE_SERVER_ENDPOINT" \
     --push_to_hub false

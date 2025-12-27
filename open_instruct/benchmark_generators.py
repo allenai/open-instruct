@@ -261,7 +261,7 @@ def setup_vllm_engines(
         single_gpu_mode=args.single_gpu_mode,
         pg=None,
         tools={},
-        max_tool_calls=args.max_tool_calls,
+        max_tool_calls=args.tool_config.max_tool_calls,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         actor_manager=actor_manager,

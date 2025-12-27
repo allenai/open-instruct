@@ -112,6 +112,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
+from open_instruct.tools.config import ToolConfig, ToolSetup, build_tools_from_config, get_available_tools
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -426,24 +427,12 @@ class Args:
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
-    # Tool settings
-    tools: list[str] | None = None
-    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: tuple[int, ...] = (5,)
-    """Maximum number of tool calls allowed. If a tuple is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
-    mask_tool_use: bool = True
-    """Whether to mask the tool output. By default on."""
+    # Tool settings - uses ToolConfig for composable, dynamic tool configuration
+    # Individual tool configs are nested (e.g., --tool_config.python.api_endpoint)
+    tool_config: ToolConfig = field(default_factory=ToolConfig)
+    """Tool configuration with nested individual tool configs."""
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
-
-    # rl-rag specific settngs
-    number_documents_to_search: int = 3
-    """The maximum number of documents to retrieve for each query."""
-    search_api_endpoint: str | None = None
-    """The API endpoint for the search engine."""
-
-    # code-tool specific settings
-    code_tool_api_endpoint: str | None = None
 
     def __post_init__(self):
         if os.environ.get("VLLM_USE_V1") == "0":
@@ -507,13 +496,14 @@ class Args:
             if self.gs_checkpoint_state_dir is not None:
                 download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if self.tools is not None and len(self.tools) > 0:
-            for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+        if self.tool_config.tools is not None and len(self.tool_config.tools) > 0:
+            available_tools = get_available_tools()
+            for tool in self.tool_config.tools:
+                if tool.lower() not in available_tools:
+                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: {available_tools}")
+            assert len(self.tool_config.tools) == len(set(self.tool_config.tools)), "Duplicate tools are not allowed"
             if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
-                assert self.mask_tool_use, (
+                assert self.tool_config.mask_tool_use, (
                     "Must mask tool use when using vLLM logprobs or truncated importance sampling."
                 )
         if not self.load_ref_policy and self.beta != 0.0:
@@ -1855,7 +1845,7 @@ def data_preparation_thread(
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
-                mask_tool_use=args.mask_tool_use,
+                mask_tool_use=args.tool_config.mask_tool_use,
                 min_num_batches=args.world_size,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
@@ -1991,7 +1981,7 @@ def setup_runtime_variables(args: Args) -> Args:
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = args.tools is not None and len(args.tools) > 0
+    args.tool_use = args.tool_config.tools is not None and len(args.tool_config.tools) > 0
     return args
 
 
@@ -2098,32 +2088,15 @@ def create_model_and_optimizer(
         for model in policy_group.models
     ]
 
-    # Set up tools
+    # Set up tools using the composable tool configuration
     max_len = args.max_prompt_token_length + args.response_length
-    tool_objects = {}
-    if args.tools:
-        for tool in args.tools:
-            if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
+    tool_setup: ToolSetup = build_tools_from_config(args.tool_config)
+    tool_objects = tool_setup.tools
 
-                tool = SearchTool(
-                    start_str="<query>",
-                    end_str="</query>",
-                    api_endpoint=args.search_api_endpoint,
-                    number_documents_to_search=args.number_documents_to_search,
-                )
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
-            elif tool.lower() == "code":
-                from open_instruct.tool_utils.tools import PythonCodeTool
-
-                tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
-            else:
-                raise ValueError(f"Unknown tool: {tool}")
+    # Add tool stop strings to args.stop_strings
+    for stop_string in tool_setup.stop_strings:
+        if stop_string not in args.stop_strings:
+            args.stop_strings.append(stop_string)
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -2147,8 +2120,8 @@ def create_model_and_optimizer(
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
-        max_tool_calls=args.max_tool_calls,
-        mask_tool_use=args.mask_tool_use,
+        max_tool_calls=args.tool_config.max_tool_calls,
+        mask_tool_use=args.tool_config.mask_tool_use,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
