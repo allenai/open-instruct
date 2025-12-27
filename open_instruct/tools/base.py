@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from vllm import ToolParser as VllmNativeToolParser
+from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
 
 
 # our only requirement is that tools must output a string
