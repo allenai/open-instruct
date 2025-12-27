@@ -650,9 +650,11 @@ class LMJudgeVerifier(VerifierFunction):
             content = re.sub(pattern, "", completion.choices[0].message.content, flags=re.DOTALL)
             content = content.replace("<answer>", "").replace("</answer>", "")
             reasoning, score = self.extractor(content)
-
+            # logger.warning("Model response processed successfully.")
+            # logger.warning(f"Extracted reasoning: {reasoning}")
+            # logger.warning(f"Extracted score: {score}")
         except Exception as e:
-            print(f"Error processing model response: {str(e)}")
+            logger.warning(f"Error processing model response: {str(e)}")
             if hasattr(completion, "choices") and completion.choices is not None and len(completion.choices) > 0:
                 print(f"Response content: {getattr(completion.choices[0].message, 'content', 'No content available')}")
 

@@ -1,45 +1,49 @@
 #!/bin/bash
 
 # OLMo 3 model
-MODEL_NAME_OR_PATH="/weka/oe-training-default/ai2-llm/checkpoints/tylerr/long-context/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_packing_yarn-fullonly_50B-fb13a737/step11921-hf"
+MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
 
 DATASETS="hamishivi/rlvr_general_mix 13314"
+# DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
 LOCAL_EVALS="hamishivi/rlvr_general_mix 8"
 LOCAL_EVAL_SPLITS="train"
 
-EVALS="alpaca_eval_v3::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,gpqa:0shot_cot::hamish_zs_reasoning_deepseek"
+EVALS="alpaca_eval_v3::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,gpqa:0shot_cot::hamish_zs_reasoning_deepseek "
+
+JUDGE_BASE_URL=http://saturn-cs-aus-252.reviz.ai2.in:8001/v1
 
 EXP_NAME="grpo_general_from_zero"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+BEAKER_IMAGE="tengx/open_instruct_olmo4"
 shift
 
-cluster=ai2/augusta
+cluster=ai2/titan
 
 python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
-    --workspace ai2/olmo-instruct \
+    --workspace ai2/tulu-thinker \
     --priority high \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 5 \
+    --num_nodes 4 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
+    --env VLLM_RPC_TIMEOUT=60000 \
     --gpus 8 \
+    --env HOSTED_VLLM_API_BASE=${JUDGE_BASE_URL} \
     --budget ai2/oe-adapt \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \&\& \
 python open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
-    --async_steps 4 \
-    --inflight_updates \
+    --async_steps 1 \
     --truncated_importance_sampling_ratio_cap 2.0 \
     --num_samples_per_prompt_rollout 8 \
-    --num_unique_prompts_rollout 32 \
+    --num_unique_prompts_rollout 24 \
     --num_mini_batches 1 \
     --num_epochs 1 \
     --learning_rate 1e-6 \
@@ -49,7 +53,6 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
-    --max_token_length 10240 \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
     --pack_length 18432 \
@@ -61,12 +64,13 @@ python open_instruct/grpo_fast.py \
     --total_episodes 10000000 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
-    --vllm_num_engines 32 \
+    --backend_timeout 3600 \
+    --vllm_num_engines 24 \
     --vllm_tensor_parallel_size 1 \
-    --llm_judge_model hosted_vllm/Qwen/Qwen3-32B \
-    --llm_judge_timeout 600 \
+    --llm_judge_model hosted_vllm/Qwen/Qwen3-1.7B \
+    --llm_judge_timeout 3600 \
     --llm_judge_max_tokens 2048 \
-    --llm_judge_max_context_length 32768 \
+    --llm_judge_max_context_length 26384 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
@@ -84,5 +88,5 @@ python open_instruct/grpo_fast.py \
     --try_launch_beaker_eval_jobs_on_weka True \
     --oe_eval_tasks $EVALS \
     --eval_on_step_0 True \
-    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto \
+    --oe_eval_beaker_image oe-eval-beaker/oe_eval_auto \
     --output_dir /output/olmo3-7b-rlzero-general/checkpoints $@

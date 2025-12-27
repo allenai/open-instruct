@@ -89,7 +89,7 @@ def check_context_window_limit(
     """
     try:
         # First try to load the actual model tokenizer from HuggingFace
-        tokenizer = AutoTokenizer.from_pretrained(model_name.replace("hosted_vllm/", ""))
+        tokenizer = AutoTokenizer.from_pretrained("/weka/oe-adapt-default/tengx/open-instruct/models/Qwen3-1.7B")
         max_context_length = tokenizer.model_max_length if max_context_length is None else max_context_length
 
         # Count tokens in all messages using HuggingFace tokenizer
@@ -185,7 +185,8 @@ def truncate_messages_to_fit_context(
     """
     try:
         # First try to load the actual model tokenizer from HuggingFace
-        tokenizer = AutoTokenizer.from_pretrained(model_name.replace("hosted_vllm/", ""))
+        # tokenizer = AutoTokenizer.from_pretrained(model_name.replace("hosted_vllm/", ""))
+        tokenizer = AutoTokenizer.from_pretrained("/weka/oe-adapt-default/tengx/open-instruct/models/Qwen3-1.7B")
         max_context_length = tokenizer.model_max_length if max_context_length is None else max_context_length
 
         # Calculate available tokens for messages
