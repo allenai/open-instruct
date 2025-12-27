@@ -5,6 +5,7 @@ Each tool has a corresponding Config dataclass and a from_config() classmethod.
 
 import asyncio
 import inspect
+import logging
 import os
 import time
 import traceback
@@ -17,6 +18,27 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from open_instruct.tools.base import Tool, ToolOutput
+
+logger = logging.getLogger(__name__)
+
+
+def _truncate(text: str, max_length: int = 500) -> str:
+    """Truncate text for logging, adding ellipsis if needed."""
+    if len(text) <= max_length:
+        return text
+    return text[:max_length] + f"... [{len(text) - max_length} more chars]"
+
+
+def _log_tool_call(tool_name: str, input_text: str, output: ToolOutput) -> None:
+    """Log a tool call at DEBUG level with truncated input/output."""
+    logger.debug(
+        f"Tool '{tool_name}' called:\n"
+        f"  Input: {_truncate(input_text)}\n"
+        f"  Output: {_truncate(output.output)}\n"
+        f"  Error: {output.error or 'None'}\n"
+        f"  Runtime: {output.runtime:.3f}s, Timeout: {output.timeout}"
+    )
+
 
 # Optional imports for MCP tools
 try:
@@ -71,7 +93,7 @@ def _create_session_with_retries(
 class MaxCallsExceededTool(Tool):
     """Tool that returns a message when max tool calls have been exceeded."""
 
-    tool_function_name = "max_calls_exceeded"
+    _default_tool_function_name = "max_calls_exceeded"
     tool_args: dict[str, dict[str, str]] = {}
 
     def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
@@ -91,6 +113,8 @@ class PythonCodeToolConfig:
     """The API endpoint for the code execution server."""
     timeout_seconds: int = 3
     """Timeout in seconds for code execution."""
+    tag_name: str | None = None
+    """Override the default tag name (e.g., use <python> instead of <code>)."""
 
 
 class PythonCodeTool(Tool):
@@ -101,29 +125,32 @@ class PythonCodeTool(Tool):
     won't accidentally block the main vLLM process and 2) way easier to parallelize via load balancing.
     """
 
-    tool_function_name = "code"
+    _default_tool_function_name = "python"
     tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "Python code to execute"}}
 
-    def __init__(self, api_endpoint: str, timeout_seconds: int = 3) -> None:
+    def __init__(self, api_endpoint: str, timeout_seconds: int = 3, tag_name: str | None = None) -> None:
         self.api_endpoint = api_endpoint
         self.timeout_seconds = timeout_seconds
+        self._tag_name = tag_name
 
     @classmethod
     def from_config(cls, config: PythonCodeToolConfig) -> "PythonCodeTool":
         if not config.api_endpoint:
             raise ValueError("api_endpoint must be set to use the Python code tool")
-        return cls(api_endpoint=config.api_endpoint, timeout_seconds=config.timeout_seconds)
+        return cls(api_endpoint=config.api_endpoint, timeout_seconds=config.timeout_seconds, tag_name=config.tag_name)
 
     def __call__(self, text: str) -> ToolOutput:
         """Execute Python code via the API."""
         if not text or not text.strip():
-            return ToolOutput(
+            result = ToolOutput(
                 output="",
                 error="Empty code. Please provide some code to execute.",
                 called=True,
                 timeout=False,
                 runtime=0,
             )
+            _log_tool_call(self.tool_function_name, text or "", result)
+            return result
 
         all_outputs = []
         timeout = False
@@ -151,9 +178,11 @@ class PythonCodeTool(Tool):
             error_traceback = traceback.format_exc()
             all_outputs.append(error_message + error_traceback)
 
-        return ToolOutput(
+        result = ToolOutput(
             output="\n".join(all_outputs), called=True, error=error, timeout=timeout, runtime=time.time() - start_time
         )
+        _log_tool_call(self.tool_function_name, text, result)
+        return result
 
 
 # =============================================================================
@@ -169,32 +198,43 @@ class SearchToolConfig:
     """The API endpoint for the search engine."""
     number_documents: int = 3
     """The maximum number of documents to retrieve for each query."""
+    tag_name: str | None = None
+    """Override the default tag name."""
 
 
 class SearchTool(Tool):
     """Search tool using the massive_ds API."""
 
-    tool_function_name = "massive_ds_search"  # Distinct from SerperSearchTool's "search"
+    _default_tool_function_name = "massive_ds_search"  # Distinct from SerperSearchTool's "search"
     tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "The search query"}}
 
-    def __init__(self, api_endpoint: str | None = None, number_documents_to_search: int = 3) -> None:
+    def __init__(
+        self, api_endpoint: str | None = None, number_documents_to_search: int = 3, tag_name: str | None = None
+    ) -> None:
         self.api_endpoint = api_endpoint
         self.number_documents_to_search = number_documents_to_search
+        self._tag_name = tag_name
 
     @classmethod
     def from_config(cls, config: SearchToolConfig) -> "SearchTool":
-        return cls(api_endpoint=config.api_endpoint, number_documents_to_search=config.number_documents)
+        return cls(
+            api_endpoint=config.api_endpoint,
+            number_documents_to_search=config.number_documents,
+            tag_name=config.tag_name,
+        )
 
     def __call__(self, text: str) -> ToolOutput:
         """Search for documents matching the query."""
         if not text or not text.strip():
-            return ToolOutput(
+            result = ToolOutput(
                 output="",
                 error="Empty query. Please provide some text in the query.",
                 called=True,
                 timeout=False,
                 runtime=0,
             )
+            _log_tool_call(self.tool_function_name, text or "", result)
+            return result
 
         start_time = time.time()
 
@@ -203,13 +243,15 @@ class SearchTool(Tool):
         if not url:
             url = os.environ.get("MASSIVE_DS_URL")
             if not url:
-                return ToolOutput(
+                result = ToolOutput(
                     output="",
                     error="Missing MASSIVE_DS_URL environment variable.",
                     called=True,
                     timeout=False,
                     runtime=time.time() - start_time,
                 )
+                _log_tool_call(self.tool_function_name, text, result)
+                return result
 
         session = _create_session_with_retries()
 
@@ -227,12 +269,16 @@ class SearchTool(Tool):
             passages = ["\n" + passage for passage in passages]
             all_snippets = "\n".join(passages).strip()
 
-            return ToolOutput(
+            result = ToolOutput(
                 output=all_snippets, called=True, error="", timeout=False, runtime=time.time() - start_time
             )
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
         except requests.exceptions.RequestException as e:
-            return ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
+            result = ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
 
 # =============================================================================
@@ -246,6 +292,8 @@ class S2SearchToolConfig:
 
     number_of_results: int = 10
     """Number of results to return from Semantic Scholar."""
+    tag_name: str | None = None
+    """Override the default tag name (e.g., use <search> instead of <s2_search>)."""
 
 
 class S2SearchTool(Tool):
@@ -254,40 +302,45 @@ class S2SearchTool(Tool):
     Requires S2_API_KEY environment variable.
     """
 
-    tool_function_name = "s2_search"
+    _default_tool_function_name = "s2_search"
     tool_args: dict[str, dict[str, str]] = {
         "text": {"type": "string", "description": "The search query for Semantic Scholar"}
     }
 
-    def __init__(self, number_of_results: int = 10) -> None:
+    def __init__(self, number_of_results: int = 10, tag_name: str | None = None) -> None:
         self.number_of_results = number_of_results
+        self._tag_name = tag_name
 
     @classmethod
     def from_config(cls, config: S2SearchToolConfig) -> "S2SearchTool":
-        return cls(number_of_results=config.number_of_results)
+        return cls(number_of_results=config.number_of_results, tag_name=config.tag_name)
 
     def __call__(self, text: str) -> ToolOutput:
         """Search Semantic Scholar for documents matching the query."""
         if not text or not text.strip():
-            return ToolOutput(
+            result = ToolOutput(
                 output="",
                 error="Empty query. Please provide some text in the query.",
                 called=True,
                 timeout=False,
                 runtime=0,
             )
+            _log_tool_call(self.tool_function_name, text or "", result)
+            return result
 
         start_time = time.time()
 
         api_key = os.environ.get("S2_API_KEY")
         if not api_key:
-            return ToolOutput(
+            result = ToolOutput(
                 output="",
                 error="Missing S2_API_KEY environment variable.",
                 called=True,
                 timeout=False,
                 runtime=time.time() - start_time,
             )
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
         session = _create_session_with_retries()
 
@@ -303,21 +356,27 @@ class S2SearchTool(Tool):
             snippets = [item["snippet"]["text"] for item in data if item.get("snippet")]
 
             if not snippets:
-                return ToolOutput(
+                result = ToolOutput(
                     output="",
                     error="Query returned no results.",
                     called=True,
                     timeout=False,
                     runtime=time.time() - start_time,
                 )
+                _log_tool_call(self.tool_function_name, text, result)
+                return result
 
             all_snippets = "\n".join(snippets).strip()
-            return ToolOutput(
+            result = ToolOutput(
                 output=all_snippets, called=True, error="", timeout=False, runtime=time.time() - start_time
             )
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
         except requests.exceptions.RequestException as e:
-            return ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
+            result = ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
 
 # =============================================================================
@@ -331,6 +390,8 @@ class YouSearchToolConfig:
 
     number_of_results: int = 10
     """Number of results to return from You.com."""
+    tag_name: str | None = None
+    """Override the default tag name (e.g., use <search> instead of <you_search>)."""
 
 
 class YouSearchTool(Tool):
@@ -339,38 +400,43 @@ class YouSearchTool(Tool):
     Requires YOUCOM_API_KEY environment variable.
     """
 
-    tool_function_name = "you_search"
+    _default_tool_function_name = "you_search"
     tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "The search query for You.com"}}
 
-    def __init__(self, number_of_results: int = 10) -> None:
+    def __init__(self, number_of_results: int = 10, tag_name: str | None = None) -> None:
         self.number_of_results = number_of_results
+        self._tag_name = tag_name
 
     @classmethod
     def from_config(cls, config: YouSearchToolConfig) -> "YouSearchTool":
-        return cls(number_of_results=config.number_of_results)
+        return cls(number_of_results=config.number_of_results, tag_name=config.tag_name)
 
     def __call__(self, text: str) -> ToolOutput:
         """Search You.com for documents matching the query."""
         if not text or not text.strip():
-            return ToolOutput(
+            result = ToolOutput(
                 output="",
                 error="Empty query. Please provide some text in the query.",
                 called=True,
                 timeout=False,
                 runtime=0,
             )
+            _log_tool_call(self.tool_function_name, text or "", result)
+            return result
 
         start_time = time.time()
 
         api_key = os.environ.get("YOUCOM_API_KEY")
         if not api_key:
-            return ToolOutput(
+            result = ToolOutput(
                 output="",
                 error="Missing YOUCOM_API_KEY environment variable.",
                 called=True,
                 timeout=False,
                 runtime=time.time() - start_time,
             )
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
         session = _create_session_with_retries()
 
@@ -385,13 +451,15 @@ class YouSearchTool(Tool):
             data = response.json()
 
             if "error_code" in data:
-                return ToolOutput(
+                result = ToolOutput(
                     output="",
                     error=f"API error: {data['error_code']}",
                     called=True,
                     timeout=False,
                     runtime=time.time() - start_time,
                 )
+                _log_tool_call(self.tool_function_name, text, result)
+                return result
 
             snippets = []
             for hit in data.get("hits", []):
@@ -401,21 +469,27 @@ class YouSearchTool(Tool):
             snippets = snippets[: self.number_of_results]
 
             if not snippets:
-                return ToolOutput(
+                result = ToolOutput(
                     output="",
                     error="Query returned no results.",
                     called=True,
                     timeout=False,
                     runtime=time.time() - start_time,
                 )
+                _log_tool_call(self.tool_function_name, text, result)
+                return result
 
             all_snippets = "\n".join(["\n" + snippet for snippet in snippets]).strip()
-            return ToolOutput(
+            result = ToolOutput(
                 output=all_snippets, called=True, error="", timeout=False, runtime=time.time() - start_time
             )
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
         except requests.exceptions.RequestException as e:
-            return ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
+            result = ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
 
 # =============================================================================
@@ -429,6 +503,8 @@ class SerperSearchToolConfig:
 
     number_of_results: int = 5
     """Number of results to return from Serper."""
+    tag_name: str | None = None
+    """Override the default tag name."""
 
 
 class SerperSearchTool(Tool):
@@ -439,40 +515,45 @@ class SerperSearchTool(Tool):
     Serper provides fast Google Search results via API. Sign up at https://serper.dev
     """
 
-    tool_function_name = "search"  # Use "search" to match model training format
+    _default_tool_function_name = "serper_search"  # Use "search" to match model training format
     tool_args: dict[str, dict[str, str]] = {
         "text": {"type": "string", "description": "The search query for Google via Serper"}
     }
 
-    def __init__(self, number_of_results: int = 5) -> None:
+    def __init__(self, number_of_results: int = 5, tag_name: str | None = None) -> None:
         self.number_of_results = number_of_results
+        self._tag_name = tag_name
 
     @classmethod
     def from_config(cls, config: SerperSearchToolConfig) -> "SerperSearchTool":
-        return cls(number_of_results=config.number_of_results)
+        return cls(number_of_results=config.number_of_results, tag_name=config.tag_name)
 
     def __call__(self, text: str) -> ToolOutput:
         """Search Google via Serper for documents matching the query."""
         if not text or not text.strip():
-            return ToolOutput(
+            result = ToolOutput(
                 output="",
                 error="Empty query. Please provide some text in the query.",
                 called=True,
                 timeout=False,
                 runtime=0,
             )
+            _log_tool_call(self.tool_function_name, text or "", result)
+            return result
 
         start_time = time.time()
 
         api_key = os.environ.get("SERPER_API_KEY")
         if not api_key:
-            return ToolOutput(
+            result = ToolOutput(
                 output="",
                 error="Missing SERPER_API_KEY environment variable.",
                 called=True,
                 timeout=False,
                 runtime=time.time() - start_time,
             )
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
         session = _create_session_with_retries()
 
@@ -505,21 +586,27 @@ class SerperSearchTool(Tool):
                     snippets.insert(0, f"**Featured Snippet:** {answer_box['snippet']}")
 
             if not snippets:
-                return ToolOutput(
+                result = ToolOutput(
                     output="",
                     error="Query returned no results.",
                     called=True,
                     timeout=False,
                     runtime=time.time() - start_time,
                 )
+                _log_tool_call(self.tool_function_name, text, result)
+                return result
 
             all_snippets = "\n\n".join(snippets).strip()
-            return ToolOutput(
+            result = ToolOutput(
                 output=all_snippets, called=True, error="", timeout=False, runtime=time.time() - start_time
             )
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
         except requests.exceptions.RequestException as e:
-            return ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
+            result = ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
 
 # =============================================================================
@@ -555,6 +642,8 @@ class MCPToolConfig:
     """Whether to use localized snippets."""
     context_chars: int = 6000
     """Number of context characters for MCP tools."""
+    tag_name: str | None = None
+    """Override the default tag name."""
 
 
 class MCPTool(Tool):
@@ -567,7 +656,7 @@ class MCPTool(Tool):
     Requires the dr_agent package to be installed.
     """
 
-    tool_function_name = "mcp"
+    _default_tool_function_name = "mcp"
     tool_args: dict[str, dict[str, str]] = {
         "text": {"type": "string", "description": "The full prompt containing MCP tool calls"}
     }
@@ -586,11 +675,13 @@ class MCPTool(Tool):
         number_documents_to_search: int = 10,
         use_localized_snippets: bool = False,
         context_chars: int = 6000,
+        tag_name: str | None = None,
         **kwargs: Any,
     ) -> None:
         if not MCP_AVAILABLE:
             raise ImportError("MCP tools require dr_agent package. Install it with: pip install dr_agent")
 
+        self._tag_name = tag_name
         self.mcp_tools: list[Any] = []
         self.stop_strings: list[str] = []
         self.max_retries = max_retries
@@ -663,6 +754,7 @@ class MCPTool(Tool):
             number_documents_to_search=config.number_documents,
             use_localized_snippets=config.use_localized_snippets,
             context_chars=config.context_chars,
+            tag_name=config.tag_name,
         )
 
     def get_stop_strings(self) -> list[str]:
@@ -677,13 +769,15 @@ class MCPTool(Tool):
         which underlying tool to call, as MCP tools share common tags.
         """
         if not MCP_AVAILABLE:
-            return ToolOutput(
+            result = ToolOutput(
                 output="",
                 error="MCP tools require dr_agent package. Install it with: pip install dr_agent",
                 called=False,
                 timeout=False,
                 runtime=0,
             )
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
         start_time = time.time()
 
@@ -725,14 +819,18 @@ class MCPTool(Tool):
             elif error is None:
                 error = "Unknown error, no MCP response and no error found."
 
-            return ToolOutput(
+            result = ToolOutput(
                 output=error or "", called=False, error=error or "", timeout=False, runtime=time.time() - start_time
             )
+            _log_tool_call(self.tool_function_name, text, result)
+            return result
 
-        return ToolOutput(
+        result = ToolOutput(
             output=text_output,
             called=True,
             error=document_tool_output.error or "",
             timeout=document_tool_output.timeout,
             runtime=document_tool_output.runtime,
         )
+        _log_tool_call(self.tool_function_name, text, result)
+        return result

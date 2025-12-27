@@ -64,6 +64,10 @@ uv run open_instruct/grpo_fast.py \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
-    --tools search code \
+    --tools serper_search python \
+    --tool_tag_names search code \
     --code_api_endpoint "$CODE_SERVER_ENDPOINT" \
     --push_to_hub false
+    # To swap search backend while keeping same tags, change to:
+    # --tools s2_search code \
+    # --tool_tag_names search code \

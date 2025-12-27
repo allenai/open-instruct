@@ -7,6 +7,7 @@ This module provides:
 - ToolConfig: internal structured config used by build_tools_from_config
 """
 
+import logging
 from dataclasses import dataclass, field, fields
 from typing import Literal
 
@@ -26,6 +27,8 @@ from open_instruct.tools.tools import (
     YouSearchTool,
     YouSearchToolConfig,
 )
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Tool Registry
@@ -86,6 +89,14 @@ class ToolArgs:
     """Whether to mask the tool output in training."""
     tool_parser: str = "legacy"
     """Tool parser: 'legacy' (<tag>...</tag>), 'vllm' (native vLLM), or 'dr_tulu' (MCP-based)."""
+    tool_tag_names: list[str] | None = None
+    """Override the XML tag names for tools, in the same order as --tools.
+
+    Allows using consistent tags while swapping backend implementations.
+    For example: --tools s2_search code --tool_tag_names search python
+    This uses Semantic Scholar with <search> tag and code tool with <python> tag.
+    Must have the same length as --tools if provided.
+    """
 
     # Code tool settings
     code_api_endpoint: str | None = None
@@ -123,6 +134,16 @@ class ToolArgs:
         if self.tool_parser not in available_parsers:
             raise ValueError(f"Unknown parser: {self.tool_parser}. Available parsers: {available_parsers}")
 
+        # Validate tool_tag_names length matches tools
+        if self.tool_tag_names is not None:
+            if not self.tools:
+                raise ValueError("--tool_tag_names requires --tools to be specified")
+            if len(self.tool_tag_names) != len(self.tools):
+                raise ValueError(
+                    f"--tool_tag_names must have the same length as --tools. "
+                    f"Got {len(self.tool_tag_names)} tag names for {len(self.tools)} tools."
+                )
+
     def to_tool_config(self) -> "ToolConfig":
         """Convert flat ToolArgs to internal ToolConfig structure."""
         return ToolConfig(
@@ -130,6 +151,7 @@ class ToolArgs:
             max_tool_calls=self.max_tool_calls,
             mask_tool_use=self.mask_tool_use,
             parser=self.tool_parser,
+            tool_tag_names=self.tool_tag_names,
             python=PythonCodeToolConfig(
                 api_endpoint=self.code_api_endpoint, timeout_seconds=self.code_timeout_seconds
             ),
@@ -176,6 +198,8 @@ class ToolConfig:
     max_tool_calls: int = 5
     mask_tool_use: bool = True
     parser: str = "legacy"
+    tool_tag_names: list[str] | None = None
+    """Tag name overrides for each tool, in the same order as tools list."""
 
     # Individual tool configurations (nested)
     python: PythonCodeToolConfig = field(default_factory=PythonCodeToolConfig)
@@ -227,11 +251,16 @@ def build_tools_from_config(config: ToolConfig, vllm_tool_parser=None, vllm_outp
     tools: dict[str, Tool] = {}
     tool_list: list[Tool] = []
     mcp_tools: list[Tool] = []
+    tool_mappings: list[str] = []  # For logging
 
-    for tool_name in config.tools:
+    for i, tool_name in enumerate(config.tools):
         tool_name_lower = tool_name.lower()
         config_attr, tool_cls, is_mcp_subtool = TOOL_REGISTRY[tool_name_lower]
         tool_config = getattr(config, config_attr)
+
+        # Apply tag_name from the parallel list if provided
+        if config.tool_tag_names and hasattr(tool_config, "tag_name"):
+            tool_config.tag_name = config.tool_tag_names[i]
 
         # MCP sub-tools need the tool_name_override
         if is_mcp_subtool:
@@ -242,9 +271,16 @@ def build_tools_from_config(config: ToolConfig, vllm_tool_parser=None, vllm_outp
         tools[tool.tool_function_name] = tool
         tool_list.append(tool)
 
+        # Log the mapping
+        tag_name = tool.tool_function_name
+        tool_mappings.append(f"{tool_name} -> <{tag_name}>")
+
         # Track MCP tools separately for DR Tulu parser
         if isinstance(tool, MCPTool):
             mcp_tools.append(tool)
+
+    # Log tool configuration
+    logger.info(f"Configured {len(tools)} tool(s): {', '.join(tool_mappings)}")
 
     # Build parser based on type
     stop_strings: list[str] = []

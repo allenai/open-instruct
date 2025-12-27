@@ -31,7 +31,24 @@ class ToolCall:
 # they must also return the argument list and their own name.
 class Tool(ABC):
     tool_args: dict[str, Any]
-    tool_function_name: str
+    # Default tool function name (subclasses set this as class attribute)
+    _default_tool_function_name: str = "tool"
+    # Instance-level tag name (set in __init__ if provided, else uses default)
+    _tag_name: str | None = None
+
+    @property
+    def tool_function_name(self) -> str:
+        """The tag/function name used for this tool instance.
+
+        This is used both as the XML tag name (e.g., <search>...</search>)
+        and as the key for looking up the tool.
+
+        Can be overridden at instantiation via tag_name parameter to allow
+        the same tool implementation to use different tags.
+        """
+        if self._tag_name is not None:
+            return self._tag_name
+        return self._default_tool_function_name
 
     @abstractmethod
     def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
