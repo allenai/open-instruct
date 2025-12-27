@@ -1,4 +1,25 @@
-python open_instruct/grpo_fast.py \
+#!/bin/bash
+# Local tool use training script with code execution server
+
+# Start the code server in the background
+echo "Starting code execution server on port 1212..."
+cd open_instruct/tools/code_server
+uv run uvicorn server:app --host 0.0.0.0 --port 1212 &
+CODE_SERVER_PID=$!
+cd - > /dev/null
+
+# Wait for server to start
+sleep 3
+
+# Cleanup function to kill server on exit
+cleanup() {
+    echo "Stopping code server (PID: $CODE_SERVER_PID)..."
+    kill $CODE_SERVER_PID 2>/dev/null
+}
+trap cleanup EXIT
+
+# Run training
+VLLM_ALLOW_INSECURE_SERIALIZATION=1 python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
@@ -29,5 +50,5 @@ python open_instruct/grpo_fast.py \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --tools code \
-    --code_tool_api_endpoint http://0.0.0.0:1212/execute \
+    --code_api_endpoint http://0.0.0.0:1212/execute \
     # --with_tracking

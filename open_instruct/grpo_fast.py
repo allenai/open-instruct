@@ -112,7 +112,8 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
-from open_instruct.tool_utils import tools
+from open_instruct.tools.base import Tool
+from open_instruct.tools.config import ToolArgs, ToolSetup, build_tools_from_config
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -427,24 +428,9 @@ class Args:
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
-    # Tool settings
-    tools: list[str] | None = None
-    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: tuple[int, ...] = (5,)
-    """Maximum number of tool calls allowed. If a tuple is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
-    mask_tool_use: bool = True
-    """Whether to mask the tool output. By default on."""
+    # Tool settings (main tool args are in ToolArgs dataclass)
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
-
-    # rl-rag specific settngs
-    number_documents_to_search: int = 3
-    """The maximum number of documents to retrieve for each query."""
-    search_api_endpoint: str | None = None
-    """The API endpoint for the search engine."""
-
-    # code-tool specific settings
-    code_tool_api_endpoint: str | None = None
 
     def __post_init__(self):
         if os.environ.get("VLLM_USE_V1") == "0":
@@ -508,15 +494,7 @@ class Args:
             if self.gs_checkpoint_state_dir is not None:
                 download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if self.tools is not None and len(self.tools) > 0:
-            for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
-            if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
-                assert self.mask_tool_use, (
-                    "Must mask tool use when using vLLM logprobs or truncated importance sampling."
-                )
+        # Tool validation is now in ToolArgs.__post_init__
         if not self.load_ref_policy and self.beta != 0.0:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
@@ -1866,7 +1844,7 @@ def data_preparation_thread(
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
-                mask_tool_use=args.mask_tool_use,
+                mask_tool_use=tool_args.mask_tool_use,
                 min_num_batches=args.world_size,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
@@ -1977,7 +1955,7 @@ def data_preparation_thread(
         )
 
 
-def setup_runtime_variables(args: Args) -> Args:
+def setup_runtime_variables(args: Args, tool_args: ToolArgs) -> Args:
     """Set up runtime variables for the experiment."""
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
@@ -2002,7 +1980,7 @@ def setup_runtime_variables(args: Args) -> Args:
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = args.tools is not None and len(args.tools) > 0
+    args.tool_use = tool_args.tools is not None and len(tool_args.tools) > 0
     return args
 
 
@@ -2083,44 +2061,6 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
     return train_dataset, eval_dataset
 
 
-def load_tools(args: Args) -> dict[str, tools.Tool]:
-    """Load tool instances based on args.tools configuration.
-
-    Args:
-        args: Parsed training arguments with tool configuration.
-
-    Returns:
-        A mapping from tool end strings to tool instances.
-
-    Raises:
-        ValueError: If an unknown tool is requested.
-    """
-    tool_objects: dict[str, tools.Tool] = {}
-    if not args.tools:
-        return tool_objects
-
-    for tool in args.tools:
-        if tool.lower() == "search":
-            from open_instruct.search_utils.search_tool import SearchTool
-
-            tool_instance = SearchTool(
-                start_str="<query>",
-                end_str="</query>",
-                api_endpoint=args.search_api_endpoint,
-                number_documents_to_search=args.number_documents_to_search,
-            )
-        elif tool.lower() == "code":
-            tool_instance = tools.PythonCodeTool(
-                start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint
-            )
-        else:
-            raise ValueError(f"Unknown tool: {tool}")
-
-        tool_objects[tool_instance.end_str] = tool_instance
-
-    return tool_objects
-
-
 def create_model_and_optimizer(
     args: Args,
     tc: TokenizerConfig,
@@ -2134,7 +2074,7 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     train_dataset,
     eval_dataset,
-) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, tools.Tool], int, int]:
+) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, Tool], int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -2146,9 +2086,15 @@ def create_model_and_optimizer(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
         for model in policy_group.models
     ]
+    # Set up tools using the composable tool configuration
+    tool_config = tool_args.to_tool_config()
+    tool_setup: ToolSetup = build_tools_from_config(tool_config)
+    tool_objects = tool_setup.tools
 
-    tool_objects = load_tools(args)
-    args.stop_strings.extend(tool_objects.keys())
+    # Add tool stop strings to args.stop_strings
+    for stop_string in tool_setup.stop_strings:
+        if stop_string not in args.stop_strings:
+            args.stop_strings.append(stop_string)
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -2172,8 +2118,9 @@ def create_model_and_optimizer(
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
-        max_tool_calls=args.max_tool_calls,
-        mask_tool_use=args.mask_tool_use,
+        tool_parser=tool_setup.parser,
+        max_tool_calls=tool_config.max_tool_calls,
+        mask_tool_use=tool_config.mask_tool_use,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
@@ -2872,9 +2819,9 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: ToolArgs):
     tokenizer = make_tokenizer(tc, model_config)
-    args = setup_runtime_variables(args)
+    args = setup_runtime_variables(args, tool_args)
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -3033,10 +2980,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
-    args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
+    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig, ToolArgs))
+    args, tokenizer_config, model_config, tool_args = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
+    assert isinstance(tool_args, ToolArgs)
 
-    main(args, tokenizer_config, model_config)
+    main(args, tokenizer_config, model_config, tool_args)
