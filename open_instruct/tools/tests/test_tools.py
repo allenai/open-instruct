@@ -72,7 +72,7 @@ class TestPythonCodeTool(unittest.TestCase):
         self.assertEqual(tool.timeout_seconds, 5)
 
     def test_successful_code_execution(self):
-        result = self.tool(code='print("Hello, World!")')
+        result = self.tool(text='print("Hello, World!")')
 
         self.assertTrue(result.called)
         self.assertIn("Hello, World!", result.output)
@@ -81,21 +81,21 @@ class TestPythonCodeTool(unittest.TestCase):
         self.assertGreater(result.runtime, 0)
 
     def test_code_execution_with_error(self):
-        result = self.tool(code='print("unclosed string')
+        result = self.tool(text='print("unclosed string')
 
         self.assertTrue(result.called)
         self.assertTrue("SyntaxError" in result.output or len(result.error) > 0)
         self.assertFalse(result.timeout)
 
     def test_timeout_handling(self):
-        result = self.tool(code="import time\ntime.sleep(10)")
+        result = self.tool(text="import time\ntime.sleep(10)")
 
         self.assertTrue(result.called)
         self.assertTrue(result.timeout or "Timeout" in result.output or "timeout" in result.error)
         self.assertLess(result.runtime, 10)  # Should timeout before 10 seconds
 
     def test_computation(self):
-        result = self.tool(code='result = 5 * 7 + 3\nprint(f"The result is {result}")')
+        result = self.tool(text='result = 5 * 7 + 3\nprint(f"The result is {result}")')
 
         self.assertTrue(result.called)
         self.assertIn("The result is 38", result.output)

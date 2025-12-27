@@ -261,7 +261,8 @@ def setup_vllm_engines(
         single_gpu_mode=args.single_gpu_mode,
         pg=None,
         tools={},
-        max_tool_calls=(5,),  # Default, no tools used in benchmark
+        tool_parser=None,
+        max_tool_calls=5,  # Default, no tools used in benchmark
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         actor_manager=actor_manager,

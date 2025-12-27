@@ -80,7 +80,7 @@ class ToolArgs:
     # General tool settings
     tools: list[str] | None = None
     """List of tools to enable. Available: code, search, serper_search, massive_ds_search, s2_search, you_search, mcp."""
-    max_tool_calls: tuple[int, ...] = (5,)
+    max_tool_calls: int = 5
     """Maximum number of tool calls allowed per generation."""
     mask_tool_use: bool = True
     """Whether to mask the tool output in training."""
@@ -173,7 +173,7 @@ class ToolConfig:
 
     # General tool settings
     tools: list[str] | None = None
-    max_tool_calls: tuple[int, ...] = (5,)
+    max_tool_calls: int = 5
     mask_tool_use: bool = True
     parser: str = "legacy"
 

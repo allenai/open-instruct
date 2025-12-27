@@ -61,7 +61,7 @@ from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.tools.base import Tool
+from open_instruct.tools.base import Tool, ToolParser
 from open_instruct.tools.tools import MaxCallsExceededTool
 from open_instruct.utils import ModelDims, ray_get_with_progress
 
@@ -199,35 +199,43 @@ def split_request_id(full_request_id: str) -> dict:
     return {"base_id": "_".join(parts[:-1]), "request_index": int(parts[-1])}
 
 
-def get_triggered_tool(
-    output_text: str,
-    tools: dict[str, Tool],
-    max_tool_calls: dict[str, int],
-    num_calls: int,
-    sampling_params: SamplingConfig,
-) -> tuple[Tool | None, str | None]:
-    """Check if any tool was triggered and return the tool and stop_str if found.
+def get_triggered_tools(
+    output_text: str, tools: dict[str, Tool], tool_parser: ToolParser | None, max_calls: int, num_calls: int
+) -> list[tuple[Tool, dict]]:
+    """Extract all triggered tool calls from the output text.
 
     Args:
         output_text: The generated text to check for tool triggers
-        tools: Dictionary mapping stop strings to Tool instances
-        max_tool_calls: Dictionary mapping stop strings to their call limits
-        num_calls: Current number of tool calls for this request
-        sampling_params: Sampling parameters containing stop strings
+        tools: Dictionary mapping tool function names to Tool instances
+        tool_parser: The parser to use for extracting tool calls
+        max_calls: Maximum number of tool calls allowed
+        num_calls: Current number of tool calls already made
 
     Returns:
-        Tuple of (tool, stop_str) if a tool was triggered, (None, None) otherwise.
+        List of (tool, args) tuples for each valid tool call found.
+        Returns empty list if no tools triggered.
+        Returns [(MaxCallsExceededTool, args)] if max calls exceeded.
     """
-    if not sampling_params.stop:
-        return None, None
+    if not tool_parser:
+        return []
 
-    for stop_str in sampling_params.stop:
-        if stop_str in tools and output_text.endswith(stop_str):
-            if num_calls < max_tool_calls.get(stop_str, 0):
-                return tools[stop_str], stop_str
-            else:
-                return MaxCallsExceededTool(start_str="<tool>", end_str="</tool>"), stop_str
-    return None, None
+    tool_calls = tool_parser.get_tool_calls(output_text)
+    if not tool_calls:
+        return []
+
+    result: list[tuple[Tool, dict]] = []
+    for tool_call in tool_calls:
+        if tool_call.name not in tools:
+            continue
+
+        if num_calls + len(result) >= max_calls:
+            # Max calls exceeded - return special tool and stop processing
+            result.append((MaxCallsExceededTool(), {"text": output_text}))
+            break
+
+        result.append((tools[tool_call.name], tool_call.args))
+
+    return result
 
 
 def process_completed_request(request_id, outs, current_time, tools, request_metadata):
@@ -506,7 +514,8 @@ class LLMRayActor:
         self,
         *args,
         tools: dict[str, Tool] | None = None,
-        max_tool_calls: dict[str, int] | None = None,
+        tool_parser: ToolParser | None = None,
+        max_tool_calls: int = 5,
         mask_tool_use: bool = True,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
@@ -521,7 +530,14 @@ class LLMRayActor:
     ):
         assert_threaded_actor(self)
         self._init_config(
-            tools, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
+            tools,
+            tool_parser,
+            max_tool_calls,
+            mask_tool_use,
+            inflight_updates,
+            reward_config,
+            train_dataset,
+            eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -536,7 +552,8 @@ class LLMRayActor:
     def _init_config(
         self,
         tools: dict[str, Tool] | None,
-        max_tool_calls: dict[str, int] | None,
+        tool_parser: ToolParser | None,
+        max_tool_calls: int,
         mask_tool_use: bool,
         inflight_updates: bool,
         reward_config: RewardConfig | None,
@@ -544,7 +561,8 @@ class LLMRayActor:
         eval_dataset,
     ) -> None:
         self.tools = tools or {}
-        self.max_tool_calls = max_tool_calls or {}
+        self.tool_parser = tool_parser
+        self.max_tool_calls = max_tool_calls
         self.mask_tool_use = mask_tool_use
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
@@ -831,46 +849,54 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
         response_masks.extend([1] * len(model_tokens))
 
-        if not actor.tools or not actor.max_tool_calls:
+        if not actor.tools or not actor.tool_parser:
             break
 
-        triggered_tool, stop_str = get_triggered_tool(
-            output.text, actor.tools, actor.max_tool_calls, num_calls, sampling_params
+        triggered_tools = get_triggered_tools(
+            output.text, actor.tools, actor.tool_parser, actor.max_tool_calls, num_calls
         )
-        if triggered_tool is None:
+        if not triggered_tools:
             break
 
         assert actor.executor is not None, f"executor is None for request {sub_request_id}"
 
+        # Execute all triggered tools and add each output separately
         loop = asyncio.get_running_loop()
-        tool_result = await loop.run_in_executor(actor.executor, triggered_tool, output.text)
+        should_break = False
 
-        tool_called = True
-        num_calls += 1
-        timeout = timeout or tool_result.timeout
-        tool_error += "" if tool_result.error is None else tool_result.error
-        tool_output += tool_result.output
-        tool_runtime += tool_result.runtime
+        for triggered_tool, tool_args in triggered_tools:
+            tool_result = await loop.run_in_executor(actor.executor, lambda t=triggered_tool, a=tool_args: t(**a))
 
-        tool_tokens = actor.llm_engine.tokenizer.encode(
-            "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
-        )
+            tool_called = True
+            num_calls += 1
+            timeout = timeout or tool_result.timeout
+            tool_error += "" if tool_result.error is None else tool_result.error
+            tool_output += tool_result.output
+            tool_runtime += tool_result.runtime
 
-        tool_tokens, excess = truncate_tool_output_tokens(
-            tool_tokens,
-            current_prompt_len=len(current_prompt),
-            current_response_len=len(response_masks),
-            max_model_len=max_model_len,
-            max_tokens=sampling_params.max_tokens,
-        )
+            # Format and tokenize this tool's output
+            formatted_output = actor.tool_parser.format_tool_calls(tool_result.output)
+            tool_tokens = actor.llm_engine.tokenizer.encode(formatted_output, add_special_tokens=False)
 
-        response_tokens.extend(tool_tokens)
-        response_logprobs.extend([0.0] * len(tool_tokens))
-        response_masks.extend([0 if actor.mask_tool_use else 1] * len(tool_tokens))
-        current_prompt.extend(tool_tokens)
+            tool_tokens, excess = truncate_tool_output_tokens(
+                tool_tokens,
+                current_prompt_len=len(current_prompt),
+                current_response_len=len(response_masks),
+                max_model_len=max_model_len,
+                max_tokens=sampling_params.max_tokens,
+            )
 
-        current_max_tokens = sampling_params.max_tokens - len(response_masks)
-        if excess > 0 or current_max_tokens <= 0:
+            response_tokens.extend(tool_tokens)
+            response_logprobs.extend([0.0] * len(tool_tokens))
+            response_masks.extend([0 if actor.mask_tool_use else 1] * len(tool_tokens))
+            current_prompt.extend(tool_tokens)
+
+            current_max_tokens = sampling_params.max_tokens - len(response_masks)
+            if excess > 0 or current_max_tokens <= 0:
+                should_break = True
+                break
+
+        if should_break:
             break
 
     if output.finish_reason == "stop" and len(response_tokens) == 0:
@@ -944,7 +970,8 @@ def create_vllm_engines(
     single_gpu_mode: bool = False,
     pg: PlacementGroup | None = None,
     tools: dict[str, Tool] | None = None,
-    max_tool_calls: tuple[int, ...] = (5,),
+    tool_parser: ToolParser | None = None,
+    max_tool_calls: int = 5,
     mask_tool_use: bool = True,
     prompt_queue=None,
     results_queue=None,
@@ -955,19 +982,6 @@ def create_vllm_engines(
     train_dataset=None,
     eval_dataset=None,
 ) -> list[ray.actor.ActorHandle]:
-    # Convert max_tool_calls to a dict mapping tool end strings to their limits
-    if tools:
-        assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
-            "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
-        )
-        # tool key is the end_str
-        if len(max_tool_calls) == 1:
-            max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools}
-        else:
-            max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls)}
-    else:
-        max_tool_calls_dict = {}
-
     vllm_engines = []
     distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
     use_hybrid_engine = pg is not None
@@ -1030,7 +1044,8 @@ def create_vllm_engines(
                 eval_results_queue=eval_results_queue,
                 actor_manager=actor_manager,
                 tools=tools,
-                max_tool_calls=max_tool_calls_dict,
+                tool_parser=tool_parser,
+                max_tool_calls=max_tool_calls,
                 mask_tool_use=mask_tool_use,
                 inflight_updates=inflight_updates,
                 reward_config=reward_config,

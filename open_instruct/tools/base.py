@@ -1,11 +1,14 @@
+from __future__ import annotations
+
 import json
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
+if TYPE_CHECKING:
+    from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
 
 
 # our only requirement is that tools must output a string
@@ -84,31 +87,36 @@ class OpenInstructLegacyToolParser(ToolParser):
     """
     Parser that recreates the older open-instruct style,
     which also matches DR Tulu and Open-R1 styles.
+
+    Tools are invoked via <tool_name>content</tool_name> tags.
+    The content between tags is passed to the tool as a text argument.
     """
 
     def __init__(self, tool_list: list[Tool], output_wrap_name: str = "output"):
         self.tool_names = [tool.tool_function_name for tool in tool_list]
+        self.output_wrap_name = output_wrap_name
         assert len(self.tool_names) == len(set(self.tool_names)), "Tool names must be unique"
         self.tool_stop_strings = [f"</{tool_name}>" for tool_name in self.tool_names]
         self.tool_start_strings = [f"<{tool_name}>" for tool_name in self.tool_names]
-        self.tool_regexes = [
-            re.escape(tool_start_string) + r"(.*?)" + re.escape(tool_end_string)
-            for tool_start_string, tool_end_string in zip(self.tool_start_strings, self.tool_stop_strings)
-        ]
+        # Build regex per tool to extract content
+        self.tool_regexes = {
+            tool_name: re.compile(re.escape(f"<{tool_name}>") + r"(.*?)" + re.escape(f"</{tool_name}>"), re.DOTALL)
+            for tool_name in self.tool_names
+        }
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
         tool_calls: list[ToolCall] = []
-        # search the tools
-        for tool_regex in self.tool_regexes:
-            match = re.search(tool_regex, text, re.DOTALL)
+        # Check each tool's regex
+        for tool_name, tool_regex in self.tool_regexes.items():
+            match = tool_regex.search(text)
             if match:
-                tool_name = match.group(1)
-                tool_args = match.group(2)
-                tool_calls.append(ToolCall(name=tool_name, args=tool_args))
+                # The content between tags is passed as the first argument
+                tool_content = match.group(1)
+                tool_calls.append(ToolCall(name=tool_name, args={"text": tool_content}))
         return tool_calls
 
     def format_tool_calls(self, tool_output: str) -> str:
-        return f"<{self.output_wrap_name}>\n{tool_output}\n</{self.output_wrap_name}>"
+        return f"<{self.output_wrap_name}>\n{tool_output}\n</{self.output_wrap_name}>\n"
 
     def stop_sequences(self) -> list[str]:
         return self.tool_stop_strings

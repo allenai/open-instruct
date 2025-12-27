@@ -1523,7 +1523,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
-        max_tool_calls=tool_args.max_tool_calls,
+        tool_parser=tool_setup.parser,
+        max_tool_calls=tool_config.max_tool_calls,
     )
     resume_training_step = ray.get(inits)[0] + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout

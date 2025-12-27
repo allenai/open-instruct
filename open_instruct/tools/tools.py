@@ -102,7 +102,7 @@ class PythonCodeTool(Tool):
     """
 
     tool_function_name = "python"
-    tool_args: dict[str, dict[str, str]] = {"code": {"type": "string", "description": "Python code to execute"}}
+    tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "Python code to execute"}}
 
     def __init__(self, api_endpoint: str, timeout_seconds: int = 3) -> None:
         self.api_endpoint = api_endpoint
@@ -114,9 +114,9 @@ class PythonCodeTool(Tool):
             raise ValueError("api_endpoint must be set to use the Python code tool")
         return cls(api_endpoint=config.api_endpoint, timeout_seconds=config.timeout_seconds)
 
-    def __call__(self, code: str) -> ToolOutput:
+    def __call__(self, text: str) -> ToolOutput:
         """Execute Python code via the API."""
-        if not code or not code.strip():
+        if not text or not text.strip():
             return ToolOutput(
                 output="",
                 error="Empty code. Please provide some code to execute.",
@@ -132,7 +132,7 @@ class PythonCodeTool(Tool):
 
         try:
             response = requests.post(
-                self.api_endpoint, json={"code": code, "timeout": self.timeout_seconds}, timeout=self.timeout_seconds
+                self.api_endpoint, json={"code": text, "timeout": self.timeout_seconds}, timeout=self.timeout_seconds
             )
             result = response.json()
             output = result["output"]
@@ -175,7 +175,7 @@ class SearchTool(Tool):
     """Search tool using the massive_ds API."""
 
     tool_function_name = "search"
-    tool_args: dict[str, dict[str, str]] = {"query": {"type": "string", "description": "The search query"}}
+    tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "The search query"}}
 
     def __init__(self, api_endpoint: str | None = None, number_documents_to_search: int = 3) -> None:
         self.api_endpoint = api_endpoint
@@ -185,9 +185,9 @@ class SearchTool(Tool):
     def from_config(cls, config: SearchToolConfig) -> "SearchTool":
         return cls(api_endpoint=config.api_endpoint, number_documents_to_search=config.number_documents)
 
-    def __call__(self, query: str) -> ToolOutput:
+    def __call__(self, text: str) -> ToolOutput:
         """Search for documents matching the query."""
-        if not query or not query.strip():
+        if not text or not text.strip():
             return ToolOutput(
                 output="",
                 error="Empty query. Please provide some text in the query.",
@@ -216,7 +216,7 @@ class SearchTool(Tool):
         try:
             res = session.post(
                 url,
-                json={"query": query, "n_docs": self.number_documents_to_search, "domains": "dpr_wiki_contriever"},
+                json={"query": text, "n_docs": self.number_documents_to_search, "domains": "dpr_wiki_contriever"},
                 headers={"Content-Type": "application/json"},
                 timeout=(3, 15),
             )
@@ -256,7 +256,7 @@ class S2SearchTool(Tool):
 
     tool_function_name = "s2_search"
     tool_args: dict[str, dict[str, str]] = {
-        "query": {"type": "string", "description": "The search query for Semantic Scholar"}
+        "text": {"type": "string", "description": "The search query for Semantic Scholar"}
     }
 
     def __init__(self, number_of_results: int = 10) -> None:
@@ -266,9 +266,9 @@ class S2SearchTool(Tool):
     def from_config(cls, config: S2SearchToolConfig) -> "S2SearchTool":
         return cls(number_of_results=config.number_of_results)
 
-    def __call__(self, query: str) -> ToolOutput:
+    def __call__(self, text: str) -> ToolOutput:
         """Search Semantic Scholar for documents matching the query."""
-        if not query or not query.strip():
+        if not text or not text.strip():
             return ToolOutput(
                 output="",
                 error="Empty query. Please provide some text in the query.",
@@ -294,7 +294,7 @@ class S2SearchTool(Tool):
         try:
             res = session.get(
                 "https://api.semanticscholar.org/graph/v1/snippet/search",
-                params={"limit": self.number_of_results, "query": query},
+                params={"limit": self.number_of_results, "query": text},
                 headers={"x-api-key": api_key},
                 timeout=60,
             )
@@ -340,7 +340,7 @@ class YouSearchTool(Tool):
     """
 
     tool_function_name = "you_search"
-    tool_args: dict[str, dict[str, str]] = {"query": {"type": "string", "description": "The search query for You.com"}}
+    tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "The search query for You.com"}}
 
     def __init__(self, number_of_results: int = 10) -> None:
         self.number_of_results = number_of_results
@@ -349,9 +349,9 @@ class YouSearchTool(Tool):
     def from_config(cls, config: YouSearchToolConfig) -> "YouSearchTool":
         return cls(number_of_results=config.number_of_results)
 
-    def __call__(self, query: str) -> ToolOutput:
+    def __call__(self, text: str) -> ToolOutput:
         """Search You.com for documents matching the query."""
-        if not query or not query.strip():
+        if not text or not text.strip():
             return ToolOutput(
                 output="",
                 error="Empty query. Please provide some text in the query.",
@@ -377,7 +377,7 @@ class YouSearchTool(Tool):
         try:
             response = session.get(
                 "https://api.ydc-index.io/search",
-                params={"query": query, "num_web_results": 1},
+                params={"query": text, "num_web_results": 1},
                 headers={"X-API-Key": api_key},
                 timeout=10,
             )
@@ -441,7 +441,7 @@ class SerperSearchTool(Tool):
 
     tool_function_name = "serper_search"
     tool_args: dict[str, dict[str, str]] = {
-        "query": {"type": "string", "description": "The search query for Google via Serper"}
+        "text": {"type": "string", "description": "The search query for Google via Serper"}
     }
 
     def __init__(self, number_of_results: int = 5) -> None:
@@ -451,9 +451,9 @@ class SerperSearchTool(Tool):
     def from_config(cls, config: SerperSearchToolConfig) -> "SerperSearchTool":
         return cls(number_of_results=config.number_of_results)
 
-    def __call__(self, query: str) -> ToolOutput:
+    def __call__(self, text: str) -> ToolOutput:
         """Search Google via Serper for documents matching the query."""
-        if not query or not query.strip():
+        if not text or not text.strip():
             return ToolOutput(
                 output="",
                 error="Empty query. Please provide some text in the query.",
@@ -479,7 +479,7 @@ class SerperSearchTool(Tool):
         try:
             response = session.post(
                 "https://google.serper.dev/search",
-                json={"q": query, "num": self.number_of_results},
+                json={"q": text, "num": self.number_of_results},
                 headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
                 timeout=10,
             )
@@ -569,7 +569,7 @@ class MCPTool(Tool):
 
     tool_function_name = "mcp"
     tool_args: dict[str, dict[str, str]] = {
-        "prompt": {"type": "string", "description": "The full prompt containing MCP tool calls"}
+        "text": {"type": "string", "description": "The full prompt containing MCP tool calls"}
     }
 
     def __init__(
@@ -669,11 +669,11 @@ class MCPTool(Tool):
         """Return the stop strings for all MCP tools."""
         return self.stop_strings
 
-    def __call__(self, prompt: str) -> ToolOutput:
+    def __call__(self, text: str) -> ToolOutput:
         """
-        Execute the appropriate MCP tool based on the prompt content.
+        Execute the appropriate MCP tool based on the text content.
 
-        Note: Unlike other tools, MCPTool still parses the prompt to determine
+        Note: Unlike other tools, MCPTool still parses the text to determine
         which underlying tool to call, as MCP tools share common tags.
         """
         if not MCP_AVAILABLE:
@@ -694,11 +694,11 @@ class MCPTool(Tool):
 
         try:
             for mcp_tool in self.mcp_tools:
-                if mcp_tool.tool_parser.has_calls(prompt, mcp_tool.name):
+                if mcp_tool.tool_parser.has_calls(text, mcp_tool.name):
                     # Retry on transient errors
                     for attempt in range(self.max_retries):
                         try:
-                            document_tool_output = asyncio.run(mcp_tool(prompt))
+                            document_tool_output = asyncio.run(mcp_tool(text))
                             break
                         except Exception as e:
                             # Check for transient network errors
