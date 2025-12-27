@@ -101,7 +101,7 @@ class PythonCodeTool(Tool):
     won't accidentally block the main vLLM process and 2) way easier to parallelize via load balancing.
     """
 
-    tool_function_name = "python"
+    tool_function_name = "code"
     tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "Python code to execute"}}
 
     def __init__(self, api_endpoint: str, timeout_seconds: int = 3) -> None:

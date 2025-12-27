@@ -32,12 +32,14 @@ fi
 
 # Run training
 uv run open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 64 \
+    --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 16 \
+    --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 16 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 512 \
     --response_length 512 \
+    --active_sampling \
+    --async_steps 8 \
     --pack_length 1024 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
@@ -46,7 +48,7 @@ uv run open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
-    --chat_template_name r1_simple_chat_postpend_think_tools \
+    --chat_template_name r1_simple_chat_postpend_think_tool_vllm \
     --learning_rate 3e-7 \
     --total_episodes 200 \
     --deepspeed_stage 2 \
