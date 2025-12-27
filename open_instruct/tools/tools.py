@@ -174,7 +174,7 @@ class SearchToolConfig:
 class SearchTool(Tool):
     """Search tool using the massive_ds API."""
 
-    tool_function_name = "search"
+    tool_function_name = "massive_ds_search"  # Distinct from SerperSearchTool's "search"
     tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "The search query"}}
 
     def __init__(self, api_endpoint: str | None = None, number_documents_to_search: int = 3) -> None:
@@ -439,7 +439,7 @@ class SerperSearchTool(Tool):
     Serper provides fast Google Search results via API. Sign up at https://serper.dev
     """
 
-    tool_function_name = "serper_search"
+    tool_function_name = "search"  # Use "search" to match model training format
     tool_args: dict[str, dict[str, str]] = {
         "text": {"type": "string", "description": "The search query for Google via Serper"}
     }
