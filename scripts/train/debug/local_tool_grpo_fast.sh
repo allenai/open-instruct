@@ -29,7 +29,7 @@ if [ "$USE_LOCAL_CODE_SERVER" = true ]; then
 fi
 
 # Run training
-uv run open_instruct/grpo_fast.py \
+VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 16 \
