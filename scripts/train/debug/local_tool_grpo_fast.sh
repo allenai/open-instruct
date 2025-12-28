@@ -1,10 +1,8 @@
 #!/bin/bash
 # Local tool use training script with code execution and search
 #
-# Note: The default search tool uses Serper (Google Search).
-# Set SERPER_API_KEY environment variable to use it.
-# For massive-ds search, use --tools massive_ds_search and
-# set --search_api_endpoint accordingly.
+# Note: replace with your own key if outside of ai2.
+export SERPER_API_KEY=$(beaker secret read hamishivi_SERPER_API_KEY --workspace ai2/olmo-instruct)
 
 # Check if we're using local code server or remote
 USE_LOCAL_CODE_SERVER=${USE_LOCAL_CODE_SERVER:-false}
@@ -31,7 +29,7 @@ if [ "$USE_LOCAL_CODE_SERVER" = true ]; then
 fi
 
 # Run training
-uv run open_instruct/grpo_fast.py \
+VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 16 \

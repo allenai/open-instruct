@@ -72,15 +72,15 @@ class TestPythonCodeTool(unittest.TestCase):
 
     def test_initialization(self):
         self.assertEqual(self.tool.api_endpoint, self.api_endpoint)
-        self.assertEqual(self.tool.tool_function_name, "code")
+        self.assertEqual(self.tool.tool_function_name, "python")
 
     def test_custom_tag_name(self):
         """Test that tag_name overrides the default tool_function_name."""
-        tool = PythonCodeTool(api_endpoint=self.api_endpoint, tag_name="python")
-        self.assertEqual(tool.tool_function_name, "python")
+        tool = PythonCodeTool(api_endpoint=self.api_endpoint, tag_name="code")
+        self.assertEqual(tool.tool_function_name, "code")
         # Without tag_name, should use default
         tool_default = PythonCodeTool(api_endpoint=self.api_endpoint)
-        self.assertEqual(tool_default.tool_function_name, "code")
+        self.assertEqual(tool_default.tool_function_name, "python")
 
     def test_from_config(self):
         config = PythonCodeToolConfig(api_endpoint=self.api_endpoint, timeout_seconds=5)
@@ -124,9 +124,9 @@ class TestTagNameOverride(unittest.TestCase):
     """Test the tag_name override functionality for tools."""
 
     def test_serper_default_tag(self):
-        """SerperSearchTool defaults to 'search' tag."""
+        """SerperSearchTool defaults to 'serper_search' tag."""
         tool = SerperSearchTool()
-        self.assertEqual(tool.tool_function_name, "search")
+        self.assertEqual(tool.tool_function_name, "serper_search")
 
     def test_serper_custom_tag(self):
         """SerperSearchTool can use a custom tag."""
@@ -194,7 +194,7 @@ class TestToolConfigTagName(unittest.TestCase):
         config = ToolConfig(tools=["s2_search", "serper_search"])
         setup = build_tools_from_config(config)
         self.assertIn("s2_search", setup.tools)
-        self.assertIn("search", setup.tools)  # serper default is "search"
+        self.assertIn("serper_search", setup.tools)  # serper default is "serper_search"
 
 
 if __name__ == "__main__":
