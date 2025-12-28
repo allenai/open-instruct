@@ -10,7 +10,7 @@ export CRAWL4AI_API_URL="http://kennel.csail.mit.edu:11236"  # shannons crawl4ai
 uv sync --extra dr-tulu
 
 # launch mcp server
-MCP_CACHE_DIR=".cache-$(hostname)" python -m dr_agent.mcp_backend.main --port 8000 --host 0.0.0.0 --path /mcp &
+MCP_CACHE_DIR=".cache-$(hostname)" uv run --extra dr-tulu python -m dr_agent.mcp_backend.main --port 8000 --host 0.0.0.0 --path /mcp &
 
 # Run training
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
