@@ -197,5 +197,73 @@ class TestToolConfigTagName(unittest.TestCase):
         self.assertIn("serper_search", setup.tools)  # serper default is "serper_search"
 
 
+class TestToolProxy(unittest.TestCase):
+    """Test the ToolProxy and ToolActor classes."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Initialize Ray for proxy tests."""
+        import ray
+
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+
+    @classmethod
+    def tearDownClass(cls):
+        """Shutdown Ray."""
+        import ray
+
+        if ray.is_initialized():
+            ray.shutdown()
+
+    def test_tool_proxy_creation(self):
+        """Test creating a ToolProxy from a tool."""
+        from open_instruct.tools.proxy import ToolProxy, create_tool_proxy
+
+        tool = MaxCallsExceededTool()
+        proxy = create_tool_proxy(tool)
+
+        self.assertIsInstance(proxy, ToolProxy)
+        self.assertEqual(proxy.tool_function_name, "max_calls_exceeded")
+
+    def test_tool_proxy_call(self):
+        """Test that ToolProxy correctly forwards calls to the ToolActor."""
+        from open_instruct.tools.proxy import create_tool_proxy
+
+        tool = MaxCallsExceededTool()
+        proxy = create_tool_proxy(tool)
+
+        result = proxy()
+        self.assertIsInstance(result, ToolOutput)
+        self.assertEqual(result.output, "Max tool calls exceeded.")
+        self.assertFalse(result.called)
+
+    def test_create_tool_proxies(self):
+        """Test creating multiple tool proxies at once."""
+        from open_instruct.tools.proxy import create_tool_proxies
+
+        tools = {"max_calls": MaxCallsExceededTool(), "serper": SerperSearchTool()}
+        proxies = create_tool_proxies(tools)
+
+        self.assertEqual(len(proxies), 2)
+        self.assertIn("max_calls", proxies)
+        self.assertIn("serper", proxies)
+
+        # Check that proxies preserve tool_function_name
+        self.assertEqual(proxies["max_calls"].tool_function_name, "max_calls_exceeded")
+        self.assertEqual(proxies["serper"].tool_function_name, "serper_search")
+
+    def test_tool_proxy_from_tool_classmethod(self):
+        """Test the from_tool classmethod."""
+        from open_instruct.tools.proxy import ToolProxy
+
+        tool = MaxCallsExceededTool()
+        proxy = ToolProxy.from_tool(tool)
+
+        self.assertIsInstance(proxy, ToolProxy)
+        result = proxy()
+        self.assertEqual(result.output, "Max tool calls exceeded.")
+
+
 if __name__ == "__main__":
     unittest.main()

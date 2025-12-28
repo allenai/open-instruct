@@ -14,8 +14,8 @@ from typing import Literal
 from open_instruct.tools.base import DRTuluToolParser, OpenInstructLegacyToolParser, Tool, ToolParser, VllmToolParser
 from open_instruct.tools.tools import (
     MCP_TOOL_REGISTRY,
-    MCPTool,
-    MCPToolConfig,
+    DrAgentMCPTool,
+    DrAgentMCPToolConfig,
     PythonCodeTool,
     PythonCodeToolConfig,
     S2SearchTool,
@@ -45,12 +45,12 @@ TOOL_REGISTRY: dict[str, tuple[str, type[Tool], bool]] = {
     "massive_ds_search": ("massive_ds_search", SearchTool, False),
     "s2_search": ("s2_search", S2SearchTool, False),
     "you_search": ("you_search", YouSearchTool, False),
-    "mcp": ("mcp", MCPTool, False),
+    "mcp": ("mcp", DrAgentMCPTool, False),
 }
 
 # Add MCP sub-tools - they use mcp config but with tool_name_override
 for mcp_name in MCP_TOOL_REGISTRY:
-    TOOL_REGISTRY[mcp_name] = ("mcp", MCPTool, True)
+    TOOL_REGISTRY[mcp_name] = ("mcp", DrAgentMCPTool, True)
 
 # Available parser types
 PARSER_TYPES = Literal["legacy", "vllm", "dr_tulu"]
@@ -207,7 +207,7 @@ class ToolConfig:
     massive_ds_search: SearchToolConfig = field(default_factory=SearchToolConfig)
     s2_search: S2SearchToolConfig = field(default_factory=S2SearchToolConfig)
     you_search: YouSearchToolConfig = field(default_factory=YouSearchToolConfig)
-    mcp: MCPToolConfig = field(default_factory=MCPToolConfig)
+    mcp: DrAgentMCPToolConfig = field(default_factory=DrAgentMCPToolConfig)
 
 
 # Validate registry at module load time
@@ -276,7 +276,7 @@ def build_tools_from_config(config: ToolConfig, vllm_tool_parser=None, vllm_outp
         tool_mappings.append(f"{tool_name} -> <{tag_name}>")
 
         # Track MCP tools separately for DR Tulu parser
-        if isinstance(tool, MCPTool):
+        if isinstance(tool, DrAgentMCPTool):
             mcp_tools.append(tool)
 
     # Log tool configuration
@@ -302,8 +302,8 @@ def build_tools_from_config(config: ToolConfig, vllm_tool_parser=None, vllm_outp
         stop_strings = parser.stop_sequences()
 
     elif config.parser == "dr_tulu":
-        if not mcp_tools:
-            raise ValueError("parser='dr_tulu' requires at least one MCP tool to be configured.")
+        assert len(mcp_tools) == 1, "DR Tulu only uses the MCP tool."
+        assert len(tool_list) == 1, "DR Tulu only uses the MCP tool. Remove other tools."
         parser = DRTuluToolParser(mcp_tool_list=mcp_tools)
         stop_strings = parser.stop_sequences()
 
@@ -312,7 +312,7 @@ def build_tools_from_config(config: ToolConfig, vllm_tool_parser=None, vllm_outp
 
     # For MCP tools, also get their stop strings (in addition to parser stop strings)
     for tool in tool_list:
-        if isinstance(tool, MCPTool):
+        if isinstance(tool, DrAgentMCPTool):
             stop_strings.extend(tool.get_stop_strings())
 
     return ToolSetup(tools=tools, parser=parser, stop_strings=list(set(stop_strings)))

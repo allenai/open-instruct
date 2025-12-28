@@ -610,43 +610,43 @@ class SerperSearchTool(Tool):
 
 
 # =============================================================================
-# MCPTool + Config
+# DrAgentMCPTool + Config
 # =============================================================================
 
 
 @dataclass
-class MCPToolConfig:
+class DrAgentMCPToolConfig:
     """Configuration for MCP (Model Context Protocol) tools."""
 
-    tool_names: str = "snippet_search"
+    mcp_tool_names: str = "snippet_search"
     """Comma-separated list of MCP tool names to use."""
-    parser_name: str = "unified"
+    mcp_parser_name: str = "unified"
     """The parser name for MCP tools."""
-    transport_type: str | None = None
+    mcp_transport_type: str | None = None
     """Transport type for MCP (default: StreamableHttpTransport)."""
-    host: str | None = None
+    mcp_host: str | None = None
     """Host for MCP transport."""
-    port: int | None = None
+    mcp_port: int | None = None
     """Port for MCP transport."""
-    timeout: int = 180
+    mcp_timeout: int = 180
     """Timeout in seconds for MCP tool calls."""
     max_retries: int = 3
     """Maximum retries for transient MCP errors."""
     retry_backoff: float = 0.5
     """Backoff factor for MCP retries."""
-    base_url: str | None = None
+    mcp_base_url: str | None = None
     """Base URL for MCP tools."""
-    number_documents: int = 10
+    mcp_number_documents: int = 10
     """Number of documents to search for MCP tools."""
-    use_localized_snippets: bool = False
+    mcp_use_localized_snippets: bool = False
     """Whether to use localized snippets."""
-    context_chars: int = 6000
+    mcp_context_chars: int = 6000
     """Number of context characters for MCP tools."""
     tag_name: str | None = None
-    """Override the default tag name."""
+    """Override the default tag name. Not used for MCP tools."""
 
 
-class MCPTool(Tool):
+class DrAgentMCPTool(Tool):
     """
     A wrapper for MCP (Model Context Protocol) tools from dr_agent.
 
@@ -679,7 +679,7 @@ class MCPTool(Tool):
         **kwargs: Any,
     ) -> None:
         if not MCP_AVAILABLE:
-            raise ImportError("MCP tools require dr_agent package. Install it with: pip install dr_agent")
+            raise ImportError("MCP tools require dr_agent package. Install it with: uv sync --extra dr-tulu")
 
         self._tag_name = tag_name
         self.mcp_tools: list[Any] = []
@@ -737,9 +737,9 @@ class MCPTool(Tool):
             self.stop_strings += self.mcp_tools[-1].tool_parser.stop_sequences
 
     @classmethod
-    def from_config(cls, config: MCPToolConfig, tool_name_override: str | None = None) -> "MCPTool":
+    def from_config(cls, config: DrAgentMCPToolConfig, tool_name_override: str | None = None) -> "DrAgentMCPTool":
         if not MCP_AVAILABLE:
-            raise ImportError("MCP tools require dr_agent package. Install it with: pip install dr_agent")
+            raise ImportError("MCP tools require dr_agent package. Install it with: uv sync --extra dr-tulu")
         tool_names = tool_name_override if tool_name_override else config.tool_names
         return cls(
             mcp_tool_names=tool_names,
@@ -765,20 +765,11 @@ class MCPTool(Tool):
         """
         Execute the appropriate MCP tool based on the text content.
 
-        Note: Unlike other tools, MCPTool still parses the text to determine
+        Note: Unlike other tools, DrAgentMCPTool still parses the text to determine
         which underlying tool to call, as MCP tools share common tags.
         """
         if not MCP_AVAILABLE:
-            result = ToolOutput(
-                output="",
-                error="MCP tools require dr_agent package. Install it with: pip install dr_agent",
-                called=False,
-                timeout=False,
-                runtime=0,
-            )
-            _log_tool_call(self.tool_function_name, text, result)
-            return result
-
+            raise ImportError("MCP tools require dr_agent package. Install it with: uv sync --extra dr-tulu")
         start_time = time.time()
 
         document_tool_output = None

@@ -104,6 +104,7 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import Timer, calculate_advantages_packed, pack_sequences
 from open_instruct.tools.config import ToolArgs, build_tools_from_config
+from open_instruct.tools.proxy import create_tool_proxies
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -1508,6 +1509,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
     tool_config = tool_args.to_tool_config()
     tool_setup = build_tools_from_config(tool_config)
     tool_objects = tool_setup.tools
+
+    # Wrap tools in Ray actors for better serialization across processes
+    if tool_objects:
+        print(f"Wrapping {len(tool_objects)} tool(s) in ToolProxy actors")
+        tool_objects = create_tool_proxies(tool_objects)
 
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,

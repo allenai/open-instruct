@@ -146,7 +146,17 @@ class DRTuluToolParser(ToolParser):
     """
 
     def __init__(self, mcp_tool_list: list[Tool]):
-        self.mcp_tools = mcp_tool_list
+        # Extract internal MCP tools from DrAgentMCPTool wrappers
+        # DrAgentMCPTool stores the actual dr_agent MCP tools in .mcp_tools
+        self.mcp_tools: list[Any] = []
+        for tool in mcp_tool_list:
+            if hasattr(tool, "mcp_tools"):
+                # It's a DrAgentMCPTool wrapper - extract internal tools
+                self.mcp_tools.extend(tool.mcp_tools)
+            else:
+                # Assume it's already an internal MCP tool
+                self.mcp_tools.append(tool)
+
         self._stop_strings: list[str] = []
         # Collect stop strings from all MCP tools
         for mcp_tool in self.mcp_tools:
@@ -163,7 +173,7 @@ class DRTuluToolParser(ToolParser):
 
     def format_tool_calls(self, tool_output: str) -> str:
         # DR Tulu uses the MCP tool's own formatting
-        return tool_output
+        return "\n" + tool_output + "\n\n"
 
     def stop_sequences(self) -> list[str]:
         return self._stop_strings

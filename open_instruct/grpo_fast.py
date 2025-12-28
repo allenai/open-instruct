@@ -114,6 +114,7 @@ from open_instruct.model_utils import (
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
 from open_instruct.tools.base import Tool
 from open_instruct.tools.config import ToolArgs, ToolSetup, build_tools_from_config
+from open_instruct.tools.proxy import create_tool_proxies
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -2090,6 +2091,11 @@ def create_model_and_optimizer(
     tool_config = tool_args.to_tool_config()
     tool_setup: ToolSetup = build_tools_from_config(tool_config)
     tool_objects = tool_setup.tools
+
+    # Wrap tools in Ray actors for better serialization across processes
+    if tool_objects:
+        logger.info(f"Wrapping {len(tool_objects)} tool(s) in ToolProxy actors")
+        tool_objects = create_tool_proxies(tool_objects)
 
     # Add tool stop strings to args.stop_strings
     for stop_string in tool_setup.stop_strings:
