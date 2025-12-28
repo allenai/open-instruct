@@ -1,15 +1,20 @@
 """
 Tool configuration system for composable tool arguments.
 
-Each tool defines its own Config dataclass (in tools.py) with a from_config() classmethod.
+Each tool defines its own Config dataclass (in tools.py) with:
+- A `cli_prefix` ClassVar that defines the CLI argument prefix
+- Fields that become CLI arguments as `--{prefix}{field_name}`
+
 This module provides:
 - ToolArgs: flat dataclass for CLI argument parsing (HfArgumentParser compatible)
 - ToolConfig: internal structured config used by build_tools_from_config
+
+ToolArgs is built automatically from individual tool configs.
 """
 
 import logging
-from dataclasses import dataclass, field, fields
-from typing import Literal
+from dataclasses import MISSING, dataclass, field, fields, make_dataclass
+from typing import Any, Literal
 
 from open_instruct.tools.base import DRTuluToolParser, OpenInstructLegacyToolParser, Tool, ToolParser, VllmToolParser
 from open_instruct.tools.tools import (
@@ -31,15 +36,31 @@ from open_instruct.tools.tools import (
 logger = logging.getLogger(__name__)
 
 # =============================================================================
+# Tool Config Registry
+# =============================================================================
+
+# Maps config attribute name (used in ToolConfig) to config class
+# Each config class must have a `cli_prefix` ClassVar
+TOOL_CONFIG_REGISTRY: dict[str, type] = {
+    "python": PythonCodeToolConfig,
+    "massive_ds_search": SearchToolConfig,
+    "serper_search": SerperSearchToolConfig,
+    "s2_search": S2SearchToolConfig,
+    "you_search": YouSearchToolConfig,
+    "mcp": DrAgentMCPToolConfig,
+}
+
+# Fields to exclude from CLI exposure (common across all configs)
+EXCLUDED_FIELDS = {"tag_name", "cli_prefix"}
+
+# =============================================================================
 # Tool Registry
 # =============================================================================
 
 # Maps tool names to (config_attr_name, tool_class, is_mcp_subtool)
-# config_attr_name is the attribute on ToolConfig that holds this tool's config
 TOOL_REGISTRY: dict[str, tuple[str, type[Tool], bool]] = {
     "code": ("python", PythonCodeTool, False),
     "python": ("python", PythonCodeTool, False),
-    # Search tools - "search" defaults to Serper (Google Search)
     "search": ("serper_search", SerperSearchTool, False),
     "serper_search": ("serper_search", SerperSearchTool, False),
     "massive_ds_search": ("massive_ds_search", SearchTool, False),
@@ -48,11 +69,10 @@ TOOL_REGISTRY: dict[str, tuple[str, type[Tool], bool]] = {
     "mcp": ("mcp", DrAgentMCPTool, False),
 }
 
-# Add MCP sub-tools - they use mcp config but with tool_name_override
+# Add MCP sub-tools
 for mcp_name in MCP_TOOL_REGISTRY:
     TOOL_REGISTRY[mcp_name] = ("mcp", DrAgentMCPTool, True)
 
-# Available parser types
 PARSER_TYPES = Literal["legacy", "vllm", "dr_tulu"]
 
 
@@ -67,141 +87,156 @@ def get_available_parsers() -> list[str]:
 
 
 # =============================================================================
-# ToolArgs - Flat dataclass for HfArgumentParser
+# Dynamic ToolArgs Construction
 # =============================================================================
 
 
-@dataclass
-class ToolArgs:
+def _get_field_default(f: Any) -> Any:
+    """Extract the default value or factory from a dataclass field."""
+    if f.default is not MISSING:
+        return f.default
+    if f.default_factory is not MISSING:
+        return field(default_factory=f.default_factory)
+    return MISSING
+
+
+def _build_tool_args() -> tuple[type, dict[str, tuple[str, str]]]:
     """
-    Flat tool arguments for CLI parsing with HfArgumentParser.
+    Build ToolArgs dataclass from tool config classes.
 
-    This dataclass is passed to ArgumentParserPlus alongside Args, TokenizerConfig, etc.
-    Use to_tool_config() to convert to the internal ToolConfig structure.
+    Returns:
+        Tuple of (ToolArgs class, mapping from CLI field to (config_attr, config_field))
     """
+    all_fields: list[tuple[str, type, Any]] = []
+    field_mapping: dict[str, tuple[str, str]] = {}
+    seen_cli_names: dict[str, str] = {}  # cli_name -> "config_attr.field_name" for error messages
 
-    # General tool settings
-    tools: list[str] | None = None
-    """List of tools to enable. Available: code, search, serper_search, massive_ds_search, s2_search, you_search, mcp."""
-    max_tool_calls: int = 5
-    """Maximum number of tool calls allowed per generation."""
-    mask_tool_use: bool = True
-    """Whether to mask the tool output in training."""
-    tool_parser: str = "legacy"
-    """Tool parser: 'legacy' (<tag>...</tag>), 'vllm' (native vLLM), or 'dr_tulu' (MCP-based)."""
-    tool_tag_names: list[str] | None = None
-    """Override the XML tag names for tools, in the same order as --tools.
+    # Base fields
+    base_fields = [
+        ("tools", list[str] | None, field(default=None)),
+        ("max_tool_calls", int, field(default=5)),
+        ("mask_tool_use", bool, field(default=True)),
+        ("tool_parser", str, field(default="legacy")),
+        ("tool_tag_names", list[str] | None, field(default=None)),
+    ]
+    all_fields.extend(base_fields)
 
-    Allows using consistent tags while swapping backend implementations.
-    For example: --tools s2_search code --tool_tag_names search python
-    This uses Semantic Scholar with <search> tag and code tool with <python> tag.
-    Must have the same length as --tools if provided.
-    """
+    # Add fields from each tool config
+    for config_attr, config_cls in TOOL_CONFIG_REGISTRY.items():
+        prefix = getattr(config_cls, "cli_prefix", "")
 
-    # Code tool settings
-    code_api_endpoint: str | None = None
-    """API endpoint for code execution tool."""
-    code_timeout_seconds: int = 3
-    """Timeout for code execution in seconds."""
+        for f in fields(config_cls):
+            if f.name in EXCLUDED_FIELDS:
+                continue
 
-    # Massive DS search settings
-    search_api_endpoint: str | None = None
-    """API endpoint for massive_ds search tool."""
-    search_num_documents: int = 3
-    """Number of documents to return from massive_ds search."""
+            cli_name = f"{prefix}{f.name}"
 
-    # Serper (Google) search settings
-    serper_num_results: int = 5
-    """Number of results from Serper (Google) search."""
-
-    # Semantic Scholar settings
-    s2_num_results: int = 10
-    """Number of results from Semantic Scholar."""
-
-    # You.com settings
-    you_num_results: int = 10
-    """Number of results from You.com."""
-
-    def __post_init__(self) -> None:
-        """Validate tool arguments."""
-        if self.tools:
-            available = get_available_tools()
-            for tool in self.tools:
-                if tool.lower() not in available:
-                    raise ValueError(f"Unknown tool: {tool}. Available tools: {available}")
-
-        available_parsers = get_available_parsers()
-        if self.tool_parser not in available_parsers:
-            raise ValueError(f"Unknown parser: {self.tool_parser}. Available parsers: {available_parsers}")
-
-        # Validate tool_tag_names length matches tools
-        if self.tool_tag_names is not None:
-            if not self.tools:
-                raise ValueError("--tool_tag_names requires --tools to be specified")
-            if len(self.tool_tag_names) != len(self.tools):
+            # Check for clashes
+            if cli_name in seen_cli_names:
                 raise ValueError(
-                    f"--tool_tag_names must have the same length as --tools. "
-                    f"Got {len(self.tool_tag_names)} tag names for {len(self.tools)} tools."
+                    f"CLI argument clash: --{cli_name} is used by both "
+                    f"{seen_cli_names[cli_name]} and {config_attr}.{f.name}. "
+                    f"Change one of the field names or cli_prefix values to avoid this."
                 )
+            seen_cli_names[cli_name] = f"{config_attr}.{f.name}"
 
-    def to_tool_config(self) -> "ToolConfig":
-        """Convert flat ToolArgs to internal ToolConfig structure."""
-        return ToolConfig(
-            tools=self.tools,
-            max_tool_calls=self.max_tool_calls,
-            mask_tool_use=self.mask_tool_use,
-            parser=self.tool_parser,
-            tool_tag_names=self.tool_tag_names,
-            python=PythonCodeToolConfig(
-                api_endpoint=self.code_api_endpoint, timeout_seconds=self.code_timeout_seconds
-            ),
-            serper_search=SerperSearchToolConfig(number_of_results=self.serper_num_results),
-            massive_ds_search=SearchToolConfig(
-                api_endpoint=self.search_api_endpoint, number_documents=self.search_num_documents
-            ),
-            s2_search=S2SearchToolConfig(number_of_results=self.s2_num_results),
-            you_search=YouSearchToolConfig(number_of_results=self.you_num_results),
-        )
+            # Get default
+            default = _get_field_default(f)
+            if default is MISSING:
+                all_fields.append((cli_name, f.type, field()))
+            elif isinstance(default, field().__class__):
+                all_fields.append((cli_name, f.type, default))
+            else:
+                all_fields.append((cli_name, f.type, field(default=default)))
+
+            field_mapping[cli_name] = (config_attr, f.name)
+
+    # Create class
+    cls = make_dataclass(
+        "ToolArgs",
+        all_fields,
+        namespace={
+            "__doc__": """
+Flat tool arguments for CLI parsing with HfArgumentParser.
+
+Auto-generated from tool config classes. Each tool config's fields are
+exposed with its cli_prefix prepended.
+
+Use to_tool_config() to convert to the internal ToolConfig structure.
+""",
+            "_field_mapping": field_mapping,
+            "__post_init__": _tool_args_post_init,
+            "to_tool_config": _tool_args_to_tool_config,
+        },
+    )
+
+    return cls, field_mapping
+
+
+def _tool_args_post_init(self: Any) -> None:
+    """Validate tool arguments."""
+    if self.tools:
+        available = get_available_tools()
+        for tool in self.tools:
+            if tool.lower() not in available:
+                raise ValueError(f"Unknown tool: {tool}. Available tools: {available}")
+
+    if self.tool_parser not in get_available_parsers():
+        raise ValueError(f"Unknown parser: {self.tool_parser}. Available: {get_available_parsers()}")
+
+    if self.tool_tag_names is not None:
+        if not self.tools:
+            raise ValueError("--tool_tag_names requires --tools to be specified")
+        if len(self.tool_tag_names) != len(self.tools):
+            raise ValueError(
+                f"--tool_tag_names must have same length as --tools. "
+                f"Got {len(self.tool_tag_names)} for {len(self.tools)} tools."
+            )
+
+
+def _tool_args_to_tool_config(self: Any) -> "ToolConfig":
+    """Convert flat ToolArgs to internal ToolConfig structure."""
+    # Build kwargs for each config
+    config_kwargs: dict[str, dict[str, Any]] = {attr: {} for attr in TOOL_CONFIG_REGISTRY}
+
+    for cli_name, (config_attr, field_name) in self._field_mapping.items():
+        config_kwargs[config_attr][field_name] = getattr(self, cli_name)
+
+    # Instantiate configs
+    tool_configs = {attr: cls(**config_kwargs[attr]) for attr, cls in TOOL_CONFIG_REGISTRY.items()}
+
+    return ToolConfig(
+        tools=self.tools,
+        max_tool_calls=self.max_tool_calls,
+        mask_tool_use=self.mask_tool_use,
+        parser=self.tool_parser,
+        tool_tag_names=self.tool_tag_names,
+        **tool_configs,
+    )
+
+
+# Build ToolArgs at module load time
+ToolArgs, _CLI_TO_CONFIG_MAPPING = _build_tool_args()
+
+# Type hint for IDE (actual class is dynamic)
+ToolArgs: type  # noqa: F811
 
 
 # =============================================================================
-# ToolConfig - Internal structured configuration
+# ToolConfig
 # =============================================================================
-
-
-def _validate_registry_against_config(config_cls: type) -> None:
-    """
-    Validate that all config_attr entries in TOOL_REGISTRY have corresponding fields in ToolConfig.
-    Called at module load time to catch misconfigurations early.
-    """
-    config_fields = {f.name for f in fields(config_cls)}
-    required_attrs = {config_attr for config_attr, _, _ in TOOL_REGISTRY.values()}
-
-    missing = required_attrs - config_fields
-    if missing:
-        raise ValueError(
-            f"TOOL_REGISTRY references config attributes that don't exist in ToolConfig: {missing}. "
-            f"Add these fields to ToolConfig or fix the registry."
-        )
 
 
 @dataclass
 class ToolConfig:
-    """
-    Internal structured tool configuration.
+    """Internal structured tool configuration."""
 
-    This is created from ToolArgs.to_tool_config() and used by build_tools_from_config().
-    """
-
-    # General tool settings
     tools: list[str] | None = None
     max_tool_calls: int = 5
     mask_tool_use: bool = True
     parser: str = "legacy"
     tool_tag_names: list[str] | None = None
-    """Tag name overrides for each tool, in the same order as tools list."""
 
-    # Individual tool configurations (nested)
     python: PythonCodeToolConfig = field(default_factory=PythonCodeToolConfig)
     serper_search: SerperSearchToolConfig = field(default_factory=SerperSearchToolConfig)
     massive_ds_search: SearchToolConfig = field(default_factory=SearchToolConfig)
@@ -210,12 +245,8 @@ class ToolConfig:
     mcp: DrAgentMCPToolConfig = field(default_factory=DrAgentMCPToolConfig)
 
 
-# Validate registry at module load time
-_validate_registry_against_config(ToolConfig)
-
-
 # =============================================================================
-# Tool Setup Functions
+# Tool Setup
 # =============================================================================
 
 
@@ -224,45 +255,27 @@ class ToolSetup:
     """Result of setting up tools."""
 
     tools: dict[str, Tool]
-    """Map of tool function name to tool instance."""
     parser: ToolParser | None
-    """The tool parser to use."""
     stop_strings: list[str]
-    """Stop strings for generation."""
 
 
 def build_tools_from_config(config: ToolConfig, vllm_tool_parser=None, vllm_output_formatter=None) -> ToolSetup:
-    """
-    Build tools and parser from ToolConfig.
-
-    Each tool is built using its Tool.from_config() classmethod.
-
-    Args:
-        config: The tool configuration with nested individual tool configs.
-        vllm_tool_parser: Optional vLLM native tool parser (required if parser="vllm").
-        vllm_output_formatter: Optional output formatter function (required if parser="vllm").
-
-    Returns:
-        ToolSetup with tools, parser, and stop strings.
-    """
+    """Build tools and parser from ToolConfig."""
     if not config.tools:
         return ToolSetup(tools={}, parser=None, stop_strings=[])
 
     tools: dict[str, Tool] = {}
     tool_list: list[Tool] = []
     mcp_tools: list[Tool] = []
-    tool_mappings: list[str] = []  # For logging
 
     for i, tool_name in enumerate(config.tools):
         tool_name_lower = tool_name.lower()
         config_attr, tool_cls, is_mcp_subtool = TOOL_REGISTRY[tool_name_lower]
         tool_config = getattr(config, config_attr)
 
-        # Apply tag_name from the parallel list if provided
         if config.tool_tag_names and hasattr(tool_config, "tag_name"):
             tool_config.tag_name = config.tool_tag_names[i]
 
-        # MCP sub-tools need the tool_name_override
         if is_mcp_subtool:
             tool = tool_cls.from_config(tool_config, tool_name_override=tool_name_lower)
         else:
@@ -271,46 +284,28 @@ def build_tools_from_config(config: ToolConfig, vllm_tool_parser=None, vllm_outp
         tools[tool.tool_function_name] = tool
         tool_list.append(tool)
 
-        # Log the mapping
-        tag_name = tool.tool_function_name
-        tool_mappings.append(f"{tool_name} -> <{tag_name}>")
-
-        # Track MCP tools separately for DR Tulu parser
         if isinstance(tool, DrAgentMCPTool):
             mcp_tools.append(tool)
 
-    # Log tool configuration
-    logger.info(f"Configured {len(tools)} tool(s): {', '.join(tool_mappings)}")
+    logger.info(f"Configured {len(tools)} tool(s): {list(tools.keys())}")
 
-    # Build parser based on type
     stop_strings: list[str] = []
 
     if config.parser == "legacy":
         parser = OpenInstructLegacyToolParser(tool_list=tool_list)
         stop_strings = parser.stop_sequences()
-
     elif config.parser == "vllm":
-        # TODO: add support for native vllm tool outputs.
-        # will require some extra work too.
-        # how to handle multiple tool calls + generation prompt?
         if vllm_tool_parser is None or vllm_output_formatter is None:
-            raise ValueError(
-                "parser='vllm' requires vllm_tool_parser and vllm_output_formatter arguments. "
-                "These should come from vLLM's native tool parsing setup."
-            )
+            raise ValueError("parser='vllm' requires vllm_tool_parser and vllm_output_formatter")
         parser = VllmToolParser(tool_parser=vllm_tool_parser, output_formatter=vllm_output_formatter)
         stop_strings = parser.stop_sequences()
-
     elif config.parser == "dr_tulu":
-        assert len(mcp_tools) == 1, "DR Tulu only uses the MCP tool."
-        assert len(tool_list) == 1, "DR Tulu only uses the MCP tool. Remove other tools."
+        assert len(mcp_tools) == 1 and len(tool_list) == 1, "DR Tulu only uses the MCP tool"
         parser = DRTuluToolParser(mcp_tool_list=mcp_tools)
         stop_strings = parser.stop_sequences()
-
     else:
         parser = None
 
-    # For MCP tools, also get their stop strings (in addition to parser stop strings)
     for tool in tool_list:
         if isinstance(tool, DrAgentMCPTool):
             stop_strings.extend(tool.get_stop_strings())

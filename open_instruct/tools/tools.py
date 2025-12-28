@@ -11,7 +11,7 @@ import time
 import traceback
 from collections.abc import Collection
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -109,6 +109,8 @@ class MaxCallsExceededTool(Tool):
 class PythonCodeToolConfig:
     """Configuration for the Python code execution tool."""
 
+    cli_prefix: ClassVar[str] = "code_"
+
     api_endpoint: str | None = None
     """The API endpoint for the code execution server."""
     timeout_seconds: int = 3
@@ -194,9 +196,11 @@ class PythonCodeTool(Tool):
 class SearchToolConfig:
     """Configuration for the massive_ds search tool."""
 
+    cli_prefix: ClassVar[str] = "search_"
+
     api_endpoint: str | None = None
     """The API endpoint for the search engine."""
-    number_documents: int = 3
+    num_documents: int = 3
     """The maximum number of documents to retrieve for each query."""
     tag_name: str | None = None
     """Override the default tag name."""
@@ -218,9 +222,7 @@ class SearchTool(Tool):
     @classmethod
     def from_config(cls, config: SearchToolConfig) -> "SearchTool":
         return cls(
-            api_endpoint=config.api_endpoint,
-            number_documents_to_search=config.number_documents,
-            tag_name=config.tag_name,
+            api_endpoint=config.api_endpoint, number_documents_to_search=config.num_documents, tag_name=config.tag_name
         )
 
     def __call__(self, text: str) -> ToolOutput:
@@ -290,7 +292,9 @@ class SearchTool(Tool):
 class S2SearchToolConfig:
     """Configuration for the Semantic Scholar search tool."""
 
-    number_of_results: int = 10
+    cli_prefix: ClassVar[str] = "s2_"
+
+    num_results: int = 10
     """Number of results to return from Semantic Scholar."""
     tag_name: str | None = None
     """Override the default tag name (e.g., use <search> instead of <s2_search>)."""
@@ -313,7 +317,7 @@ class S2SearchTool(Tool):
 
     @classmethod
     def from_config(cls, config: S2SearchToolConfig) -> "S2SearchTool":
-        return cls(number_of_results=config.number_of_results, tag_name=config.tag_name)
+        return cls(number_of_results=config.num_results, tag_name=config.tag_name)
 
     def __call__(self, text: str) -> ToolOutput:
         """Search Semantic Scholar for documents matching the query."""
@@ -388,7 +392,9 @@ class S2SearchTool(Tool):
 class YouSearchToolConfig:
     """Configuration for the You.com search tool."""
 
-    number_of_results: int = 10
+    cli_prefix: ClassVar[str] = "you_"
+
+    num_results: int = 10
     """Number of results to return from You.com."""
     tag_name: str | None = None
     """Override the default tag name (e.g., use <search> instead of <you_search>)."""
@@ -409,7 +415,7 @@ class YouSearchTool(Tool):
 
     @classmethod
     def from_config(cls, config: YouSearchToolConfig) -> "YouSearchTool":
-        return cls(number_of_results=config.number_of_results, tag_name=config.tag_name)
+        return cls(number_of_results=config.num_results, tag_name=config.tag_name)
 
     def __call__(self, text: str) -> ToolOutput:
         """Search You.com for documents matching the query."""
@@ -501,7 +507,9 @@ class YouSearchTool(Tool):
 class SerperSearchToolConfig:
     """Configuration for the Serper (Google Search) tool."""
 
-    number_of_results: int = 5
+    cli_prefix: ClassVar[str] = "serper_"
+
+    num_results: int = 5
     """Number of results to return from Serper."""
     tag_name: str | None = None
     """Override the default tag name."""
@@ -526,7 +534,7 @@ class SerperSearchTool(Tool):
 
     @classmethod
     def from_config(cls, config: SerperSearchToolConfig) -> "SerperSearchTool":
-        return cls(number_of_results=config.number_of_results, tag_name=config.tag_name)
+        return cls(number_of_results=config.num_results, tag_name=config.tag_name)
 
     def __call__(self, text: str) -> ToolOutput:
         """Search Google via Serper for documents matching the query."""
@@ -618,29 +626,31 @@ class SerperSearchTool(Tool):
 class DrAgentMCPToolConfig:
     """Configuration for MCP (Model Context Protocol) tools."""
 
-    mcp_tool_names: str = "snippet_search"
+    cli_prefix: ClassVar[str] = "mcp_"
+
+    tool_names: str = "snippet_search"
     """Comma-separated list of MCP tool names to use."""
-    mcp_parser_name: str = "unified"
+    parser_name: str = "unified"
     """The parser name for MCP tools."""
-    mcp_transport_type: str | None = None
+    transport_type: str | None = None
     """Transport type for MCP (default: StreamableHttpTransport)."""
-    mcp_host: str | None = None
+    host: str | None = None
     """Host for MCP transport."""
-    mcp_port: int | None = None
+    port: int | None = None
     """Port for MCP transport."""
-    mcp_timeout: int = 180
+    timeout: int = 180
     """Timeout in seconds for MCP tool calls."""
     max_retries: int = 3
     """Maximum retries for transient MCP errors."""
     retry_backoff: float = 0.5
     """Backoff factor for MCP retries."""
-    mcp_base_url: str | None = None
+    base_url: str | None = None
     """Base URL for MCP tools."""
-    mcp_number_documents: int = 10
+    num_documents: int = 10
     """Number of documents to search for MCP tools."""
-    mcp_use_localized_snippets: bool = False
+    use_localized_snippets: bool = False
     """Whether to use localized snippets."""
-    mcp_context_chars: int = 6000
+    context_chars: int = 6000
     """Number of context characters for MCP tools."""
     tag_name: str | None = None
     """Override the default tag name. Not used for MCP tools."""
@@ -751,7 +761,7 @@ class DrAgentMCPTool(Tool):
             max_retries=config.max_retries,
             retry_backoff=config.retry_backoff,
             base_url=config.base_url,
-            number_documents_to_search=config.number_documents,
+            number_documents_to_search=config.num_documents,
             use_localized_snippets=config.use_localized_snippets,
             context_chars=config.context_chars,
             tag_name=config.tag_name,
