@@ -18,11 +18,11 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 16 \
     --dataset_mixer_eval_list_splits train \
-    --max_prompt_token_length 512 \
+    --max_prompt_token_length 2048 \
     --response_length 512 \
     --active_sampling \
     --async_steps 8 \
-    --pack_length 1024 \
+    --pack_length 3072 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
     --num_samples_per_prompt_rollout 4 \
