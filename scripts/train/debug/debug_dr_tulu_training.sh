@@ -22,7 +22,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra dr-tulu open_instruct/grpo_fa
     --response_length 2048 \
     --active_sampling \
     --async_steps 8 \
-    --pack_length 3072 \
+    --pack_length 4096 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
     --num_samples_per_prompt_rollout 4 \
