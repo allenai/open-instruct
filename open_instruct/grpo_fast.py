@@ -773,6 +773,7 @@ class PolicyTrainerRayProcess(RayProcess):
         optimization_steps_done = 0
         checkpoint_state = None
         if args.checkpoint_state_dir:
+            # check if the dir exists
             if not os.path.exists(args.checkpoint_state_dir):
                 logger.warning(
                     f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
@@ -796,6 +797,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 random.setstate(rng_states["python_rng_state"])
 
                 if torch.cuda.is_available() and "torch_cuda_rng_states" in rng_states:
+                    # device_str, e.g. "cuda:0"
                     for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
                         device_id = int(device_str.split(":")[1])
                         torch.cuda.set_rng_state(rng_state, device_id)
@@ -804,6 +806,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
 
+                # Save reference policy path to load later (after ref_policy is initialized)
                 self.ref_policy_checkpoint_path = None
                 if args.load_ref_policy and states.get("ref_policy_saved", False):
                     ref_policy_dir = os.path.join(args.checkpoint_state_dir, "ref_policy")
