@@ -104,7 +104,7 @@ jobs:
           echo "=========================================="
           echo ""
 
-          beaker experiment await "$exp_id" 0 --index finalized --timeout 20m
+          beaker experiment await "$exp_id" 0 --index finalized --timeout 25m
           status=$(beaker experiment get "$exp_id" --format json | jq -r '.[0].jobs[0].status.exitCode')
           if [ "$status" != "0" ]; then
             echo "GPU tests failed with exit code $status"

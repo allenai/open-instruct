@@ -112,6 +112,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
+from open_instruct.tool_utils import tools
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -205,15 +206,13 @@ class Args:
     total_episodes: int = 100000
     """The total number of episodes in the dataset"""
     world_size: int | None = None
-    """RUNTIME VALUE: The number of processes (GPUs) to use"""
+    """RUNTIME VALUE: The number of processes (GPUs) to use for training ONLY"""
     num_training_steps: int | None = None
     """RUNTIME VALUE: The number of training_steps to train"""
     local_eval_every: int = 100
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
     """How many train steps to save the model"""
-    allow_world_padding: bool = False
-    """Whether to allow world padding. This is useful for model sweeps, but wastes compute."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
 
@@ -471,7 +470,10 @@ class Args:
                 f"vllm_num_engines={self.vllm_num_engines}, vllm will be generating data for multiple "
                 "batches simultaneously. This is fine but might be unexpected behaviour."
             )
-        # Initialize stop_strings if None
+        # ensure enough samples for all ranks
+        assert self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout >= sum(
+            self.num_learners_per_node
+        ), "You must have at least as many samples as training GPUs (DP ranks) for distributed training!"
         if self.stop_strings is None:
             self.stop_strings = []
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
@@ -678,6 +680,12 @@ class PolicyTrainerRayProcess(RayProcess):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
+        # Pre-initialize torch.distributed WITHOUT device_id to avoid NCCL hangs.
+        # DeepSpeed 0.17.3 and up sets device_id in init_process_group which can cause hangs
+        # when multiple process groups exist (e.g., for weight sync to vLLM).
+        # By initializing first, DeepSpeed will detect it and wrap it instead of re-initializing.
+        if not torch.distributed.is_initialized():
+            torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=args.backend_timeout))
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(
@@ -755,6 +763,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 checkpoint_path=self.ref_policy_checkpoint_path
                 if hasattr(self, "ref_policy_checkpoint_path")
                 else None,
+                ref_policy_update_freq=args.ref_policy_update_freq,
+                alpha=args.alpha,
             )
         self.local_metrics = utils.MetricsTracker(device=self.device)
         return optimization_steps_done, checkpoint_state
@@ -865,6 +875,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
+            torch.cuda.set_device(self.local_rank)
             self.model_update_group = vllm_utils.init_process_group(
                 backend=backend,
                 init_method=f"tcp://{master_address}:{master_port}",
@@ -879,6 +890,9 @@ class PolicyTrainerRayProcess(RayProcess):
     def broadcast_to_vllm(self):
         # avoid OOM
         torch.cuda.empty_cache()
+        # Ensure CUDA device is set before broadcast operations.
+        # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
+        torch.cuda.set_device(self.local_rank)
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
@@ -1856,6 +1870,7 @@ def data_preparation_thread(
                 pad_token_id=tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
                 mask_tool_use=args.mask_tool_use,
+                min_num_batches=args.world_size,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
@@ -1867,29 +1882,6 @@ def data_preparation_thread(
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
-
-        # if we have less batches than world size, we need to pad out so each world is fine
-        # ideally, you should avoid this since its wasting computation.
-        if args.allow_world_padding:
-            with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
-                shortfall = args.world_size - len(packed_sequences.query_responses)
-                if shortfall > 0:
-                    logger.warning(
-                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
-                    )
-                    # construct "dummy" sequences for padding out the world size
-                    dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
-                    dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-                    dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-                    dummy_response_mask = torch.zeros_like(dummy_qr)
-                    dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
-                    # pad out the world size
-                    for _ in range(shortfall):
-                        packed_sequences.query_responses.append(dummy_qr)
-                        packed_sequences.attention_masks.append(dummy_attention)
-                        packed_sequences.position_ids.append(dummy_position_ids)
-                        packed_sequences.response_masks.append(dummy_response_mask)
-                        packed_sequences.advantages.append(dummy_advantage)
 
         collated_data = prepare_collated_data_for_workers(
             packed_sequences, args.world_size, args.per_device_train_batch_size, tokenizer.pad_token_id
@@ -2094,6 +2086,44 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
     return train_dataset, eval_dataset
 
 
+def load_tools(args: Args) -> dict[str, tools.Tool]:
+    """Load tool instances based on args.tools configuration.
+
+    Args:
+        args: Parsed training arguments with tool configuration.
+
+    Returns:
+        A mapping from tool end strings to tool instances.
+
+    Raises:
+        ValueError: If an unknown tool is requested.
+    """
+    tool_objects: dict[str, tools.Tool] = {}
+    if not args.tools:
+        return tool_objects
+
+    for tool in args.tools:
+        if tool.lower() == "search":
+            from open_instruct.search_utils.search_tool import SearchTool
+
+            tool_instance = SearchTool(
+                start_str="<query>",
+                end_str="</query>",
+                api_endpoint=args.search_api_endpoint,
+                number_documents_to_search=args.number_documents_to_search,
+            )
+        elif tool.lower() == "code":
+            tool_instance = tools.PythonCodeTool(
+                start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint
+            )
+        else:
+            raise ValueError(f"Unknown tool: {tool}")
+
+        tool_objects[tool_instance.end_str] = tool_instance
+
+    return tool_objects
+
+
 def create_model_and_optimizer(
     args: Args,
     tc: TokenizerConfig,
@@ -2107,7 +2137,7 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     train_dataset,
     eval_dataset,
-) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict, int, int]:
+) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, tools.Tool], int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -2120,32 +2150,8 @@ def create_model_and_optimizer(
         for model in policy_group.models
     ]
 
-    # Set up tools
-    max_len = args.max_prompt_token_length + args.response_length
-    tool_objects = {}
-    if args.tools:
-        for tool in args.tools:
-            if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
-
-                tool = SearchTool(
-                    start_str="<query>",
-                    end_str="</query>",
-                    api_endpoint=args.search_api_endpoint,
-                    number_documents_to_search=args.number_documents_to_search,
-                )
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
-            elif tool.lower() == "code":
-                from open_instruct.tool_utils.tools import PythonCodeTool
-
-                tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
-            else:
-                raise ValueError(f"Unknown tool: {tool}")
+    tool_objects = load_tools(args)
+    args.stop_strings.extend(tool_objects.keys())
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -2164,7 +2170,7 @@ def create_model_and_optimizer(
         model_config.model_revision,
         args.seed,
         args.vllm_enable_prefix_caching,
-        max_len,
+        args.max_prompt_token_length + args.response_length,  # max_model_len, total length to generate
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
