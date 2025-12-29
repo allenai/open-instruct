@@ -99,6 +99,23 @@ class ToolActor:
             return list(self._tool.get_stop_strings())
         return []
 
+    def has_calls(self, text: str, tool_name: str) -> bool:
+        """Check if text contains calls to the specified tool.
+
+        This is used by DRTuluToolParser to detect tool calls.
+        """
+        if hasattr(self._tool, "mcp_tools"):
+            for mcp_tool in self._tool.mcp_tools:
+                if hasattr(mcp_tool, "tool_parser") and mcp_tool.tool_parser.has_calls(text, tool_name):
+                    return True
+        return False
+
+    def get_mcp_tool_names(self) -> list[str]:
+        """Get the names of MCP tools wrapped by this tool."""
+        if hasattr(self._tool, "mcp_tools"):
+            return [mcp_tool.name for mcp_tool in self._tool.mcp_tools]
+        return []
+
 
 def create_tool_actor_from_config(
     class_path: str,
@@ -165,6 +182,14 @@ class ToolProxy(Tool):
     def get_stop_strings(self) -> list[str]:
         """Get stop strings from the remote tool."""
         return ray.get(self._actor.get_stop_strings.remote())
+
+    def has_calls(self, text: str, tool_name: str) -> bool:
+        """Check if text contains calls to the specified tool."""
+        return ray.get(self._actor.has_calls.remote(text, tool_name))
+
+    def get_mcp_tool_names(self) -> list[str]:
+        """Get the names of MCP tools wrapped by this tool."""
+        return ray.get(self._actor.get_mcp_tool_names.remote())
 
     @classmethod
     def from_actor(cls, actor_handle: ray.actor.ActorHandle) -> ToolProxy:

@@ -143,32 +143,37 @@ class DRTuluToolParser(ToolParser):
     """
     Tool parser that recreates the DR Tulu style.
     Basically a wrapper around the mcp tools, that themselves handle parsing/calls/etc.
+
+    Works with both DrAgentMCPTool instances and ToolProxy wrappers around them.
     """
 
     def __init__(self, mcp_tool_list: list[Tool]):
-        # Extract internal MCP tools from DrAgentMCPTool wrappers
-        # DrAgentMCPTool stores the actual dr_agent MCP tools in .mcp_tools
-        self.mcp_tools: list[Any] = []
+        # Store the tool wrappers (either DrAgentMCPTool or ToolProxy)
+        self.tool_wrappers = mcp_tool_list
+
+        # Get MCP tool names from each wrapper
+        self.mcp_tool_names: list[str] = []
         for tool in mcp_tool_list:
-            if hasattr(tool, "mcp_tools"):
-                # It's a DrAgentMCPTool wrapper - extract internal tools
-                self.mcp_tools.extend(tool.mcp_tools)
-            else:
-                # Assume it's already an internal MCP tool
-                self.mcp_tools.append(tool)
+            if hasattr(tool, "get_mcp_tool_names"):
+                # It's a ToolProxy or DrAgentMCPTool with this method
+                self.mcp_tool_names.extend(tool.get_mcp_tool_names())
+            elif hasattr(tool, "mcp_tools"):
+                # Direct DrAgentMCPTool access (legacy)
+                self.mcp_tool_names.extend([t.name for t in tool.mcp_tools])
 
         self._stop_strings: list[str] = []
-        # Collect stop strings from all MCP tools
-        for mcp_tool in self.mcp_tools:
-            if hasattr(mcp_tool, "tool_parser") and hasattr(mcp_tool.tool_parser, "stop_sequences"):
-                self._stop_strings.extend(mcp_tool.tool_parser.stop_sequences)
+        # Collect stop strings from all tools
+        for tool in mcp_tool_list:
+            if hasattr(tool, "get_stop_strings"):
+                self._stop_strings.extend(tool.get_stop_strings())
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
         tool_calls: list[ToolCall] = []
-        for mcp_tool in self.mcp_tools:
-            if hasattr(mcp_tool, "tool_parser") and mcp_tool.tool_parser.has_calls(text, mcp_tool.name):
-                # DR agent tools parse text themselves
-                tool_calls.append(ToolCall(name=mcp_tool.name, args={"text": text}))
+        for tool in self.tool_wrappers:
+            for tool_name in self.mcp_tool_names:
+                if hasattr(tool, "has_calls") and tool.has_calls(text, tool_name):
+                    # DR agent tools parse text themselves
+                    tool_calls.append(ToolCall(name=tool_name, args={"text": text}))
         return tool_calls
 
     def format_tool_calls(self, tool_output: str) -> str:
