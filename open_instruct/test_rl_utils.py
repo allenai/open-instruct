@@ -254,7 +254,7 @@ class TestRLUtils(unittest.TestCase):
         queries, responses, pad_token_id = get_test_data()
 
         value_model = transformers.AutoModelForSequenceClassification.from_pretrained(
-            MODEL_NAME, num_labels=1, torch_dtype=torch.bfloat16
+            MODEL_NAME, num_labels=1, dtype=torch.bfloat16
         )
         value_model.train()
         value_head = value_model.score
@@ -295,6 +295,46 @@ class TestRLUtils(unittest.TestCase):
             dones=packed_sequences.dones[0].unsqueeze(0).numpy(),
             response_masks=packed_sequences.response_masks[0].unsqueeze(0).numpy(),
         )
+
+    def test_pack_sequences_min_num_batches(self):
+        """Test that min_num_batches forces packing to produce more batches when possible."""
+        queries, responses, pad_token_id = get_test_data()
+        masks = [[1] * len(response) for response in responses]
+        vllm_logprobs = [[0.0] * len(response) for response in responses]
+
+        # With default packing (large pack_length), we get 2 sequences
+        packed_default = rl_utils.pack_sequences(
+            queries=queries,
+            responses=responses,
+            masks=masks,
+            pack_length=PACK_LENGTH,
+            pad_token_id=pad_token_id,
+            vllm_logprobs=vllm_logprobs,
+        )
+        default_num_sequences = len(packed_default.query_responses)
+        self.assertEqual(default_num_sequences, 2)  # Sanity check
+
+        # With min_num_batches=3, we should get 3 batches (one per query-response pair)
+        # since each pair can fit in its own batch
+        packed_with_min = rl_utils.pack_sequences(
+            queries=queries,
+            responses=responses,
+            masks=masks,
+            pack_length=PACK_LENGTH,
+            pad_token_id=pad_token_id,
+            vllm_logprobs=vllm_logprobs,
+            min_num_batches=3,
+        )
+        self.assertEqual(len(packed_with_min.query_responses), 3)
+
+        # Verify all data is still present (total tokens should be the same)
+        total_tokens_default = sum(len(seq) for seq in packed_default.query_responses)
+        total_tokens_with_min = sum(len(seq) for seq in packed_with_min.query_responses)
+        self.assertEqual(total_tokens_default, total_tokens_with_min)
+
+        # Verify no empty sequences
+        for seq in packed_with_min.query_responses:
+            self.assertGreater(len(seq), 0)
 
 
 class TestMaskedMean(unittest.TestCase):

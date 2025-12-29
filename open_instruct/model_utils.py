@@ -128,8 +128,8 @@ class ModelConfig:
     """The model checkpoint for weights initialization."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
-    torch_dtype: str | None = None
-    """Override the default `torch.dtype` and load the model under this dtype."""
+    dtype: str | None = None
+    """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
     attn_implementation: Literal["flash_attention_2"] | None = None
     """Which attention implementation to use; you can run --attn_implementation=flash_attention_2, in which case
     you must install this manually by running `pip install flash-attn --no-build-isolation`"""
@@ -179,6 +179,40 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
             module.p = 0
 
 
+def maybe_load_checkpoint(
+    model: torch.nn.Module, checkpoint_path: str, device: torch.device, rank: int, throw_on_error: bool = True
+) -> None:
+    """Load a checkpoint into a model, with optional error handling.
+
+    Args:
+        model: The model to load the checkpoint into.
+        checkpoint_path: Path to the checkpoint file.
+        device: Device to load the checkpoint onto.
+        rank: Global process rank for logging.
+        throw_on_error: if true, throw an error if the checkpoint fails to load.
+    """
+
+    def _load_checkpoint(path: str, dev: torch.device):
+        state_dict = torch.load(path, map_location=dev)
+        if hasattr(model, "module"):
+            # Needed if wrapped by DeepSpeed.
+            model.module.load_state_dict(state_dict)
+        else:
+            # If a vanilla HF model.
+            model.load_state_dict(state_dict)
+        logger.info(f"{rank=}: Loaded checkpoint from {path}")
+
+    if not throw_on_error:
+        try:
+            _load_checkpoint(checkpoint_path, device)
+        except Exception as e:
+            logger.error(
+                f"{rank=}: Falling back to using base reference, Failed to load checkpoint from {checkpoint_path}: {e}"
+            )
+    else:
+        _load_checkpoint(checkpoint_path, device)
+
+
 def load_ref_policy(
     model_config: ModelConfig,
     ds_config: dict,
@@ -187,6 +221,8 @@ def load_ref_policy(
     device: torch.device,
     rank: int,
     checkpoint_path: str | None = None,
+    ref_policy_update_freq: int | None = None,
+    alpha: float = 0.0,
 ) -> transformers.PreTrainedModel:
     """Loads a reference policy model for evaluation.
 
@@ -198,6 +234,8 @@ def load_ref_policy(
         device: Target device for loading checkpoint.
         rank: Global process rank for logging.
         checkpoint_path: Optional path to model checkpoint to load.
+        ref_policy_update_freq: Frequency of reference policy updates. If None, no updates occur.
+        alpha: Alpha value for polyak updates. If 0, no updates occur.
 
     Returns:
         Initialized reference policy model in evaluation mode.
@@ -207,7 +245,7 @@ def load_ref_policy(
     ref_policy: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
@@ -217,14 +255,14 @@ def load_ref_policy(
     ref_policy.eval()
 
     if checkpoint_path:
-        state_dict = torch.load(checkpoint_path, map_location=device)
-        if hasattr(ref_policy, "module"):
-            # Needed if wrapped by DeepSpeed.
-            ref_policy.module.load_state_dict(state_dict)
-        else:
-            # If a vanilla HF model.
-            ref_policy.load_state_dict(state_dict)
-        logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
+        # throw an error if we fail to load AND we are updating the reference.
+        maybe_load_checkpoint(
+            model=ref_policy,
+            checkpoint_path=checkpoint_path,
+            device=device,
+            rank=rank,
+            throw_on_error=ref_policy_update_freq is not None and alpha != 0,
+        )
     return ref_policy
 
 

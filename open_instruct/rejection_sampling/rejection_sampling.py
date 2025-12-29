@@ -109,7 +109,7 @@ def process_shard(
     )
     # So this code handles only classification, I should also handle other models judges like Llama3
     model = AutoModelForSequenceClassification.from_pretrained(
-        model_name_or_path, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2"
+        model_name_or_path, dtype=torch.bfloat16, attn_implementation="flash_attention_2"
     )
     model = model.to(device)
     model.eval()
