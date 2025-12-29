@@ -104,10 +104,21 @@ class ToolActor:
 
         This is used by DRTuluToolParser to detect tool calls.
         """
+        text_preview = text[:100] if len(text) > 100 else text
+        logger.debug(f"ToolActor.has_calls: Checking for {tool_name} in: {text_preview!r}...")
+
         if hasattr(self._tool, "mcp_tools"):
+            logger.debug(f"ToolActor.has_calls: Found {len(self._tool.mcp_tools)} mcp_tools")
             for mcp_tool in self._tool.mcp_tools:
-                if hasattr(mcp_tool, "tool_parser") and mcp_tool.tool_parser.has_calls(text, tool_name):
-                    return True
+                has_parser = hasattr(mcp_tool, "tool_parser")
+                logger.debug(f"ToolActor.has_calls: mcp_tool.name={mcp_tool.name}, has_parser={has_parser}")
+                if has_parser:
+                    result = mcp_tool.tool_parser.has_calls(text, tool_name)
+                    logger.debug(f"ToolActor.has_calls: {mcp_tool.name}.tool_parser.has_calls({tool_name}) = {result}")
+                    if result:
+                        return True
+        else:
+            logger.debug("ToolActor.has_calls: No mcp_tools attribute on self._tool")
         return False
 
     def get_mcp_tool_names(self) -> list[str]:
