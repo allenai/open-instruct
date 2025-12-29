@@ -19,7 +19,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra dr-tulu open_instruct/grpo_fa
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 16 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 512 \
+    --response_length 2048 \
     --active_sampling \
     --async_steps 8 \
     --pack_length 3072 \
