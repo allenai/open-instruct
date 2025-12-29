@@ -48,6 +48,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra dr-tulu open_instruct/grpo_fa
     --gradient_checkpointing \
     --system_prompt_override_file scripts/train/debug/dr_tulu_system_prompt.txt \
     --tools mcp \
+    --tool_parser dr_tulu \
     --mcp_tool_names 'snippet_search,google_search,browse_webpage' \
     --mcp_parser_name v20250824 \
     --mcp_host 0.0.0.0 \
