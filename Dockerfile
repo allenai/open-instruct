@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04 AS base
 
 ARG DEBIAN_FRONTEND="noninteractive"
 ENV TZ="America/Los_Angeles" \
@@ -66,11 +66,16 @@ ENV UV_CACHE_DIR=/root/.cache/uv \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
     UV_COMPILE_BYTECODE=0
 
-# Install dependencies
+# Stage: deps - Install Python dependencies (cached unless pyproject.toml/uv.lock change)
+FROM base AS deps
+
+COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv run --frozen python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
+    uv sync --frozen --no-install-project && \
+    uv run python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
+
+# Stage: final - Add source code
+FROM deps AS final
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
