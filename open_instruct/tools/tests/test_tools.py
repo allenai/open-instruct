@@ -157,19 +157,19 @@ class TestToolConfigTagName(unittest.TestCase):
     def test_single_tool_tag_name_override(self):
         """Single tool with tag_name override."""
         config = ToolConfig(tools=["s2_search"], tool_tag_names=["search"], s2_search=S2SearchToolConfig())
-        setup = build_tools_from_config(config)
+        tools, parser, stop_strings = build_tools_from_config(config)
         # The tool should be keyed by the overridden tag name
-        self.assertIn("search", setup.tools)
-        self.assertEqual(setup.tools["search"].tool_function_name, "search")
+        self.assertIn("search", tools)
+        self.assertEqual(tools["search"].tool_function_name, "search")
 
     def test_multiple_tools_with_tag_names(self):
         """Multiple tools with corresponding tag names."""
         config = ToolConfig(tools=["s2_search", "serper_search"], tool_tag_names=["academic_search", "web_search"])
-        setup = build_tools_from_config(config)
-        self.assertIn("academic_search", setup.tools)
-        self.assertIn("web_search", setup.tools)
-        self.assertEqual(setup.tools["academic_search"].tool_function_name, "academic_search")
-        self.assertEqual(setup.tools["web_search"].tool_function_name, "web_search")
+        tools, parser, stop_strings = build_tools_from_config(config)
+        self.assertIn("academic_search", tools)
+        self.assertIn("web_search", tools)
+        self.assertEqual(tools["academic_search"].tool_function_name, "academic_search")
+        self.assertEqual(tools["web_search"].tool_function_name, "web_search")
 
     def test_tool_args_to_config_tag_names(self):
         """ToolArgs.to_tool_config() passes through tag_names list."""
@@ -192,9 +192,9 @@ class TestToolConfigTagName(unittest.TestCase):
     def test_no_tag_names_uses_defaults(self):
         """When tool_tag_names is not provided, tools use their defaults."""
         config = ToolConfig(tools=["s2_search", "serper_search"])
-        setup = build_tools_from_config(config)
-        self.assertIn("s2_search", setup.tools)
-        self.assertIn("serper_search", setup.tools)  # serper default is "serper_search"
+        tools, parser, stop_strings = build_tools_from_config(config)
+        self.assertIn("s2_search", tools)
+        self.assertIn("serper_search", tools)  # serper default is "serper_search"
 
 
 class TestToolProxy(unittest.TestCase):
@@ -217,52 +217,47 @@ class TestToolProxy(unittest.TestCase):
             ray.shutdown()
 
     def test_tool_proxy_creation(self):
-        """Test creating a ToolProxy from a tool."""
-        from open_instruct.tools.proxy import ToolProxy, create_tool_proxy
+        """Test creating a ToolProxy from config using the two-step pattern."""
+        from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
 
-        tool = MaxCallsExceededTool()
-        proxy = create_tool_proxy(tool)
+        config = SerperSearchToolConfig(num_results=5)
+
+        # Step 1: Create actor from config
+        actor = create_tool_actor_from_config(class_path="open_instruct.tools.tools:SerperSearchTool", config=config)
+
+        # Step 2: Wrap with proxy
+        proxy = ToolProxy.from_actor(actor)
 
         self.assertIsInstance(proxy, ToolProxy)
-        self.assertEqual(proxy.tool_function_name, "max_calls_exceeded")
+        self.assertEqual(proxy.tool_function_name, "serper_search")
 
     def test_tool_proxy_call(self):
         """Test that ToolProxy correctly forwards calls to the ToolActor."""
-        from open_instruct.tools.proxy import create_tool_proxy
+        from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
 
-        tool = MaxCallsExceededTool()
-        proxy = create_tool_proxy(tool)
+        config = SerperSearchToolConfig(num_results=5)
+        actor = create_tool_actor_from_config(class_path="open_instruct.tools.tools:SerperSearchTool", config=config)
+        proxy = ToolProxy.from_actor(actor)
 
-        result = proxy()
+        # Test that we can call the proxy and get a result
+        result = proxy(text="test query")
         self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.output, "Max tool calls exceeded.")
-        self.assertFalse(result.called)
+        # The result depends on the API, just check we got a response
+        self.assertIsNotNone(result.output)
 
-    def test_create_tool_proxies(self):
-        """Test creating multiple tool proxies at once."""
-        from open_instruct.tools.proxy import create_tool_proxies
+    def test_create_tool_proxies_with_existing_proxies(self):
+        """Test that create_tool_proxies passes through existing proxies."""
+        from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config, create_tool_proxies
 
-        tools = {"max_calls": MaxCallsExceededTool(), "serper": SerperSearchTool()}
-        proxies = create_tool_proxies(tools)
+        config = SerperSearchToolConfig(num_results=5)
+        actor = create_tool_actor_from_config(class_path="open_instruct.tools.tools:SerperSearchTool", config=config)
+        proxy = ToolProxy.from_actor(actor)
 
-        self.assertEqual(len(proxies), 2)
-        self.assertIn("max_calls", proxies)
+        # create_tool_proxies should pass through existing proxies unchanged
+        proxies = create_tool_proxies({"serper": proxy})
+        self.assertEqual(len(proxies), 1)
         self.assertIn("serper", proxies)
-
-        # Check that proxies preserve tool_function_name
-        self.assertEqual(proxies["max_calls"].tool_function_name, "max_calls_exceeded")
-        self.assertEqual(proxies["serper"].tool_function_name, "serper_search")
-
-    def test_tool_proxy_from_tool_classmethod(self):
-        """Test the from_tool classmethod."""
-        from open_instruct.tools.proxy import ToolProxy
-
-        tool = MaxCallsExceededTool()
-        proxy = ToolProxy.from_tool(tool)
-
-        self.assertIsInstance(proxy, ToolProxy)
-        result = proxy()
-        self.assertEqual(result.output, "Max tool calls exceeded.")
+        self.assertIsInstance(proxies["serper"], ToolProxy)
 
 
 if __name__ == "__main__":

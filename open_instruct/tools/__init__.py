@@ -10,11 +10,12 @@ This module provides:
 """
 
 from open_instruct.tools.base import Tool, ToolCall, ToolOutput, ToolParser
-from open_instruct.tools.config import ToolArgs, ToolConfig, ToolSetup, build_tools_from_config, get_available_tools
+from open_instruct.tools.config import ToolArgs, ToolConfig, build_tools_from_config, get_available_tools
 from open_instruct.tools.proxy import (
     DEFAULT_MAX_CONCURRENCY,
     ToolActor,
     ToolProxy,
+    create_tool_actor_from_config,
     create_tool_proxies,
     create_tool_proxy,
 )
@@ -29,8 +30,8 @@ __all__ = [
     "ToolOutput",
     "ToolParser",
     "ToolProxy",
-    "ToolSetup",
     "build_tools_from_config",
+    "create_tool_actor_from_config",
     "create_tool_proxies",
     "create_tool_proxy",
     "get_available_tools",

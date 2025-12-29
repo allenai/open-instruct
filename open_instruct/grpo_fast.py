@@ -113,7 +113,7 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
 from open_instruct.tools.base import Tool
-from open_instruct.tools.config import ToolArgs, ToolSetup, build_tools_from_config
+from open_instruct.tools.config import ToolArgs, build_tools_from_config
 from open_instruct.tools.proxy import create_tool_proxies
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -2089,8 +2089,7 @@ def create_model_and_optimizer(
     ]
     # Set up tools using the composable tool configuration
     tool_config = tool_args.to_tool_config()
-    tool_setup: ToolSetup = build_tools_from_config(tool_config)
-    tool_objects = tool_setup.tools
+    tool_objects, tool_parser, tool_stop_strings = build_tools_from_config(tool_config)
 
     # Wrap tools in Ray actors for better serialization across processes
     if tool_objects:
@@ -2098,7 +2097,7 @@ def create_model_and_optimizer(
         tool_objects = create_tool_proxies(tool_objects)
 
     # Add tool stop strings to args.stop_strings
-    for stop_string in tool_setup.stop_strings:
+    for stop_string in tool_stop_strings:
         if stop_string not in args.stop_strings:
             args.stop_strings.append(stop_string)
 
@@ -2124,7 +2123,7 @@ def create_model_and_optimizer(
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
-        tool_parser=tool_setup.parser,
+        tool_parser=tool_parser,
         max_tool_calls=tool_config.max_tool_calls,
         mask_tool_use=tool_config.mask_tool_use,
         prompt_queue=prompt_Q,

@@ -250,23 +250,27 @@ class ToolConfig:
 # =============================================================================
 
 
-@dataclass
-class ToolSetup:
-    """Result of setting up tools."""
+def build_tools_from_config(
+    config: ToolConfig, vllm_tool_parser=None, vllm_output_formatter=None
+) -> tuple[dict[str, Tool], ToolParser | None, list[str]]:
+    """Build tools and parser from ToolConfig.
 
-    tools: dict[str, Tool]
-    parser: ToolParser | None
-    stop_strings: list[str]
+    All tools are created as ToolProxy instances that instantiate the actual
+    tools inside Ray actors. This provides a uniform pattern and avoids
+    serialization issues with tools that have heavy dependencies.
 
+    Returns:
+        Tuple of (tools dict, parser, stop_strings list)
+    """
+    # Import here to avoid circular imports
+    from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
 
-def build_tools_from_config(config: ToolConfig, vllm_tool_parser=None, vllm_output_formatter=None) -> ToolSetup:
-    """Build tools and parser from ToolConfig."""
     if not config.tools:
-        return ToolSetup(tools={}, parser=None, stop_strings=[])
+        return {}, None, []
 
-    tools: dict[str, Tool] = {}
-    tool_list: list[Tool] = []
-    mcp_tools: list[Tool] = []
+    proxies: dict[str, ToolProxy] = {}
+    proxy_list: list[ToolProxy] = []
+    mcp_proxies: list[ToolProxy] = []
 
     for i, tool_name in enumerate(config.tools):
         tool_name_lower = tool_name.lower()
@@ -276,23 +280,32 @@ def build_tools_from_config(config: ToolConfig, vllm_tool_parser=None, vllm_outp
         if config.tool_tag_names and hasattr(tool_config, "tag_name"):
             tool_config.tag_name = config.tool_tag_names[i]
 
-        if is_mcp_subtool:
-            tool = tool_cls.from_config(tool_config, tool_name_override=tool_name_lower)
-        else:
-            tool = tool_cls.from_config(tool_config)
+        # Derive class_path from tool_cls
+        class_path = f"{tool_cls.__module__}:{tool_cls.__name__}"
 
-        tools[tool.tool_function_name] = tool
-        tool_list.append(tool)
+        # For MCP sub-tools (snippet_search, google_search, etc.), pass tool_name_override
+        tool_name_override = tool_name_lower if is_mcp_subtool else None
 
-        if isinstance(tool, DrAgentMCPTool):
-            mcp_tools.append(tool)
+        # Step 1: Create ToolActor from config (tool instantiated inside Ray actor)
+        actor = create_tool_actor_from_config(
+            class_path=class_path, config=tool_config, tool_name_override=tool_name_override
+        )
 
-    logger.info(f"Configured {len(tools)} tool(s): {list(tools.keys())}")
+        # Step 2: Wrap ToolActor with ToolProxy
+        proxy = ToolProxy.from_actor(actor)
+
+        proxies[proxy.tool_function_name] = proxy
+        proxy_list.append(proxy)
+
+        if tool_cls is DrAgentMCPTool:
+            mcp_proxies.append(proxy)
+
+    logger.info(f"Configured {len(proxies)} tool(s): {list(proxies.keys())}")
 
     stop_strings: list[str] = []
 
     if config.parser == "legacy":
-        parser = OpenInstructLegacyToolParser(tool_list=tool_list)
+        parser = OpenInstructLegacyToolParser(tool_list=proxy_list)
         stop_strings = parser.stop_sequences()
     elif config.parser == "vllm":
         if vllm_tool_parser is None or vllm_output_formatter is None:
@@ -300,14 +313,14 @@ def build_tools_from_config(config: ToolConfig, vllm_tool_parser=None, vllm_outp
         parser = VllmToolParser(tool_parser=vllm_tool_parser, output_formatter=vllm_output_formatter)
         stop_strings = parser.stop_sequences()
     elif config.parser == "dr_tulu":
-        assert len(mcp_tools) == 1 and len(tool_list) == 1, "DR Tulu only uses the MCP tool"
-        parser = DRTuluToolParser(mcp_tool_list=mcp_tools)
+        assert len(mcp_proxies) == 1 and len(proxy_list) == 1, "DR Tulu only uses the MCP tool"
+        parser = DRTuluToolParser(mcp_tool_list=mcp_proxies)
         stop_strings = parser.stop_sequences()
     else:
         parser = None
 
-    for tool in tool_list:
-        if isinstance(tool, DrAgentMCPTool):
-            stop_strings.extend(tool.get_stop_strings())
+    # Get stop strings from proxies (fetched from actors)
+    for proxy in proxy_list:
+        stop_strings.extend(proxy.get_stop_strings())
 
-    return ToolSetup(tools=tools, parser=parser, stop_strings=list(set(stop_strings)))
+    return proxies, parser, list(set(stop_strings))
