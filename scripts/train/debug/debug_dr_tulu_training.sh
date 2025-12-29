@@ -21,6 +21,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra dr-tulu open_instruct/grpo_fa
     --max_prompt_token_length 2048 \
     --response_length 2048 \
     --active_sampling \
+    --inflight_updates \
     --async_steps 8 \
     --pack_length 4096 \
     --per_device_train_batch_size 1 \
@@ -37,6 +38,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra dr-tulu open_instruct/grpo_fa
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
+    --vllm_num_engines 1 \
     --beta 0.01 \
     --seed 3 \
     --local_eval_every 1 \
