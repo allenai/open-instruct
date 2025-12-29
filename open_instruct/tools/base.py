@@ -170,10 +170,12 @@ class DRTuluToolParser(ToolParser):
     def get_tool_calls(self, text: str) -> list[ToolCall]:
         tool_calls: list[ToolCall] = []
         for tool in self.tool_wrappers:
-            for tool_name in self.mcp_tool_names:
-                if hasattr(tool, "has_calls") and tool.has_calls(text, tool_name):
-                    # DR agent tools parse text themselves
-                    tool_calls.append(ToolCall(name=tool_name, args={"text": text}))
+            for mcp_tool_name in self.mcp_tool_names:
+                if hasattr(tool, "has_calls") and tool.has_calls(text, mcp_tool_name):
+                    # Use the wrapper's tool_function_name for the dict lookup,
+                    # not the individual MCP tool name
+                    tool_calls.append(ToolCall(name=tool.tool_function_name, args={"text": text}))
+                    break  # Only one call per wrapper needed
         return tool_calls
 
     def format_tool_calls(self, tool_output: str) -> str:
