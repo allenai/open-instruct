@@ -13,7 +13,7 @@ uv sync --extra dr-tulu
 MCP_CACHE_DIR=".cache-$(hostname)" uv run --extra dr-tulu python -m dr_agent.mcp_backend.main --port 8000 --host 0.0.0.0 --path /mcp &
 
 # Run training
-VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
+VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra dr-tulu open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 16 \
