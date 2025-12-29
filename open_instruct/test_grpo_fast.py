@@ -496,7 +496,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
-            prompt_dataset=mock_dataset,
+            data_loader=mock_dataset,
         )
 
         self.assertEqual(len(batch.queries), num_prompts * num_samples_per_prompt)
@@ -542,7 +542,7 @@ class GrpoIntegrationTests(TestGrpoFastBase):
                     num_prompts=num_prompts,
                     model_dims=mock_model_dims,
                     tokenizer=tokenizer,
-                    prompt_dataset=mock_dataset,
+                    data_loader=mock_dataset,
                 )
                 completed.set()
             except Exception:
@@ -731,7 +731,7 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
             num_prompts=num_prompts,
             model_dims=mock_model_dims,
             tokenizer=tokenizer,
-            prompt_dataset=mock_dataset,
+            data_loader=mock_dataset,
             filter_zero_std_samples=True,
         )
 
