@@ -65,7 +65,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --tools serper_search python \
     --tool_tag_names search code \
-    --tool_parser vllm_qwen3_xml \
+    --tool_parser vllm_hermes \
     --code_api_endpoint "$CODE_SERVER_ENDPOINT" \
     --push_to_hub false
 

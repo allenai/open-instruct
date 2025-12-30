@@ -150,18 +150,28 @@ class VllmToolParser(ToolParser):
             tools: Optional list of tool definitions in OpenAI format (overrides stored definitions).
         """
         request = self._make_request(tools)
-        result = self.tool_parser.extract_tool_calls(model_output=text, request=request)
-
-        # Debug logging
-        logger.info(f"VllmToolParser.get_tool_calls: tools_called={result.tools_called}")
-        logger.info(f"VllmToolParser.get_tool_calls: tool_calls={result.tool_calls}")
-        logger.info(f"VllmToolParser.get_tool_calls: content={result.content!r}")
+        try:
+            result = self.tool_parser.extract_tool_calls(model_output=text, request=request)
+        except Exception as e:
+            # vLLM parsers can throw on malformed JSON - treat as no tool calls
+            preview = text[:500] if len(text) > 500 else text
+            logger.debug(f"VllmToolParser: Parser exception (likely malformed JSON): {e}\nText: {preview!r}")
+            return []
 
         if not result.tools_called:
             return []
-        return [
-            ToolCall(name=call.function.name, args=json.loads(call.function.arguments)) for call in result.tool_calls
-        ]
+
+        tool_calls = []
+        for call in result.tool_calls:
+            try:
+                args = json.loads(call.function.arguments)
+                tool_calls.append(ToolCall(name=call.function.name, args=args))
+            except json.JSONDecodeError as e:
+                logger.debug(
+                    f"VllmToolParser: Failed to parse tool arguments: {e}\nArguments: {call.function.arguments!r}"
+                )
+                continue
+        return tool_calls
 
     def format_tool_calls(self, tool_output: str) -> str:
         return self.output_formatter(tool_output)
