@@ -284,11 +284,6 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
         tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in final_output.outputs]
         tool_calleds = [getattr(out, "tool_called", False) for out in final_output.outputs]
         tool_call_counts = [getattr(out, "tool_call_counts", {}) or {} for out in final_output.outputs]
-        non_empty = [c for c in tool_call_counts if c]
-        if non_empty:
-            logger.info(
-                f"process_completed_request: extracted {len(non_empty)}/{len(tool_call_counts)} non-empty tool_call_counts: {non_empty[:3]}"
-            )
     else:
         # Use default values when tools are not used
         masks = [[1] * len(resp) for resp in response_ids]
@@ -896,7 +891,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             # Track per-tool call counts
             tool_name = triggered_tool.tool_function_name
             tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
-            logger.debug(f"Tool call tracked: tool_name={tool_name}, counts={tool_call_counts}")
 
             # Format and tokenize this tool's output
             formatted_output = actor.tool_parser.format_tool_calls(tool_result.output)
@@ -945,8 +939,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         complete_output.tool_runtime = tool_runtime
         complete_output.tool_called = tool_called
         complete_output.tool_call_counts = tool_call_counts
-        if tool_call_counts:
-            logger.info(f"Setting complete_output.tool_call_counts={tool_call_counts}")
 
     actor.active_tasks.pop(sub_request_id, None)
 

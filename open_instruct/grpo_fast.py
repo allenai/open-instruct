@@ -1927,20 +1927,11 @@ def data_preparation_thread(
 
             # Add per-tool metrics
             if result.request_info.tool_call_counts:
-                # Debug: log the raw counts
-                non_empty_counts = [c for c in result.request_info.tool_call_counts if c]
-                logger.info(
-                    f"Per-tool metrics debug: total_samples={len(result.request_info.tool_call_counts)}, "
-                    f"non_empty={len(non_empty_counts)}, sample={non_empty_counts[:3]}"
-                )
-
                 # Aggregate per-tool call counts across all samples
                 aggregated_tool_counts: dict[str, int] = {}
                 for sample_counts in result.request_info.tool_call_counts:
                     for tool_name, count in sample_counts.items():
                         aggregated_tool_counts[tool_name] = aggregated_tool_counts.get(tool_name, 0) + count
-
-                logger.info(f"Per-tool metrics: aggregated_tool_counts={aggregated_tool_counts}")
 
                 total_samples = len(result.request_info.tool_call_counts)
                 for tool_name, total_calls in aggregated_tool_counts.items():
