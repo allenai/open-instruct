@@ -115,31 +115,39 @@ class VllmToolParser(ToolParser):
 
     Usage:
         >>> from open_instruct.tools.vllm_parsers import create_vllm_parser
-        >>> parser = create_vllm_parser("hermes", tokenizer)
         >>> tools = [tool.get_openai_tool_definition() for tool in my_tools]
-        >>> tool_calls = parser.get_tool_calls(model_output, tools=tools)
+        >>> parser = create_vllm_parser("hermes", tokenizer, tool_definitions=tools)
+        >>> tool_calls = parser.get_tool_calls(model_output)
         >>> formatted = parser.format_tool_calls(tool_result)
     """
 
-    def __init__(self, tool_parser: VllmNativeToolParser, output_formatter: Callable[[str], str]):
+    def __init__(
+        self,
+        tool_parser: VllmNativeToolParser,
+        output_formatter: Callable[[str], str],
+        stop_sequences: list[str] | None = None,
+        tool_definitions: list[dict[str, Any]] | None = None,
+    ):
         self.tool_parser = tool_parser
         self.output_formatter = output_formatter
+        self._stop_sequences = stop_sequences or []
+        self._tool_definitions = tool_definitions
 
     def _make_request(self, tools: list[dict[str, Any]] | None = None) -> Any:
         """
         Create a dummy ChatCompletionRequest for vLLM parsers.
         Usually these only need the list of tools.
-        TODO: do any of the parsers ever need more than this?
         """
-        return ChatCompletionRequest(model="dummy", messages=[], tools=tools)
+        # Use provided tools or fall back to stored definitions
+        tools_to_use = tools if tools is not None else self._tool_definitions
+        return ChatCompletionRequest(model="dummy", messages=[], tools=tools_to_use)
 
     def get_tool_calls(self, text: str, tools: list[dict[str, Any]] | None = None) -> list[ToolCall]:
         """Extract tool calls from model output.
 
         Args:
             text: The model output text to parse.
-            tools: Optional list of tool definitions in OpenAI format.
-                   Get these via tool.get_openai_tool_definition() for each tool.
+            tools: Optional list of tool definitions in OpenAI format (overrides stored definitions).
         """
         request = self._make_request(tools)
         result = self.tool_parser.extract_tool_calls(model_output=text, request=request)
@@ -153,7 +161,7 @@ class VllmToolParser(ToolParser):
         return self.output_formatter(tool_output)
 
     def stop_sequences(self) -> list[str]:
-        return []
+        return self._stop_sequences
 
 
 class OpenInstructLegacyToolParser(ToolParser):

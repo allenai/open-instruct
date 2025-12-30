@@ -2852,6 +2852,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
         if stop_string not in args.stop_strings:
             args.stop_strings.append(stop_string)
 
+    # Add parser stop sequences (e.g., </tool_call> for vLLM parsers)
+    from open_instruct.tools.config import get_parser_stop_sequences
+
+    parser_stop_sequences = get_parser_stop_sequences(tool_config.parser)
+    for stop_string in parser_stop_sequences:
+        if stop_string not in args.stop_strings:
+            args.stop_strings.append(stop_string)
+            logger.info(f"Added parser stop sequence: {stop_string!r}")
+
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, tools=tool_definitions)
 
     if len(train_dataset) < (needed := max(args.async_steps, 1) * args.num_unique_prompts_rollout):

@@ -84,6 +84,27 @@ VLLM_PARSER_MAPPING: dict[str, str] = {
 }
 
 
+def get_parser_stop_sequences(parser_name: str) -> list[str]:
+    """Get stop sequences for a parser.
+
+    For vLLM parsers, these are the sequences that indicate a tool call is complete.
+    For legacy/dr_tulu parsers, stop sequences come from the tools themselves.
+
+    Args:
+        parser_name: The parser type name.
+
+    Returns:
+        List of stop sequences for this parser.
+    """
+    if parser_name in VLLM_PARSER_MAPPING:
+        from open_instruct.tools.vllm_parsers import VLLM_PARSERS
+
+        vllm_name = VLLM_PARSER_MAPPING[parser_name]
+        if vllm_name in VLLM_PARSERS:
+            return list(VLLM_PARSERS[vllm_name].stop_sequences)
+    return []
+
+
 def get_available_tools() -> list[str]:
     """Return list of available tool names."""
     return list(TOOL_REGISTRY.keys())
@@ -310,7 +331,8 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
     Args:
         parser_name: The parser type (e.g., "legacy", "vllm_qwen3_xml", "dr_tulu").
         tokenizer: Required for vllm_* parsers. The tokenizer for the model.
-        tools: Required for "legacy" and "dr_tulu" parsers. Dict of tool name -> Tool.
+        tools: Dict of tool name -> Tool. Required for "legacy" and "dr_tulu" parsers.
+               For vllm_* parsers, used to extract tool definitions.
 
     Returns:
         The created ToolParser, or None if parser_name is None/empty.
@@ -328,8 +350,13 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
             raise ValueError(f"parser='{parser_name}' requires a tokenizer")
         from open_instruct.tools.vllm_parsers import create_vllm_parser
 
+        # Extract tool definitions for vLLM parsers
+        tool_definitions = None
+        if tools:
+            tool_definitions = [tool.get_openai_tool_definition() for tool in tools.values()]
+
         vllm_parser_name = VLLM_PARSER_MAPPING[parser_name]
-        return create_vllm_parser(vllm_parser_name, tokenizer)
+        return create_vllm_parser(vllm_parser_name, tokenizer, tool_definitions=tool_definitions)
 
     elif parser_name == "dr_tulu":
         if not tools:

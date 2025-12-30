@@ -17,6 +17,7 @@ from open_instruct.tools.config import (
     build_tools_from_config,
     create_tool_parser,
     get_available_tools,
+    get_parser_stop_sequences,
     get_tool_definitions_from_config,
 )
 from open_instruct.tools.proxy import (
@@ -49,5 +50,6 @@ __all__ = [
     "create_vllm_parser",
     "get_available_tools",
     "get_available_vllm_parsers",
+    "get_parser_stop_sequences",
     "get_tool_definitions_from_config",
 ]
