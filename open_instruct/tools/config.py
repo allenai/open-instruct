@@ -361,9 +361,13 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
     elif parser_name == "dr_tulu":
         if not tools:
             raise ValueError("parser='dr_tulu' requires tools to be provided")
-        # For DR Tulu, we need the MCP tool proxies
-        mcp_tools = [t for t in tools.values() if hasattr(t, "mcp_tools")]
-        return DRTuluToolParser(mcp_tool_list=mcp_tools)
+        # DR Tulu parser requires MCP tools - check that at least one MCP tool is configured
+        if "mcp" not in tools:
+            raise ValueError(
+                "parser='dr_tulu' requires the 'mcp' tool to be configured. "
+                "Add '--tools mcp' to your command line arguments."
+            )
+        return DRTuluToolParser(mcp_tool_list=list(tools.values()))
 
     else:
         logger.warning(f"Unknown tool parser: {parser_name}")
