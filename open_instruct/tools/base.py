@@ -169,6 +169,8 @@ class VllmToolParser(ToolParser):
                     f"Text (last 500 chars): {preview!r}"
                 )
             return []
+        
+        logger.info(f"VllmToolParser: result: {result}")
 
         tool_calls = []
         for call in result.tool_calls:
