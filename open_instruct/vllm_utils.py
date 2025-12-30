@@ -961,11 +961,11 @@ def create_vllm_engines(
         assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
             "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
         )
-        # tool key is the end_str
+        # tool key is the end_str - ensure values are ints (may be strings from CLI parsing)
         if len(max_tool_calls) == 1:
-            max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools}
+            max_tool_calls_dict = {end_str: int(max_tool_calls[0]) for end_str in tools}
         else:
-            max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls)}
+            max_tool_calls_dict = {end_str: int(limit) for end_str, limit in zip(tools.keys(), max_tool_calls)}
     else:
         max_tool_calls_dict = {}
 
