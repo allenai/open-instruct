@@ -87,6 +87,7 @@ COPY oe-eval-interna[l] oe-eval-internal/
 ARG GIT_COMMIT="" \
     GIT_BRANCH=""
 
-ENV GIT_COMMIT=${GIT_COMMIT} \
-    GIT_BRANCH=${GIT_BRANCH} \
-    PATH=/stage/.venv/bin:$PATH
+LABEL org.opencontainers.image.revision=${GIT_COMMIT} \
+      org.opencontainers.image.source=${GIT_BRANCH}
+
+ENV PATH=/stage/.venv/bin:$PATH

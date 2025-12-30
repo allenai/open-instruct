@@ -69,6 +69,15 @@ beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
 
 If you are internally at AI2, you may launch experiments using our always-up-to-date auto-built image `nathanl/open_instruct_auto`.
 
+### Launching Experiments (Lightweight Setup)
+
+To launch experiments on Beaker without installing the full dependencies (torch, vllm, etc.), use `uv run --with` to install only the required packages:
+
+```bash
+# Launch experiment on Beaker (installs only needed deps, ~5s vs ~1min for full install)
+uv run --with backoff --with beaker-py --with requests --with rich \
+    python mason.py --cluster ai2/jupiter --image your-image ...
+```
 
 ## Training
 
