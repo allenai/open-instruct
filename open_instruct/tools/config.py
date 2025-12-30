@@ -21,16 +21,14 @@ from open_instruct.tools.tools import (
     MCP_TOOL_REGISTRY,
     DrAgentMCPTool,
     DrAgentMCPToolConfig,
+    MassiveDSSearchTool,
+    MassiveDSSearchToolConfig,
     PythonCodeTool,
     PythonCodeToolConfig,
     S2SearchTool,
     S2SearchToolConfig,
-    SearchTool,
-    SearchToolConfig,
     SerperSearchTool,
     SerperSearchToolConfig,
-    YouSearchTool,
-    YouSearchToolConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,10 +41,9 @@ logger = logging.getLogger(__name__)
 # Each config class must have a `cli_prefix` ClassVar
 TOOL_CONFIG_REGISTRY: dict[str, type] = {
     "python": PythonCodeToolConfig,
-    "massive_ds_search": SearchToolConfig,
+    "massive_ds_search": MassiveDSSearchToolConfig,
     "serper_search": SerperSearchToolConfig,
     "s2_search": S2SearchToolConfig,
-    "you_search": YouSearchToolConfig,
     "mcp": DrAgentMCPToolConfig,
 }
 
@@ -63,9 +60,8 @@ TOOL_REGISTRY: dict[str, tuple[str, type[Tool], bool]] = {
     "python": ("python", PythonCodeTool, False),
     "search": ("serper_search", SerperSearchTool, False),
     "serper_search": ("serper_search", SerperSearchTool, False),
-    "massive_ds_search": ("massive_ds_search", SearchTool, False),
+    "massive_ds_search": ("massive_ds_search", MassiveDSSearchTool, False),
     "s2_search": ("s2_search", S2SearchTool, False),
-    "you_search": ("you_search", YouSearchTool, False),
     "mcp": ("mcp", DrAgentMCPTool, False),
 }
 
@@ -310,9 +306,8 @@ class ToolConfig:
 
     python: PythonCodeToolConfig = field(default_factory=PythonCodeToolConfig)
     serper_search: SerperSearchToolConfig = field(default_factory=SerperSearchToolConfig)
-    massive_ds_search: SearchToolConfig = field(default_factory=SearchToolConfig)
+    massive_ds_search: MassiveDSSearchToolConfig = field(default_factory=MassiveDSSearchToolConfig)
     s2_search: S2SearchToolConfig = field(default_factory=S2SearchToolConfig)
-    you_search: YouSearchToolConfig = field(default_factory=YouSearchToolConfig)
     mcp: DrAgentMCPToolConfig = field(default_factory=DrAgentMCPToolConfig)
 
 

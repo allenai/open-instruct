@@ -196,12 +196,12 @@ class PythonCodeTool(Tool):
 
 
 # =============================================================================
-# SearchTool + Config
+# MassiveDSSearchTool + Config
 # =============================================================================
 
 
 @dataclass
-class SearchToolConfig:
+class MassiveDSSearchToolConfig:
     """Configuration for the massive_ds search tool."""
 
     cli_prefix: ClassVar[str] = "search_"
@@ -214,7 +214,7 @@ class SearchToolConfig:
     """Override the default tag name."""
 
 
-class SearchTool(Tool):
+class MassiveDSSearchTool(Tool):
     """Search tool using the massive_ds API."""
 
     _default_tool_function_name = "massive_ds_search"  # Distinct from SerperSearchTool's "search"
@@ -234,7 +234,7 @@ class SearchTool(Tool):
         self._tag_name = tag_name
 
     @classmethod
-    def from_config(cls, config: SearchToolConfig) -> "SearchTool":
+    def from_config(cls, config: MassiveDSSearchToolConfig) -> "MassiveDSSearchTool":
         return cls(
             api_endpoint=config.api_endpoint, number_documents_to_search=config.num_documents, tag_name=config.tag_name
         )
@@ -391,127 +391,6 @@ class S2SearchTool(Tool):
                 return result
 
             all_snippets = "\n".join(snippets).strip()
-            result = ToolOutput(
-                output=all_snippets, called=True, error="", timeout=False, runtime=time.time() - start_time
-            )
-            _log_tool_call(self.tool_function_name, text, result)
-            return result
-
-        except requests.exceptions.RequestException as e:
-            result = ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
-            _log_tool_call(self.tool_function_name, text, result)
-            return result
-
-
-# =============================================================================
-# YouSearchTool + Config
-# =============================================================================
-
-
-@dataclass
-class YouSearchToolConfig:
-    """Configuration for the You.com search tool."""
-
-    cli_prefix: ClassVar[str] = "you_"
-
-    num_results: int = 10
-    """Number of results to return from You.com."""
-    tag_name: str | None = None
-    """Override the default tag name (e.g., use <search> instead of <you_search>)."""
-
-
-class YouSearchTool(Tool):
-    """
-    Search tool using the You.com API.
-    Requires YOUCOM_API_KEY environment variable.
-    """
-
-    _default_tool_function_name = "you_search"
-    _default_tool_description = "Web search using the You.com API"
-    _default_tool_parameters: dict[str, Any] = {
-        "type": "object",
-        "properties": {"text": {"type": "string", "description": "The search query for You.com"}},
-        "required": ["text"],
-    }
-    tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "The search query for You.com"}}
-
-    def __init__(self, number_of_results: int = 10, tag_name: str | None = None) -> None:
-        self.number_of_results = number_of_results
-        self._tag_name = tag_name
-
-    @classmethod
-    def from_config(cls, config: YouSearchToolConfig) -> "YouSearchTool":
-        return cls(number_of_results=config.num_results, tag_name=config.tag_name)
-
-    def __call__(self, text: str) -> ToolOutput:
-        """Search You.com for documents matching the query."""
-        if not text or not text.strip():
-            result = ToolOutput(
-                output="",
-                error="Empty query. Please provide some text in the query.",
-                called=True,
-                timeout=False,
-                runtime=0,
-            )
-            _log_tool_call(self.tool_function_name, text or "", result)
-            return result
-
-        start_time = time.time()
-
-        api_key = os.environ.get("YOUCOM_API_KEY")
-        if not api_key:
-            result = ToolOutput(
-                output="",
-                error="Missing YOUCOM_API_KEY environment variable.",
-                called=True,
-                timeout=False,
-                runtime=time.time() - start_time,
-            )
-            _log_tool_call(self.tool_function_name, text, result)
-            return result
-
-        session = _create_session_with_retries()
-
-        try:
-            response = session.get(
-                "https://api.ydc-index.io/search",
-                params={"query": text, "num_web_results": 1},
-                headers={"X-API-Key": api_key},
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            if "error_code" in data:
-                result = ToolOutput(
-                    output="",
-                    error=f"API error: {data['error_code']}",
-                    called=True,
-                    timeout=False,
-                    runtime=time.time() - start_time,
-                )
-                _log_tool_call(self.tool_function_name, text, result)
-                return result
-
-            snippets = []
-            for hit in data.get("hits", []):
-                for snippet in hit.get("snippets", []):
-                    snippets.append(snippet)
-
-            snippets = snippets[: self.number_of_results]
-
-            if not snippets:
-                result = ToolOutput(
-                    output="",
-                    error="Query returned no results.",
-                    called=True,
-                    timeout=False,
-                    runtime=time.time() - start_time,
-                )
-                _log_tool_call(self.tool_function_name, text, result)
-                return result
-
-            all_snippets = "\n".join(["\n" + snippet for snippet in snippets]).strip()
             result = ToolOutput(
                 output=all_snippets, called=True, error="", timeout=False, runtime=time.time() - start_time
             )
