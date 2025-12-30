@@ -654,12 +654,11 @@ class DrAgentMCPTool(Tool):
             self.stop_strings += self.mcp_tools[-1].tool_parser.stop_sequences
 
     @classmethod
-    def from_config(cls, config: DrAgentMCPToolConfig, tool_name_override: str | None = None) -> "DrAgentMCPTool":
+    def from_config(cls, config: DrAgentMCPToolConfig) -> "DrAgentMCPTool":
         if not MCP_AVAILABLE:
             raise ImportError("MCP tools require dr_agent package. Install it with: uv sync --extra dr-tulu")
-        tool_names = tool_name_override if tool_name_override else config.tool_names
         return cls(
-            mcp_tool_names=tool_names,
+            mcp_tool_names=config.tool_names,
             mcp_parser_name=config.parser_name,
             transport_type=config.transport_type,
             mcp_host=config.host,

@@ -18,7 +18,6 @@ from typing import Any, Literal
 
 from open_instruct.tools.base import DRTuluToolParser, OpenInstructLegacyToolParser, Tool, ToolParser
 from open_instruct.tools.tools import (
-    MCP_TOOL_REGISTRY,
     DrAgentMCPTool,
     DrAgentMCPToolConfig,
     MassiveDSSearchTool,
@@ -46,7 +45,6 @@ class ToolEntry:
     This is the single source of truth for tool registration. Each entry defines:
     - The tool class and its config class
     - The config attribute name (used in ToolConfig dataclass)
-    - Whether this is an MCP subtool (uses DrAgentMCPTool with tool_name_override)
 
     To add a new tool:
     1. Create YourTool and YourToolConfig in tools.py
@@ -57,7 +55,6 @@ class ToolEntry:
     tool_cls: type[Tool]
     config_cls: type
     config_attr: str  # Attribute name on ToolConfig (e.g., "python", "serper_search")
-    is_mcp_subtool: bool = False  # If True, passes tool name to DrAgentMCPTool.from_config()
 
 
 # Primary tool registry - maps canonical names to their entries
@@ -82,17 +79,6 @@ for name, entry in _TOOL_ENTRIES.items():
 # Add aliases (point to the same entry)
 for alias, canonical in _TOOL_ALIASES.items():
     TOOL_REGISTRY[alias] = _TOOL_ENTRIES[canonical]
-
-# Add MCP sub-tools (snippet_search, google_search, etc.)
-# These use the MCP entry but with is_mcp_subtool=True
-_mcp_entry = _TOOL_ENTRIES["mcp"]
-for mcp_name in MCP_TOOL_REGISTRY:
-    TOOL_REGISTRY[mcp_name] = ToolEntry(
-        tool_cls=_mcp_entry.tool_cls,
-        config_cls=_mcp_entry.config_cls,
-        config_attr=_mcp_entry.config_attr,
-        is_mcp_subtool=True,
-    )
 
 # Derive config registry from tool entries (for CLI generation)
 # Maps config_attr -> config_cls
@@ -438,13 +424,8 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
         # Derive class_path from tool_cls
         class_path = f"{entry.tool_cls.__module__}:{entry.tool_cls.__name__}"
 
-        # For MCP sub-tools (snippet_search, google_search, etc.), pass tool_name_override
-        tool_name_override = tool_name_lower if entry.is_mcp_subtool else None
-
         # Step 1: Create ToolActor from config (tool instantiated inside Ray actor)
-        actor = create_tool_actor_from_config(
-            class_path=class_path, config=tool_config, tool_name_override=tool_name_override
-        )
+        actor = create_tool_actor_from_config(class_path=class_path, config=tool_config)
 
         # Step 2: Wrap ToolActor with ToolProxy
         proxy = ToolProxy.from_actor(actor)

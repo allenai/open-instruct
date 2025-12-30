@@ -11,9 +11,8 @@ across processes. The flow is:
 Usage:
     # Create actor from config
     actor = create_tool_actor_from_config(
-        class_path="open_instruct.tools.tools:DrAgentMCPTool",
-        config=mcp_config,
-        tool_name_override="snippet_search",
+        class_path="open_instruct.tools.tools:SerperSearchTool",
+        config=serper_config,
     )
 
     # Wrap with proxy
@@ -25,7 +24,6 @@ Usage:
 
 from __future__ import annotations
 
-import inspect
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -59,24 +57,18 @@ class ToolActor:
     avoiding the need to pickle tool objects with heavy dependencies (e.g., dr_agent).
     """
 
-    def __init__(self, *, class_path: str, config: Any, tool_name_override: str | None = None):
+    def __init__(self, *, class_path: str, config: Any):
         """Initialize the actor by constructing a tool from config.
 
         Args:
             class_path: "module.submodule:ClassName" for lazy import.
             config: Config dataclass to pass to from_config().
-            tool_name_override: Override tool name for from_config() (used by MCP sub-tools).
         """
         tool_cls = _import_from_path(class_path)
         if not hasattr(tool_cls, "from_config"):
             raise ValueError(f"Tool class {tool_cls} does not have from_config method")
 
-        # Check if from_config accepts tool_name_override
-        sig = inspect.signature(tool_cls.from_config)
-        if "tool_name_override" in sig.parameters and tool_name_override is not None:
-            self._tool = tool_cls.from_config(config, tool_name_override=tool_name_override)
-        else:
-            self._tool = tool_cls.from_config(config)
+        self._tool = tool_cls.from_config(config)
 
         self.tool_function_name = self._tool.tool_function_name
         logger.info(f"ToolActor initialized for tool: {self.tool_function_name}")
@@ -101,11 +93,7 @@ class ToolActor:
 
 
 def create_tool_actor_from_config(
-    class_path: str,
-    config: Any,
-    tool_name_override: str | None = None,
-    max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
-    **actor_options: Any,
+    class_path: str, config: Any, max_concurrency: int = DEFAULT_MAX_CONCURRENCY, **actor_options: Any
 ) -> ray.actor.ActorHandle:
     """Create a ToolActor from a config.
 
@@ -116,7 +104,6 @@ def create_tool_actor_from_config(
     Args:
         class_path: "module.submodule:ClassName" for the tool class.
         config: Config dataclass to pass to from_config().
-        tool_name_override: Override tool name for from_config() (used by MCP sub-tools).
         max_concurrency: Maximum number of concurrent calls the actor can handle.
         **actor_options: Additional options to pass to ray.remote() for the actor.
 
@@ -125,7 +112,7 @@ def create_tool_actor_from_config(
     """
     options = {"max_concurrency": max_concurrency, **actor_options}
     actor_cls = ToolActor.options(**options)
-    return actor_cls.remote(class_path=class_path, config=config, tool_name_override=tool_name_override)
+    return actor_cls.remote(class_path=class_path, config=config)
 
 
 class ToolProxy(Tool):
