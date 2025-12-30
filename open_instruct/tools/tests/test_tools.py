@@ -157,7 +157,7 @@ class TestToolConfigTagName(unittest.TestCase):
     def test_single_tool_tag_name_override(self):
         """Single tool with tag_name override."""
         config = ToolConfig(tools=["s2_search"], tool_tag_names=["search"], s2_search=S2SearchToolConfig())
-        tools, parser, stop_strings = build_tools_from_config(config)
+        tools, stop_strings = build_tools_from_config(config)
         # The tool should be keyed by the overridden tag name
         self.assertIn("search", tools)
         self.assertEqual(tools["search"].tool_function_name, "search")
@@ -165,7 +165,7 @@ class TestToolConfigTagName(unittest.TestCase):
     def test_multiple_tools_with_tag_names(self):
         """Multiple tools with corresponding tag names."""
         config = ToolConfig(tools=["s2_search", "serper_search"], tool_tag_names=["academic_search", "web_search"])
-        tools, parser, stop_strings = build_tools_from_config(config)
+        tools, stop_strings = build_tools_from_config(config)
         self.assertIn("academic_search", tools)
         self.assertIn("web_search", tools)
         self.assertEqual(tools["academic_search"].tool_function_name, "academic_search")
@@ -192,7 +192,7 @@ class TestToolConfigTagName(unittest.TestCase):
     def test_no_tag_names_uses_defaults(self):
         """When tool_tag_names is not provided, tools use their defaults."""
         config = ToolConfig(tools=["s2_search", "serper_search"])
-        tools, parser, stop_strings = build_tools_from_config(config)
+        tools, stop_strings = build_tools_from_config(config)
         self.assertIn("s2_search", tools)
         self.assertIn("serper_search", tools)  # serper default is "serper_search"
 

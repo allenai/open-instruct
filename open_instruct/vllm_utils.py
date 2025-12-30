@@ -224,7 +224,7 @@ def get_triggered_tools(
 
     # Debug logging for tool call detection
     if output_text and len(output_text) > 0:
-        preview = output_text[:500] if len(output_text) > 500 else output_text
+        preview = output_text
         logger.info(f"get_triggered_tools: output_text preview: {preview!r}")
         logger.info(f"get_triggered_tools: tool_calls found: {[(tc.name, tc.args) for tc in tool_calls]}")
         logger.info(f"get_triggered_tools: available tools: {list(tools.keys()) if tools else []}")
