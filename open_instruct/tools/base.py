@@ -154,8 +154,10 @@ class VllmToolParser(ToolParser):
             result = self.tool_parser.extract_tool_calls(model_output=text, request=request)
         except Exception as e:
             # vLLM parsers can throw on malformed JSON - treat as no tool calls
-            preview = text[:500] if len(text) > 500 else text
-            logger.debug(f"VllmToolParser: Parser exception (likely malformed JSON): {e}\nText: {preview!r}")
+            preview = text[-500:] if len(text) > 500 else text
+            logger.warning(
+                f"VllmToolParser: Parser exception (malformed tool call JSON): {e}\nText (last 500 chars): {preview!r}"
+            )
             return []
 
         if not result.tools_called:
@@ -167,7 +169,7 @@ class VllmToolParser(ToolParser):
                 args = json.loads(call.function.arguments)
                 tool_calls.append(ToolCall(name=call.function.name, args=args))
             except json.JSONDecodeError as e:
-                logger.debug(
+                logger.warning(
                     f"VllmToolParser: Failed to parse tool arguments: {e}\nArguments: {call.function.arguments!r}"
                 )
                 continue
