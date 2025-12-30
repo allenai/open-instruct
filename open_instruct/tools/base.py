@@ -161,6 +161,13 @@ class VllmToolParser(ToolParser):
             return []
 
         if not result.tools_called:
+            # Log if it looks like a tool call was attempted but parsing failed
+            if "<tool_call>" in text:
+                preview = text[-500:] if len(text) > 500 else text
+                logger.warning(
+                    f"VllmToolParser: Found <tool_call> tag but parser returned no tools (likely malformed JSON)\n"
+                    f"Text (last 500 chars): {preview!r}"
+                )
             return []
 
         tool_calls = []
