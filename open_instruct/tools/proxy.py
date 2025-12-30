@@ -89,42 +89,10 @@ class ToolActor:
         """Get the tool's function name."""
         return self.tool_function_name
 
-    def get_tool_args(self) -> dict[str, Any]:
-        """Get the tool's argument specification."""
-        return self._tool.tool_args
-
     def get_stop_strings(self) -> list[str]:
         """Get the tool's stop strings."""
         if hasattr(self._tool, "get_stop_strings") and callable(self._tool.get_stop_strings):
             return list(self._tool.get_stop_strings())
-        return []
-
-    def has_calls(self, text: str, tool_name: str) -> bool:
-        """Check if text contains calls to the specified tool.
-
-        This is used by DRTuluToolParser to detect tool calls.
-        """
-        text_preview = text[:100] if len(text) > 100 else text
-        logger.debug(f"ToolActor.has_calls: Checking for {tool_name} in: {text_preview!r}...")
-
-        if hasattr(self._tool, "mcp_tools"):
-            logger.debug(f"ToolActor.has_calls: Found {len(self._tool.mcp_tools)} mcp_tools")
-            for mcp_tool in self._tool.mcp_tools:
-                has_parser = hasattr(mcp_tool, "tool_parser")
-                logger.debug(f"ToolActor.has_calls: mcp_tool.name={mcp_tool.name}, has_parser={has_parser}")
-                if has_parser:
-                    result = mcp_tool.tool_parser.has_calls(text, tool_name)
-                    logger.debug(f"ToolActor.has_calls: {mcp_tool.name}.tool_parser.has_calls({tool_name}) = {result}")
-                    if result:
-                        return True
-        else:
-            logger.debug("ToolActor.has_calls: No mcp_tools attribute on self._tool")
-        return False
-
-    def get_mcp_tool_names(self) -> list[str]:
-        """Get the names of MCP tools wrapped by this tool."""
-        if hasattr(self._tool, "mcp_tools"):
-            return [mcp_tool.name for mcp_tool in self._tool.mcp_tools]
         return []
 
     def get_openai_tool_definition(self) -> dict:
@@ -171,7 +139,7 @@ class ToolProxy(Tool):
     All actual tool execution happens in the remote ToolActor.
     """
 
-    def __init__(self, actor_handle: ray.actor.ActorHandle, tool_function_name: str, tool_args: dict[str, Any]):
+    def __init__(self, actor_handle: ray.actor.ActorHandle, tool_function_name: str):
         """Initialize the proxy with an actor handle.
 
         Prefer using ToolProxy.from_actor() instead of calling this directly.
@@ -179,11 +147,9 @@ class ToolProxy(Tool):
         Args:
             actor_handle: Handle to the ToolActor that owns the actual tool.
             tool_function_name: The function name for this tool (used for parsing).
-            tool_args: The argument specification for this tool.
         """
         self._actor = actor_handle
         self._tool_function_name = tool_function_name
-        self.tool_args = tool_args
 
     @property
     def tool_function_name(self) -> str:
@@ -197,14 +163,6 @@ class ToolProxy(Tool):
     def get_stop_strings(self) -> list[str]:
         """Get stop strings from the remote tool."""
         return ray.get(self._actor.get_stop_strings.remote())
-
-    def has_calls(self, text: str, tool_name: str) -> bool:
-        """Check if text contains calls to the specified tool."""
-        return ray.get(self._actor.has_calls.remote(text, tool_name))
-
-    def get_mcp_tool_names(self) -> list[str]:
-        """Get the names of MCP tools wrapped by this tool."""
-        return ray.get(self._actor.get_mcp_tool_names.remote())
 
     def get_openai_tool_definition(self) -> dict:
         """Get the tool definition in OpenAI format for function calling.
@@ -230,8 +188,7 @@ class ToolProxy(Tool):
         """
         # Fetch metadata from the actor
         tool_function_name = ray.get(actor_handle.get_tool_function_name.remote())
-        tool_args = ray.get(actor_handle.get_tool_args.remote())
-        return cls(actor_handle=actor_handle, tool_function_name=tool_function_name, tool_args=tool_args)
+        return cls(actor_handle=actor_handle, tool_function_name=tool_function_name)
 
 
 # Keep these for backwards compatibility

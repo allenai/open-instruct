@@ -33,41 +33,73 @@ from open_instruct.tools.tools import (
 
 logger = logging.getLogger(__name__)
 
+
 # =============================================================================
-# Tool Config Registry
+# Unified Tool Registry
 # =============================================================================
 
-# Maps config attribute name (used in ToolConfig) to config class
-# Each config class must have a `cli_prefix` ClassVar
-TOOL_CONFIG_REGISTRY: dict[str, type] = {
-    "python": PythonCodeToolConfig,
-    "massive_ds_search": MassiveDSSearchToolConfig,
-    "serper_search": SerperSearchToolConfig,
-    "s2_search": S2SearchToolConfig,
-    "mcp": DrAgentMCPToolConfig,
+
+@dataclass(frozen=True)
+class ToolEntry:
+    """Metadata for a registered tool.
+
+    This is the single source of truth for tool registration. Each entry defines:
+    - The tool class and its config class
+    - The config attribute name (used in ToolConfig dataclass)
+    - Whether this is an MCP subtool (uses DrAgentMCPTool with tool_name_override)
+
+    To add a new tool:
+    1. Create YourTool and YourToolConfig in tools.py
+    2. Add a ToolEntry to TOOL_REGISTRY below
+    3. Add the config attribute to ToolConfig dataclass
+    """
+
+    tool_cls: type[Tool]
+    config_cls: type
+    config_attr: str  # Attribute name on ToolConfig (e.g., "python", "serper_search")
+    is_mcp_subtool: bool = False  # If True, passes tool name to DrAgentMCPTool.from_config()
+
+
+# Primary tool registry - maps canonical names to their entries
+_TOOL_ENTRIES: dict[str, ToolEntry] = {
+    "python": ToolEntry(PythonCodeTool, PythonCodeToolConfig, "python"),
+    "serper_search": ToolEntry(SerperSearchTool, SerperSearchToolConfig, "serper_search"),
+    "massive_ds_search": ToolEntry(MassiveDSSearchTool, MassiveDSSearchToolConfig, "massive_ds_search"),
+    "s2_search": ToolEntry(S2SearchTool, S2SearchToolConfig, "s2_search"),
+    "mcp": ToolEntry(DrAgentMCPTool, DrAgentMCPToolConfig, "mcp"),
 }
+
+# Aliases for convenience (e.g., --tools code instead of --tools python)
+_TOOL_ALIASES: dict[str, str] = {"code": "python", "search": "serper_search"}
+
+# Build the full registry including aliases and MCP subtools
+TOOL_REGISTRY: dict[str, ToolEntry] = {}
+
+# Add primary entries
+for name, entry in _TOOL_ENTRIES.items():
+    TOOL_REGISTRY[name] = entry
+
+# Add aliases (point to the same entry)
+for alias, canonical in _TOOL_ALIASES.items():
+    TOOL_REGISTRY[alias] = _TOOL_ENTRIES[canonical]
+
+# Add MCP sub-tools (snippet_search, google_search, etc.)
+# These use the MCP entry but with is_mcp_subtool=True
+_mcp_entry = _TOOL_ENTRIES["mcp"]
+for mcp_name in MCP_TOOL_REGISTRY:
+    TOOL_REGISTRY[mcp_name] = ToolEntry(
+        tool_cls=_mcp_entry.tool_cls,
+        config_cls=_mcp_entry.config_cls,
+        config_attr=_mcp_entry.config_attr,
+        is_mcp_subtool=True,
+    )
+
+# Derive config registry from tool entries (for CLI generation)
+# Maps config_attr -> config_cls
+TOOL_CONFIG_REGISTRY: dict[str, type] = {entry.config_attr: entry.config_cls for entry in _TOOL_ENTRIES.values()}
 
 # Fields to exclude from CLI exposure (common across all configs)
 EXCLUDED_FIELDS = {"tag_name", "cli_prefix"}
-
-# =============================================================================
-# Tool Registry
-# =============================================================================
-
-# Maps tool names to (config_attr_name, tool_class, is_mcp_subtool)
-TOOL_REGISTRY: dict[str, tuple[str, type[Tool], bool]] = {
-    "code": ("python", PythonCodeTool, False),
-    "python": ("python", PythonCodeTool, False),
-    "search": ("serper_search", SerperSearchTool, False),
-    "serper_search": ("serper_search", SerperSearchTool, False),
-    "massive_ds_search": ("massive_ds_search", MassiveDSSearchTool, False),
-    "s2_search": ("s2_search", S2SearchTool, False),
-    "mcp": ("mcp", DrAgentMCPTool, False),
-}
-
-# Add MCP sub-tools
-for mcp_name in MCP_TOOL_REGISTRY:
-    TOOL_REGISTRY[mcp_name] = ("mcp", DrAgentMCPTool, True)
 
 PARSER_TYPES = Literal["legacy", "vllm_hermes", "vllm_llama3", "vllm_qwen3_xml", "vllm_qwen3_coder", "dr_tulu"]
 
@@ -132,18 +164,18 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
         if tool_name_lower not in TOOL_REGISTRY:
             raise ValueError(f"Unknown tool: {tool_name}. Available: {get_available_tools()}")
 
-        _, tool_cls, _ = TOOL_REGISTRY[tool_name_lower]
+        entry = TOOL_REGISTRY[tool_name_lower]
 
         # Get tag name from config or use default
         if config.tool_tag_names and i < len(config.tool_tag_names):
             tag_name = config.tool_tag_names[i]
         else:
-            tag_name = getattr(tool_cls, "_default_tool_function_name", tool_name_lower)
+            tag_name = getattr(entry.tool_cls, "_default_tool_function_name", tool_name_lower)
 
         # Get description and parameters from class attributes
-        description = getattr(tool_cls, "_default_tool_description", "")
+        description = getattr(entry.tool_cls, "_default_tool_description", "")
         parameters = getattr(
-            tool_cls, "_default_tool_parameters", {"type": "object", "properties": {}, "required": []}
+            entry.tool_cls, "_default_tool_parameters", {"type": "object", "properties": {}, "required": []}
         )
 
         definitions.append(
@@ -397,17 +429,17 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
 
     for i, tool_name in enumerate(config.tools):
         tool_name_lower = tool_name.lower()
-        config_attr, tool_cls, is_mcp_subtool = TOOL_REGISTRY[tool_name_lower]
-        tool_config = getattr(config, config_attr)
+        entry = TOOL_REGISTRY[tool_name_lower]
+        tool_config = getattr(config, entry.config_attr)
 
         if config.tool_tag_names and hasattr(tool_config, "tag_name"):
             tool_config.tag_name = config.tool_tag_names[i]
 
         # Derive class_path from tool_cls
-        class_path = f"{tool_cls.__module__}:{tool_cls.__name__}"
+        class_path = f"{entry.tool_cls.__module__}:{entry.tool_cls.__name__}"
 
         # For MCP sub-tools (snippet_search, google_search, etc.), pass tool_name_override
-        tool_name_override = tool_name_lower if is_mcp_subtool else None
+        tool_name_override = tool_name_lower if entry.is_mcp_subtool else None
 
         # Step 1: Create ToolActor from config (tool instantiated inside Ray actor)
         actor = create_tool_actor_from_config(

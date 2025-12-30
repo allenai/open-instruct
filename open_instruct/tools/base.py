@@ -35,7 +35,6 @@ class ToolCall:
 # base class. All tools must have call method and output ToolOutput.
 # they must also return the argument list and their own name.
 class Tool(ABC):
-    tool_args: dict[str, Any]
     # Default tool function name (subclasses set this as class attribute)
     _default_tool_function_name: str = "tool"
     # Default description (subclasses can override as class attribute)
@@ -95,7 +94,7 @@ class Tool(ABC):
 # parser base class
 class ToolParser(ABC):
     @abstractmethod
-    def get_tool_calls(self, text: str, tools: list[dict[str, Any]] | None = None) -> list[ToolCall]:
+    def get_tool_calls(self, text: str) -> list[ToolCall]:
         pass
 
     @abstractmethod
@@ -133,23 +132,20 @@ class VllmToolParser(ToolParser):
         self._stop_sequences = stop_sequences or []
         self._tool_definitions = tool_definitions
 
-    def _make_request(self, tools: list[dict[str, Any]] | None = None) -> Any:
+    def _make_request(self) -> Any:
         """
         Create a dummy ChatCompletionRequest for vLLM parsers.
         Usually these only need the list of tools.
         """
-        # Use provided tools or fall back to stored definitions
-        tools_to_use = tools if tools is not None else self._tool_definitions
-        return ChatCompletionRequest(model="dummy", messages=[], tools=tools_to_use)
+        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)
 
-    def get_tool_calls(self, text: str, tools: list[dict[str, Any]] | None = None) -> list[ToolCall]:
+    def get_tool_calls(self, text: str) -> list[ToolCall]:
         """Extract tool calls from model output.
 
         Args:
             text: The model output text to parse.
-            tools: Optional list of tool definitions in OpenAI format (overrides stored definitions).
         """
-        request = self._make_request(tools)
+        request = self._make_request()
         result = self.tool_parser.extract_tool_calls(model_output=text, request=request)
 
         if not result.tools_called:
@@ -195,7 +191,7 @@ class OpenInstructLegacyToolParser(ToolParser):
             for tool_name in self.tool_names
         }
 
-    def get_tool_calls(self, text: str, tools: list[dict[str, Any]] | None = None) -> list[ToolCall]:
+    def get_tool_calls(self, text: str) -> list[ToolCall]:
         tool_calls: list[ToolCall] = []
         # Check each tool's regex
         for tool_name, tool_regex in self.tool_regexes.items():
@@ -215,67 +211,48 @@ class OpenInstructLegacyToolParser(ToolParser):
 
 class DRTuluToolParser(ToolParser):
     """
-    Tool parser that recreates the DR Tulu style.
-    Basically a wrapper around the mcp tools, that themselves handle parsing/calls/etc.
+    Tool parser for DR Tulu / MCP style tools.
 
-    Works with both DrAgentMCPTool instances and ToolProxy wrappers around them.
+    These tools handle their own internal parsing and routing, so this parser
+    just detects if ANY tool call pattern is present (by checking for stop strings)
+    and routes the full text to the tool for execution.
     """
 
-    def __init__(self, mcp_tool_list: list[Tool]):
-        # Store the tool wrappers (either DrAgentMCPTool or ToolProxy)
-        self.tool_wrappers = mcp_tool_list
-        logger.info(f"DRTuluToolParser: Initializing with {len(mcp_tool_list)} tool wrappers")
+    def __init__(self, tool_list: list[Tool]):
+        self.tools = tool_list
 
-        # Get MCP tool names from each wrapper
-        self.mcp_tool_names: list[str] = []
-        for tool in mcp_tool_list:
-            if hasattr(tool, "get_mcp_tool_names"):
-                # It's a ToolProxy or DrAgentMCPTool with this method
-                names = tool.get_mcp_tool_names()
-                logger.info(f"DRTuluToolParser: Got MCP tool names from proxy: {names}")
-                self.mcp_tool_names.extend(names)
-            elif hasattr(tool, "mcp_tools"):
-                # Direct DrAgentMCPTool access (legacy)
-                names = [t.name for t in tool.mcp_tools]
-                logger.info(f"DRTuluToolParser: Got MCP tool names directly: {names}")
-                self.mcp_tool_names.extend(names)
-
-        logger.info(f"DRTuluToolParser: All MCP tool names: {self.mcp_tool_names}")
-
+        # Collect stop strings from tools (e.g., "</tool>")
         self._stop_strings: list[str] = []
-        # Collect stop strings from all tools
-        for tool in mcp_tool_list:
+        for tool in tool_list:
             if hasattr(tool, "get_stop_strings"):
-                stop_strs = tool.get_stop_strings()
-                logger.info(f"DRTuluToolParser: Got stop strings: {stop_strs}")
-                self._stop_strings.extend(stop_strs)
+                self._stop_strings.extend(tool.get_stop_strings())
 
-        logger.info(f"DRTuluToolParser: All stop strings: {self._stop_strings}")
+        # Remove duplicates while preserving order
+        seen: set[str] = set()
+        unique_stops: list[str] = []
+        for s in self._stop_strings:
+            if s not in seen:
+                seen.add(s)
+                unique_stops.append(s)
+        self._stop_strings = unique_stops
 
-    def get_tool_calls(self, text: str, tools: list[dict[str, Any]] | None = None) -> list[ToolCall]:
-        tool_calls: list[ToolCall] = []
-        text_preview = text[:200] if len(text) > 200 else text
-        logger.debug(f"DRTuluToolParser.get_tool_calls: Checking text: {text_preview!r}...")
-        logger.debug(f"DRTuluToolParser.get_tool_calls: mcp_tool_names={self.mcp_tool_names}")
+        logger.info(f"DRTuluToolParser: Initialized with {len(tool_list)} tools, stop_strings={self._stop_strings}")
 
-        for tool in self.tool_wrappers:
-            for mcp_tool_name in self.mcp_tool_names:
-                has_calls_attr = hasattr(tool, "has_calls")
-                if has_calls_attr:
-                    result = tool.has_calls(text, mcp_tool_name)
-                    logger.debug(f"DRTuluToolParser: has_calls({mcp_tool_name}) = {result}")
-                    if result:
-                        # Use the wrapper's tool_function_name for the dict lookup,
-                        # not the individual MCP tool name
-                        tool_calls.append(ToolCall(name=tool.tool_function_name, args={"text": text}))
-                        logger.info(f"DRTuluToolParser: Found tool call for {tool.tool_function_name}")
-                        break  # Only one call per wrapper needed
+    def get_tool_calls(self, text: str) -> list[ToolCall]:
+        """Detect tool calls by checking for stop string patterns.
 
-        logger.debug(f"DRTuluToolParser.get_tool_calls: Returning {len(tool_calls)} tool calls")
-        return tool_calls
+        Since MCP tools handle their own internal routing, we just need to detect
+        if ANY tool was called and route the full text to that tool.
+        """
+        # Check if any stop string appears in text (indicates a tool call)
+        for stop_str in self._stop_strings:
+            if stop_str in text:
+                # Route to the first tool (MCP tool handles internal routing)
+                for tool in self.tools:
+                    return [ToolCall(name=tool.tool_function_name, args={"text": text})]
+        return []
 
     def format_tool_calls(self, tool_output: str) -> str:
-        # DR Tulu uses the MCP tool's own formatting
         return "\n" + tool_output + "\n\n"
 
     def stop_sequences(self) -> list[str]:

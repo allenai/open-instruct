@@ -96,7 +96,6 @@ class MaxCallsExceededTool(Tool):
     _default_tool_function_name = "max_calls_exceeded"
     _default_tool_description = "Returns an error when max tool calls limit is hit"
     _default_tool_parameters: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
-    tool_args: dict[str, dict[str, str]] = {}
 
     def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
         return ToolOutput(output="Max tool calls exceeded.", called=False, error="", timeout=False, runtime=0)
@@ -136,7 +135,6 @@ class PythonCodeTool(Tool):
         "properties": {"text": {"type": "string", "description": "Python code to execute"}},
         "required": ["text"],
     }
-    tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "Python code to execute"}}
 
     def __init__(self, api_endpoint: str, timeout_seconds: int = 3, tag_name: str | None = None) -> None:
         self.api_endpoint = api_endpoint
@@ -224,7 +222,6 @@ class MassiveDSSearchTool(Tool):
         "properties": {"text": {"type": "string", "description": "The search query"}},
         "required": ["text"],
     }
-    tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "The search query"}}
 
     def __init__(
         self, api_endpoint: str | None = None, number_documents_to_search: int = 3, tag_name: str | None = None
@@ -326,9 +323,6 @@ class S2SearchTool(Tool):
         "type": "object",
         "properties": {"text": {"type": "string", "description": "The search query for Semantic Scholar"}},
         "required": ["text"],
-    }
-    tool_args: dict[str, dict[str, str]] = {
-        "text": {"type": "string", "description": "The search query for Semantic Scholar"}
     }
 
     def __init__(self, number_of_results: int = 10, tag_name: str | None = None) -> None:
@@ -434,9 +428,6 @@ class SerperSearchTool(Tool):
         "type": "object",
         "properties": {"text": {"type": "string", "description": "The search query for Google via Serper"}},
         "required": ["text"],
-    }
-    tool_args: dict[str, dict[str, str]] = {
-        "text": {"type": "string", "description": "The search query for Google via Serper"}
     }
 
     def __init__(self, number_of_results: int = 5, tag_name: str | None = None) -> None:
@@ -585,9 +576,6 @@ class DrAgentMCPTool(Tool):
         "type": "object",
         "properties": {"text": {"type": "string", "description": "The full prompt containing MCP tool calls"}},
         "required": ["text"],
-    }
-    tool_args: dict[str, dict[str, str]] = {
-        "text": {"type": "string", "description": "The full prompt containing MCP tool calls"}
     }
 
     def __init__(

@@ -12,8 +12,10 @@ This module provides:
 
 from open_instruct.tools.base import Tool, ToolCall, ToolOutput, ToolParser, VllmToolParser
 from open_instruct.tools.config import (
+    TOOL_REGISTRY,
     ToolArgs,
     ToolConfig,
+    ToolEntry,
     build_tools_from_config,
     create_tool_parser,
     get_available_tools,
@@ -32,11 +34,13 @@ from open_instruct.tools.vllm_parsers import VLLM_PARSERS, create_vllm_parser, g
 
 __all__ = [
     "DEFAULT_MAX_CONCURRENCY",
+    "TOOL_REGISTRY",
     "Tool",
     "ToolActor",
     "ToolArgs",
     "ToolCall",
     "ToolConfig",
+    "ToolEntry",
     "ToolOutput",
     "ToolParser",
     "ToolProxy",
