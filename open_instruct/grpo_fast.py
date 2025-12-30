@@ -1922,6 +1922,22 @@ def data_preparation_thread(
                 **batch_metrics_prefixed,
             }
 
+            # Add per-tool metrics
+            if result.request_info.tool_call_counts:
+                # Aggregate per-tool call counts across all samples
+                aggregated_tool_counts: dict[str, int] = {}
+                for sample_counts in result.request_info.tool_call_counts:
+                    for tool_name, count in sample_counts.items():
+                        aggregated_tool_counts[tool_name] = aggregated_tool_counts.get(tool_name, 0) + count
+
+                total_samples = len(result.request_info.tool_call_counts)
+                for tool_name, total_calls in aggregated_tool_counts.items():
+                    # Rate of samples that called this tool at least once
+                    samples_with_tool = sum(1 for s in result.request_info.tool_call_counts if s.get(tool_name, 0) > 0)
+                    metrics[f"val/tool_{tool_name}_call_rate"] = samples_with_tool / total_samples
+                    metrics[f"val/tool_{tool_name}_total_calls"] = total_calls
+                    metrics[f"val/tool_{tool_name}_calls_per_sample"] = total_calls / total_samples
+
             total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
             metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
 

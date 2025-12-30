@@ -99,6 +99,7 @@ class CompletionOutput:
     tool_output: str = ""
     tool_runtime: float = 0.0
     tool_called: bool = False
+    tool_call_counts: dict[str, int] | None = None  # Per-tool call counts
 
 
 @dataclasses.dataclass
@@ -282,6 +283,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
         tool_outputs = [getattr(out, "tool_output", "") for out in final_output.outputs]
         tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in final_output.outputs]
         tool_calleds = [getattr(out, "tool_called", False) for out in final_output.outputs]
+        tool_call_counts = [getattr(out, "tool_call_counts", {}) or {} for out in final_output.outputs]
     else:
         # Use default values when tools are not used
         masks = [[1] * len(resp) for resp in response_ids]
@@ -291,6 +293,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
         tool_outputs = [""] * len(response_ids)
         tool_runtimes = [0.0] * len(response_ids)
         tool_calleds = [False] * len(response_ids)
+        tool_call_counts = [{}] * len(response_ids)
 
     result = GenerationResult(
         responses=response_ids,
@@ -303,6 +306,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
             tool_outputs=tool_outputs,
             tool_runtimes=tool_runtimes,
             tool_calleds=tool_calleds,
+            tool_call_counts=tool_call_counts,
         ),
         dataset_index=metadata["dataset_index"],
         prompt_id=metadata["prompt_id"],
@@ -824,6 +828,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     tool_output = ""
     tool_runtime = 0.0
     tool_called = False
+    tool_call_counts: dict[str, int] = {}  # Per-tool call counts
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
     original_prompt = actor.request_metadata[base_request_id]["prompt_token_ids"]
@@ -883,6 +888,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             tool_output += tool_result.output
             tool_runtime += tool_result.runtime
 
+            # Track per-tool call counts
+            tool_name = triggered_tool.tool_function_name
+            tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+
             # Format and tokenize this tool's output
             formatted_output = actor.tool_parser.format_tool_calls(tool_result.output)
             tool_tokens = actor.llm_engine.tokenizer.encode(formatted_output, add_special_tokens=False)
@@ -929,6 +938,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         complete_output.tool_output = tool_output
         complete_output.tool_runtime = tool_runtime
         complete_output.tool_called = tool_called
+        complete_output.tool_call_counts = tool_call_counts
 
     actor.active_tasks.pop(sub_request_id, None)
 

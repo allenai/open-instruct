@@ -150,27 +150,10 @@ class VllmToolParser(ToolParser):
             tools: Optional list of tool definitions in OpenAI format (overrides stored definitions).
         """
         request = self._make_request(tools)
-        try:
-            result = self.tool_parser.extract_tool_calls(model_output=text, request=request)
-        except Exception as e:
-            # vLLM parsers can throw on malformed JSON - treat as no tool calls
-            preview = text[-500:] if len(text) > 500 else text
-            logger.warning(
-                f"VllmToolParser: Parser exception (malformed tool call JSON): {e}\nText (last 500 chars): {preview!r}"
-            )
-            return []
+        result = self.tool_parser.extract_tool_calls(model_output=text, request=request)
 
         if not result.tools_called:
-            # Log if it looks like a tool call was attempted but parsing failed
-            if "<tool_call>" in text:
-                preview = text[-500:] if len(text) > 500 else text
-                logger.warning(
-                    f"VllmToolParser: Found <tool_call> tag but parser returned no tools (likely malformed JSON)\n"
-                    f"Text (last 500 chars): {preview!r}"
-                )
             return []
-        
-        logger.info(f"VllmToolParser: result: {result}")
 
         tool_calls = []
         for call in result.tool_calls:
