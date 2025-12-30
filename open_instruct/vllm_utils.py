@@ -53,8 +53,7 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
-from vllm.entrypoints.openai.cli_args import make_arg_parser
-from vllm.utils import FlexibleArgumentParser
+from vllm.entrypoints.openai.cli_args import FlexibleArgumentParser, make_arg_parser
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
