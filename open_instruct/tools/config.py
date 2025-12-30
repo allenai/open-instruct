@@ -16,7 +16,7 @@ import logging
 from dataclasses import MISSING, dataclass, field, fields, make_dataclass
 from typing import Any, Literal
 
-from open_instruct.tools.base import DRTuluToolParser, OpenInstructLegacyToolParser, Tool, ToolParser, VllmToolParser
+from open_instruct.tools.base import DRTuluToolParser, OpenInstructLegacyToolParser, Tool, ToolParser
 from open_instruct.tools.tools import (
     MCP_TOOL_REGISTRY,
     DrAgentMCPTool,
@@ -73,7 +73,15 @@ TOOL_REGISTRY: dict[str, tuple[str, type[Tool], bool]] = {
 for mcp_name in MCP_TOOL_REGISTRY:
     TOOL_REGISTRY[mcp_name] = ("mcp", DrAgentMCPTool, True)
 
-PARSER_TYPES = Literal["legacy", "vllm", "dr_tulu"]
+PARSER_TYPES = Literal["legacy", "vllm_hermes", "vllm_llama3", "vllm_qwen3_xml", "vllm_qwen3_coder", "dr_tulu"]
+
+# Maps parser names to vllm_parsers factory function names
+VLLM_PARSER_MAPPING: dict[str, str] = {
+    "vllm_hermes": "hermes",
+    "vllm_llama3": "llama3_json",
+    "vllm_qwen3_xml": "qwen3_xml",
+    "vllm_qwen3_coder": "qwen3_coder",
+}
 
 
 def get_available_tools() -> list[str]:
@@ -83,7 +91,7 @@ def get_available_tools() -> list[str]:
 
 def get_available_parsers() -> list[str]:
     """Return list of available parser types."""
-    return ["legacy", "vllm", "dr_tulu"]
+    return ["legacy", "vllm_hermes", "vllm_llama3", "vllm_qwen3_xml", "vllm_qwen3_coder", "dr_tulu"]
 
 
 # =============================================================================
@@ -251,13 +259,21 @@ class ToolConfig:
 
 
 def build_tools_from_config(
-    config: ToolConfig, vllm_tool_parser=None, vllm_output_formatter=None
+    config: ToolConfig, tokenizer=None
 ) -> tuple[dict[str, Tool], ToolParser | None, list[str]]:
     """Build tools and parser from ToolConfig.
 
     All tools are created as ToolProxy instances that instantiate the actual
     tools inside Ray actors. This provides a uniform pattern and avoids
     serialization issues with tools that have heavy dependencies.
+
+    For vLLM parsers, the tool definitions are automatically extracted from
+    the Tool instances via get_openai_tool_definition().
+    See: https://docs.vllm.ai/en/latest/features/tool_calling/
+
+    Args:
+        config: The tool configuration.
+        tokenizer: Required for vllm_* parsers. The tokenizer for the model.
 
     Returns:
         Tuple of (tools dict, parser, stop_strings list)
@@ -307,10 +323,13 @@ def build_tools_from_config(
     if config.parser == "legacy":
         parser = OpenInstructLegacyToolParser(tool_list=proxy_list)
         stop_strings = parser.stop_sequences()
-    elif config.parser == "vllm":
-        if vllm_tool_parser is None or vllm_output_formatter is None:
-            raise ValueError("parser='vllm' requires vllm_tool_parser and vllm_output_formatter")
-        parser = VllmToolParser(tool_parser=vllm_tool_parser, output_formatter=vllm_output_formatter)
+    elif config.parser in VLLM_PARSER_MAPPING:
+        if tokenizer is None:
+            raise ValueError(f"parser='{config.parser}' requires a tokenizer")
+        from open_instruct.tools.vllm_parsers import create_vllm_parser
+
+        vllm_parser_name = VLLM_PARSER_MAPPING[config.parser]
+        parser = create_vllm_parser(vllm_parser_name, tokenizer)
         stop_strings = parser.stop_sequences()
     elif config.parser == "dr_tulu":
         assert len(mcp_proxies) == 1 and len(proxy_list) == 1, "DR Tulu only uses the MCP tool"

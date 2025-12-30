@@ -127,6 +127,10 @@ class ToolActor:
             return [mcp_tool.name for mcp_tool in self._tool.mcp_tools]
         return []
 
+    def get_openai_tool_definition(self) -> dict:
+        """Get the tool definition in OpenAI format for function calling."""
+        return self._tool.get_openai_tool_definition()
+
 
 def create_tool_actor_from_config(
     class_path: str,
@@ -201,6 +205,14 @@ class ToolProxy(Tool):
     def get_mcp_tool_names(self) -> list[str]:
         """Get the names of MCP tools wrapped by this tool."""
         return ray.get(self._actor.get_mcp_tool_names.remote())
+
+    def get_openai_tool_definition(self) -> dict:
+        """Get the tool definition in OpenAI format for function calling.
+
+        Returns:
+            Dict in OpenAI tool format with type, function name, description, and parameters.
+        """
+        return ray.get(self._actor.get_openai_tool_definition.remote())
 
     @classmethod
     def from_actor(cls, actor_handle: ray.actor.ActorHandle) -> ToolProxy:

@@ -8,6 +8,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+
 if TYPE_CHECKING:
     from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
 
@@ -36,6 +38,10 @@ class Tool(ABC):
     tool_args: dict[str, Any]
     # Default tool function name (subclasses set this as class attribute)
     _default_tool_function_name: str = "tool"
+    # Default description (subclasses can override as class attribute)
+    _default_tool_description: str = ""
+    # Default parameters schema (subclasses can override as class attribute)
+    _default_tool_parameters: dict[str, Any] = {"type": "function", "properties": {}, "required": []}
     # Instance-level tag name (set in __init__ if provided, else uses default)
     _tag_name: str | None = None
 
@@ -53,6 +59,34 @@ class Tool(ABC):
             return self._tag_name
         return self._default_tool_function_name
 
+    @property
+    def tool_description(self) -> str:
+        """Description of what the tool does. Used for function calling."""
+        return self._default_tool_description
+
+    @property
+    def tool_parameters(self) -> dict[str, Any]:
+        """JSON Schema for tool parameters. Used for function calling."""
+        return self._default_tool_parameters
+
+    def get_openai_tool_definition(self) -> dict[str, Any]:
+        """Export tool definition in OpenAI function calling format.
+
+        This format is compatible with vLLM's tool calling and chat templates.
+        See: https://docs.vllm.ai/en/latest/features/tool_calling/
+
+        Returns:
+            Dict in OpenAI tool format with type, function name, description, and parameters.
+        """
+        return {
+            "type": "function",
+            "function": {
+                "name": self.tool_function_name,
+                "description": self.tool_description,
+                "parameters": self.tool_parameters,
+            },
+        }
+
     @abstractmethod
     def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
         pass
@@ -61,7 +95,7 @@ class Tool(ABC):
 # parser base class
 class ToolParser(ABC):
     @abstractmethod
-    def get_tool_calls(self, text: str) -> list[ToolCall]:
+    def get_tool_calls(self, text: str, tools: list[dict[str, Any]] | None = None) -> list[ToolCall]:
         pass
 
     @abstractmethod
@@ -75,31 +109,50 @@ class ToolParser(ABC):
 
 class VllmToolParser(ToolParser):
     """
-    Parser that wraps around vllm tool parsers.
+    Wraps a vLLM tool parser to extract tool calls and format responses.
+
+    See: https://docs.vllm.ai/en/latest/features/tool_calling/
+
+    Usage:
+        >>> from open_instruct.tools.vllm_parsers import create_vllm_parser
+        >>> parser = create_vllm_parser("hermes", tokenizer)
+        >>> tools = [tool.get_openai_tool_definition() for tool in my_tools]
+        >>> tool_calls = parser.get_tool_calls(model_output, tools=tools)
+        >>> formatted = parser.format_tool_calls(tool_result)
     """
 
     def __init__(self, tool_parser: VllmNativeToolParser, output_formatter: Callable[[str], str]):
-        # output formatter is a function that wraps around the tool output
-        # has to be unique to the chat template used.
-        self.output_formatter = output_formatter
         self.tool_parser = tool_parser
+        self.output_formatter = output_formatter
 
-    def get_tool_calls(self, text: str) -> list[ToolCall]:
-        tool_calls: list[ToolCall] = []
-        result = self.tool_parser.extract_tool_calls(model_output=text)
+    def _make_request(self, tools: list[dict[str, Any]] | None = None) -> Any:
+        """
+        Create a dummy ChatCompletionRequest for vLLM parsers.
+        Usually these only need the list of tools.
+        TODO: do any of the parsers ever need more than this?
+        """
+        return ChatCompletionRequest(model="dummy", messages=[], tools=tools)
+
+    def get_tool_calls(self, text: str, tools: list[dict[str, Any]] | None = None) -> list[ToolCall]:
+        """Extract tool calls from model output.
+
+        Args:
+            text: The model output text to parse.
+            tools: Optional list of tool definitions in OpenAI format.
+                   Get these via tool.get_openai_tool_definition() for each tool.
+        """
+        request = self._make_request(tools)
+        result = self.tool_parser.extract_tool_calls(model_output=text, request=request)
         if not result.tools_called:
-            return tool_calls
-        for call in result.tool_calls:
-            name = call.function.name
-            args = json.loads(call.function.arguments)
-            tool_calls.append(ToolCall(name=name, args=args))
-        return tool_calls
+            return []
+        return [
+            ToolCall(name=call.function.name, args=json.loads(call.function.arguments)) for call in result.tool_calls
+        ]
 
     def format_tool_calls(self, tool_output: str) -> str:
         return self.output_formatter(tool_output)
 
     def stop_sequences(self) -> list[str]:
-        """vllm parsers use native stop sequences."""
         return []
 
 
@@ -124,7 +177,7 @@ class OpenInstructLegacyToolParser(ToolParser):
             for tool_name in self.tool_names
         }
 
-    def get_tool_calls(self, text: str) -> list[ToolCall]:
+    def get_tool_calls(self, text: str, tools: list[dict[str, Any]] | None = None) -> list[ToolCall]:
         tool_calls: list[ToolCall] = []
         # Check each tool's regex
         for tool_name, tool_regex in self.tool_regexes.items():
@@ -181,7 +234,7 @@ class DRTuluToolParser(ToolParser):
 
         logger.info(f"DRTuluToolParser: All stop strings: {self._stop_strings}")
 
-    def get_tool_calls(self, text: str) -> list[ToolCall]:
+    def get_tool_calls(self, text: str, tools: list[dict[str, Any]] | None = None) -> list[ToolCall]:
         tool_calls: list[ToolCall] = []
         text_preview = text[:200] if len(text) > 200 else text
         logger.debug(f"DRTuluToolParser.get_tool_calls: Checking text: {text_preview!r}...")
