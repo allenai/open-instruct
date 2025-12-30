@@ -151,6 +151,12 @@ class VllmToolParser(ToolParser):
         """
         request = self._make_request(tools)
         result = self.tool_parser.extract_tool_calls(model_output=text, request=request)
+
+        # Debug logging
+        logger.info(f"VllmToolParser.get_tool_calls: tools_called={result.tools_called}")
+        logger.info(f"VllmToolParser.get_tool_calls: tool_calls={result.tool_calls}")
+        logger.info(f"VllmToolParser.get_tool_calls: content={result.content!r}")
+
         if not result.tools_called:
             return []
         return [
