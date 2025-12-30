@@ -113,8 +113,7 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
 from open_instruct.tools.base import Tool
-from open_instruct.tools.config import ToolArgs, build_tools_from_config
-from open_instruct.tools.proxy import create_tool_proxies
+from open_instruct.tools.config import ToolArgs, ToolConfig, build_tools_from_config
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -2010,8 +2009,17 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
     return beaker_config, wandb_url
 
 
-def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
-    """Set up training and evaluation datasets."""
+def setup_datasets(
+    args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer, tools: list[dict] | None = None
+):
+    """Set up training and evaluation datasets.
+
+    Args:
+        args: Training arguments.
+        tc: Tokenizer configuration.
+        tokenizer: The tokenizer.
+        tools: Optional list of tool definitions in OpenAI format for chat template.
+    """
     system_prompt_override = None
     if args.system_prompt_override_file is not None:
         logger.info(f"Loading system prompt override from {args.system_prompt_override_file}")
@@ -2020,7 +2028,7 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
     transform_fn_args = [
-        {"system_prompt_override": system_prompt_override},
+        {"system_prompt_override": system_prompt_override, "tools": tools},
         {"max_prompt_token_length": args.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
@@ -2075,7 +2083,10 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     train_dataset,
     eval_dataset,
-) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, Tool], int, int]:
+    tool_objects: dict[str, Tool],
+    tool_parser,
+    tool_config: "ToolConfig",
+) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -2087,19 +2098,6 @@ def create_model_and_optimizer(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
         for model in policy_group.models
     ]
-    # Set up tools using the composable tool configuration
-    tool_config = tool_args.to_tool_config()
-    tool_objects, tool_parser, tool_stop_strings = build_tools_from_config(tool_config)
-
-    # Wrap tools in Ray actors for better serialization across processes
-    if tool_objects:
-        logger.info(f"Wrapping {len(tool_objects)} tool(s) in ToolProxy actors")
-        tool_objects = create_tool_proxies(tool_objects)
-
-    # Add tool stop strings to args.stop_strings
-    for stop_string in tool_stop_strings:
-        if stop_string not in args.stop_strings:
-            args.stop_strings.append(stop_string)
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -2163,7 +2161,7 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
-    return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
+    return policy_group, vllm_engines, resume_training_step, episode, actor_manager
 
 
 def create_generation_configs(args: Args):
@@ -2835,7 +2833,27 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
 
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
+    pprint([args, model_config])
+
+    # Initialize Ray early so we can create tools before dataset processing
+    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
+
+    # Create tools early (needs Ray for tool actors)
+    tool_config = tool_args.to_tool_config()
+    tool_objects, tool_parser, tool_stop_strings = build_tools_from_config(tool_config, tokenizer=tokenizer)
+
+    # Get tool definitions for dataset transformation (needed for vLLM native tool calling)
+    tool_definitions = None
+    if tool_objects:
+        tool_definitions = [tool.get_openai_tool_definition() for tool in tool_objects.values()]
+        logger.info(f"Tool definitions for chat template: {[t['function']['name'] for t in tool_definitions]}")
+
+    # Add tool stop strings to args.stop_strings
+    for stop_string in tool_stop_strings:
+        if stop_string not in args.stop_strings:
+            args.stop_strings.append(stop_string)
+
+    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, tools=tool_definitions)
 
     if len(train_dataset) < (needed := max(args.async_steps, 1) * args.num_unique_prompts_rollout):
         raise ValueError(
@@ -2844,11 +2862,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
 
     if args.cache_dataset_only:
         return
-
-    pprint([args, model_config])
-
-    # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
@@ -2873,7 +2886,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
         verifier_functions=build_all_verifiers(args),
     )
 
-    policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
+    policy_group, vllm_engines, resume_training_step, episode, actor_manager = (
         create_model_and_optimizer(
             args,
             tc,
@@ -2887,6 +2900,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
             reward_config,
             train_dataset,
             eval_dataset,
+            tool_objects,
+            tool_parser,
+            tool_config,
         )
     )
 

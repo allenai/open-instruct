@@ -94,6 +94,51 @@ def get_available_parsers() -> list[str]:
     return ["legacy", "vllm_hermes", "vllm_llama3", "vllm_qwen3_xml", "vllm_qwen3_coder", "dr_tulu"]
 
 
+def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any]]:
+    """Get OpenAI-format tool definitions from ToolConfig without full tool instantiation.
+
+    This is useful for passing tool definitions to apply_chat_template before
+    the full tools are instantiated (which may require Ray actors, API endpoints, etc).
+
+    Args:
+        config: The tool configuration.
+
+    Returns:
+        List of tool definitions in OpenAI function calling format.
+    """
+    if not config.tools:
+        return []
+
+    definitions = []
+    for i, tool_name in enumerate(config.tools):
+        tool_name_lower = tool_name.lower()
+        if tool_name_lower not in TOOL_REGISTRY:
+            raise ValueError(f"Unknown tool: {tool_name}. Available: {get_available_tools()}")
+
+        _, tool_cls, _ = TOOL_REGISTRY[tool_name_lower]
+
+        # Get tag name from config or use default
+        if config.tool_tag_names and i < len(config.tool_tag_names):
+            tag_name = config.tool_tag_names[i]
+        else:
+            tag_name = getattr(tool_cls, "_default_tool_function_name", tool_name_lower)
+
+        # Get description and parameters from class attributes
+        description = getattr(tool_cls, "_default_tool_description", "")
+        parameters = getattr(tool_cls, "_default_tool_parameters", {"type": "object", "properties": {}, "required": []})
+
+        definitions.append({
+            "type": "function",
+            "function": {
+                "name": tag_name,
+                "description": description,
+                "parameters": parameters,
+            },
+        })
+
+    return definitions
+
+
 # =============================================================================
 # Dynamic ToolArgs Construction
 # =============================================================================
