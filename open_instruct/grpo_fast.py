@@ -2084,7 +2084,6 @@ def create_model_and_optimizer(
     train_dataset,
     eval_dataset,
     tool_objects: dict[str, Tool],
-    tool_parser,
     tool_config: "ToolConfig",
 ) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], int, int]:
     """Create the model, optimizer, and vLLM engines."""
@@ -2121,7 +2120,7 @@ def create_model_and_optimizer(
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
-        tool_parser=tool_parser,
+        tool_parser_name=tool_config.parser if tool_config.tools else None,
         max_tool_calls=tool_config.max_tool_calls,
         mask_tool_use=tool_config.mask_tool_use,
         prompt_queue=prompt_Q,
@@ -2132,6 +2131,7 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        tokenizer=tokenizer,
     )
 
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
@@ -2839,8 +2839,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     # Create tools early (needs Ray for tool actors)
+    # Note: tool_parser is created lazily inside the vLLM actor to avoid serialization issues
     tool_config = tool_args.to_tool_config()
-    tool_objects, tool_parser, tool_stop_strings = build_tools_from_config(tool_config, tokenizer=tokenizer)
+    tool_objects, tool_stop_strings = build_tools_from_config(tool_config)
 
     # Get tool definitions for dataset transformation (needed for vLLM native tool calling)
     tool_definitions = None
@@ -2901,7 +2902,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
             train_dataset,
             eval_dataset,
             tool_objects,
-            tool_parser,
             tool_config,
         )
     )

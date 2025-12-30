@@ -303,35 +303,80 @@ class ToolConfig:
 # =============================================================================
 
 
+def create_tool_parser(
+    parser_name: str,
+    tokenizer=None,
+    tools: dict[str, Tool] | None = None,
+) -> ToolParser | None:
+    """Create a tool parser by name.
+
+    This function creates the appropriate parser based on the parser name.
+    It's designed to be called lazily (e.g., inside a Ray actor) to avoid
+    serialization issues with parsers that contain non-serializable components.
+
+    Args:
+        parser_name: The parser type (e.g., "legacy", "vllm_qwen3_xml", "dr_tulu").
+        tokenizer: Required for vllm_* parsers. The tokenizer for the model.
+        tools: Required for "legacy" and "dr_tulu" parsers. Dict of tool name -> Tool.
+
+    Returns:
+        The created ToolParser, or None if parser_name is None/empty.
+    """
+    if not parser_name:
+        return None
+
+    if parser_name == "legacy":
+        if not tools:
+            raise ValueError("parser='legacy' requires tools to be provided")
+        return OpenInstructLegacyToolParser(tool_list=list(tools.values()))
+
+    elif parser_name in VLLM_PARSER_MAPPING:
+        if tokenizer is None:
+            raise ValueError(f"parser='{parser_name}' requires a tokenizer")
+        from open_instruct.tools.vllm_parsers import create_vllm_parser
+
+        vllm_parser_name = VLLM_PARSER_MAPPING[parser_name]
+        return create_vllm_parser(vllm_parser_name, tokenizer)
+
+    elif parser_name == "dr_tulu":
+        if not tools:
+            raise ValueError("parser='dr_tulu' requires tools to be provided")
+        # For DR Tulu, we need the MCP tool proxies
+        mcp_tools = [t for t in tools.values() if hasattr(t, "mcp_tools")]
+        return DRTuluToolParser(mcp_tool_list=mcp_tools)
+
+    else:
+        logger.warning(f"Unknown tool parser: {parser_name}")
+        return None
+
+
 def build_tools_from_config(
-    config: ToolConfig, tokenizer=None
-) -> tuple[dict[str, Tool], ToolParser | None, list[str]]:
-    """Build tools and parser from ToolConfig.
+    config: ToolConfig,
+) -> tuple[dict[str, Tool], list[str]]:
+    """Build tools from ToolConfig.
 
     All tools are created as ToolProxy instances that instantiate the actual
     tools inside Ray actors. This provides a uniform pattern and avoids
     serialization issues with tools that have heavy dependencies.
 
-    For vLLM parsers, the tool definitions are automatically extracted from
-    the Tool instances via get_openai_tool_definition().
-    See: https://docs.vllm.ai/en/latest/features/tool_calling/
+    Note: This function does NOT create the parser. Use create_tool_parser()
+    to create the parser lazily when needed (e.g., inside a Ray actor where
+    the tokenizer is available).
 
     Args:
         config: The tool configuration.
-        tokenizer: Required for vllm_* parsers. The tokenizer for the model.
 
     Returns:
-        Tuple of (tools dict, parser, stop_strings list)
+        Tuple of (tools dict, stop_strings list)
     """
     # Import here to avoid circular imports
     from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
 
     if not config.tools:
-        return {}, None, []
+        return {}, []
 
     proxies: dict[str, ToolProxy] = {}
     proxy_list: list[ToolProxy] = []
-    mcp_proxies: list[ToolProxy] = []
 
     for i, tool_name in enumerate(config.tools):
         tool_name_lower = tool_name.lower()
@@ -358,33 +403,11 @@ def build_tools_from_config(
         proxies[proxy.tool_function_name] = proxy
         proxy_list.append(proxy)
 
-        if tool_cls is DrAgentMCPTool:
-            mcp_proxies.append(proxy)
-
     logger.info(f"Configured {len(proxies)} tool(s): {list(proxies.keys())}")
 
-    stop_strings: list[str] = []
-
-    if config.parser == "legacy":
-        parser = OpenInstructLegacyToolParser(tool_list=proxy_list)
-        stop_strings = parser.stop_sequences()
-    elif config.parser in VLLM_PARSER_MAPPING:
-        if tokenizer is None:
-            raise ValueError(f"parser='{config.parser}' requires a tokenizer")
-        from open_instruct.tools.vllm_parsers import create_vllm_parser
-
-        vllm_parser_name = VLLM_PARSER_MAPPING[config.parser]
-        parser = create_vllm_parser(vllm_parser_name, tokenizer)
-        stop_strings = parser.stop_sequences()
-    elif config.parser == "dr_tulu":
-        assert len(mcp_proxies) == 1 and len(proxy_list) == 1, "DR Tulu only uses the MCP tool"
-        parser = DRTuluToolParser(mcp_tool_list=mcp_proxies)
-        stop_strings = parser.stop_sequences()
-    else:
-        parser = None
-
     # Get stop strings from proxies (fetched from actors)
+    stop_strings: list[str] = []
     for proxy in proxy_list:
         stop_strings.extend(proxy.get_stop_strings())
 
-    return proxies, parser, list(set(stop_strings))
+    return proxies, list(set(stop_strings))

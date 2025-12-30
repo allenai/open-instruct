@@ -15,6 +15,7 @@ from open_instruct.tools.config import (
     ToolArgs,
     ToolConfig,
     build_tools_from_config,
+    create_tool_parser,
     get_available_tools,
     get_tool_definitions_from_config,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "VllmToolParser",
     "build_tools_from_config",
     "create_tool_actor_from_config",
+    "create_tool_parser",
     "create_tool_proxies",
     "create_tool_proxy",
     "create_vllm_parser",

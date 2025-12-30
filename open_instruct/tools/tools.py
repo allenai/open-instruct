@@ -94,6 +94,7 @@ class MaxCallsExceededTool(Tool):
     """Tool that returns a message when max tool calls have been exceeded."""
 
     _default_tool_function_name = "max_calls_exceeded"
+    _default_tool_description = "Returns an error when max tool calls limit is hit"
     tool_args: dict[str, dict[str, str]] = {}
 
     def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
@@ -128,6 +129,7 @@ class PythonCodeTool(Tool):
     """
 
     _default_tool_function_name = "python"
+    _default_tool_description = "Executes Python code and returns printed output."
     tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "Python code to execute"}}
 
     def __init__(self, api_endpoint: str, timeout_seconds: int = 3, tag_name: str | None = None) -> None:
@@ -210,6 +212,7 @@ class SearchTool(Tool):
     """Search tool using the massive_ds API."""
 
     _default_tool_function_name = "massive_ds_search"  # Distinct from SerperSearchTool's "search"
+    _default_tool_description = "Searches Wikipedia/documents using the massive_ds retrieval system"
     tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "The search query"}}
 
     def __init__(
@@ -307,6 +310,7 @@ class S2SearchTool(Tool):
     """
 
     _default_tool_function_name = "s2_search"
+    _default_tool_description = "Searches Semantic Scholar for academic papers and citations"
     tool_args: dict[str, dict[str, str]] = {
         "text": {"type": "string", "description": "The search query for Semantic Scholar"}
     }
@@ -407,6 +411,7 @@ class YouSearchTool(Tool):
     """
 
     _default_tool_function_name = "you_search"
+    _default_tool_description = "Web search using the You.com API"
     tool_args: dict[str, dict[str, str]] = {"text": {"type": "string", "description": "The search query for You.com"}}
 
     def __init__(self, number_of_results: int = 10, tag_name: str | None = None) -> None:
@@ -524,6 +529,7 @@ class SerperSearchTool(Tool):
     """
 
     _default_tool_function_name = "serper_search"  # Use "search" to match model training format
+    _default_tool_description = "Google search via the Serper API"
     tool_args: dict[str, dict[str, str]] = {
         "text": {"type": "string", "description": "The search query for Google via Serper"}
     }
@@ -667,6 +673,7 @@ class DrAgentMCPTool(Tool):
     """
 
     _default_tool_function_name = "mcp"
+    _default_tool_description = "MCP tools wrapper supporting snippet_search, google_search, massive_serve, browse_webpage"
     tool_args: dict[str, dict[str, str]] = {
         "text": {"type": "string", "description": "The full prompt containing MCP tool calls"}
     }

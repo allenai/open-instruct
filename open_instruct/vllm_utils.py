@@ -61,6 +61,7 @@ from open_instruct.data_types import GenerationResult, PromptRequest, RequestInf
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.tools.base import Tool, ToolParser
+from open_instruct.tools.config import create_tool_parser
 from open_instruct.tools.tools import MaxCallsExceededTool
 from open_instruct.utils import ModelDims, ray_get_with_progress
 
@@ -515,7 +516,7 @@ class LLMRayActor:
         self,
         *args,
         tools: dict[str, Tool] | None = None,
-        tool_parser: ToolParser | None = None,
+        tool_parser_name: str | None = None,
         max_tool_calls: int = 5,
         mask_tool_use: bool = True,
         bundle_indices: list[int] | None = None,
@@ -527,12 +528,13 @@ class LLMRayActor:
         reward_config: RewardConfig | None = None,
         train_dataset=None,
         eval_dataset=None,
+        tokenizer_for_parser=None,
         **kwargs,
     ):
         assert_threaded_actor(self)
         self._init_config(
             tools,
-            tool_parser,
+            tool_parser_name,
             max_tool_calls,
             mask_tool_use,
             inflight_updates,
@@ -549,11 +551,18 @@ class LLMRayActor:
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
+        # init tool parser using the passed tokenizer (which has correct chat template settings)
+        if self.tool_parser_name and self.tools:
+            self.tool_parser = create_tool_parser(
+                parser_name=self.tool_parser_name,
+                tokenizer=tokenizer_for_parser,
+                tools=self.tools,
+            )
 
     def _init_config(
         self,
         tools: dict[str, Tool] | None,
-        tool_parser: ToolParser | None,
+        tool_parser_name: str | None,
         max_tool_calls: int,
         mask_tool_use: bool,
         inflight_updates: bool,
@@ -562,7 +571,8 @@ class LLMRayActor:
         eval_dataset,
     ) -> None:
         self.tools = tools or {}
-        self.tool_parser = tool_parser
+        self.tool_parser_name = tool_parser_name
+        self.tool_parser: ToolParser | None = None  # Created lazily in _init_tool_parser
         self.max_tool_calls = max_tool_calls
         self.mask_tool_use = mask_tool_use
         self.inflight_updates = inflight_updates
@@ -570,9 +580,10 @@ class LLMRayActor:
         self.active_tasks = {}
         self.request_outputs = {}
         self.reward_config = reward_config
+        self.reward_fn = reward_config.build() if reward_config else None
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
-        self.reward_fn = reward_config.build() if reward_config else None
+
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
@@ -970,7 +981,7 @@ def create_vllm_engines(
     single_gpu_mode: bool = False,
     pg: PlacementGroup | None = None,
     tools: dict[str, Tool] | None = None,
-    tool_parser: ToolParser | None = None,
+    tool_parser_name: str | None = None,
     max_tool_calls: int = 5,
     mask_tool_use: bool = True,
     prompt_queue=None,
@@ -981,6 +992,7 @@ def create_vllm_engines(
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
+    tokenizer=None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
@@ -1044,13 +1056,14 @@ def create_vllm_engines(
                 eval_results_queue=eval_results_queue,
                 actor_manager=actor_manager,
                 tools=tools,
-                tool_parser=tool_parser,
+                tool_parser_name=tool_parser_name,
                 max_tool_calls=max_tool_calls,
                 mask_tool_use=mask_tool_use,
                 inflight_updates=inflight_updates,
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
+                tokenizer_for_parser=tokenizer,
             )
         )
 
