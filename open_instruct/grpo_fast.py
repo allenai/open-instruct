@@ -2009,9 +2009,7 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
     return beaker_config, wandb_url
 
 
-def setup_datasets(
-    args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer, tools: list[dict] | None = None
-):
+def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer, tools: list[dict] | None = None):
     """Set up training and evaluation datasets.
 
     Args:
@@ -2887,23 +2885,21 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
         verifier_functions=build_all_verifiers(args),
     )
 
-    policy_group, vllm_engines, resume_training_step, episode, actor_manager = (
-        create_model_and_optimizer(
-            args,
-            tc,
-            model_config,
-            beaker_config,
-            wandb_url,
-            tokenizer,
-            inference_results_Q,
-            prompt_Q,
-            evaluation_inference_results_Q,
-            reward_config,
-            train_dataset,
-            eval_dataset,
-            tool_objects,
-            tool_config,
-        )
+    policy_group, vllm_engines, resume_training_step, episode, actor_manager = create_model_and_optimizer(
+        args,
+        tc,
+        model_config,
+        beaker_config,
+        wandb_url,
+        tokenizer,
+        inference_results_Q,
+        prompt_Q,
+        evaluation_inference_results_Q,
+        reward_config,
+        train_dataset,
+        eval_dataset,
+        tool_objects,
+        tool_config,
     )
 
     # Get the model dimensions from one of the engines without loading weights

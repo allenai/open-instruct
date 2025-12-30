@@ -125,16 +125,13 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
 
         # Get description and parameters from class attributes
         description = getattr(tool_cls, "_default_tool_description", "")
-        parameters = getattr(tool_cls, "_default_tool_parameters", {"type": "object", "properties": {}, "required": []})
+        parameters = getattr(
+            tool_cls, "_default_tool_parameters", {"type": "object", "properties": {}, "required": []}
+        )
 
-        definitions.append({
-            "type": "function",
-            "function": {
-                "name": tag_name,
-                "description": description,
-                "parameters": parameters,
-            },
-        })
+        definitions.append(
+            {"type": "function", "function": {"name": tag_name, "description": description, "parameters": parameters}}
+        )
 
     return definitions
 
@@ -303,11 +300,7 @@ class ToolConfig:
 # =============================================================================
 
 
-def create_tool_parser(
-    parser_name: str,
-    tokenizer=None,
-    tools: dict[str, Tool] | None = None,
-) -> ToolParser | None:
+def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] | None = None) -> ToolParser | None:
     """Create a tool parser by name.
 
     This function creates the appropriate parser based on the parser name.
@@ -350,9 +343,7 @@ def create_tool_parser(
         return None
 
 
-def build_tools_from_config(
-    config: ToolConfig,
-) -> tuple[dict[str, Tool], list[str]]:
+def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[str]]:
     """Build tools from ToolConfig.
 
     All tools are created as ToolProxy instances that instantiate the actual

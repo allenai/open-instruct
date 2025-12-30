@@ -554,9 +554,7 @@ class LLMRayActor:
         # init tool parser using the passed tokenizer (which has correct chat template settings)
         if self.tool_parser_name and self.tools:
             self.tool_parser = create_tool_parser(
-                parser_name=self.tool_parser_name,
-                tokenizer=tokenizer_for_parser,
-                tools=self.tools,
+                parser_name=self.tool_parser_name, tokenizer=tokenizer_for_parser, tools=self.tools
             )
 
     def _init_config(
@@ -583,7 +581,6 @@ class LLMRayActor:
         self.reward_fn = reward_config.build() if reward_config else None
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
-
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()

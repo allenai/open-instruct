@@ -41,7 +41,7 @@ class Tool(ABC):
     # Default description (subclasses can override as class attribute)
     _default_tool_description: str = ""
     # Default parameters schema (subclasses can override as class attribute)
-    _default_tool_parameters: dict[str, Any] = {"type": "function", "properties": {}, "required": []}
+    _default_tool_parameters: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
     # Instance-level tag name (set in __init__ if provided, else uses default)
     _tag_name: str | None = None
 
