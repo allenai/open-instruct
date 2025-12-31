@@ -15,7 +15,7 @@ import requests
 from rich.console import Console
 from rich.text import Text
 
-from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS, download_from_gs_bucket
+from open_instruct.cluster_config import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS, download_from_gs_bucket
 
 console = Console()
 

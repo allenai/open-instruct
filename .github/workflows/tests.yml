@@ -44,9 +44,6 @@ jobs:
         with:
           version: "0.8.6"
 
-      - name: Set up Python
-        run: uv sync --frozen
-
       - name: Install Beaker CLI
         run: curl -s https://beaker.org/install | sudo bash
 
@@ -78,12 +75,19 @@ jobs:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: |
           beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-          image_name="open-instruct-gpu-tests-ci"
 
-          beaker image rename "$beaker_user/$image_name" "" 2>/dev/null || true
-          beaker image create open-instruct-gpu-tests:latest -n "$image_name" -w "ai2/$beaker_user" --description "Git commit: ${{ github.sha }}"
+          # Hash dependencies to create stable image name (skip upload if unchanged)
+          deps_hash=$(sha256sum pyproject.toml uv.lock | sha256sum | cut -c1-12)
+          image_name="open-instruct-gpu-tests-${deps_hash}"
 
-          uv sync --frozen
+          # Check if image already exists
+          if beaker image get "$beaker_user/$image_name" &>/dev/null; then
+            echo "Beaker image $image_name already exists, skipping upload"
+          else
+            echo "Creating new Beaker image: $image_name"
+            beaker image create open-instruct-gpu-tests:latest -n "$image_name" -w "ai2/$beaker_user" --description "Git commit: ${{ github.sha }}"
+          fi
+
           output=$(bash scripts/train/debug/run_gpu_pytest.sh "$beaker_user/$image_name" 2>&1)
           echo "$output"
 

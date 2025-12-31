@@ -2018,6 +2018,12 @@ dev = [
     { name = "ruff" },
     { name = "ty" },
 ]
+experimenter = [
+    { name = "backoff" },
+    { name = "beaker-py" },
+    { name = "requests" },
+    { name = "rich" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2068,6 +2074,12 @@ dev = [
     { name = "rich", specifier = ">=13.7.0" },
     { name = "ruff", specifier = ">=0.11.13" },
     { name = "ty", specifier = ">=0.0.1a13" },
+]
+experimenter = [
+    { name = "backoff", specifier = ">=2.2.1" },
+    { name = "beaker-py", specifier = ">=2.5.3" },
+    { name = "requests", specifier = ">=2.28.0" },
+    { name = "rich", specifier = ">=13.7.0" },
 ]
 
 [[package]]
