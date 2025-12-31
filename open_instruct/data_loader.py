@@ -38,8 +38,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=0
         )
 
-        dataset_with_indices = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
-        self._original_dataset = dataset_with_indices.shard(num_shards=world_size, index=rank)
+        self._original_dataset = dataset.shard(num_shards=world_size, index=rank)
         self.dataset = self._original_dataset.shuffle(seed=seed)
         self.seed = seed
         self._batch_size = batch_size
@@ -48,6 +47,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._excluded_indices: set[int] = set()
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
+        self._index_to_position: dict[int, int] = {}
+        self._build_index_mapping()
 
     def __next__(self) -> dict[str, Any]:
         if self._current_iter is None:
@@ -66,11 +67,20 @@ class HFDataLoader(data_loader.DataLoaderBase):
             self.batches_processed = 0
             raise
 
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        """Look up an example by its original dataset index."""
+        position = self._index_to_position[index]
+        return self.dataset[position]
+
+    def _build_index_mapping(self) -> None:
+        """Build a mapping from original row IDs to current positional indices."""
+        self._index_to_position = {self.dataset[i]["index"]: i for i in range(len(self.dataset))}
+
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
         for i in range(self.batches_processed, self.effective_size):
             example = self.dataset[i]
-            yield example | {"prompt_id": f"{self._epoch}_{example['dataset_index']}"}
+            yield example | {"prompt_id": f"{self._epoch}_{example['index']}"}
 
     @property
     def total_batches(self) -> int:
@@ -99,7 +109,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Exclude a dataset index from future iterations.
 
         Args:
-            index: The dataset_index to exclude.
+            index: The index to exclude.
         """
         self._excluded_indices.add(index)
 
@@ -114,8 +124,9 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.batches_processed = 0
         shuffled = self._original_dataset.shuffle(seed=self.seed + self._epoch)
         # If this is slow, we can speed it up by making this a boolean mask.
-        self.dataset = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
+        self.dataset = shuffled.filter(lambda x: x["index"] not in self._excluded_indices)
         self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
+        self._build_index_mapping()
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.

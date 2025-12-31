@@ -1515,8 +1515,7 @@ def accumulate_inference_batches(
     num_prompts: int,
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
-    prompt_dataset: Dataset,
-    data_loader: data_loader_lib.HFDataLoader | None = None,
+    data_loader: data_loader_lib.HFDataLoader,
     prompt_Q: ray_queue.Queue | None = None,
     actor_manager=None,
     timeout: float | None = None,
@@ -1532,10 +1531,7 @@ def accumulate_inference_batches(
         args: Arguments containing vllm_num_engines and batch size info
         generation_config: Generation config containing n (number of samples per prompt)
         num_prompts: Number of prompts to accumulate
-        data_loader: Iterator over the dataloader for replenishing prompts. Required when
-            replenish_prompts=True or no_resampling_pass_rate is set. Can be None for
-            evaluation where all prompts are pre-queued.
-        prompt_dataset: Dataset containing prompts
+        data_loader: DataLoader for looking up prompt data by index and replenishing prompts.
         prompt_Q: Queue containing prompts to send to generator. Required when
             replenish_prompts=True. Can be None for evaluation where no replenishment is needed.
         timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
@@ -1552,13 +1548,8 @@ def accumulate_inference_batches(
         Tuple of (combined_result, Batch with queries, ground_truths, datasets, prompt_lengths, response_lengths)
         or (ShutdownSentinel, None, None, None) if shutdown signal received
     """
-    if no_resampling_pass_rate is not None:
-        assert data_loader is not None, "no_resampling requires data_loader"
-
     if replenish_prompts:
-        assert prompt_Q is not None and data_loader is not None and prompt_dataset is not None, (
-            "replenish_prompts requires prompt_Q, data_loader, and prompt_dataset"
-        )
+        assert prompt_Q is not None, "replenish_prompts requires prompt_Q"
     results = []
     all_queries = []
     all_ground_truths = []
@@ -1603,7 +1594,7 @@ def accumulate_inference_batches(
         # Don't resample prompt that was solved at more than no_resample_positive_rate
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             total_no_resampled += 1
-            data_loader.exclude_index(result.dataset_index)
+            data_loader.exclude_index(result.index)
             logging.debug(
                 f"[Data Preparation Thread] Prompt solved at {percent_solved}, total no resampled: {total_no_resampled}"
             )
@@ -1631,7 +1622,7 @@ def accumulate_inference_batches(
             progress_bar.update(1)
 
         results.append(result)
-        prompt_data = prompt_dataset[result.dataset_index]
+        prompt_data = data_loader[result.index]
         all_queries.extend(repeat_each([prompt_data[INPUT_IDS_PROMPT_KEY]], generation_config.n))
         all_ground_truths.extend(repeat_each([prompt_data[GROUND_TRUTHS_KEY]], generation_config.n))
         all_datasets.extend(repeat_each([prompt_data[VERIFIER_SOURCE_KEY]], generation_config.n))
@@ -1720,7 +1711,7 @@ def accumulate_inference_batches(
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=None,
+        index=None,
         prompt_id=None,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
@@ -1767,7 +1758,6 @@ def data_preparation_thread(
     generation_config,
     resume_training_step: int,
     data_loader: data_loader_lib.HFDataLoader,
-    train_dataset: Dataset,
     actor_manager=None,
     model_dims: utils.ModelDims = None,
 ):
@@ -1782,7 +1772,6 @@ def data_preparation_thread(
                 model_dims=model_dims,
                 tokenizer=tokenizer,
                 data_loader=data_loader,
-                prompt_dataset=train_dataset,
                 prompt_Q=prompt_Q,
                 actor_manager=actor_manager,
                 active_sampling=args.active_sampling,
@@ -2239,8 +2228,8 @@ def add_prompt_to_generator(
     Args:
         example: A dict containing:
             - INPUT_IDS_PROMPT_KEY: The tokenized prompt
-            - dataset_index: Index into the original dataset
-            - prompt_id: Unique identifier for this prompt (epoch_datasetIndex)
+            - index: Original row ID from the dataset
+            - prompt_id: Unique identifier for this prompt (epoch_index)
         param_prompt_Q: Queue to put the prompt request
         generation_config: Generation configuration
         is_eval: Whether this is an evaluation prompt
@@ -2249,7 +2238,7 @@ def add_prompt_to_generator(
         PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
-            dataset_index=example["dataset_index"],
+            index=example["index"],
             prompt_id=example["prompt_id"],
             is_eval=is_eval,
         )
@@ -2489,6 +2478,7 @@ def maybe_evaluate(
     tokenizer,
     episode,
     eval_dataset: Dataset,
+    eval_data_loader: data_loader_lib.HFDataLoader,
     eval_generation_config,
     model_dims: utils.ModelDims,
     actor_manager=None,
@@ -2510,7 +2500,7 @@ def maybe_evaluate(
             num_prompts=len(eval_dataset),
             model_dims=model_dims,
             tokenizer=tokenizer,
-            prompt_dataset=eval_dataset,
+            data_loader=eval_data_loader,
             actor_manager=actor_manager,
             timeout=timeout,
             active_sampling=False,
@@ -2717,7 +2707,6 @@ def run_training(
         generation_configs["train"],
         resume_training_step,
         data_loader,
-        train_dataset,
         actor_manager,
         model_dims,
     )
@@ -2856,6 +2845,7 @@ def run_training(
             tokenizer,
             episode,
             eval_dataset,
+            eval_data_loader,
             generation_configs["eval"],
             model_dims,
             actor_manager,
