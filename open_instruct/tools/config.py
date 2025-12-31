@@ -42,19 +42,37 @@ logger = logging.getLogger(__name__)
 class ToolEntry:
     """Metadata for a registered tool.
 
-    This is the single source of truth for tool registration. Each entry defines:
-    - The tool class and its config class
-    - The config attribute name (used in ToolConfig dataclass)
+    This is the single source of truth for tool registration.
+    Both ToolArgs (CLI) and ToolConfig are auto-generated from this registry.
 
     To add a new tool:
-    1. Create YourTool and YourToolConfig in tools.py
-    2. Add a ToolEntry to TOOL_REGISTRY below
-    3. Add the config attribute to ToolConfig dataclass
+    1. Create YourTool and YourToolConfig in tools.py (with cli_prefix on config)
+    2. Add a ToolEntry to _TOOL_ENTRIES below
+
+    That's it! CLI args and internal config are generated automatically.
+
+    Example:
+        # In tools.py
+        @dataclass
+        class MyToolConfig:
+            cli_prefix: ClassVar[str] = "mytool_"
+            some_option: int = 10
+
+        class MyTool(Tool):
+            @classmethod
+            def from_config(cls, config: MyToolConfig) -> "MyTool":
+                return cls(...)
+
+        # In config.py, add to _TOOL_ENTRIES:
+        "mytool": ToolEntry(MyTool, MyToolConfig, "mytool"),
+
+        # Now you can use:
+        #   --tools mytool --mytool_some_option 20
     """
 
     tool_cls: type[Tool]
     config_cls: type
-    config_attr: str  # Attribute name on ToolConfig (e.g., "python", "serper_search")
+    config_attr: str  # Attribute name for this tool's config (usually same as tool name)
 
 
 # Primary tool registry - maps canonical names to their entries
@@ -308,25 +326,43 @@ ToolArgs: type  # noqa: F811
 
 
 # =============================================================================
-# ToolConfig
+# ToolConfig (auto-generated)
 # =============================================================================
 
 
-@dataclass
-class ToolConfig:
-    """Internal structured tool configuration."""
+def _build_tool_config() -> type:
+    """Build ToolConfig dataclass from tool entries.
 
-    tools: list[str] | None = None
-    max_tool_calls: int = 5
-    mask_tool_use: bool = True
-    parser: str = "legacy"
-    tool_tag_names: list[str] | None = None
+    This auto-generates the ToolConfig class with a field for each tool's config.
+    """
+    # Base fields
+    base_fields: list[tuple[str, type, Any]] = [
+        ("tools", list[str] | None, field(default=None)),
+        ("max_tool_calls", int, field(default=5)),
+        ("mask_tool_use", bool, field(default=True)),
+        ("parser", str, field(default="legacy")),
+        ("tool_tag_names", list[str] | None, field(default=None)),
+    ]
 
-    python: PythonCodeToolConfig = field(default_factory=PythonCodeToolConfig)
-    serper_search: SerperSearchToolConfig = field(default_factory=SerperSearchToolConfig)
-    massive_ds_search: MassiveDSSearchToolConfig = field(default_factory=MassiveDSSearchToolConfig)
-    s2_search: S2SearchToolConfig = field(default_factory=S2SearchToolConfig)
-    mcp: DrAgentMCPToolConfig = field(default_factory=DrAgentMCPToolConfig)
+    # Add a field for each unique tool config
+    seen_config_attrs: set[str] = set()
+    for entry in _TOOL_ENTRIES.values():
+        if entry.config_attr not in seen_config_attrs:
+            seen_config_attrs.add(entry.config_attr)
+            base_fields.append((entry.config_attr, entry.config_cls, field(default_factory=entry.config_cls)))
+
+    return make_dataclass(
+        "ToolConfig",
+        base_fields,
+        namespace={"__doc__": "Internal structured tool configuration. Auto-generated from TOOL_ENTRIES."},
+    )
+
+
+# Build ToolConfig at module load time
+ToolConfig = _build_tool_config()
+
+# Type hint for IDE (actual class is dynamic)
+ToolConfig: type  # noqa: F811
 
 
 # =============================================================================
