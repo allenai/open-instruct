@@ -668,9 +668,10 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
         num_added_tokens = tokenizer.add_special_tokens(
             {"bos_token": "<s>", "eos_token": "</s>", "unk_token": "<unk>", "pad_token": "<pad>"}
         )
-        assert num_added_tokens in [0, 1], (
-            "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
-        )
+        assert num_added_tokens in [
+            0,
+            1,
+        ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
         # OLMo newer models use this tokenizer
         if tokenizer.bos_token is None:
@@ -679,9 +680,9 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
         # else, pythia / other models
         else:
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-            assert num_added_tokens <= 1, (
-                "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
-            )
+            assert (
+                num_added_tokens <= 1
+            ), "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
     # NOTE: (Costa) I just commented the `OPTForCausalLM` because we are not likely to use it.
     # elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
     #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
@@ -728,22 +729,23 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
         if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-            assert num_added_tokens in [0, 1], (
-                "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
-            )
+            assert num_added_tokens in [
+                0,
+                1,
+            ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
         elif isinstance(tokenizer, GPTNeoXTokenizerFast):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
                 tokenizer.bos_token = tokenizer.eos_token
-                assert tc.add_bos, (
-                    "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
-                )
+                assert (
+                    tc.add_bos
+                ), "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
             # else, pythia / other models
             else:
                 num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-                assert num_added_tokens <= 1, (
-                    "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
-                )
+                assert (
+                    num_added_tokens <= 1
+                ), "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
         # NOTE: (Costa) I just commented the `OPTForCausalLM` because we are not likely to use it.
         # elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
@@ -751,9 +753,9 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
 
-    assert tokenizer.pad_token_id != tokenizer.eos_token_id, (
-        "pad token and eos token matching causes issues in our setup."
-    )
+    assert (
+        tokenizer.pad_token_id != tokenizer.eos_token_id
+    ), "pad token and eos token matching causes issues in our setup."
 
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
@@ -807,9 +809,10 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
         if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-            assert num_added_tokens in [0, 1], (
-                "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
-            )
+            assert num_added_tokens in [
+                0,
+                1,
+            ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
         elif isinstance(tokenizer, GPTNeoXTokenizerFast):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
@@ -822,9 +825,9 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             # else, pythia / other models
             else:
                 num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-                assert num_added_tokens <= 1, (
-                    "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
-                )
+                assert (
+                    num_added_tokens <= 1
+                ), "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
         # NOTE: (Costa) I just commented the `OPTForCausalLM` because we are not likely to use it.
         # elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
@@ -832,9 +835,9 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
 
-    assert tokenizer.pad_token_id != tokenizer.eos_token_id, (
-        "pad token and eos token matching causes issues in our setup."
-    )
+    assert (
+        tokenizer.pad_token_id != tokenizer.eos_token_id
+    ), "pad token and eos token matching causes issues in our setup."
 
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
@@ -1567,9 +1570,9 @@ class DatasetConfig:
 
 
 def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
-    assert len(dc.transform_fn) == len(dc.transform_fn_args), (
-        f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
-    )
+    assert len(dc.transform_fn) == len(
+        dc.transform_fn_args
+    ), f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
     # beaker specific logic; we may get assigned 15.5 CPU, so we convert it to float then int
     num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
 
@@ -1856,9 +1859,9 @@ def load_dataset_configs(
         # all current usage provides a single split that gets replicated to len(dataset_mixer_list).
         # If different splits per dataset are needed, use dataset_mixer_list_splits[i // 2] instead.
         assert i % 2 == 0, f"Index {i} must be even"
-        assert i < len(dataset_mixer_list_splits), (
-            f"Index {i} out of bounds for dataset_mixer_list_splits of length {len(dataset_mixer_list_splits)}"
-        )
+        assert i < len(
+            dataset_mixer_list_splits
+        ), f"Index {i} out of bounds for dataset_mixer_list_splits of length {len(dataset_mixer_list_splits)}"
         dataset_config = DatasetConfig(
             dataset_name=dataset_name,
             dataset_split=dataset_mixer_list_splits[i],

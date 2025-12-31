@@ -6,6 +6,7 @@ Computes mmlu average quckly.
 import argparse
 
 from beaker import Beaker
+
 from eval.utils import upload_results_to_hf
 
 parser = argparse.ArgumentParser()

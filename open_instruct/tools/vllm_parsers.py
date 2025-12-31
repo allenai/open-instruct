@@ -43,23 +43,30 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
     "hermes": VllmParserConfig(
         import_path="vllm.entrypoints.openai.tool_parsers.hermes_tool_parser:Hermes2ProToolParser",
         output_template="<|im_start|>tool\n<tool_response>\n{}\n</tool_response>\n<|im_end|>\n",
-        stop_sequences=["</tool_call>"],
+        stop_sequences=[],
         output_postfix="<|im_start|>assistant\n",
     ),
     # Llama 3.x JSON style
     "llama3_json": VllmParserConfig(
         import_path="vllm.entrypoints.openai.tool_parsers.llama_tool_parser:Llama3JsonToolParser",
         output_template="<|start_header_id|>ipython<|end_header_id|>\n\n{}<|eot_id|>",
-        stop_sequences=["<|eom_id|>"],
+        stop_sequences=[],
         output_postfix="<|start_header_id|>assistant<|end_header_id|>\n\n",
     ),
     # Qwen3 Coder
     "qwen3_coder": VllmParserConfig(
         import_path="vllm.entrypoints.openai.tool_parsers.qwen3coder_tool_parser:Qwen3CoderToolParser",
         output_template="<tool_response>\n{}\n</tool_response>\n",
-        stop_sequences=["</tool_call>"],
+        stop_sequences=[],
         output_postfix="<|im_end|>\n<|im_start|>assistant\n",
         output_prefix="<|im_start|>user\n",
+    ),
+    # OLMo 3 (allenai/OLMo-3-*-Instruct models)
+    "olmo3": VllmParserConfig(
+        import_path="vllm.entrypoints.openai.tool_parsers.olmo3_tool_parser:Olmo3PythonicToolParser",
+        output_template="<|im_start|>environment\n{}<|im_end|>\n",
+        stop_sequences=[],
+        output_postfix="<|im_start|>assistant\n",
     ),
 }
 

@@ -446,9 +446,9 @@ class Args:
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
-        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
-            "At least one reward must be applied!"
-        )
+        assert (
+            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
+        ), "At least one reward must be applied!"
         # Ensure we have enough prompts for all VLLM engines
         if self.num_unique_prompts_rollout < self.vllm_num_engines:
             logger.warning(
@@ -462,11 +462,9 @@ class Args:
         ), "You must have at least as many samples as training GPUs (DP ranks) for distributed training!"
         if self.stop_strings is None:
             self.stop_strings = []
-        # HfArgumentParser parses tuple[int, ...] elements as strings, so convert to int
-        self.max_tool_calls = tuple(int(x) for x in self.max_tool_calls)
-        assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
-            "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
-        )
+        assert (
+            self.pack_length >= self.max_prompt_token_length + self.response_length
+        ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
@@ -1325,9 +1323,9 @@ class PolicyTrainerRayProcess(RayProcess):
             if getattr(model_to_save.config, "tie_word_embeddings", False) and "lm_head.weight" in state_dict_keys:
                 state_dict_keys.remove("lm_head.weight")
 
-            assert state_dict_keys.issubset(output_state_dict_keys), (
-                f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
-            )
+            assert state_dict_keys.issubset(
+                output_state_dict_keys
+            ), f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
 
             # only save peft weights https://github.com/microsoft/DeepSpeed/issues/4295
             if isinstance(model_to_save, PeftModel):
@@ -1446,9 +1444,9 @@ def calculate_utilization_metrics(
             - actor_mbu: Model bandwidth utilization for inference (percentage)
             - learner_mfu: Model FLOPs utilization for training (percentage)
     """
-    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-    )
+    assert (
+        len(response_lengths) == len(prompt_lengths) * samples_per_prompt
+    ), f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
 
     actor_metrics = model_dims.calculate_actor_utilization(
         prompt_lengths=prompt_lengths,
@@ -1534,9 +1532,9 @@ def accumulate_inference_batches(
         assert data_loader is not None, "no_resampling requires data_loader"
 
     if replenish_prompts:
-        assert prompt_Q is not None and data_loader is not None and prompt_dataset is not None, (
-            "replenish_prompts requires prompt_Q, data_loader, and prompt_dataset"
-        )
+        assert (
+            prompt_Q is not None and data_loader is not None and prompt_dataset is not None
+        ), "replenish_prompts requires prompt_Q, data_loader, and prompt_dataset"
     results = []
     all_queries = []
     all_ground_truths = []

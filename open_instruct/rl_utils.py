@@ -151,9 +151,9 @@ def pack_sequences(
         # Filter out padding tokens from response, mask, and logprobs together
         response_logprobs_unfiltered = vllm_logprobs[i]
 
-        assert len(response_logprobs_unfiltered) == len(response), (
-            f"Response {i}: logprobs length ({len(response_logprobs_unfiltered)}) != response length ({len(response)})"
-        )
+        assert len(response_logprobs_unfiltered) == len(
+            response
+        ), f"Response {i}: logprobs length ({len(response_logprobs_unfiltered)}) != response length ({len(response)})"
 
         filtered_response = []
         filtered_mask = []

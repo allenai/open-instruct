@@ -1828,12 +1828,12 @@ class ModelDims:
             self.device_name = get_device_name(torch.cuda.get_device_name(0))
 
         assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
-        assert self.num_attn_heads % self.num_kv_heads == 0, (
-            "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
-        )
-        assert self.num_sliding_window_layers <= self.num_layers, (
-            f"num_sliding_window_layers ({self.num_sliding_window_layers}) cannot exceed num_layers ({self.num_layers})"
-        )
+        assert (
+            self.num_attn_heads % self.num_kv_heads == 0
+        ), "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
+        assert (
+            self.num_sliding_window_layers <= self.num_layers
+        ), f"num_sliding_window_layers ({self.num_sliding_window_layers}) cannot exceed num_layers ({self.num_layers})"
 
     def _calculate_num_params(self) -> int:
         embedding_params = self.vocab_size * self.hidden_size
@@ -1997,9 +1997,9 @@ class ModelDims:
 
         Embedding lookups are ignored by design.
         """
-        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-        )
+        assert (
+            len(response_lengths) == len(prompt_lengths) * samples_per_prompt
+        ), f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
 
         num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
         num_sliding_layers = self.num_sliding_window_layers
@@ -2103,9 +2103,9 @@ class ModelDims:
         Returns:
             Total bytes for KV cache reads during decode
         """
-        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-        )
+        assert (
+            len(response_lengths) == len(prompt_lengths) * samples_per_prompt
+        ), f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
 
         num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
         num_sliding_layers = self.num_sliding_window_layers
@@ -2259,9 +2259,9 @@ class ModelDims:
 
         response_chunks: list[list[int] | None]
         if response_lengths is not None:
-            assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-                f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-            )
+            assert (
+                len(response_lengths) == len(prompt_lengths) * samples_per_prompt
+            ), f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
             response_chunks = []
             response_idx = 0
             for chunk in prompt_chunks:
