@@ -13,7 +13,7 @@ ToolArgs is built automatically from individual tool configs.
 """
 
 import logging
-from dataclasses import MISSING, dataclass, field, fields, make_dataclass
+from dataclasses import MISSING, field, fields, make_dataclass
 from typing import Any, Literal
 
 from open_instruct.tools.base import DRTuluToolParser, OpenInstructLegacyToolParser, Tool, ToolParser
@@ -34,86 +34,69 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# Unified Tool Registry
+# Tool Registry
 # =============================================================================
 
+# Maps tool name -> (tool_cls, config_cls)
+# The dict key is used as both the tool name and the config attribute name.
+#
+# To add a new tool:
+#   1. Create YourTool and YourToolConfig in tools.py (with cli_prefix on config)
+#   2. Add an entry here: "mytool": (MyTool, MyToolConfig)
+#
+# That's it! CLI args and internal config are generated automatically.
+#
+# Example:
+#     # In tools.py
+#     @dataclass
+#     class MyToolConfig:
+#         cli_prefix: ClassVar[str] = "mytool_"
+#         some_option: int = 10
+#
+#     class MyTool(Tool):
+#         @classmethod
+#         def from_config(cls, config: MyToolConfig) -> "MyTool":
+#             return cls(...)
+#
+#     # In config.py, add to TOOL_REGISTRY:
+#     "mytool": (MyTool, MyToolConfig),
+#
+#     # Now you can use:
+#     #   --tools mytool --mytool_some_option 20
 
-@dataclass(frozen=True)
-class ToolEntry:
-    """Metadata for a registered tool.
-
-    This is the single source of truth for tool registration.
-    Both ToolArgs (CLI) and ToolConfig are auto-generated from this registry.
-
-    To add a new tool:
-    1. Create YourTool and YourToolConfig in tools.py (with cli_prefix on config)
-    2. Add a ToolEntry to _TOOL_ENTRIES below
-
-    That's it! CLI args and internal config are generated automatically.
-
-    Example:
-        # In tools.py
-        @dataclass
-        class MyToolConfig:
-            cli_prefix: ClassVar[str] = "mytool_"
-            some_option: int = 10
-
-        class MyTool(Tool):
-            @classmethod
-            def from_config(cls, config: MyToolConfig) -> "MyTool":
-                return cls(...)
-
-        # In config.py, add to _TOOL_ENTRIES:
-        "mytool": ToolEntry(MyTool, MyToolConfig, "mytool"),
-
-        # Now you can use:
-        #   --tools mytool --mytool_some_option 20
-    """
-
-    tool_cls: type[Tool]
-    config_cls: type
-    config_attr: str  # Attribute name for this tool's config (usually same as tool name)
-
-
-# Primary tool registry - maps canonical names to their entries
-_TOOL_ENTRIES: dict[str, ToolEntry] = {
-    "python": ToolEntry(PythonCodeTool, PythonCodeToolConfig, "python"),
-    "serper_search": ToolEntry(SerperSearchTool, SerperSearchToolConfig, "serper_search"),
-    "massive_ds_search": ToolEntry(MassiveDSSearchTool, MassiveDSSearchToolConfig, "massive_ds_search"),
-    "s2_search": ToolEntry(S2SearchTool, S2SearchToolConfig, "s2_search"),
-    "mcp": ToolEntry(DrAgentMCPTool, DrAgentMCPToolConfig, "mcp"),
+TOOL_REGISTRY: dict[str, tuple[type[Tool], type]] = {
+    "python": (PythonCodeTool, PythonCodeToolConfig),
+    "serper_search": (SerperSearchTool, SerperSearchToolConfig),
+    "massive_ds_search": (MassiveDSSearchTool, MassiveDSSearchToolConfig),
+    "s2_search": (S2SearchTool, S2SearchToolConfig),
+    "mcp": (DrAgentMCPTool, DrAgentMCPToolConfig),
 }
 
-# Aliases for convenience (e.g., --tools code instead of --tools python)
-_TOOL_ALIASES: dict[str, str] = {"code": "python", "search": "serper_search"}
-
-# Build the full registry including aliases and MCP subtools
-TOOL_REGISTRY: dict[str, ToolEntry] = {}
-
-# Add primary entries
-for name, entry in _TOOL_ENTRIES.items():
-    TOOL_REGISTRY[name] = entry
-
-# Add aliases (point to the same entry)
-for alias, canonical in _TOOL_ALIASES.items():
-    TOOL_REGISTRY[alias] = _TOOL_ENTRIES[canonical]
-
-# Derive config registry from tool entries (for CLI generation)
-# Maps config_attr -> config_cls
-TOOL_CONFIG_REGISTRY: dict[str, type] = {entry.config_attr: entry.config_cls for entry in _TOOL_ENTRIES.values()}
+# Derive config registry from tool registry (for CLI generation)
+# Maps tool_name -> config_cls
+TOOL_CONFIG_REGISTRY: dict[str, type] = {name: entry[1] for name, entry in TOOL_REGISTRY.items()}
 
 # Fields to exclude from CLI exposure (common across all configs)
 EXCLUDED_FIELDS = {"tag_name", "cli_prefix"}
 
-PARSER_TYPES = Literal["legacy", "vllm_hermes", "vllm_llama3", "vllm_qwen3_xml", "vllm_qwen3_coder", "dr_tulu"]
-
 # Maps parser names to vllm_parsers factory function names
+# To add a new vLLM parser:
+#   1. Add it to VLLM_PARSERS in vllm_parsers.py
+#   2. Add the mapping here (e.g., "vllm_myparser": "myparser")
+# PARSER_TYPES is auto-generated from this mapping + built-in parsers.
 VLLM_PARSER_MAPPING: dict[str, str] = {
     "vllm_hermes": "hermes",
     "vllm_llama3": "llama3_json",
     "vllm_qwen3_xml": "qwen3_xml",
     "vllm_qwen3_coder": "qwen3_coder",
 }
+
+# Built-in parsers that don't use vLLM
+_BUILTIN_PARSERS = ("legacy", "dr_tulu")
+
+# Auto-generate PARSER_TYPES from vLLM mapping + built-in parsers
+_ALL_PARSER_NAMES = tuple(_BUILTIN_PARSERS) + tuple(VLLM_PARSER_MAPPING.keys())
+PARSER_TYPES = Literal[_ALL_PARSER_NAMES]  # type: ignore[valid-type]
 
 
 def get_parser_stop_sequences(parser_name: str) -> list[str]:
@@ -144,7 +127,7 @@ def get_available_tools() -> list[str]:
 
 def get_available_parsers() -> list[str]:
     """Return list of available parser types."""
-    return ["legacy", "vllm_hermes", "vllm_llama3", "vllm_qwen3_xml", "vllm_qwen3_coder", "dr_tulu"]
+    return list(_ALL_PARSER_NAMES)
 
 
 def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any]]:
@@ -168,18 +151,18 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
         if tool_name_lower not in TOOL_REGISTRY:
             raise ValueError(f"Unknown tool: {tool_name}. Available: {get_available_tools()}")
 
-        entry = TOOL_REGISTRY[tool_name_lower]
+        tool_cls, _ = TOOL_REGISTRY[tool_name_lower]
 
         # Get tag name from config or use default
         if config.tool_tag_names and i < len(config.tool_tag_names):
             tag_name = config.tool_tag_names[i]
         else:
-            tag_name = getattr(entry.tool_cls, "_default_tool_function_name", tool_name_lower)
+            tag_name = getattr(tool_cls, "_default_tool_function_name", tool_name_lower)
 
         # Get description and parameters from class attributes
-        description = getattr(entry.tool_cls, "_default_tool_description", "")
+        description = getattr(tool_cls, "_default_tool_description", "")
         parameters = getattr(
-            entry.tool_cls, "_default_tool_parameters", {"type": "object", "properties": {}, "required": []}
+            tool_cls, "_default_tool_parameters", {"type": "object", "properties": {}, "required": []}
         )
 
         definitions.append(
@@ -331,7 +314,7 @@ ToolArgs: type  # noqa: F811
 
 
 def _build_tool_config() -> type:
-    """Build ToolConfig dataclass from tool entries.
+    """Build ToolConfig dataclass from tool registry.
 
     This auto-generates the ToolConfig class with a field for each tool's config.
     """
@@ -344,17 +327,14 @@ def _build_tool_config() -> type:
         ("tool_tag_names", list[str] | None, field(default=None)),
     ]
 
-    # Add a field for each unique tool config
-    seen_config_attrs: set[str] = set()
-    for entry in _TOOL_ENTRIES.values():
-        if entry.config_attr not in seen_config_attrs:
-            seen_config_attrs.add(entry.config_attr)
-            base_fields.append((entry.config_attr, entry.config_cls, field(default_factory=entry.config_cls)))
+    # Add a field for each tool config (tool_name is the config attr name)
+    for tool_name, (_, config_cls) in TOOL_REGISTRY.items():
+        base_fields.append((tool_name, config_cls, field(default_factory=config_cls)))
 
     return make_dataclass(
         "ToolConfig",
         base_fields,
-        namespace={"__doc__": "Internal structured tool configuration. Auto-generated from TOOL_ENTRIES."},
+        namespace={"__doc__": "Internal structured tool configuration. Auto-generated from TOOL_REGISTRY."},
     )
 
 
@@ -416,7 +396,7 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
                 "parser='dr_tulu' requires the 'mcp' tool to be configured. "
                 "Add '--tools mcp' to your command line arguments."
             )
-        return DRTuluToolParser(mcp_tool_list=list(tools.values()))
+        return DRTuluToolParser(tool_list=list(tools.values()))
 
     else:
         logger.warning(f"Unknown tool parser: {parser_name}")
@@ -451,14 +431,14 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
 
     for i, tool_name in enumerate(config.tools):
         tool_name_lower = tool_name.lower()
-        entry = TOOL_REGISTRY[tool_name_lower]
-        tool_config = getattr(config, entry.config_attr)
+        tool_cls, _ = TOOL_REGISTRY[tool_name_lower]
+        tool_config = getattr(config, tool_name_lower)  # config attr = tool name
 
         if config.tool_tag_names and hasattr(tool_config, "tag_name"):
             tool_config.tag_name = config.tool_tag_names[i]
 
         # Derive class_path from tool_cls
-        class_path = f"{entry.tool_cls.__module__}:{entry.tool_cls.__name__}"
+        class_path = f"{tool_cls.__module__}:{tool_cls.__name__}"
 
         # Step 1: Create ToolActor from config (tool instantiated inside Ray actor)
         actor = create_tool_actor_from_config(class_path=class_path, config=tool_config)
