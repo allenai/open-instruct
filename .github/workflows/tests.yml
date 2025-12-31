@@ -39,6 +39,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Checkout oe-eval-internal
+        uses: actions/checkout@v4
+        with:
+          repository: allenai/oe-eval-internal
+          path: './oe-eval-internal'
+          ssh-key: ${{ secrets.OE_EVAL_GIT_CLONE_ACCESS_PRIVATE_SSH_DEPLOY_KEY }}
+          fetch-depth: 1
+          filter: 'blob:none'
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
