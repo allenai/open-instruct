@@ -27,7 +27,7 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.9.0,<2.10",
     "transformers>=4.57.0",
-    "vllm==0.13.0",
+    "vllm==0.11.1",
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",

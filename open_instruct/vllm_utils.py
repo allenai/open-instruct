@@ -641,10 +641,9 @@ class LLMRayActor:
 
             engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
-            server_args = _create_server_args(engine_client.vllm_config.model_config.model)
-            app = build_app(server_args)
-            # vllm 0.13.0 changed init_app_state signature: (engine, vllm_config, args) - removed state param
-            await init_app_state(engine_client, engine_client.vllm_config, server_args)
+            args = _create_server_args(engine_client.vllm_config.model_config.model)
+            app = build_app(args)
+            await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
 
             # Create a socket and bind to port 0 to let the OS assign an available port.
             # We pass the socket to serve_http to avoid race conditions where another
