@@ -37,6 +37,7 @@ import openai
 import ray
 import torch
 import torch.distributed
+import uvicorn
 import vllm
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -51,7 +52,6 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
-from vllm.entrypoints.launcher import serve_http
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils import FlexibleArgumentParser
@@ -630,9 +630,8 @@ class LLMRayActor:
 
             logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
 
-            asyncio.create_task(
-                serve_http(app, sock=sock, host="127.0.0.1", port=self.server_port, log_level="warning")
-            )
+            config = uvicorn.Config(app, host="127.0.0.1", port=self.server_port, log_level="warning")
+            asyncio.create_task(uvicorn.Server(config).serve(sockets=[sock]))
 
             # Yield control to allow the server task to start before returning.
             await asyncio.sleep(0.1)
