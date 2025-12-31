@@ -663,7 +663,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 group_name="openrlhf",
             )
             ray.get(refs)
-        torch.distributed.barrier()
+        torch.distributed.barrier(device_ids=[self.local_rank])
 
     def broadcast_to_vllm(self):
         # avoid OOM

@@ -18,12 +18,14 @@
 import argparse
 import asyncio
 import dataclasses
+import logging
 import os
 import queue
 import socket
 import sys
 import threading
 import time
+import warnings
 from collections import defaultdict
 from collections.abc import Awaitable
 from concurrent import futures
@@ -65,6 +67,21 @@ from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ModelDims, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
+
+warnings.filterwarnings("ignore", message=r".*`torch_dtype` is deprecated.*")
+
+
+def _configure_vllm_logging():
+    """Suppress expected vLLM warnings that are informational or intentionally triggered."""
+    for logger_name in [
+        "vllm.config",
+        "vllm.v1.serial_utils",
+        "vllm.v1.worker.gpu_model_runner",
+        "vllm.v1.core.sched.scheduler",
+        "vllm.engine.multiprocessing.engine",
+    ]:
+        logging.getLogger(logger_name).setLevel(logging.ERROR)
+
 
 NUM_PREFETCH_WORKERS = 2
 NUM_TOOL_WORKERS = 20
@@ -521,6 +538,7 @@ class LLMRayActor:
         **kwargs,
     ):
         assert_threaded_actor(self)
+        _configure_vllm_logging()
         self._init_config(
             tools, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
         )
@@ -960,11 +978,11 @@ def create_vllm_engines(
         assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
             "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
         )
-        # tool key is the end_str
+        # tool key is the end_str - ensure values are ints (may be strings from CLI parsing)
         if len(max_tool_calls) == 1:
-            max_tool_calls_dict = {end_str: max_tool_calls[0] for end_str in tools}
+            max_tool_calls_dict = {end_str: int(max_tool_calls[0]) for end_str in tools}
         else:
-            max_tool_calls_dict = {end_str: limit for end_str, limit in zip(tools.keys(), max_tool_calls)}
+            max_tool_calls_dict = {end_str: int(limit) for end_str, limit in zip(tools.keys(), max_tool_calls)}
     else:
         max_tool_calls_dict = {}
 
