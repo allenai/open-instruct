@@ -126,11 +126,15 @@ class VllmToolParser(ToolParser):
         output_formatter: Callable[[str], str],
         stop_sequences: list[str] | None = None,
         tool_definitions: list[dict[str, Any]] | None = None,
+        output_postfix: str = "",
+        output_prefix: str = "",
     ):
         self.tool_parser = tool_parser
         self.output_formatter = output_formatter
         self._stop_sequences = stop_sequences or []
         self._tool_definitions = tool_definitions
+        self.output_postfix = output_postfix
+        self.output_prefix = output_prefix
 
     def _make_request(self) -> Any:
         """
@@ -165,6 +169,18 @@ class VllmToolParser(ToolParser):
 
     def format_tool_calls(self, tool_output: str) -> str:
         return self.output_formatter(tool_output)
+
+    def format_tool_outputs(self, tool_outputs: list[str]) -> str:
+        """Format multiple tool outputs with prefix and postfix.
+
+        Args:
+            tool_outputs: List of tool output strings to format.
+
+        Returns:
+            Formatted string with prefix, all tool outputs, and postfix.
+        """
+        formatted_parts = [self.output_formatter(output) for output in tool_outputs]
+        return self.output_prefix + "".join(formatted_parts) + self.output_postfix
 
     def stop_sequences(self) -> list[str]:
         return self._stop_sequences

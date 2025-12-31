@@ -28,8 +28,10 @@ class VllmParserConfig:
     """Configuration for a vLLM tool parser."""
 
     import_path: str  # e.g., "vllm.entrypoints.openai.tool_parsers.hermes_tool_parser:Hermes2ProToolParser"
-    output_template: str  # Template for formatting tool output, uses {} as placeholder
+    output_template: str  # Template for formatting each tool output, uses {} as placeholder
     stop_sequences: list[str]  # Stop sequences to use for this parser
+    output_postfix: str  # Postfix to add after all tool outputs (includes generation prompt)
+    output_prefix: str = ""  # Prefix to add before all tool outputs (for grouped tool responses)
 
 
 # =============================================================================
@@ -40,26 +42,24 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
     # Hermes-style (also works for Qwen2.5)
     "hermes": VllmParserConfig(
         import_path="vllm.entrypoints.openai.tool_parsers.hermes_tool_parser:Hermes2ProToolParser",
-        output_template="<tool_response>\n{}\n</tool_response>",
+        output_template="<|im_start|>tool\n<tool_response>\n{}\n</tool_response>\n<|im_end|>\n",
         stop_sequences=["</tool_call>"],
+        output_postfix="<|im_start|>assistant\n",
     ),
     # Llama 3.x JSON style
     "llama3_json": VllmParserConfig(
         import_path="vllm.entrypoints.openai.tool_parsers.llama_tool_parser:Llama3JsonToolParser",
-        output_template="<|python_tag|>{}",
+        output_template="<|start_header_id|>ipython<|end_header_id|>\n\n{}<|eot_id|>",
         stop_sequences=["<|eom_id|>"],
-    ),
-    # Qwen3 XML style
-    "qwen3_xml": VllmParserConfig(
-        import_path="vllm.entrypoints.openai.tool_parsers.qwen3xml_tool_parser:Qwen3XMLToolParser",
-        output_template="<|im_start|>observation\n{}\n<|im_end|>",
-        stop_sequences=["</tool_call>"],
+        output_postfix="<|start_header_id|>assistant<|end_header_id|>\n\n",
     ),
     # Qwen3 Coder
     "qwen3_coder": VllmParserConfig(
         import_path="vllm.entrypoints.openai.tool_parsers.qwen3coder_tool_parser:Qwen3CoderToolParser",
-        output_template="<|im_start|>observation\n{}\n<|im_end|>",
+        output_template="<tool_response>\n{}\n</tool_response>\n",
         stop_sequences=["</tool_call>"],
+        output_postfix="<|im_end|>\n<|im_start|>assistant\n",
+        output_prefix="<|im_start|>user\n",
     ),
 }
 
@@ -114,6 +114,8 @@ def create_vllm_parser(
     return VllmToolParser(
         tool_parser=native_parser,
         output_formatter=lambda x, t=template: t.format(x),
-        stop_sequences=config.stop_sequences,
+        stop_sequences=[],  # for vLLM parser, we allow the models to decide when to stop.
         tool_definitions=tool_definitions,
+        output_postfix=config.output_postfix,
+        output_prefix=config.output_prefix,
     )
