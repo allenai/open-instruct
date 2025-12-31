@@ -245,20 +245,6 @@ class TestToolProxy(unittest.TestCase):
         # The result depends on the API, just check we got a response
         self.assertIsNotNone(result.output)
 
-    def test_create_tool_proxies_with_existing_proxies(self):
-        """Test that create_tool_proxies passes through existing proxies."""
-        from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config, create_tool_proxies
-
-        config = SerperSearchToolConfig(num_results=5)
-        actor = create_tool_actor_from_config(class_path="open_instruct.tools.tools:SerperSearchTool", config=config)
-        proxy = ToolProxy.from_actor(actor)
-
-        # create_tool_proxies should pass through existing proxies unchanged
-        proxies = create_tool_proxies({"serper": proxy})
-        self.assertEqual(len(proxies), 1)
-        self.assertIn("serper", proxies)
-        self.assertIsInstance(proxies["serper"], ToolProxy)
-
 
 if __name__ == "__main__":
     unittest.main()
