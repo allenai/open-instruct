@@ -599,9 +599,9 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
                 if os.path.exists(model_name_or_path):
                     path = model_name_or_path
-                    assert args.gs_model_name is not None, (
-                        "for local models to upload to gs, you must set --gs_model_name"
-                    )
+                    assert (
+                        args.gs_model_name is not None
+                    ), "for local models to upload to gs, you must set --gs_model_name"
                     model_name_or_path = args.gs_model_name
                     # get the short commit hash (first 8 chars)
                     commit_hash = hashlib.md5(model_name_or_path.encode("utf-8")).hexdigest()[:8]

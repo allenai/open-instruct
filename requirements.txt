@@ -8,11 +8,15 @@ accelerate==1.12.0
     #   peft
 ai2-olmo-core==2.3.0
     # via open-instruct
+aiofiles==25.1.0
+    # via crawl4ai
 aiohappyeyeballs==2.6.1
     # via aiohttp
 aiohttp==3.13.2
     # via
     #   aiohttp-cors
+    #   crawl4ai
+    #   dr-agent
     #   fsspec
     #   litellm
     #   ray
@@ -21,25 +25,40 @@ aiohttp-cors==0.8.1
     # via ray
 aiosignal==1.4.0
     # via aiohttp
+aiosqlite==0.22.1
+    # via crawl4ai
+alphashape==1.3.1
+    # via crawl4ai
 annotated-doc==0.0.4
     # via fastapi
 annotated-types==0.7.0
     # via pydantic
+anthropic==0.71.0
+    # via vllm
 antlr4-python3-runtime==4.11.0
     # via open-instruct
 anyio==4.12.0
     # via
+    #   anthropic
+    #   crawl4ai
     #   httpx
+    #   mcp
     #   openai
+    #   sse-starlette
     #   starlette
     #   watchfiles
+apache-tvm-ffi==0.1.7
+    # via flashinfer-python
 astor==0.8.1
     # via depyf
 attrs==25.4.0
     # via
     #   aiohttp
+    #   cyclopts
     #   jsonschema
     #   referencing
+authlib==1.6.6
+    # via fastmcp
 babel==2.17.0
     # via mkdocs-material
 backoff==2.2.1
@@ -47,18 +66,26 @@ backoff==2.2.1
 backrefs==6.1
     # via mkdocs-material
 beaker-py==2.5.3
+beautifulsoup4==4.14.3
+    # via
+    #   crawl4ai
+    #   dr-agent
 bettermap==1.3.1
     # via ai2-olmo-core
 bitsandbytes==0.49.0 ; sys_platform != 'darwin'
     # via open-instruct
 blake3==1.0.8
     # via vllm
+blobfile==3.1.0
+    # via dr-agent
 boto3==1.42.10
     # via cached-path
 botocore==1.42.10
     # via
     #   boto3
     #   s3transfer
+brotli==1.2.0
+    # via crawl4ai
 cached-path==1.8.1
     # via ai2-olmo-core
 cachetools==6.2.4
@@ -73,16 +100,26 @@ certifi==2025.11.12
     #   httpx
     #   requests
     #   sentry-sdk
-cffi==2.0.0
+cffi==2.0.0 ; implementation_name == 'pypy' or platform_python_implementation != 'PyPy'
     # via
+    #   cryptography
     #   pyzmq
-    #   soundfile
 cfgv==3.5.0
     # via pre-commit
+chardet==5.2.0
+    # via
+    #   crawl4ai
+    #   dr-agent
 charset-normalizer==3.4.4
-    # via requests
+    # via
+    #   pdfminer-six
+    #   requests
 click==8.2.1
     # via
+    #   alphashape
+    #   click-log
+    #   crawl4ai
+    #   flashinfer-python
     #   litellm
     #   mkdocs
     #   nltk
@@ -91,12 +128,17 @@ click==8.2.1
     #   typer
     #   uvicorn
     #   wandb
+click-log==0.4.0
+    # via alphashape
 cloudpickle==3.1.2
     # via vllm
+cohere==5.20.1
+    # via dr-agent
 colorama==0.4.6
     # via
     #   click
     #   colorful
+    #   loguru
     #   mkdocs
     #   mkdocs-material
     #   nvitop
@@ -105,21 +147,45 @@ colorama==0.4.6
     #   uvicorn
 colorful==0.5.8
     # via ray
-compressed-tensors==0.11.0
+compressed-tensors==0.12.2
     # via vllm
 contourpy==1.3.3
     # via matplotlib
+crawl4ai==0.7.8
+    # via dr-agent
+cryptography==46.0.3
+    # via
+    #   authlib
+    #   pdfminer-six
+    #   pyjwt
+    #   pyopenssl
+cssselect==1.3.0
+    # via crawl4ai
+cuda-bindings==13.1.1
+    # via cuda-python
+cuda-pathfinder==1.3.3
+    # via
+    #   cuda-bindings
+    #   cuda-python
+cuda-python==13.1.1
+    # via nvidia-cutlass-dsl
 cupy-cuda12x==13.6.0 ; sys_platform != 'darwin'
     # via ray
 cycler==0.12.1
     # via matplotlib
+cyclopts==4.4.3
+    # via fastmcp
 datasets==4.4.1
-    # via open-instruct
+    # via
+    #   dr-agent
+    #   open-instruct
 debugpy==1.8.19
     # via open-instruct
+decorator==5.2.1
+    # via retry
 deepspeed==0.18.3
     # via open-instruct
-depyf==0.19.0
+depyf==0.20.0
     # via vllm
 dill==0.4.0
     # via
@@ -128,26 +194,46 @@ dill==0.4.0
     #   depyf
     #   multiprocess
 diskcache==5.6.3
-    # via vllm
+    # via
+    #   dr-agent
+    #   vllm
 distlib==0.4.0
     # via virtualenv
 distro==1.9.0
-    # via openai
+    # via
+    #   anthropic
+    #   openai
 dnspython==2.8.0
     # via email-validator
 docker-pycreds==0.4.0
     # via wandb
+docstring-parser==0.17.0
+    # via
+    #   anthropic
+    #   cyclopts
+docutils==0.22.4
+    # via rich-rst
+dr-agent==0.1.2
+    # via open-instruct
 einops==0.8.1
     # via
     #   deepspeed
     #   flash-attn
+    #   flashinfer-python
     #   vllm
 email-validator==2.3.0
     # via
     #   fastapi
     #   pydantic
+exceptiongroup==1.3.1
+    # via fastmcp
+fake-http-header==0.3.5
+    # via tf-playwright-stealth
+fake-useragent==2.2.0
+    # via crawl4ai
 fastapi==0.124.4
     # via
+    #   model-hosting-container-standards
     #   open-instruct
     #   vllm
 fastapi-cli==0.0.16
@@ -156,10 +242,15 @@ fastapi-cloud-cli==0.7.0
     # via fastapi-cli
 fastar==0.8.0
     # via fastapi-cloud-cli
+fastavro==1.12.1
+    # via cohere
+fastmcp==2.11.3
+    # via dr-agent
 fastrlock==0.8.3 ; sys_platform != 'darwin'
     # via cupy-cuda12x
 filelock==3.20.1
     # via
+    #   blobfile
     #   cached-path
     #   datasets
     #   huggingface-hub
@@ -170,10 +261,10 @@ filelock==3.20.1
     #   vllm
 flash-attn==2.8.3 ; sys_platform != 'darwin'
     # via open-instruct
+flashinfer-python==0.5.3
+    # via vllm
 fonttools==4.61.1
     # via matplotlib
-frozendict==2.4.7
-    # via compressed-tensors
 frozenlist==1.8.0
     # via
     #   aiohttp
@@ -214,6 +305,10 @@ google-resumable-media==2.8.0
     # via google-cloud-storage
 googleapis-common-protos==1.72.0
     # via google-api-core
+greenlet==3.3.0
+    # via
+    #   patchright
+    #   playwright
 grpcio==1.76.0
     # via
     #   beaker-py
@@ -223,23 +318,35 @@ h11==0.16.0
     # via
     #   httpcore
     #   uvicorn
+h2==4.3.0
+    # via httpx
 hf-transfer==0.1.9
     # via open-instruct
 hf-xet==1.2.0 ; platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
     # via huggingface-hub
 hjson==3.1.0
     # via deepspeed
+hpack==4.1.0
+    # via h2
 httpcore==1.0.9
     # via httpx
 httptools==0.7.1
     # via uvicorn
 httpx==0.28.1
     # via
+    #   anthropic
+    #   cohere
+    #   crawl4ai
     #   datasets
     #   fastapi
     #   fastapi-cloud-cli
+    #   fastmcp
     #   litellm
+    #   mcp
+    #   model-hosting-container-standards
     #   openai
+httpx-sse==0.4.3
+    # via mcp
 huggingface-hub==0.36.0
     # via
     #   accelerate
@@ -248,6 +355,10 @@ huggingface-hub==0.36.0
     #   peft
     #   tokenizers
     #   transformers
+humanize==4.15.0
+    # via crawl4ai
+hyperframe==6.1.0
+    # via h2
 identify==2.6.15
     # via pre-commit
 idna==3.11
@@ -257,6 +368,8 @@ idna==3.11
     #   httpx
     #   requests
     #   yarl
+ijson==3.4.0.post0
+    # via vllm
 immutabledict==1.2.0
     # via open-instruct
 importlib-metadata==8.7.0
@@ -269,6 +382,8 @@ iniconfig==2.3.0
     # via pytest
 interegular==0.3.3
     # via lm-format-enforcer
+isodate==0.7.2
+    # via openapi-core
 jinja2==3.1.6
     # via
     #   fastapi
@@ -278,36 +393,63 @@ jinja2==3.1.6
     #   mlx-lm
     #   torch
 jiter==0.12.0
-    # via openai
+    # via
+    #   anthropic
+    #   openai
 jmespath==1.0.1
     # via
     #   boto3
     #   botocore
+    #   model-hosting-container-standards
 joblib==1.5.3
     # via nltk
 jsonschema==4.25.1
     # via
     #   litellm
+    #   mcp
     #   mistral-common
+    #   openapi-core
+    #   openapi-schema-validator
+    #   openapi-spec-validator
     #   ray
+jsonschema-path==0.3.4
+    # via
+    #   openapi-core
+    #   openapi-spec-validator
 jsonschema-specifications==2025.9.1
-    # via jsonschema
+    # via
+    #   jsonschema
+    #   openapi-schema-validator
 kiwisolver==1.4.9
     # via matplotlib
 langdetect==1.0.9
     # via open-instruct
 lark==1.2.2
-    # via vllm
+    # via
+    #   crawl4ai
+    #   vllm
+lazy-object-proxy==1.12.0
+    # via openapi-spec-validator
 liger-kernel==0.6.4 ; sys_platform != 'darwin'
     # via open-instruct
 litellm==1.75.0
-    # via open-instruct
-llguidance==0.7.30 ; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+    # via
+    #   crawl4ai
+    #   dr-agent
+    #   open-instruct
+llguidance==1.3.0 ; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'ppc64le' or platform_machine == 's390x' or platform_machine == 'x86_64'
     # via vllm
 llvmlite==0.44.0
     # via numba
 lm-format-enforcer==0.11.3
     # via vllm
+loguru==0.7.3
+    # via compressed-tensors
+lxml==5.4.0
+    # via
+    #   blobfile
+    #   crawl4ai
+    #   dr-agent
 markdown==3.10
     # via
     #   mkdocs
@@ -323,6 +465,10 @@ markupsafe==3.0.3
     #   werkzeug
 matplotlib==3.10.8
     # via open-instruct
+mcp==1.25.0
+    # via
+    #   fastmcp
+    #   vllm
 mdurl==0.1.2
     # via markdown-it-py
 mergedeep==1.3.4
@@ -344,6 +490,10 @@ mlx-lm==0.28.4 ; platform_machine == 'arm64' and sys_platform == 'darwin'
     # via xgrammar
 mlx-metal==0.30.0 ; platform_machine == 'arm64' and sys_platform == 'darwin'
     # via mlx
+model-hosting-container-standards==0.1.12
+    # via vllm
+more-itertools==10.8.0
+    # via openapi-core
 mpmath==1.3.0
     # via sympy
 msgpack==1.1.2
@@ -361,14 +511,20 @@ multiprocess==0.70.17
     #   datasets
     #   open-instruct
 networkx==3.6.1
-    # via torch
+    # via
+    #   alphashape
+    #   torch
 ninja==1.13.0
     # via
     #   deepspeed
+    #   flashinfer-python
     #   vllm
     #   xgrammar
 nltk==3.9.2
-    # via open-instruct
+    # via
+    #   crawl4ai
+    #   dr-agent
+    #   open-instruct
 nodeenv==1.9.1
     # via pre-commit
 numba==0.61.2
@@ -377,78 +533,102 @@ numpy==1.26.4
     # via
     #   accelerate
     #   ai2-olmo-core
+    #   alphashape
     #   bitsandbytes
     #   contourpy
+    #   crawl4ai
     #   cupy-cuda12x
     #   datasets
     #   deepspeed
+    #   flashinfer-python
     #   gguf
     #   matplotlib
     #   mistral-common
     #   mlx-lm
     #   numba
+    #   nvidia-cutlass-dsl
     #   open-instruct
     #   opencv-python-headless
     #   pandas
     #   peft
+    #   rank-bm25
     #   scipy
-    #   soundfile
-    #   soxr
+    #   shapely
     #   tensorboard
     #   torchvision
     #   transformers
+    #   trimesh
     #   vllm
-    #   xformers
     #   xgrammar
-nvidia-cublas-cu12==12.8.4.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cublas-cu12==12.8.4.1 ; sys_platform == 'linux'
     # via
     #   nvidia-cudnn-cu12
     #   nvidia-cusolver-cu12
     #   torch
-nvidia-cuda-cupti-cu12==12.8.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cuda-cupti-cu12==12.8.90 ; sys_platform == 'linux'
     # via torch
-nvidia-cuda-nvrtc-cu12==12.8.93 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cuda-nvrtc-cu12==12.8.93 ; sys_platform == 'linux'
     # via torch
-nvidia-cuda-runtime-cu12==12.8.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cuda-runtime-cu12==12.8.90 ; sys_platform == 'linux'
     # via torch
-nvidia-cudnn-cu12==9.10.2.21 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cudnn-cu12==9.10.2.21 ; sys_platform == 'linux'
     # via torch
-nvidia-cufft-cu12==11.3.3.83 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cudnn-frontend==1.17.0
+    # via flashinfer-python
+nvidia-cufft-cu12==11.3.3.83 ; sys_platform == 'linux'
     # via torch
-nvidia-cufile-cu12==1.13.1.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cufile-cu12==1.13.1.3 ; sys_platform == 'linux'
     # via torch
-nvidia-curand-cu12==10.3.9.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-curand-cu12==10.3.9.90 ; sys_platform == 'linux'
     # via torch
-nvidia-cusolver-cu12==11.7.3.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cusolver-cu12==11.7.3.90 ; sys_platform == 'linux'
     # via torch
-nvidia-cusparse-cu12==12.5.8.93 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cusparse-cu12==12.5.8.93 ; sys_platform == 'linux'
     # via
     #   nvidia-cusolver-cu12
     #   torch
-nvidia-cusparselt-cu12==0.7.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cusparselt-cu12==0.7.1 ; sys_platform == 'linux'
     # via torch
+nvidia-cutlass-dsl==4.3.4
+    # via flashinfer-python
 nvidia-ml-py==13.580.82
-    # via nvitop
-nvidia-nccl-cu12==2.27.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via
+    #   flashinfer-python
+    #   nvitop
+nvidia-nccl-cu12==2.27.5 ; sys_platform == 'linux'
     # via torch
-nvidia-nvjitlink-cu12==12.8.93 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-nvjitlink-cu12==12.8.93 ; sys_platform == 'linux'
     # via
     #   nvidia-cufft-cu12
     #   nvidia-cusolver-cu12
     #   nvidia-cusparse-cu12
     #   torch
-nvidia-nvtx-cu12==12.8.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-nvshmem-cu12==3.3.20 ; sys_platform == 'linux'
+    # via torch
+nvidia-nvtx-cu12==12.8.90 ; sys_platform == 'linux'
     # via torch
 nvitop==1.6.1
     # via open-instruct
 omegaconf==2.0.6
-    # via ai2-olmo-core
+    # via
+    #   ai2-olmo-core
+    #   dr-agent
 openai==2.12.0
     # via
     #   litellm
     #   vllm
 openai-harmony==0.0.8
     # via vllm
+openapi-core==0.22.0
+    # via fastmcp
+openapi-pydantic==0.5.1
+    # via fastmcp
+openapi-schema-validator==0.6.3
+    # via
+    #   openapi-core
+    #   openapi-spec-validator
+openapi-spec-validator==0.7.2
+    # via openapi-core
 opencensus==0.11.4
     # via ray
 opencensus-context==0.1.3
@@ -483,6 +663,7 @@ packaging==25.0
     #   cached-path
     #   datasets
     #   deepspeed
+    #   flashinfer-python
     #   huggingface-hub
     #   lm-format-enforcer
     #   matplotlib
@@ -500,14 +681,24 @@ pandas==2.3.3
 parameterized==0.9.0
 partial-json-parser==0.2.1.1.post7
     # via vllm
+patchright==1.56.0
+    # via crawl4ai
+pathable==0.4.4
+    # via jsonschema-path
 pathspec==0.12.1
     # via mkdocs
+pdfminer-six==20251107
+    # via pdfplumber
+pdfplumber==0.11.8
+    # via dr-agent
 peft==0.18.0
     # via open-instruct
 pillow==12.0.0
     # via
+    #   crawl4ai
     #   matplotlib
     #   mistral-common
+    #   pdfplumber
     #   tensorboard
     #   torchvision
     #   vllm
@@ -516,6 +707,10 @@ platformdirs==4.5.1
     #   mkdocs-get-deps
     #   virtualenv
     #   wandb
+playwright==1.57.0
+    # via
+    #   crawl4ai
+    #   tf-playwright-stealth
 pluggy==1.6.0
     # via pytest
 pre-commit==4.5.0
@@ -548,11 +743,14 @@ protobuf==5.29.5
 psutil==7.1.3
     # via
     #   accelerate
+    #   crawl4ai
     #   deepspeed
     #   nvitop
     #   peft
     #   vllm
     #   wandb
+py==1.11.0
+    # via retry
 py-cpuinfo==9.0.0
     # via
     #   deepspeed
@@ -571,37 +769,64 @@ pybase64==1.4.3
     # via vllm
 pycountry==24.6.1
     # via pydantic-extra-types
-pycparser==2.23 ; implementation_name != 'PyPy'
+pycparser==2.23 ; (implementation_name != 'PyPy' and platform_python_implementation != 'PyPy') or (implementation_name == 'pypy' and platform_python_implementation == 'PyPy')
     # via cffi
+pycryptodomex==3.23.0
+    # via blobfile
 pydantic==2.12.5
     # via
+    #   anthropic
+    #   cohere
     #   compressed-tensors
+    #   crawl4ai
     #   deepspeed
+    #   dr-agent
     #   fastapi
     #   fastapi-cloud-cli
+    #   fastmcp
     #   litellm
     #   lm-format-enforcer
+    #   mcp
     #   mistral-common
+    #   model-hosting-container-standards
     #   open-instruct
     #   openai
     #   openai-harmony
+    #   openapi-pydantic
     #   pydantic-extra-types
+    #   pydantic-settings
     #   ray
     #   vllm
     #   xgrammar
 pydantic-core==2.41.5
-    # via pydantic
+    # via
+    #   cohere
+    #   pydantic
 pydantic-extra-types==2.10.6
     # via mistral-common
+pydantic-settings==2.12.0
+    # via mcp
+pyee==13.0.0
+    # via
+    #   patchright
+    #   playwright
 pygments==2.19.2
     # via
     #   mkdocs-material
     #   pytest
     #   rich
+pyjwt==2.10.1
+    # via mcp
 pymdown-extensions==10.19.1
     # via mkdocs-material
+pyopenssl==25.3.0
+    # via crawl4ai
 pyparsing==3.2.5
     # via matplotlib
+pypdfium2==5.2.0
+    # via pdfplumber
+pyperclip==1.11.0
+    # via fastmcp
 pytest==9.0.2
 python-dateutil==2.9.0.post0
     # via
@@ -611,21 +836,32 @@ python-dateutil==2.9.0.post0
     #   pandas
 python-dotenv==1.2.1
     # via
+    #   crawl4ai
+    #   dr-agent
+    #   fastmcp
     #   litellm
+    #   pydantic-settings
     #   uvicorn
 python-json-logger==4.0.0
     # via vllm
 python-multipart==0.0.20
-    # via fastapi
+    # via
+    #   fastapi
+    #   mcp
 pytz==2025.2
     # via pandas
+pywin32==311 ; sys_platform == 'win32'
+    # via mcp
 pyyaml==6.0.3
     # via
     #   accelerate
     #   beaker-py
+    #   crawl4ai
     #   datasets
+    #   dr-agent
     #   gguf
     #   huggingface-hub
+    #   jsonschema-path
     #   lm-format-enforcer
     #   mkdocs
     #   mkdocs-get-deps
@@ -645,13 +881,16 @@ pyyaml-env-tag==1.1
     # via mkdocs
 pyzmq==27.1.0
     # via vllm
+rank-bm25==0.2.2
+    # via crawl4ai
 ray==2.52.1
     # via
     #   open-instruct
     #   vllm
-referencing==0.37.0
+referencing==0.36.2
     # via
     #   jsonschema
+    #   jsonschema-path
     #   jsonschema-specifications
 regex==2025.11.3
     # via
@@ -664,10 +903,15 @@ requests==2.32.5
     #   ai2-olmo-core
     #   beaker-py
     #   cached-path
+    #   cohere
+    #   crawl4ai
     #   datasets
+    #   dr-agent
+    #   flashinfer-python
     #   google-api-core
     #   google-cloud-storage
     #   huggingface-hub
+    #   jsonschema-path
     #   mistral-common
     #   mkdocs-material
     #   open-instruct
@@ -678,12 +922,22 @@ requests==2.32.5
     #   vllm
     #   wandb
 responses==0.25.8
+retry==0.9.2
+    # via dr-agent
+rfc3339-validator==0.1.4
+    # via openapi-schema-validator
 rich==13.9.4
     # via
     #   ai2-olmo-core
     #   cached-path
+    #   crawl4ai
+    #   cyclopts
+    #   fastmcp
+    #   rich-rst
     #   rich-toolkit
     #   typer
+rich-rst==1.3.2
+    # via cyclopts
 rich-toolkit==0.17.0
     # via
     #   fastapi-cli
@@ -696,6 +950,8 @@ rpds-py==0.30.0
     #   referencing
 rsa==4.9.1
     # via google-auth
+rtree==1.4.1
+    # via alphashape
 ruff==0.14.9
 s3transfer==0.16.0
     # via boto3
@@ -706,7 +962,9 @@ safetensors==0.7.0
     #   peft
     #   transformers
 scipy==1.16.3
-    # via vllm
+    # via
+    #   alphashape
+    #   vllm
 sentencepiece==0.2.1
     # via
     #   mlx-lm
@@ -721,12 +979,17 @@ setproctitle==1.3.7
     #   wandb
 setuptools==79.0.1
     # via
+    #   model-hosting-container-standards
     #   open-instruct
     #   tensorboard
     #   torch
     #   triton
     #   vllm
     #   wandb
+shapely==2.1.2
+    # via
+    #   alphashape
+    #   crawl4ai
 shellingham==1.5.4
     # via typer
 six==1.17.0
@@ -735,50 +998,74 @@ six==1.17.0
     #   langdetect
     #   opencensus
     #   python-dateutil
+    #   rfc3339-validator
     #   vllm
 smart-open==7.5.0
     # via ray
 smmap==5.0.2
     # via gitdb
 sniffio==1.3.1
-    # via openai
-soundfile==0.13.1
-    # via mistral-common
-soxr==1.0.0
-    # via mistral-common
+    # via
+    #   anthropic
+    #   openai
+snowballstemmer==2.2.0
+    # via crawl4ai
+soupsieve==2.8.1
+    # via beautifulsoup4
+sse-starlette==3.1.1
+    # via mcp
 starlette==0.50.0
     # via
     #   fastapi
+    #   mcp
+    #   model-hosting-container-standards
     #   prometheus-fastapi-instrumentator
+    #   sse-starlette
+supervisor==4.3.0
+    # via model-hosting-container-standards
 sympy==1.14.0
     # via torch
+tabulate==0.9.0
+    # via flashinfer-python
+tenacity==9.1.2
+    # via dr-agent
 tensorboard==2.20.0
     # via open-instruct
 tensorboard-data-server==0.7.2
     # via tensorboard
+tf-playwright-stealth==1.2.0
+    # via crawl4ai
 tiktoken==0.12.0
     # via
     #   litellm
     #   mistral-common
     #   vllm
+tinydb==4.8.2
+    # via
+    #   dr-agent
+    #   tinydb-serialization
+tinydb-serialization==2.2.0
+    # via dr-agent
 tokenizers==0.22.1
     # via
+    #   cohere
     #   litellm
     #   transformers
     #   vllm
-torch==2.8.0 ; sys_platform == 'darwin'
+torch==2.9.0 ; sys_platform == 'darwin'
     # via
     #   accelerate
     #   ai2-olmo-core
     #   compressed-tensors
     #   deepspeed
+    #   flashinfer-python
     #   open-instruct
     #   peft
     #   torchaudio
     #   torchvision
     #   vllm
     #   xgrammar
-torch==2.8.0+cu128 ; sys_platform != 'darwin'
+torch==2.9.0+cu128 ; sys_platform != 'darwin'
     # via
     #   accelerate
     #   ai2-olmo-core
@@ -786,22 +1073,23 @@ torch==2.8.0+cu128 ; sys_platform != 'darwin'
     #   compressed-tensors
     #   deepspeed
     #   flash-attn
+    #   flashinfer-python
     #   liger-kernel
     #   open-instruct
     #   peft
     #   torchaudio
     #   torchvision
     #   vllm
-    #   xformers
     #   xgrammar
-torchaudio==2.8.0
+torchaudio==2.9.0
     # via vllm
-torchvision==0.23.0
+torchvision==0.24.0
     # via vllm
 tqdm==4.67.1
     # via
     #   datasets
     #   deepspeed
+    #   flashinfer-python
     #   gguf
     #   huggingface-hub
     #   nltk
@@ -812,12 +1100,17 @@ tqdm==4.67.1
 transformers==4.57.3
     # via
     #   compressed-tensors
+    #   dr-agent
     #   mlx-lm
     #   open-instruct
     #   peft
     #   vllm
     #   xgrammar
-triton==3.4.0 ; sys_platform != 'darwin'
+trimesh==4.10.1
+    # via alphashape
+triton==3.4.0 ; sys_platform != 'darwin' and sys_platform != 'linux'
+    # via liger-kernel
+triton==3.5.0 ; sys_platform == 'linux'
     # via
     #   liger-kernel
     #   torch
@@ -825,24 +1118,37 @@ triton==3.4.0 ; sys_platform != 'darwin'
 ty==0.0.1a35
 typer==0.20.0
     # via
+    #   dr-agent
     #   fastapi-cli
     #   fastapi-cloud-cli
+types-requests==2.32.4.20250913
+    # via cohere
 typing-extensions==4.15.0
     # via
     #   aiosignal
+    #   anthropic
     #   anyio
+    #   apache-tvm-ffi
+    #   beautifulsoup4
+    #   cohere
+    #   exceptiongroup
     #   fastapi
     #   grpcio
     #   huggingface-hub
+    #   mcp
     #   mistral-common
+    #   nvidia-cutlass-dsl
     #   omegaconf
     #   openai
+    #   openapi-core
     #   opentelemetry-api
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
     #   pydantic
     #   pydantic-core
     #   pydantic-extra-types
+    #   pyee
+    #   pyopenssl
     #   referencing
     #   rich-toolkit
     #   starlette
@@ -852,20 +1158,26 @@ typing-extensions==4.15.0
     #   vllm
     #   xgrammar
 typing-inspection==0.4.2
-    # via pydantic
+    # via
+    #   mcp
+    #   pydantic
+    #   pydantic-settings
 tzdata==2025.3
     # via pandas
 urllib3==2.6.2
     # via
+    #   blobfile
     #   botocore
     #   requests
     #   responses
     #   sentry-sdk
+    #   types-requests
 uvicorn==0.38.0
     # via
     #   fastapi
     #   fastapi-cli
     #   fastapi-cloud-cli
+    #   mcp
     #   open-instruct
 uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'
     # via uvicorn
@@ -873,7 +1185,7 @@ virtualenv==20.35.4
     # via
     #   pre-commit
     #   ray
-vllm==0.11.0
+vllm==0.13.0
     # via open-instruct
 wandb==0.18.1
     # via open-instruct
@@ -886,17 +1198,21 @@ watchfiles==1.1.1
 websockets==15.0.1
     # via uvicorn
 werkzeug==3.1.4
-    # via tensorboard
+    # via
+    #   openapi-core
+    #   tensorboard
+win32-setctime==1.2.0 ; sys_platform == 'win32'
+    # via loguru
 windows-curses==2.4.1 ; sys_platform == 'win32'
     # via nvitop
 wrapt==2.0.1
     # via smart-open
-xformers==0.0.32.post1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via vllm
-xgrammar==0.1.25 ; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+xgrammar==0.1.27 ; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'ppc64le' or platform_machine == 's390x' or platform_machine == 'x86_64'
     # via vllm
 xxhash==3.6.0
-    # via datasets
+    # via
+    #   crawl4ai
+    #   datasets
 yarl==1.22.0
     # via aiohttp
 zipp==3.23.0
