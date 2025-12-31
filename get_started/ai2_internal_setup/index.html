@@ -1,0 +1,1287 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/get_started/ai2_internal_setup/">
+      
+      
+        <link rel="prev" href="../installation/">
+      
+      
+        <link rel="next" href="../../algorithms/dataset_transformation/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+    
+    
+      
+        <title>Ai2 Internal Setup - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.618322db.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#ai2-internal-setup" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Ai2 Internal Setup
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#one-time-setup-vscode-weka-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        (One-time setup) VScode + Weka setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#one-time-setup-setup-api-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        (One-time setup) Setup API keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#masonpy-for-job-submission" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mason.py (for job submission)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#update_command_argspy-for-sweep-benchmark-etc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        update_command_args.py (for sweep, benchmark, etc.)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ai2-internal-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ai2 Internal Evaluation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-with-gantry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running with gantry
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Running with gantry">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#extra-beaker-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extra Beaker Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-gotchas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Gotchas
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/trained_model.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    None
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/ppo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proximal Policy Optimization (PPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#one-time-setup-vscode-weka-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        (One-time setup) VScode + Weka setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#one-time-setup-setup-api-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        (One-time setup) Setup API keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#masonpy-for-job-submission" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mason.py (for job submission)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#update_command_argspy-for-sweep-benchmark-etc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        update_command_args.py (for sweep, benchmark, etc.)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ai2-internal-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ai2 Internal Evaluation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-with-gantry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running with gantry
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Running with gantry">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#extra-beaker-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extra Beaker Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-gotchas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Gotchas
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="ai2-internal-setup">Ai2 Internal Setup</h1>
+<p>This document details some best practices when working with our cluster.</p>
+<h2 id="one-time-setup-vscode-weka-setup">(One-time setup) VScode + Weka setup</h2>
+<p>You should join the <code>#vscode-weka-dev-workflow</code> slack channel to setup your VScode to work with weka.</p>
+<p>After following the instructions there, you should end up with a VScode / Cursor setup that looks like this:</p>
+<ul>
+<li>Your terminal has direct access to the weka filesystem.</li>
+<li>You can run <code>beaker</code> commands from the terminal.</li>
+<li>You can edit files in the weka filesystem.</li>
+<li>You can run python scripts with the pyenv / uv environment.</li>
+</ul>
+<p><img alt="VScode setup" src="../vscode.png" /></p>
+<h2 id="one-time-setup-setup-api-keys">(One-time setup) Setup API keys</h2>
+<p>You need to first obtain API key or tokens from the following website:</p>
+<ul>
+<li><code>BEAKER_TOKEN</code>: <a href="https://beaker.org/user">https://beaker.org/user</a></li>
+<li><code>WANDB_API_KEY</code>: <a href="https://wandb.ai/authorize">https://wandb.ai/authorize</a></li>
+<li><code>HF_TOKEN</code>: <a href="https://huggingface.co/settings/tokens">https://huggingface.co/settings/tokens</a></li>
+</ul>
+<p>Then you need to write them in beaker secret as follows (replace the <code>xxxx</code> with your own API key or token)
+<div class="highlight"><pre><span></span><code><span class="nv">beaker_whoami</span><span class="o">=</span><span class="k">$(</span>beaker<span class="w"> </span>account<span class="w"> </span>whoami<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.[0].name&#39;</span><span class="k">)</span>
+beaker<span class="w"> </span>secret<span class="w"> </span>write<span class="w"> </span>-w<span class="w"> </span>ai2/tulu-2-improvements<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">beaker_whoami</span><span class="si">}</span><span class="s2">_BEAKER_TOKEN&quot;</span><span class="w"> </span>xxxx
+beaker<span class="w"> </span>secret<span class="w"> </span>write<span class="w"> </span>-w<span class="w"> </span>ai2/tulu-2-improvements<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">beaker_whoami</span><span class="si">}</span><span class="s2">_WANDB_API_KEY&quot;</span><span class="w"> </span>xxxx
+beaker<span class="w"> </span>secret<span class="w"> </span>write<span class="w"> </span>-w<span class="w"> </span>ai2/tulu-2-improvements<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">beaker_whoami</span><span class="si">}</span><span class="s2">_HF_TOKEN&quot;</span><span class="w"> </span>xxxx
+beaker<span class="w"> </span>secret<span class="w"> </span>write<span class="w"> </span>-w<span class="w"> </span>ai2/tulu-3-dev<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">beaker_whoami</span><span class="si">}</span><span class="s2">_BEAKER_TOKEN&quot;</span><span class="w"> </span>xxxx
+beaker<span class="w"> </span>secret<span class="w"> </span>write<span class="w"> </span>-w<span class="w"> </span>ai2/tulu-3-dev<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">beaker_whoami</span><span class="si">}</span><span class="s2">_WANDB_API_KEY&quot;</span><span class="w"> </span>xxxx
+beaker<span class="w"> </span>secret<span class="w"> </span>write<span class="w"> </span>-w<span class="w"> </span>ai2/tulu-3-dev<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">beaker_whoami</span><span class="si">}</span><span class="s2">_HF_TOKEN&quot;</span><span class="w"> </span>xxxx
+</code></pre></div></p>
+<h2 id="masonpy-for-job-submission">mason.py (for job submission)</h2>
+<p><code>mason.py</code> is our job submission script. It basically takes your command and runs it in the specified clusters.</p>
+<p>For example, let's say you have a training job like this:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>open_instruct/finetune.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name_or_path<span class="w"> </span>EleutherAI/pythia-14m<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tokenizer_name<span class="w"> </span>EleutherAI/pythia-14m<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer_list<span class="w"> </span>allenai/tulu-3-sft-personas-algebra<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--use_flash_attn<span class="w"> </span>False<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--with_tracking<span class="w"> </span>--report_to<span class="w"> </span>wandb
+</code></pre></div>
+<p>You can take your command above and run it on the weka cluster with the following command (use <code>--</code> to separate the mason command from the python command):</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>mason.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--cluster<span class="w"> </span>ai2/jupiter<span class="w"> </span>ai2/saturn<span class="w"> </span>ai2/neptune<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--workspace<span class="w"> </span>ai2/tulu-3-dev<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--image<span class="w"> </span>nathanl/open_instruct_auto<span class="w"> </span>--pure_docker_mode<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--priority<span class="w"> </span>normal<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--budget<span class="w"> </span>ai2/oe-adapt<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpus<span class="w"> </span><span class="m">0</span><span class="w"> </span>--<span class="w"> </span>python<span class="w"> </span>open_instruct/finetune.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name_or_path<span class="w"> </span>EleutherAI/pythia-14m<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tokenizer_name<span class="w"> </span>EleutherAI/pythia-14m<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset_mixer_list<span class="w"> </span>allenai/tulu-3-sft-personas-algebra<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--use_flash_attn<span class="w"> </span>False<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--with_tracking<span class="w"> </span>--report_to<span class="w"> </span>wandb
+</code></pre></div>
+<p><img alt="mason.py" src="../mason.png" /></p>
+<p><img alt="mason_job.py" src="../mason_job.png" /></p>
+<p><code>mason.py</code> does a few things:</p>
+<p><strong>Auto set HF cache environment variables:</strong></p>
+<p>During the job submission, it automatically tries to setup a shared Hugging Face cache with environment variables. For example, it sets</p>
+<ul>
+<li><code>HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface</code>.</li>
+<li><code>HF_DATASETS_CACHE=/weka/oe-adapt-default/allennlp/.cache/huggingface</code></li>
+<li><code>HF_HUB_CACHE=/weka/oe-adapt-default/allennlp/.cache/hub</code></li>
+</ul>
+<p><strong>Auto set <code>--hf_entity</code> and <code>--wandb_entity</code> arguments:</strong></p>
+<p>so during runtime we issue fewer HF API calls, which sometimes could fail due to rate limiting.</p>
+<p><strong>Auto caching datasets:</strong></p>
+<p>mason.py will auto call <code>--cache_dataset_only</code> for you, so you do the tokenization locally instead of in the jobs, which saves idle GPU time in the actual jobs.</p>
+<p><strong>Auto upload to Google Cloud Storage:</strong></p>
+<p>When submitting to the <code>ai2/augusta</code> cluster, mason will try to read your model and upload it to Google Cloud Storage and download it to the job (since the cluster does not have a reliable shared filesystem).</p>
+<h2 id="update_command_argspy-for-sweep-benchmark-etc">update_command_args.py (for sweep, benchmark, etc.)</h2>
+<p>The <a href="/scripts/train">/scripts/train</a> directory contains many examples on how to launch jobs with mason.py. Sometimes the commands can get long and hard to manage, so we wrote a script called <a href="/update_command_args.py">update_command_args.py</a> that can be used to add or update arguments in a shell script. For example,</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>update_command_args.py<span class="w"> </span>scripts/train/tulu3/grpo_fast_8b.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--cluster<span class="w"> </span>ai2/augusta<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--priority<span class="w"> </span>normal<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--image<span class="w"> </span>costah/open_instruct_dev0320_11<span class="w">  </span>--non_stop_penalty<span class="w"> </span>False<span class="w"> </span><span class="p">|</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>bash
+</code></pre></div>
+<p>This will update the <code>--cluster</code>, <code>--priority</code>, <code>--image</code>, and <code>--non_stop_penalty</code> arguments in the script with the ones specified, making it easier to launch jobs with different configurations.</p>
+<p>As another example, you can run something like this for a learning rate search:</p>
+<div class="highlight"><pre><span></span><code><span class="k">for</span><span class="w"> </span>lr<span class="w"> </span><span class="k">in</span><span class="w"> </span>1e-6<span class="w"> </span>1e-5<span class="w"> </span>1e-4<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span>python<span class="w"> </span>update_command_args.py<span class="w"> </span>scripts/train/tulu3/grpo_fast_8b.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--exp_name<span class="w"> </span>grpo_fast_8b_lr_<span class="si">${</span><span class="nv">lr</span><span class="si">}</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--learning_rate<span class="w"> </span><span class="nv">$lr</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--image<span class="w"> </span>costah/open_instruct_dev0320_11<span class="w"> </span>--non_stop_penalty<span class="w"> </span>False<span class="w"> </span><span class="p">|</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>bash
+<span class="k">done</span>
+</code></pre></div>
+<p>We also have a script called <a href="/scripts/train/benchmark.sh">scripts/train/benchmark.sh</a> that keeps track of all the commands used to launch jobs in our public <a href="https://wandb.ai/ai2-llm/open_instruct_public">wandb project <code>ai2-llm/open_instruct_public</code></a>.</p>
+<h2 id="ai2-internal-evaluation">Ai2 Internal Evaluation</h2>
+<p>We provide a script integrated with beaker for use internally at Ai2. There are couple of use cases.</p>
+<p><em>1.</em> Run evals against a public Hugging Face model. Basically you need to prefix the model name with <code>hf-</code> and provide the location as the HF path (e.g. <code>meta-llama/Meta-Llama-3-8B-Instruct</code>).</p>
+<div class="highlight"><pre><span></span><code><span class="k">for</span><span class="w"> </span>model<span class="w"> </span><span class="k">in</span><span class="w"> </span>allenai/OLMoE-1B-7B-0125-Instruct<span class="w"> </span>allenai/OLMoE-1B-7B-0125-DPO<span class="w"> </span>allenai/OLMoE-1B-7B-0125-SFT<span class="w"> </span>allenai/OLMoE-1B-7B-0924-SFT<span class="w"> </span>allenai/OLMoE-1B-7B-0924-Instruct<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+python<span class="w"> </span>scripts/submit_eval_jobs.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name<span class="w"> </span>hf-<span class="nv">$model</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--cluster<span class="w"> </span>ai2/jupiter<span class="w"> </span>ai2/neptune<span class="w"> </span>ai2/saturn<span class="w"> </span>ai2/ceres<span class="w">  </span><span class="se">\</span>
+<span class="w">    </span>--priority<span class="w"> </span>high<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--location<span class="w"> </span><span class="nv">$model</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--is_tuned<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--workspace<span class="w"> </span><span class="s2">&quot;tulu-3-results&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--priority<span class="w"> </span>high<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--preemptible<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--use_hf_tokenizer_template<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--run_oe_eval_experiments<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--evaluate_on_weka<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--skip_oi_evals
+<span class="k">done</span>
+</code></pre></div>
+<p><em>2.</em> Run evals against a model hosted on Beaker dataset. If it's a training run, you should try matching the <code>exp_name</code> and <code>run_id</code> with the training run.</p>
+<div class="highlight"><pre><span></span><code><span class="nv">model_name</span><span class="o">=</span>0222_32B_dpo_lr_8.5e-7__allenai_open_instruct_dev__42__1741225304
+<span class="nv">url</span><span class="o">=</span>https://wandb.ai/ai2-llm/open_instruct_internal/runs/7afq8x28
+<span class="nv">location</span><span class="o">=</span>01JNMHSM8DDSFB3GJDBM5MP6J8
+python<span class="w"> </span>scripts/submit_eval_jobs.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name<span class="w"> </span><span class="nv">$model_name</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--cluster<span class="w"> </span>ai2/jupiter<span class="w"> </span>ai2/neptune<span class="w"> </span>ai2/saturn<span class="w"> </span>ai2/ceres<span class="w">  </span><span class="se">\</span>
+<span class="w">    </span>--priority<span class="w"> </span>high<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--location<span class="w"> </span><span class="nv">$location</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--is_tuned<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--workspace<span class="w"> </span><span class="s2">&quot;tulu-3-results&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--preemptible<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--use_hf_tokenizer_template<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--run_oe_eval_experiments<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--skip_oi_evals<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--run_id<span class="w"> </span><span class="nv">$url</span>
+</code></pre></div>
+<p>This will later show up in the <a href="https://huggingface.co/spaces/allenai/oe-eval-leaderboard">internal leaderboard</a>.</p>
+<p><img alt="internal leaderboard" src="../internal_leaderboard.png" /></p>
+<p><em>3.</em> Run evals against a model hosted on weka.</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>scripts/submit_eval_jobs.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name<span class="w"> </span>test_no_hf_upload<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--location<span class="w"> </span>/weka/oe-adapt-default/costah/models/0129_grpo_math_kl_fix_zs_0.0_16_half-m_461_checkpoints/step_640<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--cluster<span class="w"> </span>ai2/saturn<span class="w"> </span>ai2/neptune<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--is_tuned<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--workspace<span class="w"> </span><span class="s2">&quot;tulu-3-results&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--priority<span class="w"> </span>high<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--preemptible<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--use_hf_tokenizer_template<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--beaker_image<span class="w"> </span><span class="s2">&quot;nathanl/open_instruct_auto&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--run_oe_eval_experiments<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--evaluate_on_weka<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--oe_eval_tasks<span class="w"> </span>gsm8k::tulu,minerva_math::tulu<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--run_id<span class="w"> </span>https://wandb.ai/ai2-llm/open_instruct_internal/runs/swf79vby<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--skip_oi_evals<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--oe_eval_max_length<span class="w"> </span><span class="m">8096</span>
+</code></pre></div>
+<p><em>4.</em> Run evals against a model on Google Cloud Storage.</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>scripts/submit_eval_jobs.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name<span class="w"> </span>test_gs_location<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--location<span class="w"> </span>gs://ai2-llm/post-training/allenai/Llama-3.1-Tulu-3.1-8B<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--cluster<span class="w"> </span>ai2/augusta<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--is_tuned<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--workspace<span class="w"> </span>tulu-3-results<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--preemptible<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--use_hf_tokenizer_template<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--beaker_image<span class="w"> </span>nathanl/open_instruct_auto<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--oe_eval_tasks<span class="w"> </span>gsm8k::tulu<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--skip_oi_evals<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpu_multiplier<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--run_oe_eval_experiments
+</code></pre></div>
+<h2 id="running-with-gantry">Running with gantry</h2>
+<p>You can also run with gantry, if you want to test changes.
+<strong>Important</strong>: Before you run any command with gantry, make sure you <em>commit and push</em>, since gantry will attempt to clone the repo with your local latest commit hash.</p>
+<p>See the "One-Time Setup" section below before running commands. To test your setup, run the following command -- if this job succeeds, then you're ready to run evaluations with gantry.</p>
+<div class="highlight"><pre><span></span><code>gantry<span class="w"> </span>run<span class="w"> </span>--workspace<span class="w"> </span><span class="o">{</span>workspace<span class="o">}</span><span class="w"> </span>--budget<span class="w"> </span>ai2/oe-adapt<span class="w"> </span>--beaker-image<span class="w"> </span>kavelr/oe-safety<span class="w"> </span>--venv<span class="w"> </span>base<span class="w"> </span>--cluster<span class="w"> </span>ai2/jupiter<span class="w"> </span>--env-secret<span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>openai_api_key<span class="w"> </span>--env-secret<span class="w"> </span><span class="nv">HF_TOKEN</span><span class="o">=</span>hf_token<span class="w"> </span>--<span class="w"> </span>python<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;print(&quot;Hello world&quot;)&#39;</span>
+</code></pre></div>
+<p>You can freely add any additional arguments to give to Beaker, such as a <code>--priority</code> tag which can be set to preemptible, normal, high, or urgent. AI2 policies may restrict the priorities that are available to users on certain clusters.</p>
+<p>In the examples below, text within {} tags should be replaced with your own values.</p>
+<p>As a convenience, you can use the <code>evaluation/gantry_run.sh</code> script which includes some necessary arguments. You can use it the same way as <code>gantry run</code>, but excluding these boilerplate arguments (take a look at the script to see what it includes). Example usage:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">PYTHONPATH</span><span class="o">=</span>safety-eval<span class="w"> </span>./evaluation/gantry_run.sh<span class="w"> </span>--workspace<span class="w"> </span><span class="o">{</span>workspace<span class="o">}</span><span class="w"> </span>--cluster<span class="w"> </span><span class="o">{</span>cluster<span class="o">}</span><span class="w"> </span>--gpus<span class="w"> </span><span class="o">{</span>n_gpus<span class="o">}</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--priority<span class="w"> </span><span class="o">{</span>priority<span class="o">}</span><span class="w"> </span>--<span class="w"> </span>python<span class="w"> </span>evaluation/run_all_generation_benchmarks.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name_or_path<span class="w"> </span>allenai/tulu-2-dpo-7b<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_input_template_path_or_name<span class="w"> </span>tulu2<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--report_output_path<span class="w"> </span>/results/metrics.json
+</code></pre></div>
+<h3 id="extra-beaker-commands">Extra Beaker Commands</h3>
+<p>Here is an example using the full <code>gantry run</code> command. Use the beaker image <code>seungjuh/oe-safety-support-olmo17</code></p>
+<p><strong>Important</strong>: Please include all the beaker arguments exactly as in the examples unless intentionally modifying some configuration. Many of them are necessary to avoid job failures, such as <code>--beaker-image</code>, <code>--venv</code>, and <code>--env-secret</code>. Note that <code>openai_api_key</code> and <code>hf_token</code> are Beaker workspace secret names, so should <em>not</em> be replaced with actual values (see One-Time Setup).</p>
+<p>Note that the <code>--</code> divides the gantry command from the evaluation command - you can edit the second part to run whatever eval suite you want from the <code>eval.py</code> script. Any additional Beaker arguments such as a dataset mount to use a model from a Beaker dataset or adding a priority tag can be added before the <code>--</code>.</p>
+<p>You can also run all generator evaluations parallelized across the GPUs allocated to your batch job, like so:
+<div class="highlight"><pre><span></span><code>gantry<span class="w"> </span>run<span class="w"> </span>--workspace<span class="w"> </span><span class="o">{</span>your_workspace<span class="o">}</span><span class="w"> </span>--cluster<span class="w"> </span><span class="o">{</span>cluster<span class="o">}</span><span class="w"> </span>--gpus<span class="w"> </span><span class="o">{</span>n_gpus<span class="o">}</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--name<span class="w"> </span><span class="o">{</span>beaker_experiment_name<span class="o">}</span><span class="w"> </span>--task-name<span class="w"> </span><span class="o">{</span>beaker_task_name<span class="o">}</span><span class="w"> </span>--beaker-image<span class="w"> </span>seungjuh/oe-safety-support-olmo17<span class="w"> </span>--venv<span class="w"> </span>base<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--env-secret<span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>openai_api_key<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--env-secret<span class="w"> </span><span class="nv">HF_TOKEN</span><span class="o">=</span>hf_token<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--budget<span class="w"> </span><span class="o">{</span>budget<span class="o">}</span><span class="w"> </span>--<span class="w"> </span>python<span class="w"> </span>evaluation/run_all_generation_benchmarks.py<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_name_or_path<span class="w"> </span>allenai/tulu-2-dpo-7b<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model_input_template_path_or_name<span class="w"> </span>tulu2<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--report_output_path<span class="w"> </span>/results/metrics.json<span class="w"> </span>--save_individual_results_path<span class="w"> </span>/results/all.json
+</code></pre></div></p>
+<p>Because the <code>--report_output_path</code> argument is set to <code>/results/metrics.json</code>, the output will automatically get logged to Beaker metrics in the experiment page (<a href="https://beaker.org/ex/01HW8NKZ458MA1PSB1X4YQTH94/tasks/01HW8NKZ4DTDA8FEFDGWA7Q8XX/job/01HW8NM2QR5AYB53PYP32J2VAA">example</a>).</p>
+<h3 id="common-gotchas">Common Gotchas</h3>
+<p>If you're experiencing job failures, here are some things to check:</p>
+<ul>
+<li>Make sure your local changes are committed,  pushed, and up to date with the remote</li>
+<li>Make sure you have <code>--beaker-image seungjuh/oe-safety-support-olmo17</code> and <code>--venv base</code> in your <code>gantry run</code> command</li>
+<li>Check your GitHub personal access token is authorized to access the allenai organization</li>
+<li>Make sure the openai_api_key and hf_token secrets exist in your Beaker workspace</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
