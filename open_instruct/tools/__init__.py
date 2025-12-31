@@ -21,14 +21,7 @@ from open_instruct.tools.config import (
     get_parser_stop_sequences,
     get_tool_definitions_from_config,
 )
-from open_instruct.tools.proxy import (
-    DEFAULT_MAX_CONCURRENCY,
-    ToolActor,
-    ToolProxy,
-    create_tool_actor_from_config,
-    create_tool_proxies,
-    create_tool_proxy,
-)
+from open_instruct.tools.proxy import DEFAULT_MAX_CONCURRENCY, ToolActor, ToolProxy, create_tool_actor_from_config
 from open_instruct.tools.vllm_parsers import VLLM_PARSERS, create_vllm_parser, get_available_vllm_parsers
 
 __all__ = [
@@ -47,8 +40,6 @@ __all__ = [
     "build_tools_from_config",
     "create_tool_actor_from_config",
     "create_tool_parser",
-    "create_tool_proxies",
-    "create_tool_proxy",
     "create_vllm_parser",
     "get_available_tools",
     "get_available_vllm_parsers",

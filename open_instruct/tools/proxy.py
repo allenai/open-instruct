@@ -25,14 +25,11 @@ Usage:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import ray
 
 from open_instruct.tools.base import Tool, ToolOutput
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -176,54 +173,3 @@ class ToolProxy(Tool):
         # Fetch metadata from the actor
         tool_function_name = ray.get(actor_handle.get_tool_function_name.remote())
         return cls(actor_handle=actor_handle, tool_function_name=tool_function_name)
-
-
-# Keep these for backwards compatibility
-def create_tool_proxy(tool: Tool, max_concurrency: int = DEFAULT_MAX_CONCURRENCY, **actor_options: Any) -> ToolProxy:
-    """Create a ToolProxy from a tool instance.
-
-    If the tool is already a ToolProxy, returns it unchanged.
-    This is kept for backwards compatibility.
-
-    Args:
-        tool: The tool to wrap.
-        max_concurrency: Maximum number of concurrent calls the actor can handle.
-        **actor_options: Additional options for the Ray actor.
-
-    Returns:
-        A ToolProxy instance.
-    """
-    if isinstance(tool, ToolProxy):
-        return tool
-    # For backwards compatibility, create a simple wrapper actor
-    # This path should rarely be used now that build_tools_from_config creates proxies directly
-    raise NotImplementedError(
-        "create_tool_proxy from tool instances is deprecated. "
-        "Use create_tool_proxy_from_config or build_tools_from_config instead."
-    )
-
-
-def create_tool_proxies(
-    tools: dict[str, Tool], max_concurrency: int = DEFAULT_MAX_CONCURRENCY, **actor_options: Any
-) -> dict[str, ToolProxy]:
-    """Create ToolProxy instances for all tools in a dictionary.
-
-    If tools are already ToolProxy instances, returns them unchanged.
-
-    Args:
-        tools: Dictionary mapping tool names to Tool instances.
-        max_concurrency: Maximum number of concurrent calls each actor can handle.
-        **actor_options: Additional options to pass to all Tool actors.
-
-    Returns:
-        Dictionary mapping tool names to ToolProxy instances.
-    """
-    result = {}
-    for name, tool in tools.items():
-        if isinstance(tool, ToolProxy):
-            result[name] = tool
-        else:
-            raise NotImplementedError(
-                f"Tool '{name}' is not a ToolProxy. Use build_tools_from_config to create tools as proxies."
-            )
-    return result

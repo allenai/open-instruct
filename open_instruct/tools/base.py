@@ -80,7 +80,7 @@ class Tool(ABC):
         return {
             "type": "function",
             "function": {
-                "name": self._tag_name,
+                "name": self.tool_function_name,
                 "description": self.tool_description,
                 "parameters": self.tool_parameters,
             },

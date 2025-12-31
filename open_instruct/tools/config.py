@@ -14,7 +14,7 @@ ToolArgs is built automatically from individual tool configs.
 
 import logging
 from dataclasses import MISSING, field, fields, make_dataclass
-from typing import Any, Literal
+from typing import Any
 
 from open_instruct.tools.base import DRTuluToolParser, OpenInstructLegacyToolParser, Tool, ToolParser
 from open_instruct.tools.tools import (
@@ -72,31 +72,34 @@ TOOL_REGISTRY: dict[str, tuple[type[Tool], type]] = {
     "mcp": (DrAgentMCPTool, DrAgentMCPToolConfig),
 }
 
-# Derive config registry from tool registry (for CLI generation)
-# Maps tool_name -> config_cls
-TOOL_CONFIG_REGISTRY: dict[str, type] = {name: entry[1] for name, entry in TOOL_REGISTRY.items()}
-
 # Fields to exclude from CLI exposure (common across all configs)
 EXCLUDED_FIELDS = {"tag_name", "cli_prefix"}
-
-# Maps parser names to vllm_parsers factory function names
-# To add a new vLLM parser:
-#   1. Add it to VLLM_PARSERS in vllm_parsers.py
-#   2. Add the mapping here (e.g., "vllm_myparser": "myparser")
-# PARSER_TYPES is auto-generated from this mapping + built-in parsers.
-VLLM_PARSER_MAPPING: dict[str, str] = {
-    "vllm_hermes": "hermes",
-    "vllm_llama3": "llama3_json",
-    "vllm_qwen3_xml": "qwen3_xml",
-    "vllm_qwen3_coder": "qwen3_coder",
-}
 
 # Built-in parsers that don't use vLLM
 _BUILTIN_PARSERS = ("legacy", "dr_tulu")
 
-# Auto-generate PARSER_TYPES from vLLM mapping + built-in parsers
-_ALL_PARSER_NAMES = tuple(_BUILTIN_PARSERS) + tuple(VLLM_PARSER_MAPPING.keys())
-PARSER_TYPES = Literal[_ALL_PARSER_NAMES]  # type: ignore[valid-type]
+
+def _get_vllm_parser_mapping() -> dict[str, str]:
+    """Auto-generate vllm_X -> X mapping from VLLM_PARSERS.
+
+    To add a new vLLM parser, just add it to VLLM_PARSERS in vllm_parsers.py.
+    The CLI argument will automatically be available as --tool_parser vllm_{name}.
+    """
+    from open_instruct.tools.vllm_parsers import VLLM_PARSERS
+
+    return {f"vllm_{name}": name for name in VLLM_PARSERS}
+
+
+# Lazy-load to avoid circular import at module level
+_VLLM_PARSER_MAPPING_CACHE: dict[str, str] | None = None
+
+
+def get_vllm_parser_mapping() -> dict[str, str]:
+    """Get the vLLM parser name mapping (lazy-loaded)."""
+    global _VLLM_PARSER_MAPPING_CACHE
+    if _VLLM_PARSER_MAPPING_CACHE is None:
+        _VLLM_PARSER_MAPPING_CACHE = _get_vllm_parser_mapping()
+    return _VLLM_PARSER_MAPPING_CACHE
 
 
 def get_parser_stop_sequences(parser_name: str) -> list[str]:
@@ -111,10 +114,11 @@ def get_parser_stop_sequences(parser_name: str) -> list[str]:
     Returns:
         List of stop sequences for this parser.
     """
-    if parser_name in VLLM_PARSER_MAPPING:
+    vllm_mapping = get_vllm_parser_mapping()
+    if parser_name in vllm_mapping:
         from open_instruct.tools.vllm_parsers import VLLM_PARSERS
 
-        vllm_name = VLLM_PARSER_MAPPING[parser_name]
+        vllm_name = vllm_mapping[parser_name]
         if vllm_name in VLLM_PARSERS:
             return list(VLLM_PARSERS[vllm_name].stop_sequences)
     return []
@@ -127,7 +131,7 @@ def get_available_tools() -> list[str]:
 
 def get_available_parsers() -> list[str]:
     """Return list of available parser types."""
-    return list(_ALL_PARSER_NAMES)
+    return list(_BUILTIN_PARSERS) + list(get_vllm_parser_mapping().keys())
 
 
 def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any]]:
@@ -207,8 +211,8 @@ def _build_tool_args() -> tuple[type, dict[str, tuple[str, str]]]:
     ]
     all_fields.extend(base_fields)
 
-    # Add fields from each tool config
-    for config_attr, config_cls in TOOL_CONFIG_REGISTRY.items():
+    # Add fields from each tool config (tool_name is config_attr)
+    for config_attr, (_, config_cls) in TOOL_REGISTRY.items():
         prefix = getattr(config_cls, "cli_prefix", "")
 
         for f in fields(config_cls):
@@ -282,14 +286,14 @@ def _tool_args_post_init(self: Any) -> None:
 
 def _tool_args_to_tool_config(self: Any) -> "ToolConfig":
     """Convert flat ToolArgs to internal ToolConfig structure."""
-    # Build kwargs for each config
-    config_kwargs: dict[str, dict[str, Any]] = {attr: {} for attr in TOOL_CONFIG_REGISTRY}
+    # Build kwargs for each config (tool_name is config_attr)
+    config_kwargs: dict[str, dict[str, Any]] = {name: {} for name in TOOL_REGISTRY}
 
     for cli_name, (config_attr, field_name) in self._field_mapping.items():
         config_kwargs[config_attr][field_name] = getattr(self, cli_name)
 
     # Instantiate configs
-    tool_configs = {attr: cls(**config_kwargs[attr]) for attr, cls in TOOL_CONFIG_REGISTRY.items()}
+    tool_configs = {name: config_cls(**config_kwargs[name]) for name, (_, config_cls) in TOOL_REGISTRY.items()}
 
     return ToolConfig(
         tools=self.tools,
@@ -374,7 +378,7 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
             raise ValueError("parser='legacy' requires tools to be provided")
         return OpenInstructLegacyToolParser(tool_list=list(tools.values()))
 
-    elif parser_name in VLLM_PARSER_MAPPING:
+    elif parser_name in get_vllm_parser_mapping():
         if tokenizer is None:
             raise ValueError(f"parser='{parser_name}' requires a tokenizer")
         from open_instruct.tools.vllm_parsers import create_vllm_parser
@@ -384,7 +388,7 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
         if tools:
             tool_definitions = [tool.get_openai_tool_definition() for tool in tools.values()]
 
-        vllm_parser_name = VLLM_PARSER_MAPPING[parser_name]
+        vllm_parser_name = get_vllm_parser_mapping()[parser_name]
         return create_vllm_parser(vllm_parser_name, tokenizer, tool_definitions=tool_definitions)
 
     elif parser_name == "dr_tulu":
