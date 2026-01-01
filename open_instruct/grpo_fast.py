@@ -2463,6 +2463,13 @@ def maybe_evaluate(
         return
 
     try:
+        # Log queue size to help debug evaluation issues
+        try:
+            queue_size = evaluation_inference_results_Q.qsize()
+            logger.info(f"[Main Thread] Eval queue size: {queue_size}, need {len(eval_dataset)} results")
+        except Exception:
+            pass  # qsize() may not be available on all queue implementations
+
         # timeout 0.01 if this is not the last training step
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
         timeout = 0.01 if training_step < args.num_training_steps else 100
@@ -2747,8 +2754,11 @@ def run_training(
             and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
+            eval_count = 0
             for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(eval_example, prompt_Q, generation_configs["eval"], is_eval=True)
+                eval_count += 1
+            logger.info(f"[Main Thread] Added {eval_count} eval prompts to queue at step {training_step}")
         if collated_data is None:
             continue
 

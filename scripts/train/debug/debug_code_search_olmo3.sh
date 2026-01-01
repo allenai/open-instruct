@@ -48,7 +48,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
     --learning_rate 3e-7 \
-    --total_episodes 200 \
+    --total_episodes 2000 \
     --deepspeed_stage 3 \
     --num_epochs 1 \
     --num_learners_per_node 6 \
@@ -57,6 +57,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --beta 0.00 \
     --seed 3 \
     --local_eval_every 1 \
+    --eval_on_step_0 \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
