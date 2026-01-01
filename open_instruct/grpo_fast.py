@@ -1556,66 +1556,75 @@ def accumulate_inference_batches(
         disable=not args.verbose,
     )
     num_prompts_sampled = 0
-    while num_prompts_sampled < num_prompts:
-        result = inference_results_Q.get(timeout=timeout)
+    consumed_results = []  # Track consumed results in case we need to restore on timeout
+    try:
+        while num_prompts_sampled < num_prompts:
+            result = inference_results_Q.get(timeout=timeout)
+            consumed_results.append(result)
 
-        if isinstance(result, ShutdownSentinel):
-            return result, None, None, None
+            if isinstance(result, ShutdownSentinel):
+                return result, None, None, None
 
-        # Validate that each individual result has the expected number of responses
-        assert len(result.responses) == generation_config.n, (
-            f"Mismatch: individual prompt result has {len(result.responses)} responses "
-            f"but expected {generation_config.n} samples per prompt. "
-            f"Prompt ID: {result.prompt_id}"
-        )
-
-        # Replenish generation queue with new prompt
-        if replenish_prompts:
-            add_prompt_to_generator(next(data_loader), prompt_Q, generation_config, is_eval=False)
-
-        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
-
-        percent_solved = np.mean(result.reward_scores).item() / args.max_possible_score
-        # Don't resample prompt that was solved at more than no_resample_positive_rate
-        if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
-            total_no_resampled += 1
-            data_loader.exclude_index(result.dataset_index)
-            logging.debug(
-                f"[Data Preparation Thread] Prompt solved at {percent_solved}, total no resampled: {total_no_resampled}"
+            # Validate that each individual result has the expected number of responses
+            assert len(result.responses) == generation_config.n, (
+                f"Mismatch: individual prompt result has {len(result.responses)} responses "
+                f"but expected {generation_config.n} samples per prompt. "
+                f"Prompt ID: {result.prompt_id}"
             )
 
-        # Filter out zero std prompts
-        if filter_zero_std_samples and np.std(result.reward_scores) == 0:
-            # If we're not active sampling, still count this as a sample
-            if not active_sampling:
+            # Replenish generation queue with new prompt
+            if replenish_prompts:
+                add_prompt_to_generator(next(data_loader), prompt_Q, generation_config, is_eval=False)
+
+            decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+
+            percent_solved = np.mean(result.reward_scores).item() / args.max_possible_score
+            # Don't resample prompt that was solved at more than no_resample_positive_rate
+            if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
+                total_no_resampled += 1
+                data_loader.exclude_index(result.dataset_index)
+                logging.debug(
+                    f"[Data Preparation Thread] Prompt solved at {percent_solved}, total no resampled: {total_no_resampled}"
+                )
+
+            # Filter out zero std prompts
+            if filter_zero_std_samples and np.std(result.reward_scores) == 0:
+                # If we're not active sampling, still count this as a sample
+                if not active_sampling:
+                    num_prompts_sampled += 1
+                    progress_bar.update(1)
+
+                total_filtered_prompts += 1
+                if result.reward_scores[0] == 0:
+                    filtered_prompt_zero += 1
+                elif result.reward_scores[0] == args.max_possible_score:
+                    filtered_prompt_solved += 1
+                else:
+                    filtered_prompt_nonzero += 1
+                logging.debug(
+                    f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
+                )
+                continue
+            else:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
 
-            total_filtered_prompts += 1
-            if result.reward_scores[0] == 0:
-                filtered_prompt_zero += 1
-            elif result.reward_scores[0] == args.max_possible_score:
-                filtered_prompt_solved += 1
-            else:
-                filtered_prompt_nonzero += 1
-            logging.debug(
-                f"[Data Preparation Thread] Filtered prompt with reward std 0, total filtered {total_filtered_prompts}"
-            )
-            continue
-        else:
-            num_prompts_sampled += 1
-            progress_bar.update(1)
-
-        results.append(result)
-        prompt_data = prompt_dataset[result.dataset_index]
-        all_queries.extend(repeat_each([prompt_data[INPUT_IDS_PROMPT_KEY]], generation_config.n))
-        all_ground_truths.extend(repeat_each([prompt_data[GROUND_TRUTHS_KEY]], generation_config.n))
-        all_datasets.extend(repeat_each([prompt_data[VERIFIER_SOURCE_KEY]], generation_config.n))
-        all_raw_queries.extend(repeat_each([prompt_data[RAW_PROMPT_KEY]], generation_config.n))
-        all_decoded_responses.extend(decoded_responses)
-        all_scores.extend(result.reward_scores)
-        all_reward_metrics.append(result.reward_metrics)
-        all_percent_solved.append(percent_solved)
+            results.append(result)
+            prompt_data = prompt_dataset[result.dataset_index]
+            all_queries.extend(repeat_each([prompt_data[INPUT_IDS_PROMPT_KEY]], generation_config.n))
+            all_ground_truths.extend(repeat_each([prompt_data[GROUND_TRUTHS_KEY]], generation_config.n))
+            all_datasets.extend(repeat_each([prompt_data[VERIFIER_SOURCE_KEY]], generation_config.n))
+            all_raw_queries.extend(repeat_each([prompt_data[RAW_PROMPT_KEY]], generation_config.n))
+            all_decoded_responses.extend(decoded_responses)
+            all_scores.extend(result.reward_scores)
+            all_reward_metrics.append(result.reward_metrics)
+            all_percent_solved.append(percent_solved)
+    except Empty:
+        # Put consumed results back into the queue so they're not lost
+        for consumed_result in consumed_results:
+            inference_results_Q.put(consumed_result)
+        logger.debug(f"[Data Preparation Thread] Timeout waiting for results, restored {len(consumed_results)} to queue")
+        raise  # Re-raise to let caller handle the timeout
 
     if len(results) == 0:
         logger.warning(
