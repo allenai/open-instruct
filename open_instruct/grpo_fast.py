@@ -1575,7 +1575,7 @@ def accumulate_inference_batches(
         if replenish_prompts:
             add_prompt_to_generator(next(data_loader), prompt_Q, generation_config, is_eval=False)
 
-        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
 
         percent_solved = np.mean(result.reward_scores).item() / args.max_possible_score
         # Don't resample prompt that was solved at more than no_resample_positive_rate

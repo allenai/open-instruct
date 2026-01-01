@@ -63,7 +63,7 @@ from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.tools.config import create_tool_parser
 from open_instruct.tools.parsers import ToolParser
 from open_instruct.tools.tools import MaxCallsExceededTool
-from open_instruct.tools.utils import Tool
+from open_instruct.tools.utils import Tool, ToolOutput
 from open_instruct.utils import ModelDims, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
@@ -880,7 +880,17 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         should_break = False
 
         for triggered_tool, tool_args in triggered_tools:
-            tool_result = await loop.run_in_executor(actor.executor, lambda t=triggered_tool, a=tool_args: t(**a))
+            try:
+                tool_result = await loop.run_in_executor(actor.executor, lambda t=triggered_tool, a=tool_args: t(**a))
+            except Exception as e:
+                # If the model called the tool with wrong arguments, return an error instead of crashing
+                tool_result = ToolOutput(
+                    output="",
+                    error=f"Tool call failed: {type(e).__name__}: {e}",
+                    called=True,
+                    timeout=False,
+                    runtime=0,
+                )
 
             tool_called = True
             num_calls += 1
