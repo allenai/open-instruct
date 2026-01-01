@@ -69,8 +69,7 @@ from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import logger_utils
-from open_instruct.data_types import CollatedBatchData
+from open_instruct import data_types, logger_utils
 
 WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
 GCP_CLUSTERS = ["ai2/augusta"]
@@ -1441,10 +1440,8 @@ def get_train_ds_config(
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
         "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
+        "sequence_parallel_size": sequence_parallel_size,
     }
-
-    if sequence_parallel_size > 1:
-        config["sequence_parallel_size"] = sequence_parallel_size
 
     return config
 
@@ -2588,6 +2585,7 @@ def get_beaker_experiment_url() -> str | None:
         return None
 
 
+@dataclass
 class UlyssesSPSplitter:
     """Splits CollatedBatchData for Ulysses sequence parallelism.
 
@@ -2596,19 +2594,16 @@ class UlyssesSPSplitter:
     Rather than wrapping a dataloader, we just want to split a given batch into the shards across sp group.
     """
 
-    def __init__(self, sp_rank: int, sp_group, sp_world_size, device, pad_token_id):
-        self.sp_rank = sp_rank
-        self.sp_group = sp_group
-        self.sp_world_size = sp_world_size
-        self.device = device
-        self.pad_token_id = pad_token_id
+    sp_rank: int
+    sp_group: "torch.distributed.distributed_c10d.ProcessGroup"
+    sp_world_size: int
+    device: torch.device
+    pad_token_id: int
 
-    def split_collated_batch(self, data: CollatedBatchData) -> CollatedBatchData:
+    def split_collated_batch(self, data: data_types.CollatedBatchData) -> data_types.CollatedBatchData:
         """Get this rank's shard of a CollatedBatchData for sequence parallelism."""
-        fields = [f.name for f in dataclasses.fields(data)]
-
         # Find max sequence length across all ranks to ensure consistent padding
-        local_max = max(t.shape[-1] for t in getattr(data, fields[0]))
+        local_max = max(t.shape[-1] for t in data.query_responses)
         local_seqlen = torch.tensor([local_max], dtype=torch.int64, device=self.device)
         seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
         dist.all_gather(seqlens, local_seqlen, group=self.sp_group)
@@ -2624,21 +2619,21 @@ class UlyssesSPSplitter:
 
         # slice and pad tensors for this sp rank
         kwargs = {}
-        for field in fields:
-            tensors = getattr(data, field)
-            if field == "query_responses":
+        for field in dataclasses.fields(data):
+            if field.name == "query_responses":
                 pad_value = self.pad_token_id
-            elif field == "vllm_logprobs":
+            elif field.name == "vllm_logprobs":
                 pad_value = INVALID_LOGPROB
             else:
                 pad_value = 0
             sharded = []
-            for t in tensors:
+            for t in getattr(data, field.name):
+                # For all tensors in batch, pad tensor to max_seqlen, then slice to get this SP rank's chunk
                 padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
                 sharded.append(padded_sliced)
-            kwargs[field] = sharded
+            kwargs[field.name] = sharded
 
-        return CollatedBatchData(**kwargs)
+        return data_types.CollatedBatchData(**kwargs)
 
 
 def get_denominator(loss_denominator: str | float) -> float | str:

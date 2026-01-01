@@ -854,13 +854,13 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics = utils.MetricsTracker(device=self.device)
 
         if self.mpu is not None:
-            self.sp_group = groups._get_sequence_parallel_group()
-            self.sp_world_size = groups._get_sequence_parallel_world_size()
-            self.sp_rank = groups._get_sequence_parallel_rank()
+            sp_group = groups._get_sequence_parallel_group()
+            sp_world_size = groups._get_sequence_parallel_world_size()
+            sp_rank = groups._get_sequence_parallel_rank()
             self.splitter = UlyssesSPSplitter(
-                sp_rank=self.sp_rank,
-                sp_group=self.sp_group,
-                sp_world_size=self.sp_world_size,
+                sp_rank=sp_rank,
+                sp_group=sp_group,
+                sp_world_size=sp_world_size,
                 device=self.device,
                 pad_token_id=self.tokenizer.pad_token_id,
             )
@@ -1035,6 +1035,32 @@ class PolicyTrainerRayProcess(RayProcess):
             accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
 
         return accumulation_counts
+
+    def _compute_loss_metrics(
+        self, loss_stats_B: dict[str, torch.Tensor], total_valid_tokens: int
+    ) -> dict[str, float]:
+        """Compute weighted average metrics from per-batch loss statistics."""
+        token_counts = loss_stats_B["token_count"]
+        total_tokens = token_counts.sum()
+        # Zero weights when no tokens - all weighted sums become 0
+        weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
+
+        if self.args.load_ref_policy:
+            for j in range(4):
+                self.local_metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum()
+            self.local_metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum()
+        self.local_metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum()
+        self.local_metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum()
+        self.local_metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum()
+        self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
+        weighted_mean_ratio = self.local_metrics["val/ratio"]
+        self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
+        if self.args.record_entropy:
+            self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
+
+        self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
+        self.local_metrics["_token_count"] = total_valid_tokens
+        return self.local_metrics.get_metrics_list()
 
     def train(self, data_BT: CollatedBatchData, pad_token_id: int) -> dict[str, float]:
         """Train the policy model on a batch of data.
@@ -1300,46 +1326,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         if self.args.record_entropy:
                             loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
             with torch.no_grad():
-                # Compute weighted averages using token counts (important for sequence parallel)
-                token_counts = loss_stats_B["token_count"]
-                total_tokens = token_counts.sum()
-                if total_tokens > 0:
-                    weights = token_counts / total_tokens
-                    if args.load_ref_policy:
-                        for j in range(4):
-                            self.local_metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum()
-                        self.local_metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum()
-                    self.local_metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum()
-                    self.local_metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum()
-                    self.local_metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum()
-                    self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
-                    # Weighted variance: sum(w * (x - weighted_mean)^2)
-                    weighted_mean_ratio = (loss_stats_B["ratio"] * weights).sum()
-                    self.local_metrics["val/ratio_var"] = (
-                        weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2
-                    ).sum()
-                    if self.args.record_entropy:
-                        self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
-                else:
-                    # No valid tokens in this rank's chunk - set metrics to 0
-                    if args.load_ref_policy:
-                        for j in range(4):
-                            self.local_metrics[f"objective/kl{j}_avg"] = 0.0
-                        self.local_metrics["loss/kl_avg"] = 0.0
-                    self.local_metrics["loss/policy_avg"] = 0.0
-                    self.local_metrics["loss/total_avg"] = 0.0
-                    self.local_metrics["policy/clipfrac_avg"] = 0.0
-                    self.local_metrics["val/ratio"] = 0.0
-                    self.local_metrics["val/ratio_var"] = 0.0
-                    if self.args.record_entropy:
-                        self.local_metrics["policy/entropy_avg"] = 0.0
-                self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
-                # Store total token count for this rank (for weighted averaging across ranks)
-                self.local_metrics["_token_count"] = total_valid_tokens
-                return self.local_metrics.get_metrics_list()
+                return self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
         args = self.args
+
         # Save comprehensive RNG states for each rank
         rng_states = {
             "torch_cpu_rng_state": torch.get_rng_state(),
@@ -1531,6 +1522,18 @@ class ModelGroup:
                 scheduling_strategy=scheduling_strategy,
             ).remote(world_size, rank, 0, master_addr, master_port)
             self.models.append(worker_policy)
+
+
+def compute_token_weights(metrics_list: list[dict[str, float]]) -> list[float]:
+    """Compute token-weighted weights for averaging metrics across ranks.
+
+    Important for sequence parallel where different ranks may have different token counts.
+    """
+    token_counts = [m.get("_token_count", 1.0) for m in metrics_list]
+    total_tokens = sum(token_counts)
+    if total_tokens > 0:
+        return [tc / total_tokens for tc in token_counts]
+    return [1.0 / len(metrics_list)] * len(metrics_list)
 
 
 def calculate_utilization_metrics(
@@ -2489,14 +2492,7 @@ def one_training_step(
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
-    # Compute token-weighted average for metrics (important for sequence parallel)
-    # Metrics that are averages over tokens should be weighted by token count
-    token_counts = [m.get("_token_count", 1.0) for m in metrics_list]
-    total_tokens = sum(token_counts)
-    if total_tokens > 0:
-        weights = [tc / total_tokens for tc in token_counts]
-    else:
-        weights = [1.0 / len(metrics_list)] * len(metrics_list)
+    weights = compute_token_weights(metrics_list)
 
     # Metrics that should be token-weighted (averages over tokens)
     token_weighted_metrics = {
