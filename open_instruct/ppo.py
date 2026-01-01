@@ -373,6 +373,8 @@ class Args:
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
+        # HfArgumentParser parses tuple[int, ...] elements as strings, so convert to int
+        self.max_tool_calls = tuple(int(x) for x in self.max_tool_calls)
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
