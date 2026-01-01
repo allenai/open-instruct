@@ -3,7 +3,7 @@ import unittest
 import torch
 
 import open_instruct.model_utils
-from open_instruct.model_utils import Batch
+from open_instruct.model_utils import Batch, TensorCache
 
 
 class TestBatchSlicing(unittest.TestCase):
@@ -58,6 +58,32 @@ class TestLogSoftmaxAndGather(unittest.TestCase):
         self.assertEqual(result.shape, (batch_size, seq_len))
         self.assertTrue(torch.all(result <= 0))
         self.assertTrue(torch.all(torch.isfinite(result)))
+
+
+class TestTensorCache(unittest.TestCase):
+    def test_getitem_returns_correct_tensors(self):
+        chosen_logps = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        rejected_logps = torch.tensor([[0.5, 1.5], [2.5, 3.5]])
+
+        cache = TensorCache(tensors={"chosen_logps": chosen_logps, "rejected_logps": rejected_logps})
+
+        result = cache[torch.tensor([0])]
+        self.assertTrue(torch.allclose(result["chosen_logps"], torch.tensor([[1.0, 2.0]])))
+        self.assertTrue(torch.allclose(result["rejected_logps"], torch.tensor([[0.5, 1.5]])))
+
+        result = cache[torch.tensor([1])]
+        self.assertTrue(torch.allclose(result["chosen_logps"], torch.tensor([[3.0, 4.0]])))
+        self.assertTrue(torch.allclose(result["rejected_logps"], torch.tensor([[2.5, 3.5]])))
+
+    def test_getitem_with_multiple_indices(self):
+        chosen_logps = torch.tensor([[1.0], [2.0], [3.0]])
+        rejected_logps = torch.tensor([[0.5], [1.5], [2.5]])
+
+        cache = TensorCache(tensors={"chosen_logps": chosen_logps, "rejected_logps": rejected_logps})
+
+        result = cache[torch.tensor([0, 2])]
+        self.assertTrue(torch.allclose(result["chosen_logps"], torch.tensor([[1.0], [3.0]])))
+        self.assertTrue(torch.allclose(result["rejected_logps"], torch.tensor([[0.5], [2.5]])))
 
 
 if __name__ == "__main__":
