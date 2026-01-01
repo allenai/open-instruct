@@ -60,9 +60,10 @@ from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.tools.base import Tool, ToolParser
 from open_instruct.tools.config import create_tool_parser
+from open_instruct.tools.parsers import ToolParser
 from open_instruct.tools.tools import MaxCallsExceededTool
+from open_instruct.tools.utils import Tool
 from open_instruct.utils import ModelDims, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)

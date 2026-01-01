@@ -29,7 +29,7 @@ from typing import Any
 
 import ray
 
-from open_instruct.tools.base import Tool, ToolOutput
+from open_instruct.tools.utils import Tool, ToolOutput
 
 logger = logging.getLogger(__name__)
 

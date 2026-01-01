@@ -112,8 +112,8 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
-from open_instruct.tools.base import Tool
 from open_instruct.tools.config import ToolArgs, ToolConfig, build_tools_from_config
+from open_instruct.tools.utils import Tool
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,

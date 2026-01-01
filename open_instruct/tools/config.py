@@ -16,7 +16,7 @@ import logging
 from dataclasses import MISSING, field, fields, make_dataclass
 from typing import Any
 
-from open_instruct.tools.base import DRTuluToolParser, OpenInstructLegacyToolParser, Tool, ToolParser
+from open_instruct.tools.parsers import DRTuluToolParser, OpenInstructLegacyToolParser, ToolParser
 from open_instruct.tools.tools import (
     DrAgentMCPTool,
     DrAgentMCPToolConfig,
@@ -29,6 +29,7 @@ from open_instruct.tools.tools import (
     SerperSearchTool,
     SerperSearchToolConfig,
 )
+from open_instruct.tools.utils import Tool
 
 logger = logging.getLogger(__name__)
 

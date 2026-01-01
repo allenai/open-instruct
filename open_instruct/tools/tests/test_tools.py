@@ -2,7 +2,6 @@ import subprocess
 import time
 import unittest
 
-from open_instruct.tools.base import ToolOutput
 from open_instruct.tools.config import ToolArgs, ToolConfig, build_tools_from_config
 from open_instruct.tools.tools import (
     MaxCallsExceededTool,
@@ -13,6 +12,7 @@ from open_instruct.tools.tools import (
     SerperSearchTool,
     SerperSearchToolConfig,
 )
+from open_instruct.tools.utils import ToolOutput
 
 
 class TestToolOutput(unittest.TestCase):
