@@ -728,16 +728,15 @@ class PolicyTrainerRayProcess(RayProcess):
         logger.info(f"Deepspeed config: {dschf=}")
 
         # set sequence parallel
-        self.mpu = None
-        if args.sequence_parallel_size > 1:
-            self.mpu = UlyssesSPAttentionHF.register_with_transformers(
-                model_name_or_path=model_config.model_name_or_path,
-                core_attn_implementation="flash_attention_2",
-                sequence_parallel_size=args.sequence_parallel_size,
-                max_length=args.pack_length,
-                micro_batch_size=args.per_device_train_batch_size,
-                seq_length_is_variable=True,
-            )
+        # note this returns None if sequence_parallel_size == 1
+        self.mpu = UlyssesSPAttentionHF.register_with_transformers(
+            model_name_or_path=model_config.model_name_or_path,
+            core_attn_implementation="flash_attention_2",
+            sequence_parallel_size=args.sequence_parallel_size,
+            max_length=args.pack_length,
+            micro_batch_size=args.per_device_train_batch_size,
+            seq_length_is_variable=True,
+        )
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
