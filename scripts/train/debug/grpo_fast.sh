@@ -3,7 +3,7 @@ export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
 uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
-    --dataset_mixer_list_splits train \
+     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 512 \

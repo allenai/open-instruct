@@ -112,7 +112,8 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import PackedSequences, Timer, masked_mean, pack_sequences
-from open_instruct.tool_utils import tools
+from open_instruct.tools.config import ToolArgs, ToolConfig, build_tools_from_config
+from open_instruct.tools.utils import Tool
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -427,24 +428,9 @@ class Args:
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
-    # Tool settings
-    tools: list[str] | None = None
-    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: tuple[int, ...] = (5,)
-    """Maximum number of tool calls allowed. If a tuple is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
-    mask_tool_use: bool = True
-    """Whether to mask the tool output. By default on."""
+    # Tool settings (main tool args are in ToolArgs dataclass)
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
-
-    # rl-rag specific settngs
-    number_documents_to_search: int = 3
-    """The maximum number of documents to retrieve for each query."""
-    search_api_endpoint: str | None = None
-    """The API endpoint for the search engine."""
-
-    # code-tool specific settings
-    code_tool_api_endpoint: str | None = None
 
     def __post_init__(self):
         if os.environ.get("VLLM_USE_V1") == "0":
@@ -510,15 +496,6 @@ class Args:
             if self.gs_checkpoint_state_dir is not None:
                 download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if self.tools is not None and len(self.tools) > 0:
-            for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
-            if self.use_vllm_logprobs or self.truncated_importance_sampling_ratio_cap > 0.0:
-                assert self.mask_tool_use, (
-                    "Must mask tool use when using vLLM logprobs or truncated importance sampling."
-                )
         if not self.load_ref_policy and self.beta != 0.0:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
@@ -1597,7 +1574,7 @@ def accumulate_inference_batches(
         if replenish_prompts:
             add_prompt_to_generator(next(data_loader), prompt_Q, generation_config, is_eval=False)
 
-        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
 
         percent_solved = np.mean(result.reward_scores).item() / args.max_possible_score
         # Don't resample prompt that was solved at more than no_resample_positive_rate
@@ -1659,6 +1636,7 @@ def accumulate_inference_batches(
     combined_tool_outputs = []
     combined_tool_runtimes = []
     combined_tool_calleds = []
+    combined_tool_call_counts = []
     combined_logprobs = []
 
     earliest_start_time = float("inf")
@@ -1679,6 +1657,7 @@ def accumulate_inference_batches(
         combined_tool_outputs.extend(result.request_info.tool_outputs)
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
+        combined_tool_call_counts.extend(result.request_info.tool_call_counts or [])
 
         combined_logprobs.extend(result.logprobs)
 
@@ -1712,6 +1691,7 @@ def accumulate_inference_batches(
         tool_outputs=combined_tool_outputs,
         tool_runtimes=combined_tool_runtimes,
         tool_calleds=combined_tool_calleds,
+        tool_call_counts=combined_tool_call_counts,
     )
 
     # Create combined GenerationResult
@@ -1868,7 +1848,7 @@ def data_preparation_thread(
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
-                mask_tool_use=args.mask_tool_use,
+                mask_tool_use=tool_args.mask_tool_use,
                 min_num_batches=args.world_size,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
@@ -1946,6 +1926,22 @@ def data_preparation_thread(
                 **batch_metrics_prefixed,
             }
 
+            # Add per-tool metrics
+            if result.request_info.tool_call_counts:
+                # Aggregate per-tool call counts across all samples
+                aggregated_tool_counts: dict[str, int] = {}
+                for sample_counts in result.request_info.tool_call_counts:
+                    for tool_name, count in sample_counts.items():
+                        aggregated_tool_counts[tool_name] = aggregated_tool_counts.get(tool_name, 0) + count
+
+                total_samples = len(result.request_info.tool_call_counts)
+                for tool_name, total_calls in aggregated_tool_counts.items():
+                    # Rate of samples that called this tool at least once
+                    samples_with_tool = sum(1 for s in result.request_info.tool_call_counts if s.get(tool_name, 0) > 0)
+                    metrics[f"val/tool_{tool_name}_call_rate"] = samples_with_tool / total_samples
+                    metrics[f"val/tool_{tool_name}_total_calls"] = total_calls
+                    metrics[f"val/tool_{tool_name}_calls_per_sample"] = total_calls / total_samples
+
             total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
             metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
 
@@ -1979,7 +1975,7 @@ def data_preparation_thread(
         )
 
 
-def setup_runtime_variables(args: Args) -> Args:
+def setup_runtime_variables(args: Args, tool_args: ToolArgs) -> Args:
     """Set up runtime variables for the experiment."""
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
@@ -2004,7 +2000,7 @@ def setup_runtime_variables(args: Args) -> Args:
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = args.tools is not None and len(args.tools) > 0
+    args.tool_use = tool_args.tools is not None and len(tool_args.tools) > 0
     return args
 
 
@@ -2033,8 +2029,15 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
     return beaker_config, wandb_url
 
 
-def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
-    """Set up training and evaluation datasets."""
+def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer, tools: list[dict] | None = None):
+    """Set up training and evaluation datasets.
+
+    Args:
+        args: Training arguments.
+        tc: Tokenizer configuration.
+        tokenizer: The tokenizer.
+        tools: Optional list of tool definitions in OpenAI format for chat template.
+    """
     system_prompt_override = None
     if args.system_prompt_override_file is not None:
         logger.info(f"Loading system prompt override from {args.system_prompt_override_file}")
@@ -2043,7 +2046,7 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
     transform_fn_args = [
-        {"system_prompt_override": system_prompt_override},
+        {"system_prompt_override": system_prompt_override, "tools": tools},
         {"max_prompt_token_length": args.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
@@ -2085,44 +2088,6 @@ def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokeniz
     return train_dataset, eval_dataset
 
 
-def load_tools(args: Args) -> dict[str, tools.Tool]:
-    """Load tool instances based on args.tools configuration.
-
-    Args:
-        args: Parsed training arguments with tool configuration.
-
-    Returns:
-        A mapping from tool end strings to tool instances.
-
-    Raises:
-        ValueError: If an unknown tool is requested.
-    """
-    tool_objects: dict[str, tools.Tool] = {}
-    if not args.tools:
-        return tool_objects
-
-    for tool in args.tools:
-        if tool.lower() == "search":
-            from open_instruct.search_utils.search_tool import SearchTool
-
-            tool_instance = SearchTool(
-                start_str="<query>",
-                end_str="</query>",
-                api_endpoint=args.search_api_endpoint,
-                number_documents_to_search=args.number_documents_to_search,
-            )
-        elif tool.lower() == "code":
-            tool_instance = tools.PythonCodeTool(
-                start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint
-            )
-        else:
-            raise ValueError(f"Unknown tool: {tool}")
-
-        tool_objects[tool_instance.end_str] = tool_instance
-
-    return tool_objects
-
-
 def create_model_and_optimizer(
     args: Args,
     tc: TokenizerConfig,
@@ -2136,7 +2101,9 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     train_dataset,
     eval_dataset,
-) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, tools.Tool], int, int]:
+    tool_objects: dict[str, Tool],
+    tool_config: "ToolConfig",
+) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -2148,9 +2115,6 @@ def create_model_and_optimizer(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
         for model in policy_group.models
     ]
-
-    tool_objects = load_tools(args)
-    args.stop_strings.extend(tool_objects.keys())
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -2174,8 +2138,9 @@ def create_model_and_optimizer(
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
-        max_tool_calls=args.max_tool_calls,
-        mask_tool_use=args.mask_tool_use,
+        tool_parser_name=tool_config.parser if tool_config.tools else None,
+        max_tool_calls=tool_config.max_tool_calls,
+        mask_tool_use=tool_config.mask_tool_use,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
@@ -2184,6 +2149,7 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        tokenizer=tokenizer,
     )
 
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
@@ -2213,7 +2179,7 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
-    return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
+    return policy_group, vllm_engines, resume_training_step, episode, actor_manager
 
 
 def create_generation_configs(args: Args):
@@ -2874,9 +2840,9 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: ToolArgs):
     tokenizer = make_tokenizer(tc, model_config)
-    args = setup_runtime_variables(args)
+    args = setup_runtime_variables(args, tool_args)
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -2885,7 +2851,27 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
+    # Initialize Ray early so we can create tools before dataset processing
+    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
+
+    # Create tools here so we can use them for dataset setup
+    tool_config = tool_args.to_tool_config()
+    tool_objects, tool_stop_strings = build_tools_from_config(tool_config)
+
+    pprint([args, model_config, tool_config])
+
+    # Get tool definitions for dataset transformation (chat template needs them)
+    tool_definitions = None
+    if tool_objects:
+        tool_definitions = [tool.get_openai_tool_definition() for tool in tool_objects.values()]
+        logger.info(f"Tool definitions for chat template: {[t['function']['name'] for t in tool_definitions]}")
+
+    # Add tool stop strings to args.stop_strings
+    for stop_string in tool_stop_strings:
+        if stop_string not in args.stop_strings:
+            args.stop_strings.append(stop_string)
+
+    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, tools=tool_definitions)
 
     if len(train_dataset) < (needed := max(args.async_steps, 1) * args.num_unique_prompts_rollout):
         raise ValueError(
@@ -2894,11 +2880,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     if args.cache_dataset_only:
         return
-
-    pprint([args, model_config])
-
-    # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
@@ -2923,21 +2904,21 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         verifier_functions=build_all_verifiers(args),
     )
 
-    policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
-        create_model_and_optimizer(
-            args,
-            tc,
-            model_config,
-            beaker_config,
-            wandb_url,
-            tokenizer,
-            inference_results_Q,
-            prompt_Q,
-            evaluation_inference_results_Q,
-            reward_config,
-            train_dataset,
-            eval_dataset,
-        )
+    policy_group, vllm_engines, resume_training_step, episode, actor_manager = create_model_and_optimizer(
+        args,
+        tc,
+        model_config,
+        beaker_config,
+        wandb_url,
+        tokenizer,
+        inference_results_Q,
+        prompt_Q,
+        evaluation_inference_results_Q,
+        reward_config,
+        train_dataset,
+        eval_dataset,
+        tool_objects,
+        tool_config,
     )
 
     # Get the model dimensions from one of the engines without loading weights
@@ -3035,10 +3016,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
-    args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
+    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig, ToolArgs))
+    args, tokenizer_config, model_config, tool_args = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
+    assert isinstance(tool_args, ToolArgs)
 
-    main(args, tokenizer_config, model_config)
+    main(args, tokenizer_config, model_config, tool_args)

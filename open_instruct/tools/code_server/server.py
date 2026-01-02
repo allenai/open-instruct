@@ -3,8 +3,8 @@
 
 This script sets up a FastAPI server that allows users to execute Python code snippets
 
-cd open_instruct/tool_utils
-PREIMPORT_PKGS=pandas,numpy,sympy,time,math,networkx uv run uvicorn tool_server:app --host 0.0.0.0 --port 1212
+cd open_instruct/tools/code_server
+PREIMPORT_PKGS=pandas,numpy,sympy,time,math,networkx uv run uvicorn server:app --host 0.0.0.0 --port 1212
 
 ```bash
 docker build -t tool-server .
@@ -13,7 +13,7 @@ beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 beaker image delete $beaker_user/tool-server
 beaker image create tool-server -n tool-server -w ai2/$beaker_user
 # ghcr build:
-docker build -t ghcr.io/allenai/open-instruct/python-code-executor -f open_instruct/tool_utils/Dockerfile .
+docker build -t ghcr.io/allenai/open-instruct/python-code-executor -f open_instruct/tools/code_server/Dockerfile .
 docker push ghcr.io/allenai/open-instruct/python-code-executor
 
 # Run the server
@@ -29,7 +29,7 @@ python mason.py \
     --image $beaker_user/tool-server --pure_docker_mode \
     --priority high \
     --budget ai2/oe-adapt \
-    --gpus 0 -- python tool_server.py
+    --gpus 0 -- python server.py
 # https://beaker.org/ex/01JSSTZG7111M8T1CA2D9S662N
 ```
 
@@ -71,6 +71,7 @@ import ast
 import asyncio
 import importlib
 import io
+import logging
 import os
 import signal
 import time
@@ -82,12 +83,11 @@ from contextlib import redirect_stderr, redirect_stdout, suppress
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from open_instruct import logger_utils
-
 ###############################################################################
 # Configure logging (Cloud Run uses stdout/stderr)
 ###############################################################################
-logger = logger_utils.setup_logger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 ###############################################################################
 # Pre‑import heavy libraries *before* the fork so children share memory
@@ -226,7 +226,7 @@ async def execute_code(req: CodeRequest):  # noqa: D401
 
     latency_ms = (time.perf_counter() - start) * 1000
     logger.info(
-        "📤 Responding success=%s latency=%.1f ms output_len=%s error=%s, output=\n%s",
+        "📤 Responding success=%s latency=%.1f ms output_len=%s error=%s, output=\n%s",
         result["success"],
         latency_ms,
         len(result["output"] or ""),
@@ -242,3 +242,12 @@ async def execute_code(req: CodeRequest):  # noqa: D401
 @app.get("/")
 async def root():  # noqa: D401
     return {"message": "Python Code Executor API — POST /execute {code, timeout}"}
+
+
+###############################################################################
+# Run with uvicorn when executed directly
+###############################################################################
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8080)
