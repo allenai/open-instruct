@@ -20,14 +20,13 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 from vllm.entrypoints.openai.protocol import ChatCompletionRequest
 from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
 
 from open_instruct.tools.utils import Tool, ToolCall
-
-from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 logger = logging.getLogger(__name__)
 
