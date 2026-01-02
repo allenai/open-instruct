@@ -786,7 +786,6 @@ class LLMRayActor:
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool support, awaiting tools inline."""
-    await _check_health(actor.server_port)
     response_tokens = []
     response_logprobs = []
     response_masks = []
