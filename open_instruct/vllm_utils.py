@@ -1002,7 +1002,6 @@ def create_vllm_engines(
             .options(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
-                max_concurrency=2,  # allow health checks to run
                 scheduling_strategy=scheduling_strategy,
                 runtime_env=ray.runtime_env.RuntimeEnv(
                     env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
