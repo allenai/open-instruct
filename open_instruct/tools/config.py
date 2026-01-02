@@ -20,6 +20,8 @@ from open_instruct.tools.parsers import DRTuluToolParser, OpenInstructLegacyTool
 from open_instruct.tools.tools import (
     DrAgentMCPTool,
     DrAgentMCPToolConfig,
+    JinaBrowseTool,
+    JinaBrowseToolConfig,
     MassiveDSSearchTool,
     MassiveDSSearchToolConfig,
     PythonCodeTool,
@@ -70,6 +72,7 @@ TOOL_REGISTRY: dict[str, tuple[type[Tool], type]] = {
     "serper_search": (SerperSearchTool, SerperSearchToolConfig),
     "massive_ds_search": (MassiveDSSearchTool, MassiveDSSearchToolConfig),
     "s2_search": (S2SearchTool, S2SearchToolConfig),
+    "jina_browse": (JinaBrowseTool, JinaBrowseToolConfig),
     "mcp": (DrAgentMCPTool, DrAgentMCPToolConfig),
 }
 

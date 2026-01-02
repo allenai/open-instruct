@@ -520,6 +520,129 @@ class SerperSearchTool(Tool):
 
 
 # =============================================================================
+# JinaBrowseTool + Config
+# =============================================================================
+
+
+@dataclass
+class JinaBrowseToolConfig:
+    """Configuration for the Jina Reader browse tool."""
+
+    cli_prefix: ClassVar[str] = "jina_"
+
+    api_key: str | None = None
+    """Jina API key. If not set, uses JINA_API_KEY environment variable."""
+    timeout_seconds: int = 30
+    """Timeout in seconds for fetching pages."""
+    max_content_length: int = 50000
+    """Maximum content length to return (in characters)."""
+    tag_name: str | None = None
+    """Override the default tag name."""
+
+
+class JinaBrowseTool(Tool):
+    """
+    Browse tool using the Jina Reader API (r.jina.ai).
+
+    Fetches and parses web pages into clean markdown text.
+    Requires JINA_API_KEY environment variable (free tier available).
+    """
+
+    _default_tool_function_name = "browse"
+    _default_tool_description = "Fetches and reads a webpage, returning its content as clean text"
+    _default_tool_parameters: dict[str, Any] = {
+        "type": "object",
+        "properties": {"url": {"type": "string", "description": "The URL of the webpage to browse"}},
+        "required": ["url"],
+    }
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        timeout_seconds: int = 30,
+        max_content_length: int = 50000,
+        tag_name: str | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
+        self.max_content_length = max_content_length
+        self._tag_name = tag_name
+
+    @classmethod
+    def from_config(cls, config: JinaBrowseToolConfig) -> "JinaBrowseTool":
+        return cls(
+            api_key=config.api_key,
+            timeout_seconds=config.timeout_seconds,
+            max_content_length=config.max_content_length,
+            tag_name=config.tag_name,
+        )
+
+    def __call__(self, url: str) -> ToolOutput:
+        """Fetch and parse a webpage using Jina Reader API."""
+        if not url or not url.strip():
+            result = ToolOutput(
+                output="",
+                error="Empty URL. Please provide a URL to browse.",
+                called=True,
+                timeout=False,
+                runtime=0,
+            )
+            _log_tool_call(self.tool_function_name, url or "", result)
+            return result
+
+        start_time = time.time()
+
+        # Get API key from config or environment
+        api_key = self.api_key or os.environ.get("JINA_API_KEY")
+
+        # Prepare headers
+        headers = {"Accept": "text/plain"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        # Build Jina Reader URL
+        jina_url = f"https://r.jina.ai/{url.strip()}"
+
+        session = _create_session_with_retries()
+
+        try:
+            response = session.get(
+                jina_url,
+                headers=headers,
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+
+            content = response.text
+
+            # Truncate if too long
+            if len(content) > self.max_content_length:
+                content = content[: self.max_content_length] + f"\n\n[Content truncated at {self.max_content_length} characters]"
+
+            result = ToolOutput(
+                output=content, called=True, error="", timeout=False, runtime=time.time() - start_time
+            )
+            _log_tool_call(self.tool_function_name, url, result)
+            return result
+
+        except requests.Timeout:
+            result = ToolOutput(
+                output="",
+                error=f"Timeout after {self.timeout_seconds} seconds",
+                called=True,
+                timeout=True,
+                runtime=time.time() - start_time,
+            )
+            _log_tool_call(self.tool_function_name, url, result)
+            return result
+
+        except requests.exceptions.RequestException as e:
+            result = ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
+            _log_tool_call(self.tool_function_name, url, result)
+            return result
+
+
+# =============================================================================
 # DrAgentMCPTool + Config
 # =============================================================================
 
