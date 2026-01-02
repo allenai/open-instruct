@@ -496,7 +496,6 @@ class Args:
             if self.gs_checkpoint_state_dir is not None:
                 download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        # Tool validation is now in ToolArgs.__post_init__
         if not self.load_ref_policy and self.beta != 0.0:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
@@ -2852,14 +2851,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
 
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
-    pprint([args, model_config])
-
     # Initialize Ray early so we can create tools before dataset processing
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     # Create tools here so we can use them for dataset setup
     tool_config = tool_args.to_tool_config()
     tool_objects, tool_stop_strings = build_tools_from_config(tool_config)
+
+    pprint([args, model_config, tool_config])
 
     # Get tool definitions for dataset transformation (chat template needs them)
     tool_definitions = None

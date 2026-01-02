@@ -224,7 +224,7 @@ class VllmParserConfig:
 
 
 VLLM_PARSERS: dict[str, VllmParserConfig] = {
-    # Hermes-style (also works for Qwen2.5)
+    # Hermes-style (also works for Qwen2.5/3)
     "hermes": VllmParserConfig(
         import_path="vllm.entrypoints.openai.tool_parsers.hermes_tool_parser:Hermes2ProToolParser",
         output_template="<|im_start|>tool\n<tool_response>\n{}\n</tool_response>\n<|im_end|>\n",

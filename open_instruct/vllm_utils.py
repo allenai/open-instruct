@@ -883,9 +883,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             try:
                 tool_result = await loop.run_in_executor(actor.executor, lambda t=triggered_tool, a=tool_args: t(**a))
             except Exception as e:
-                # If the model called the tool with wrong arguments, return an error instead of crashing
+                # If the tool errors for whatever reason, tell the model that it called the tool.
                 tool_result = ToolOutput(
-                    output="",
+                    output=f"Tool call failed: {type(e).__name__}: {e}",
                     error=f"Tool call failed: {type(e).__name__}: {e}",
                     called=True,
                     timeout=False,
