@@ -2857,12 +2857,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
     # Initialize Ray early so we can create tools before dataset processing
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
-    # Create tools early (needs Ray for tool actors)
-    # Note: tool_parser is created lazily inside the vLLM actor to avoid serialization issues
+    # Create tools here so we can use them for dataset setup
     tool_config = tool_args.to_tool_config()
     tool_objects, tool_stop_strings = build_tools_from_config(tool_config)
 
-    # Get tool definitions for dataset transformation (needed for vLLM native tool calling)
+    # Get tool definitions for dataset transformation (chat template needs them)
     tool_definitions = None
     if tool_objects:
         tool_definitions = [tool.get_openai_tool_definition() for tool in tool_objects.values()]
@@ -2872,15 +2871,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: 
     for stop_string in tool_stop_strings:
         if stop_string not in args.stop_strings:
             args.stop_strings.append(stop_string)
-
-    # Add parser stop sequences (e.g., </tool_call> for vLLM parsers)
-    from open_instruct.tools.config import get_parser_stop_sequences
-
-    parser_stop_sequences = get_parser_stop_sequences(tool_config.parser)
-    for stop_string in parser_stop_sequences:
-        if stop_string not in args.stop_strings:
-            args.stop_strings.append(stop_string)
-            logger.info(f"Added parser stop sequence: {stop_string!r}")
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, tools=tool_definitions)
 

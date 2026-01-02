@@ -16,7 +16,13 @@ import logging
 from dataclasses import MISSING, field, fields, make_dataclass
 from typing import Any
 
-from open_instruct.tools.parsers import DRTuluToolParser, OpenInstructLegacyToolParser, ToolParser
+from open_instruct.tools.parsers import (
+    DRTuluToolParser,
+    OpenInstructLegacyToolParser,
+    ToolParser,
+    get_vllm_parser_mapping,
+)
+from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
 from open_instruct.tools.tools import (
     DrAgentMCPTool,
     DrAgentMCPToolConfig,
@@ -80,51 +86,6 @@ EXCLUDED_FIELDS = {"tag_name", "cli_prefix"}
 _BUILTIN_PARSERS = ("legacy", "dr_tulu")
 
 
-def _get_vllm_parser_mapping() -> dict[str, str]:
-    """Auto-generate vllm_X -> X mapping from VLLM_PARSERS.
-
-    To add a new vLLM parser, just add it to VLLM_PARSERS in vllm_parsers.py.
-    The CLI argument will automatically be available as --tool_parser vllm_{name}.
-    """
-    from open_instruct.tools.vllm_parsers import VLLM_PARSERS
-
-    return {f"vllm_{name}": name for name in VLLM_PARSERS}
-
-
-# Lazy-load to avoid circular import at module level
-_VLLM_PARSER_MAPPING_CACHE: dict[str, str] | None = None
-
-
-def get_vllm_parser_mapping() -> dict[str, str]:
-    """Get the vLLM parser name mapping (lazy-loaded)."""
-    global _VLLM_PARSER_MAPPING_CACHE
-    if _VLLM_PARSER_MAPPING_CACHE is None:
-        _VLLM_PARSER_MAPPING_CACHE = _get_vllm_parser_mapping()
-    return _VLLM_PARSER_MAPPING_CACHE
-
-
-def get_parser_stop_sequences(parser_name: str) -> list[str]:
-    """Get stop sequences for a parser.
-
-    For vLLM parsers, these are the sequences that indicate a tool call is complete.
-    For legacy/dr_tulu parsers, stop sequences come from the tools themselves.
-
-    Args:
-        parser_name: The parser type name.
-
-    Returns:
-        List of stop sequences for this parser.
-    """
-    vllm_mapping = get_vllm_parser_mapping()
-    if parser_name in vllm_mapping:
-        from open_instruct.tools.vllm_parsers import VLLM_PARSERS
-
-        vllm_name = vllm_mapping[parser_name]
-        if vllm_name in VLLM_PARSERS:
-            return list(VLLM_PARSERS[vllm_name].stop_sequences)
-    return []
-
-
 def get_available_tools() -> list[str]:
     """Return list of available tool names."""
     return list(TOOL_REGISTRY.keys())
@@ -175,11 +136,6 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
         )
 
     return definitions
-
-
-# =============================================================================
-# Dynamic ToolArgs Construction
-# =============================================================================
 
 
 def _get_field_default(f: Any) -> Any:
@@ -309,14 +265,6 @@ def _tool_args_to_tool_config(self: Any) -> "ToolConfig":
 # Build ToolArgs at module load time
 ToolArgs, _CLI_TO_CONFIG_MAPPING = _build_tool_args()
 
-# Type hint for IDE (actual class is dynamic)
-ToolArgs: type  # noqa: F811
-
-
-# =============================================================================
-# ToolConfig (auto-generated)
-# =============================================================================
-
 
 def _build_tool_config() -> type:
     """Build ToolConfig dataclass from tool registry.
@@ -346,14 +294,6 @@ def _build_tool_config() -> type:
 # Build ToolConfig at module load time
 ToolConfig = _build_tool_config()
 
-# Type hint for IDE (actual class is dynamic)
-ToolConfig: type  # noqa: F811
-
-
-# =============================================================================
-# Tool Setup
-# =============================================================================
-
 
 def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] | None = None) -> ToolParser | None:
     """Create a tool parser by name.
@@ -382,7 +322,7 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
     elif parser_name in get_vllm_parser_mapping():
         if tokenizer is None:
             raise ValueError(f"parser='{parser_name}' requires a tokenizer")
-        from open_instruct.tools.vllm_parsers import create_vllm_parser
+        from open_instruct.tools.parsers import create_vllm_parser
 
         # Extract tool definitions for vLLM parsers
         tool_definitions = None
@@ -425,9 +365,6 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
     Returns:
         Tuple of (tools dict, stop_strings list)
     """
-    # Import here to avoid circular imports
-    from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
-
     if not config.tools:
         return {}, []
 

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Any
 
 
-# our only requirement is that tools must output a string
 @dataclass
 class ToolOutput:
     output: str

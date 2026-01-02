@@ -1,16 +1,3 @@
-"""
-Tools module for open-instruct.
-
-This module provides:
-- Tool base classes and data types (utils.py)
-- Tool parsers for extracting tool calls from model output (parsers.py)
-- Tool configuration and registry (config.py)
-- Tool implementations (tools.py)
-- Tool proxy for Ray actor serialization (proxy.py)
-- vLLM tool parser factories (vllm_parsers.py)
-- Code execution server for the Python tool (code_server/)
-"""
-
 from open_instruct.tools.config import (
     TOOL_REGISTRY,
     ToolArgs,
@@ -18,13 +5,17 @@ from open_instruct.tools.config import (
     build_tools_from_config,
     create_tool_parser,
     get_available_tools,
-    get_parser_stop_sequences,
     get_tool_definitions_from_config,
 )
-from open_instruct.tools.parsers import ToolParser, VllmToolParser
+from open_instruct.tools.parsers import (
+    VLLM_PARSERS,
+    ToolParser,
+    VllmToolParser,
+    create_vllm_parser,
+    get_available_vllm_parsers,
+)
 from open_instruct.tools.proxy import DEFAULT_MAX_CONCURRENCY, ToolActor, ToolProxy, create_tool_actor_from_config
 from open_instruct.tools.utils import Tool, ToolCall, ToolOutput
-from open_instruct.tools.vllm_parsers import VLLM_PARSERS, create_vllm_parser, get_available_vllm_parsers
 
 __all__ = [
     "DEFAULT_MAX_CONCURRENCY",
@@ -45,6 +36,5 @@ __all__ = [
     "create_vllm_parser",
     "get_available_tools",
     "get_available_vllm_parsers",
-    "get_parser_stop_sequences",
     "get_tool_definitions_from_config",
 ]
