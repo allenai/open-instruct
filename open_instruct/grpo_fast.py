@@ -1510,7 +1510,7 @@ def create_model_and_optimizer(
         verbose=args.verbose,
         work_dir=args.output_dir,
         initial_state=data_prep_actor_state,
-        allow_world_padding=False,
+        allow_world_padding=args.allow_world_padding,
     )
 
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
