@@ -36,7 +36,7 @@ if [ -n "$1" ]; then
     uv run python mason.py \
         --cluster "$CLUSTER" \
         --workspace "$WORKSPACE" \
-        --priority normal \
+        --priority urgent \
         --image "$BEAKER_IMAGE" \
         --description "Single GPU OLMo-core SFT debug job." \
         --pure_docker_mode \
