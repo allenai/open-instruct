@@ -258,7 +258,7 @@ python open_instruct/grpo_fast.py \
     --non_stop_penalty \
     --non_stop_penalty_value 0.0 \
     --num_epochs 1 \
-    --num_learners_per_node [4, 8] \
+    --num_learners_per_node 4 8 \
     --num_mini_batches 1 \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 48 \
@@ -268,7 +268,7 @@ python open_instruct/grpo_fast.py \
     --response_length 2048 \
     --save_freq 200 \
     --seed 1 \
-    --stop_strings ["</answer>"] \
+    --stop_strings "</answer>" \
     --temperature 1.0 \
     --tokenizer_name_or_path allenai/OLMo-2-0425-1B-DPO \
     --tokenizer_revision main \
@@ -314,7 +314,7 @@ python open_instruct/grpo_fast.py \
     --save_freq 200 \
     --save_traces True \
     --seed 1 \
-    --stop_strings ["</answer>"] \
+    --stop_strings "</answer>" \
     --temperature 1.0 \
     --tokenizer_name_or_path allenai/OLMo-2-0425-1B-RLVR1 \
     --tokenizer_revision main \
