@@ -7,7 +7,12 @@ Core to training OLMo models (version 1 and 2) at least are to include the follo
 
 For more details on how to convert these to standard launch commands (without ai2 `mason.py`) see the `tulu3.md` docs.
 
-## Insturction Finetuning
+The time taken for each stage of training was approximately:
+1. SFT: 9 hours, 1 H100 node (8 GPUs).
+2. DPO: 2 hours, 1 H100 node.
+3. RLVR: 43 hours per stage for 2 million episodes on 2 H100 nodes (16 GPUs), totalling around 86 hours.
+
+## Instruction Finetuning
 
 ### 1B
 
@@ -64,10 +69,11 @@ accelerate launch \
     --exp_name olmo2_1b_v2_sft_lr3e-5_seed1  \
     --model_name_or_path allenai/OLMo-2-0425-1B \
     --model_revision main \
-    --tokenizer_name allenai/OLMo-2-1124-7B \
+    --tokenizer_name allenai/OLMo-2-0425-1B \
     --tokenizer_revision main \
     --use_slow_tokenizer False \
     --add_bos \
+    --chat_template_name tulu \
     --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
     --use_flash_attn \
     --max_seq_length 4096 \
