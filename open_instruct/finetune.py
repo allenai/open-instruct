@@ -59,15 +59,7 @@ from olmo_core.data.types import LongDocStrategy
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.distributed.utils import get_local_rank, get_rank
 from olmo_core.exceptions import OLMoConfigurationError
-from olmo_core.internal.common import (
-    CLUSTER_TO_GPU_TYPE,
-    build_launch_config,
-    get_beaker_username,
-    get_root_dir,
-    get_work_dir,
-)
-from olmo_core.io import copy_dir, dir_is_empty, get_parent, join_path
-from olmo_core.launch.beaker import BeakerLaunchConfig
+from olmo_core.io import copy_dir, dir_is_empty, is_url, join_path
 from olmo_core.nn.transformer import TransformerConfig
 from olmo_core.optim import LinearWithWarmup, SkipStepAdamWConfig
 from olmo_core.train import (
@@ -92,10 +84,17 @@ from olmo_core.train.train_module import (
     TransformerTrainModuleConfig,
 )
 from olmo_core.utils import prepare_cli_environment, seed_all
-from rich import print
-from tqdm import tqdm
 
-from open_instruct.dataset_transformation import (
+SKIP_LAUNCH_CONFIG = False
+try:
+    from olmo_core.launch.beaker import BeakerLaunchConfig
+except ImportError:
+    SKIP_LAUNCH_CONFIG = True
+    BeakerLaunchConfig = None  # type: ignore
+from rich import print  # noqa: E402
+from tqdm import tqdm  # noqa: E402
+
+from open_instruct.dataset_transformation import (  # noqa: E402
     ATTENTION_MASK_KEY,
     DATASET_ORIGIN_KEY,
     INPUT_IDS_KEY,
@@ -105,8 +104,8 @@ from open_instruct.dataset_transformation import (
     remove_dataset_source_field,
     visualize_token,
 )
-from open_instruct.dataset_transformation import TokenizerConfig as OITokenizerConfig
-from open_instruct.utils import is_beaker_job
+from open_instruct.dataset_transformation import TokenizerConfig as OITokenizerConfig  # noqa: E402
+from open_instruct.utils import is_beaker_job  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -114,6 +113,46 @@ DEFAULT_SEQUENCE_LENGTH = 4096
 DEFAULT_NUM_NODES = 1
 GPUS_PER_NODE = 8
 MAX_RANK_MICROBATCH_SIZE_TOKENS = 16_384
+
+CLUSTER_TO_GPU_TYPE = {
+    "ai2/jupiter": "NVIDIA H100 80GB HBM3",
+    "ai2/augusta": "NVIDIA H100 80GB HBM3",
+    "ai2/ceres": "NVIDIA H100 80GB HBM3",
+    "ai2/neptune": "NVIDIA B200",
+}
+
+
+def get_beaker_username() -> str | None:
+    return os.environ.get("BEAKER_USER") or os.environ.get("BEAKER_EXPERIMENT_AUTHOR")
+
+
+def get_root_dir(cluster: str) -> str:
+    if cluster in ["ai2/test-h100", "ai2/jupiter", "ai2/augusta", "ai2/ceres", "ai2/neptune"]:
+        return "/weka/oe-training-default/ai2-llm"
+    elif cluster in ["ai2/prior"]:
+        return "/net/nfs.cirrascale/prior/ai2"
+    elif cluster in ["ai2/saturn", "ai2/aristo-elara-cirrascale"]:
+        return "/net/nfs.cirrascale/aristo/ai2"
+    elif cluster in ["ai2/allennlp", "ai2/mosaic"]:
+        return "/net/nfs.cirrascale/allennlp/ai2"
+    elif cluster == "local":
+        return "./output"
+    raise OLMoConfigurationError(f"Unknown cluster: {cluster}")
+
+
+def get_work_dir(root_dir: str) -> str:
+    if is_url(root_dir):
+        return "./dataset-cache"
+    elif (beaker_username := get_beaker_username()) is not None:
+        return f"{root_dir}/checkpoints/{beaker_username.lower()}/dataset-cache"
+    else:
+        return f"{root_dir}/checkpoints/dataset-cache"
+
+
+def get_parent(path: str) -> str:
+    if "/" in path:
+        return "/".join(path.rstrip("/").split("/")[:-1])
+    return "."
 
 
 @dataclass
@@ -209,7 +248,7 @@ class SFTConfig(Config):
     """Configuration for SFT training."""
 
     run_name: str
-    launch: BeakerLaunchConfig
+    launch: Any
     model: TransformerConfig
     dataset: NumpyPackedFSLDatasetConfig | None
     data_loader: NumpyDataLoaderConfig
@@ -277,9 +316,11 @@ class SFTConfig(Config):
         model = TransformerConfig.olmo2_7B(vocab_size=tokenizer_config.padded_vocab_size())
         model.block.attention.use_flash = True
 
-        config = SFTConfig(
-            run_name=run_name,
-            launch=build_launch_config(
+        launch_config = None
+        if not SKIP_LAUNCH_CONFIG:
+            from olmo_core.internal.common import build_launch_config
+
+            launch_config = build_launch_config(
                 name=run_name,
                 root_dir=root_dir,
                 cmd=[
@@ -300,7 +341,11 @@ class SFTConfig(Config):
                 num_nodes=num_nodes,
                 budget=budget,
                 workspace=workspace,
-            ),
+            )
+
+        config = SFTConfig(
+            run_name=run_name,
+            launch=launch_config,
             model=model,
             dataset=None,
             data_loader=NumpyDataLoaderConfig(
@@ -807,6 +852,8 @@ def main() -> None:
     if args.cmd == "dry_run":
         print("Dry run completed. Configuration is valid.")
     elif args.cmd == "launch":
+        if config.launch is None:
+            raise RuntimeError("Launch mode not available (beaker-py version incompatible with olmo_core)")
         config.launch.launch(follow=args.follow)
     elif args.cmd == "train":
         no_save_tokenizer = getattr(args, "no_save_tokenizer", False)
