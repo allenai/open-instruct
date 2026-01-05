@@ -99,6 +99,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, masked_mean
+from open_instruct.tool_utils import tools
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -162,15 +163,13 @@ class Args:
     total_episodes: int = 100000
     """The total number of episodes in the dataset"""
     world_size: int | None = None
-    """RUNTIME VALUE: The number of processes (GPUs) to use"""
+    """RUNTIME VALUE: The number of processes (GPUs) to use for training ONLY"""
     num_training_steps: int | None = None
     """RUNTIME VALUE: The number of training_steps to train"""
     local_eval_every: int = 100
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
     """How many train steps to save the model"""
-    allow_world_padding: bool = False
-    """Whether to allow world padding. This is useful for model sweeps, but wastes compute."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
 
@@ -417,6 +416,12 @@ class PolicyTrainerRayProcess(RayProcess):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
+        # Pre-initialize torch.distributed WITHOUT device_id to avoid NCCL hangs.
+        # DeepSpeed 0.17.3 and up sets device_id in init_process_group which can cause hangs
+        # when multiple process groups exist (e.g., for weight sync to vLLM).
+        # By initializing first, DeepSpeed will detect it and wrap it instead of re-initializing.
+        if not torch.distributed.is_initialized():
+            torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=args.backend_timeout))
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(
@@ -539,6 +544,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 checkpoint_path=self.ref_policy_checkpoint_path
                 if hasattr(self, "ref_policy_checkpoint_path")
                 else None,
+                ref_policy_update_freq=args.ref_policy_update_freq,
+                alpha=args.alpha,
             )
         self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
         return optimization_steps_done
@@ -601,6 +608,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
+            torch.cuda.set_device(self.local_rank)
             self.model_update_group = vllm_utils.init_process_group(
                 backend=backend,
                 init_method=f"tcp://{master_address}:{master_port}",
@@ -615,6 +623,9 @@ class PolicyTrainerRayProcess(RayProcess):
     def broadcast_to_vllm(self):
         # avoid OOM
         torch.cuda.empty_cache()
+        # Ensure CUDA device is set before broadcast operations.
+        # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
+        torch.cuda.set_device(self.local_rank)
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
@@ -1245,6 +1256,23 @@ def calculate_utilization_metrics(
     return utilization_metrics
 
 
+def validate_configs(
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
+    num_learners_per_node: tuple[int, ...],
+) -> None:
+    """Validate cross-cutting config constraints."""
+    if streaming_config.num_unique_prompts_rollout < vllm_config.vllm_num_engines:
+        logger.warning(
+            f"With num_unique_prompts_rollout={streaming_config.num_unique_prompts_rollout} < "
+            f"vllm_num_engines={vllm_config.vllm_num_engines}, vllm will be generating data for multiple "
+            "batches simultaneously. This is fine but might be unexpected behaviour."
+        )
+    assert streaming_config.num_samples_per_prompt_rollout * streaming_config.num_unique_prompts_rollout >= sum(
+        num_learners_per_node
+    ), "You must have at least as many samples as training GPUs (DP ranks) for distributed training!"
+
+
 def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig) -> Args:
     """Set up runtime variables for the experiment."""
     if streaming_config.tools and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
@@ -1362,6 +1390,44 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
+def load_tools(args: Args) -> dict[str, tools.Tool]:
+    """Load tool instances based on args.tools configuration.
+
+    Args:
+        args: Parsed training arguments with tool configuration.
+
+    Returns:
+        A mapping from tool end strings to tool instances.
+
+    Raises:
+        ValueError: If an unknown tool is requested.
+    """
+    tool_objects: dict[str, tools.Tool] = {}
+    if not args.tools:
+        return tool_objects
+
+    for tool in args.tools:
+        if tool.lower() == "search":
+            from open_instruct.search_utils.search_tool import SearchTool
+
+            tool_instance = SearchTool(
+                start_str="<query>",
+                end_str="</query>",
+                api_endpoint=args.search_api_endpoint,
+                number_documents_to_search=args.number_documents_to_search,
+            )
+        elif tool.lower() == "code":
+            tool_instance = tools.PythonCodeTool(
+                start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint
+            )
+        else:
+            raise ValueError(f"Unknown tool: {tool}")
+
+        tool_objects[tool_instance.end_str] = tool_instance
+
+    return tool_objects
+
+
 def create_model_and_optimizer(
     args: Args,
     tc: TokenizerConfig,
@@ -1379,7 +1445,7 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     generation_config,
     data_prep_actor_state: dict | None = None,
-) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict, int, int]:
+) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, tools.Tool], int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -1387,8 +1453,7 @@ def create_model_and_optimizer(
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
     # Set up tools
-    max_len = streaming_config.max_prompt_token_length + streaming_config.response_length
-    tool_objects = {}
+    tool_objects: dict[str, tools.Tool] = {}
     if streaming_config.tools:
         for tool in streaming_config.tools:
             if tool.lower() == "search":
@@ -1478,7 +1543,7 @@ def create_model_and_optimizer(
         model_config.model_revision,
         args.seed,
         vllm_config.vllm_enable_prefix_caching,
-        max_len,
+        streaming_config.max_prompt_token_length + streaming_config.response_length,  # max_model_len
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
@@ -2133,6 +2198,7 @@ def main(
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config)
+    validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node))
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
