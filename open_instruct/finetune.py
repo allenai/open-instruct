@@ -708,7 +708,10 @@ def main() -> None:
     train_parser.add_argument("run_name", help="Name of the run")
     train_parser.add_argument("pretrain_checkpoint", help="Path to pretrain checkpoint")
     train_parser.add_argument("cluster", help="Beaker cluster")
-    train_parser.add_argument("--dataset_path", required=True, help="Path to pre-tokenized dataset")
+    train_parser.add_argument("--dataset_path", help="Path to pre-tokenized dataset")
+    train_parser.add_argument("--dataset_mixer_list", nargs="+", help="HF datasets to mix (e.g., dataset1 1.0)")
+    train_parser.add_argument("--cache_dataset_only", action="store_true", help="Cache dataset and exit")
+    train_parser.add_argument("--output_dir", default="output/", help="Output dir for cached dataset")
     train_parser.add_argument("--seq_len", type=int, default=DEFAULT_SEQUENCE_LENGTH)
     train_parser.add_argument("--num_nodes", type=int, default=DEFAULT_NUM_NODES)
     train_parser.add_argument("--global_batch_size", type=int, default=64 * DEFAULT_SEQUENCE_LENGTH)
@@ -750,6 +753,22 @@ def main() -> None:
         cache_dataset_only(cache_args, tc)
         return
 
+    if args.cmd == "train" and getattr(args, "cache_dataset_only", False):
+        dataset_mixer_list = getattr(args, "dataset_mixer_list", None)
+        if dataset_mixer_list is None:
+            raise ValueError("--dataset_mixer_list required with --cache_dataset_only")
+        tc = OITokenizerConfig(tokenizer_name_or_path=args.pretrain_checkpoint, chat_template_name="olmo")
+        cache_args = CacheDatasetArguments(
+            output_dir=getattr(args, "output_dir", "output/"),
+            dataset_mixer_list=dataset_mixer_list,
+            dataset_mixer_list_splits=["train"],
+            max_seq_length=args.seq_len,
+            num_examples=0,
+            visualize=False,
+        )
+        cache_dataset_only(cache_args, tc)
+        return
+
     if args.cmd in ("launch", "dry_run"):
         prepare_cli_environment()
     elif args.cmd == "train":
@@ -757,6 +776,10 @@ def main() -> None:
     else:
         parser.print_help()
         return
+
+    dataset_path = getattr(args, "dataset_path", None)
+    if dataset_path is None:
+        raise ValueError("--dataset_path required for training (use --cache_dataset_only first)")
 
     config = SFTConfig.build(
         script=sys.argv[0],
@@ -770,7 +793,7 @@ def main() -> None:
         overrides=overrides,
         budget=args.budget,
         workspace=args.workspace,
-        dataset_path=args.dataset_path,
+        dataset_path=dataset_path,
         learning_rate=getattr(args, "learning_rate", 8e-5),
         warmup_ratio=getattr(args, "warmup_ratio", 0.03),
         num_epochs=getattr(args, "num_epochs", 3),
