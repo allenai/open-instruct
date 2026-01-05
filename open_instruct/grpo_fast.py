@@ -2193,10 +2193,7 @@ def create_model_and_optimizer(
     results, _ = ray_get_with_progress(inits, desc="Initializing models")
     optimization_steps_done, checkpoint_state = results[0]
     resume_training_step = optimization_steps_done + 1
-    if checkpoint_state and "episode" in checkpoint_state:
-        episode = checkpoint_state["episode"]
-    else:
-        episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     logger.info("======== ✅ all models and vLLM engines initialized =========")
 
     kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
@@ -2836,11 +2833,7 @@ def run_training(
             utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
             with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
                 # Save comprehensive client state including dataloader state
-                client_state = {
-                    "training_step": training_step,
-                    "episode": episode,
-                    "num_total_tokens": num_total_tokens,
-                }
+                client_state = {"training_step": training_step, "num_total_tokens": num_total_tokens}
 
                 # Save dataloader state
                 if data_loader is not None:
