@@ -8,7 +8,7 @@
 RUN_NAME="debug-sft-olmo2-7b"
 CHECKPOINT="s3://ai2-llm/checkpoints/OLMo-2/Olmo-2-1124-7B/step556000-unsharded"
 CLUSTER="ai2/jupiter"
-DATASET_PATH="/weka/oe-training-default/ai2-llm/preprocessed/tulu-sft/tulu-3-sft-olmo-2-mixture-4096"
+DATASET_PATH="s3://ai2-llm/preprocessed/tulu-sft/tulu-3-sft-olmo-2-mixture-4096"
 SEQ_LEN=4096
 NUM_NODES=1
 GLOBAL_BATCH_SIZE=$((64 * SEQ_LEN))
