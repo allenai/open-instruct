@@ -57,38 +57,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          tags: open-instruct-gpu-tests:latest
-          build-args: |
-            GIT_COMMIT=${{ github.sha }}
-            GIT_BRANCH=${{ github.head_ref || github.ref_name }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
-
-      - name: Upload image to Beaker and run tests
+      - name: Run GPU tests on Beaker
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+          DOCKER_CACHE_PUSH: "1"
+          DOCKER_CACHE_REPO: ghcr.io/${{ github.repository }}:buildcache
         run: |
-          beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-
-          # Hash dependencies to create stable image name (skip upload if unchanged)
-          deps_hash=$(sha256sum pyproject.toml uv.lock | sha256sum | cut -c1-12)
-          image_name="open-instruct-gpu-tests-${deps_hash}"
-
-          # Check if image already exists
-          if beaker image get "$beaker_user/$image_name" &>/dev/null; then
-            echo "Beaker image $image_name already exists, skipping upload"
-          else
-            echo "Creating new Beaker image: $image_name"
-            beaker image create open-instruct-gpu-tests:latest -n "$image_name" -w "ai2/$beaker_user" --description "Git commit: ${{ github.sha }}"
-          fi
-
-          output=$(bash scripts/train/debug/run_gpu_pytest.sh "$beaker_user/$image_name" 2>&1)
+          output=$(./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh 2>&1)
           echo "$output"
 
           exp_url=$(echo "$output" | grep -oP 'https://beaker.org/ex/[^\s]+' | head -1)
