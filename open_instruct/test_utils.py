@@ -28,7 +28,6 @@ from dateutil import parser
 from parameterized import parameterized
 
 from open_instruct import grpo_fast, utils
-from open_instruct.finetune import FlatArguments
 
 
 def _load_mbu_test_cases():
@@ -489,25 +488,6 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(specs["flops"], expected_specs["flops"])
         self.assertEqual(specs["memory_size"], expected_specs["memory_size"])
         self.assertEqual(specs["memory_bandwidth"], expected_specs["memory_bandwidth"])
-
-
-class TestFlatArguments(unittest.TestCase):
-    def test_additional_model_args(self) -> None:
-        parser = utils.ArgumentParserPlus(FlatArguments)
-        (args,) = parser.parse_args_into_dataclasses(
-            ["--additional_model_arguments", '{"int": 1, "bool": true, "float": 0.0, "float2": 5e-7}']
-        )
-        self.assertIsInstance(args.additional_model_arguments, dict)
-        self.assertIsInstance(args.additional_model_arguments["int"], int)
-        self.assertIsInstance(args.additional_model_arguments["bool"], bool)
-        self.assertIsInstance(args.additional_model_arguments["float"], float)
-        self.assertIsInstance(args.additional_model_arguments["float2"], float)
-
-    def test_no_additional_model_args(self) -> None:
-        parser = utils.ArgumentParserPlus(FlatArguments)
-        (args,) = parser.parse_args_into_dataclasses(["--exp_name", "test"])
-        self.assertIsInstance(args.additional_model_arguments, dict)
-        self.assertFalse(args.additional_model_arguments)
 
 
 class TestModelDims(unittest.TestCase):

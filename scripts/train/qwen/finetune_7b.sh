@@ -1,3 +1,12 @@
+#!/bin/bash
+# DEPRECATED: finetune.py now only supports OLMo models via OLMo-core infrastructure.
+# This script trained Qwen models which are no longer supported.
+# Use scripts/train/olmo2/*.sh for OLMo model training instead.
+
+echo "ERROR: This script is deprecated. finetune.py now only supports OLMo models."
+echo "Use scripts/train/olmo2/*.sh for OLMo model training."
+exit 1
+
 python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \

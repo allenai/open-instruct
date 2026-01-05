@@ -1,3 +1,12 @@
+#!/bin/bash
+# DEPRECATED: finetune.py now uses OLMo-core infrastructure instead of HF Accelerate.
+# This script is kept for reference only.
+# Use scripts/train/olmo2/*.sh for OLMo model training instead.
+
+echo "ERROR: This script is deprecated. finetune.py now uses OLMo-core instead of Accelerate."
+echo "Use scripts/train/olmo2/*.sh for OLMo model training."
+exit 1
+
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 MODEL_SIZE=7B

@@ -1,4 +1,11 @@
 #!/bin/bash
+# DEPRECATED: finetune.py now only supports OLMo models via OLMo-core infrastructure.
+# This script trained Llama models which are no longer supported.
+# Use scripts/train/olmo2/*.sh for OLMo model training instead.
+
+echo "ERROR: This script is deprecated. finetune.py now only supports OLMo models."
+echo "Use scripts/train/olmo2/*.sh for OLMo model training."
+exit 1
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 

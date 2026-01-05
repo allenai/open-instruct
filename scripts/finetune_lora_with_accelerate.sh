@@ -1,3 +1,12 @@
+#!/bin/bash
+# DEPRECATED: LoRA training is no longer supported in the OLMo-core based finetune.py.
+# This script is kept for reference only.
+# See the TODO at the top of open_instruct/finetune.py for planned LoRA support.
+
+echo "ERROR: This script is deprecated. LoRA training is not currently supported."
+echo "See open_instruct/finetune.py for the TODO to add LoRA support."
+exit 1
+
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 MODEL_SIZE=7B

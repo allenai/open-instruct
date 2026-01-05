@@ -1,3 +1,12 @@
+#!/bin/bash
+# DEPRECATED: QLoRA training is no longer supported in the OLMo-core based finetune.py.
+# This script is kept for reference only.
+# See the TODO at the top of open_instruct/finetune.py for planned QLoRA support.
+
+echo "ERROR: This script is deprecated. QLoRA training is not currently supported."
+echo "See open_instruct/finetune.py for the TODO to add QLoRA support."
+exit 1
+
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 
 MODEL_SIZE=70B
