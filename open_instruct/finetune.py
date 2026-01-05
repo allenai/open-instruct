@@ -824,7 +824,11 @@ def main() -> None:
 
     dataset_path = getattr(args, "dataset_path", None)
     if dataset_path is None:
-        raise ValueError("--dataset_path required for training (use --cache_dataset_only first)")
+        output_dir = getattr(args, "output_dir", None)
+        if output_dir:
+            dataset_path = output_dir
+        else:
+            raise ValueError("--dataset_path or --output_dir required for training")
 
     config = SFTConfig.build(
         script=sys.argv[0],
