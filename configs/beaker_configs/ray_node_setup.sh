@@ -4,13 +4,6 @@ export PATH="/root/.local/bin:$PATH"
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 export NCCL_CUMEM_ENABLE=0
-# Suppress Ray future warning about accelerator visible devices
-export RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
-# Explicitly set vLLM multiprocessing method to suppress warning
-export VLLM_WORKER_MULTIPROC_METHOD=spawn
-# Reduce Gloo verbosity (suppress "connected to 0 peer ranks" messages)
-export GLOO_LOG_LEVEL=ERROR
-
 
 echo CURRENT_DATETIME=$CURRENT_DATETIME
 echo PYTHONPATH=$PYTHONPATH
