@@ -111,7 +111,7 @@ accelerate launch \
     --model_name_or_path allenai/OLMo-2-0425-1B-SFT \
     --model_revision main \
     --use_flash_attn \
-    --tokenizer_name_or_path allenai/OLMo-2-1124-13B \
+    --tokenizer_name_or_path allenai/OLMo-2-0425-1B-SFT \
     --tokenizer_revision main \
     --max_seq_length 2048 \
     --per_device_train_batch_size 8 \
@@ -125,9 +125,10 @@ accelerate launch \
     --report_to wandb \
     --logging_steps 1 \
     --gradient_checkpointing \
-    --dataset_mixer_list allenai/olmo-2-0425-1b-preference-mix \
+    --dataset_mixer_list allenai/olmo-2-0425-1b-preference-mix 1.0 \
     --use_slow_tokenizer False \
     --add_bos \
+    --chat_template_name tulu \
     --use_lora False \
     --dpo_loss_type dpo_norm \
     --dpo_beta 5
