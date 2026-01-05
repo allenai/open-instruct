@@ -102,7 +102,7 @@ accelerate launch \
     --mixed_precision bf16 \
     --num_processes 8 \
     --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage2_accelerate.conf \
+    --deepspeed_config_file configs/ds_configs/stage2_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/dpo_tune_cache.py \
     --exp_name 0424_1B_dpo_onpol_lr_2.5e-6_seed_111 \
@@ -151,7 +151,7 @@ python mason.py \
     --mixed_precision bf16 \
     --num_processes 8 \
     --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage2_accelerate.conf \
+    --deepspeed_config_file configs/ds_configs/stage2_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/dpo_tune_cache.py \
     --exp_name "0424_1B_dpo_onpol_lr_2.5e-6_seed_111" \
