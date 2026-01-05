@@ -53,7 +53,7 @@ from datetime import datetime
 from typing import Any, Literal, cast
 
 import numpy as np
-from olmo_core.config import Config, DType
+from olmo_core.config import DType
 from olmo_core.data import NumpyDataLoaderConfig, NumpyPackedFSLDatasetConfig, TokenizerConfig
 from olmo_core.data.types import LongDocStrategy
 from olmo_core.distributed.parallel import DataParallelType
@@ -244,7 +244,7 @@ def build_sft_dataset(
 
 
 @dataclass
-class SFTConfig(Config):
+class SFTConfig:
     """Configuration for SFT training."""
 
     run_name: str
@@ -388,11 +388,9 @@ class SFTConfig(Config):
                 ),
             ),
             init_seed=init_seed,
-        ).merge(overrides)
+        )
 
         config.dataset = dataset_config
-
-        print(config)
 
         return config
 
@@ -849,9 +847,6 @@ def main() -> None:
         wandb_project=getattr(args, "wandb_project", None),
         wandb_entity=getattr(args, "wandb_entity", None),
     )
-
-    if get_local_rank() == 0:
-        print(config)
 
     if args.cmd == "dry_run":
         print("Dry run completed. Configuration is valid.")
