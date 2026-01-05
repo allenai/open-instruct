@@ -71,6 +71,7 @@ class TestGrpoFastBase(unittest.TestCase):
         utils.check_runtime_leaks()
 
         # Initialize Ray for this test
+        os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
         ray.init(include_dashboard=False, runtime_env={"env_vars": dict(os.environ)})
 
     def _cleanup_ray_queues(self):
