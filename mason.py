@@ -15,7 +15,7 @@ import requests
 from rich.console import Console
 from rich.text import Text
 
-from open_instruct.cluster_config import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS, download_from_gs_bucket
+from open_instruct.launch_utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS, download_from_gs_bucket
 
 console = Console()
 
@@ -438,7 +438,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
     is_open_instruct_training = any(cmd in command for cmd in OPEN_INSTRUCT_COMMANDS)
     if is_open_instruct_training:
         from open_instruct.dataset_transformation import get_commit_hash
-        from open_instruct.utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
+        from open_instruct.launch_utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
 
         # HACK: Cache dataset logic:
         # Here we basically try to run the tokenization full_command locally before running it on beaker

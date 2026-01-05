@@ -7,7 +7,7 @@ from datetime import datetime
 
 import yaml
 
-from open_instruct.utils import get_beaker_whoami
+from open_instruct.launch_utils import get_beaker_whoami
 
 
 def load_yaml(file_path):
