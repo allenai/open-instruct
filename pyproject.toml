@@ -116,8 +116,7 @@ src_paths = ["open_instruct"]
 [tool.ruff]
 target-version = "py310"
 line-length = 119
-# do both . and open_instruct to make sure known-first-party below works
-src = [".", "open_instruct"]
+src = ["open_instruct"]
 exclude = ["wandb"]
 
 [tool.ruff.format]
@@ -148,7 +147,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["open-instruct"]
+known-first-party = ["open_instruct"]
 # case insensitive to match isort --profile black
 case-sensitive = false
 # Disable split-on-trailing-comma to work with skip-magic-trailing-comma
