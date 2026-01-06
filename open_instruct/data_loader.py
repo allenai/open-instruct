@@ -167,7 +167,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         # If this is slow, we can speed it up by making this a boolean mask.
         self.dataset = shuffled.filter(lambda x: x["index"] not in self._excluded_indices)
         self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
-        self._build_index_mapping()
+        self._index_to_position = build_index_mapping(self.dataset)
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
