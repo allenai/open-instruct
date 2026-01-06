@@ -135,8 +135,8 @@ def load_model_config_from_checkpoint(checkpoint_path: str, vocab_size: int) -> 
     """Load TransformerConfig from checkpoint's config.json file."""
     from olmo_core.io import resource_path
 
-    config_path = join_path(checkpoint_path, "config.json")
-    with resource_path(config_path).open("r") as f:
+    local_config_path = resource_path(checkpoint_path, "config.json")
+    with local_config_path.open("r") as f:
         config_dict = json.load(f)
 
     model_config_dict = config_dict["model"]
