@@ -8,7 +8,7 @@ uv run python mason.py \
     --cluster ai2/jupiter \
     --description "Multi-node DPO run with OLMo3-7B, 32k sequence length." \
     --workspace ai2/open-instruct-dev \
-    --priority high \
+    --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --preemptible \
