@@ -316,11 +316,6 @@ def main(
 
     logger_utils.setup_logger(rank=rank)
 
-    if args.model_name_or_path:
-        model_config.model_name_or_path = args.model_name_or_path
-    if args.model_revision:
-        model_config.model_revision = args.model_revision
-
     tokenizer = make_tokenizer(tc, model_config)
 
     args.num_training_steps = args.total_episodes // (
