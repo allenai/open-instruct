@@ -446,13 +446,13 @@ class BatchStatistics:
 def add_prompt_to_generator(
     example: dict[str, Any], epoch_number: int, param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
 ) -> None:
-    dataset_index = example["dataset_index"]
+    index = example["index"]
     param_prompt_Q.put(
         data_types.PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
-            dataset_index=dataset_index,
-            prompt_id=f"{epoch_number}_{dataset_index}",
+            index=index,
+            prompt_id=f"{epoch_number}_{index}",
             is_eval=is_eval,
         )
     )
@@ -527,10 +527,10 @@ def accumulate_inference_batches(
         assert len(result.responses) == generation_config.n, (
             f"Mismatch: individual prompt result has {len(result.responses)} responses "
             f"but expected {generation_config.n} samples per prompt. "
-            f"Dataset index: {result.dataset_index}, Prompt ID: {result.prompt_id}"
+            f"Index: {result.index}, Prompt ID: {result.prompt_id}"
         )
 
-        example = dataset[result.dataset_index]
+        example = dataset[result.index]
         query = example[INPUT_IDS_PROMPT_KEY]
         ground_truth = example[GROUND_TRUTHS_KEY]
         dataset_name = example[VERIFIER_SOURCE_KEY]
@@ -558,7 +558,7 @@ def accumulate_inference_batches(
         percent_solved = np.mean(result.reward_scores).item() / max_possible_score
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             assert iter_dataloader is not None
-            iter_dataloader.exclude_index(result.dataset_index)
+            iter_dataloader.exclude_index(result.index)
             total_no_resampled += 1
             logging.debug(
                 f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
@@ -666,7 +666,7 @@ def accumulate_inference_batches(
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=None,
+        index=None,
         prompt_id=results[0].prompt_id,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
