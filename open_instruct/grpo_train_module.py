@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from olmo_core import config
 from olmo_core.distributed.parallel import build_world_mesh
-from olmo_core.distributed.utils import get_default_device, is_distributed
+from olmo_core.distributed.utils import is_distributed
 from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
 from olmo_core.optim.scheduler import Scheduler
@@ -23,6 +23,7 @@ from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import TrainModule
 from olmo_core.train.train_module.transformer.common import parallelize_model
 from olmo_core.train.train_module.transformer.config import TransformerDataParallelConfig
+from olmo_core.utils import get_default_device
 from transformers import PreTrainedTokenizer
 
 from open_instruct import data_types
