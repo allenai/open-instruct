@@ -37,6 +37,7 @@ import openai
 import ray
 import torch
 import torch.distributed
+import uvicorn
 import vllm
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -51,7 +52,6 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
-from vllm.entrypoints.launcher import serve_http
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils import FlexibleArgumentParser
@@ -294,7 +294,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
             tool_runtimes=tool_runtimes,
             tool_calleds=tool_calleds,
         ),
-        dataset_index=metadata["dataset_index"],
+        index=metadata["index"],
         prompt_id=metadata["prompt_id"],
         token_statistics=TokenStatistics(
             num_prompt_tokens=len(metadata["prompt_token_ids"]),
@@ -411,7 +411,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
-        "dataset_index": request.dataset_index,
+        "index": request.index,
         "prompt_id": request.prompt_id,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
@@ -480,7 +480,8 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
 async def compute_rewards(
     actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset, is_eval: bool
 ) -> tuple[list[float], dict]:
-    example = dataset[result.dataset_index]
+    index_map = actor._eval_index_map if is_eval else actor._train_index_map
+    example = dataset[index_map[result.index]]
     decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
     k = len(result.responses)
@@ -554,6 +555,12 @@ class LLMRayActor:
         self.reward_config = reward_config
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
+        self._train_index_map: dict[int, int] = (
+            {train_dataset[i]["index"]: i for i in range(len(train_dataset))} if train_dataset is not None else {}
+        )
+        self._eval_index_map: dict[int, int] = (
+            {eval_dataset[i]["index"]: i for i in range(len(eval_dataset))} if eval_dataset is not None else {}
+        )
         self.reward_fn = reward_config.build() if reward_config else None
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
@@ -623,9 +630,8 @@ class LLMRayActor:
 
             logger.info(f"Starting vLLM OpenAI API server on port {self.server_port}")
 
-            asyncio.create_task(
-                serve_http(app, sock=sock, host="127.0.0.1", port=self.server_port, log_level="warning")
-            )
+            config = uvicorn.Config(app, host="127.0.0.1", port=self.server_port, log_level="warning")
+            asyncio.create_task(uvicorn.Server(config).serve(sockets=[sock]))
 
             # Yield control to allow the server task to start before returning.
             await asyncio.sleep(0.1)
