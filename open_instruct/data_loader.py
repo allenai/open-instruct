@@ -114,8 +114,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     def __getitem__(self, index: int) -> dict[str, Any]:
         """Look up an example by its original dataset index."""
-        position = self._index_to_position[index]
-        return self.dataset[position]
+        return self.dataset[self._index_to_position[index]]
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
