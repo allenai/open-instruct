@@ -290,6 +290,10 @@ class Args:
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
+    # Data loading
+    allow_world_padding: bool = False
+    """Whether to allow padding to fill incomplete batches when dataset size doesn't divide evenly by world size"""
+
     def __post_init__(self):
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
