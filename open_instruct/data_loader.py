@@ -46,6 +46,11 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 logger = logging.getLogger(__name__)
 
 
+def build_index_mapping(dataset: Dataset) -> dict[str, int]:
+    """Build a mapping from original row IDs to current positional indices."""
+    return {dataset[i]["index"]: i for i in range(len(dataset))}
+
+
 class HFDataLoader(data_loader.DataLoaderBase):
     """A DataLoader that wraps a HuggingFace Dataset for use with olmo_core's Trainer.
 
@@ -88,8 +93,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._excluded_indices: set[int] = set()
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
-        self._index_to_position: dict[int, int] = {}
-        self._build_index_mapping()
+        self._index_to_position: dict[int, int] = build_index_mapping(self.dataset)
 
     def __next__(self) -> dict[str, Any]:
         if self._current_iter is None:
@@ -112,10 +116,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Look up an example by its original dataset index."""
         position = self._index_to_position[index]
         return self.dataset[position]
-
-    def _build_index_mapping(self) -> None:
-        """Build a mapping from original row IDs to current positional indices."""
-        self._index_to_position = {self.dataset[i]["index"]: i for i in range(len(self.dataset))}
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
