@@ -186,8 +186,6 @@ class PythonCodeToolConfig(BaseToolConfig):
     """The API endpoint for the code execution server."""
     timeout_seconds: int = 3
     """Timeout in seconds for code execution."""
-    tag_name: str | None = None
-    """Override the default tag name (e.g., use <python> instead of <code>)."""
 
     def build(self) -> PythonCodeTool:
         if not self.api_endpoint:
@@ -284,8 +282,6 @@ class MassiveDSSearchToolConfig(BaseToolConfig):
     """The API endpoint for the search engine."""
     num_documents: int = 3
     """The maximum number of documents to retrieve for each query."""
-    tag_name: str | None = None
-    """Override the default tag name."""
 
 
 # =============================================================================
@@ -383,8 +379,6 @@ class S2SearchToolConfig(BaseToolConfig):
 
     num_results: int = 10
     """Number of results to return from Semantic Scholar."""
-    tag_name: str | None = None
-    """Override the default tag name (e.g., use <search> instead of <s2_search>)."""
 
 
 # =============================================================================
@@ -501,8 +495,6 @@ class SerperSearchToolConfig(BaseToolConfig):
 
     num_results: int = 5
     """Number of results to return from Serper."""
-    tag_name: str | None = None
-    """Override the default tag name."""
 
 
 # =============================================================================
@@ -705,18 +697,3 @@ class DrAgentMCPToolConfig(BaseToolConfig):
     """Whether to use localized snippets."""
     context_chars: int = 6000
     """Number of context characters for MCP tools."""
-    tag_name: str | None = None
-    """Override the default tag name. Not used for MCP tools."""
-
-
-# =============================================================================
-# Tool Config Registry
-# =============================================================================
-
-TOOL_CONFIG_REGISTRY: dict[str, type[BaseToolConfig]] = {
-    "python": PythonCodeToolConfig,
-    "massive_ds_search": MassiveDSSearchToolConfig,
-    "s2_search": S2SearchToolConfig,
-    "serper_search": SerperSearchToolConfig,
-    "mcp": DrAgentMCPToolConfig,
-}

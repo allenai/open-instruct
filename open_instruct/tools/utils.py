@@ -107,6 +107,9 @@ class BaseToolConfig:
         # ClassVars are not included in asdict(), so they won't be passed to build()
         tool_class: ClassVar[type[Tool]]
 
+    tag_name: str | None = None
+    """Override the default tag/function name for this tool instance."""
+
     def build(self) -> Tool:
         """Build the tool instance from this config.
 

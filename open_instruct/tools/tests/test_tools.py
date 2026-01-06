@@ -156,7 +156,7 @@ class TestToolConfigTagName(unittest.TestCase):
 
     def test_single_tool_tag_name_override(self):
         """Single tool with tag_name override."""
-        config = ToolConfig(tools=["s2_search"], tool_tag_names=["search"], s2_search=S2SearchToolConfig())
+        config = ToolConfig(tools=["s2_search"], tool_tag_names=["search"])
         tools, stop_strings = build_tools_from_config(config)
         # The tool should be keyed by the overridden tag name
         self.assertIn("search", tools)
@@ -204,14 +204,14 @@ class TestToolConfigs(unittest.TestCase):
         """Test that tool_configs works for simple values."""
         args = ToolArgs(tools=["serper_search"], tool_configs=['{"num_results": 10}'])
         config = args.to_tool_config()
-        self.assertEqual(config.serper_search.num_results, 10)
+        self.assertEqual(config.get_tool_config("serper_search").num_results, 10)
 
     def test_tool_configs_multiple_fields(self):
         """Test that tool_configs works with multiple fields."""
         args = ToolArgs(tools=["s2_search"], tool_configs=['{"num_results": 20, "tag_name": "papers"}'])
         config = args.to_tool_config()
-        self.assertEqual(config.s2_search.num_results, 20)
-        self.assertEqual(config.s2_search.tag_name, "papers")
+        self.assertEqual(config.get_tool_config("s2_search").num_results, 20)
+        self.assertEqual(config.get_tool_config("s2_search").tag_name, "papers")
 
     def test_tool_configs_multiple_tools(self):
         """Test tool_configs with multiple tools."""
@@ -219,14 +219,14 @@ class TestToolConfigs(unittest.TestCase):
             tools=["serper_search", "s2_search"], tool_configs=['{"num_results": 5}', '{"num_results": 15}']
         )
         config = args.to_tool_config()
-        self.assertEqual(config.serper_search.num_results, 5)
-        self.assertEqual(config.s2_search.num_results, 15)
+        self.assertEqual(config.get_tool_config("serper_search").num_results, 5)
+        self.assertEqual(config.get_tool_config("s2_search").num_results, 15)
 
     def test_tool_configs_empty_dict_uses_defaults(self):
         """Test that empty dict {} uses default values."""
         args = ToolArgs(tools=["serper_search"], tool_configs=["{}"])
         config = args.to_tool_config()
-        self.assertEqual(config.serper_search.num_results, 5)  # default
+        self.assertEqual(config.get_tool_config("serper_search").num_results, 5)  # default
 
     def test_tool_configs_invalid_json(self):
         """Test that invalid JSON raises an error."""
@@ -262,8 +262,8 @@ class TestToolConfigs(unittest.TestCase):
         """Test tool_configs for MCP tool."""
         args = ToolArgs(tools=["mcp"], tool_configs=['{"tool_names": "snippet_search,google_search", "timeout": 120}'])
         config = args.to_tool_config()
-        self.assertEqual(config.mcp.tool_names, "snippet_search,google_search")
-        self.assertEqual(config.mcp.timeout, 120)
+        self.assertEqual(config.get_tool_config("mcp").tool_names, "snippet_search,google_search")
+        self.assertEqual(config.get_tool_config("mcp").timeout, 120)
 
 
 class TestToolProxy(unittest.TestCase):

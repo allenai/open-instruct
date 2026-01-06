@@ -16,7 +16,7 @@ CLI Usage:
 
 import json
 import logging
-from dataclasses import field, fields, make_dataclass
+from dataclasses import dataclass, field, fields, make_dataclass
 from typing import Any
 
 from open_instruct.tools.parsers import (
@@ -27,18 +27,13 @@ from open_instruct.tools.parsers import (
 )
 from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
 from open_instruct.tools.tools import (
-    DrAgentMCPTool,
     DrAgentMCPToolConfig,
-    MassiveDSSearchTool,
     MassiveDSSearchToolConfig,
-    PythonCodeTool,
     PythonCodeToolConfig,
-    S2SearchTool,
     S2SearchToolConfig,
-    SerperSearchTool,
     SerperSearchToolConfig,
 )
-from open_instruct.tools.utils import Tool
+from open_instruct.tools.utils import BaseToolConfig, Tool
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +42,15 @@ logger = logging.getLogger(__name__)
 # Tool Registry
 # =============================================================================
 
-# Maps tool name -> (tool_cls, config_cls)
+# Maps tool name -> config_cls
+# The config class must have `tool_class` as a ClassVar pointing to the Tool class.
 # The dict key is used as both the tool name and the config attribute name.
 #
 # To add a new tool:
 #   1. Create YourTool and YourToolConfig in tools.py
 #      - YourToolConfig should inherit from BaseToolConfig
 #      - Set tool_class as a ClassVar on the config
-#   2. Add an entry here: "mytool": (MyTool, MyToolConfig)
+#   2. Add an entry here: "mytool": MyToolConfig
 #
 # Example:
 #     # In tools.py
@@ -62,20 +58,20 @@ logger = logging.getLogger(__name__)
 #     class MyToolConfig(BaseToolConfig):
 #         tool_class: ClassVar[type[Tool]] = MyTool
 #         some_option: int = 10
-#         tag_name: str | None = None
+#         # tag_name inherited from BaseToolConfig
 #
 #     # In config.py, add to TOOL_REGISTRY:
-#     "mytool": (MyTool, MyToolConfig),
+#     "mytool": MyToolConfig,
 #
 #     # Now you can use:
 #     #   --tools mytool --tool_configs '{"some_option": 20}'
 
-TOOL_REGISTRY: dict[str, tuple[type[Tool], type]] = {
-    "python": (PythonCodeTool, PythonCodeToolConfig),
-    "serper_search": (SerperSearchTool, SerperSearchToolConfig),
-    "massive_ds_search": (MassiveDSSearchTool, MassiveDSSearchToolConfig),
-    "s2_search": (S2SearchTool, S2SearchToolConfig),
-    "mcp": (DrAgentMCPTool, DrAgentMCPToolConfig),
+TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
+    "python": PythonCodeToolConfig,
+    "serper_search": SerperSearchToolConfig,
+    "massive_ds_search": MassiveDSSearchToolConfig,
+    "s2_search": S2SearchToolConfig,
+    "mcp": DrAgentMCPToolConfig,
 }
 
 
@@ -114,7 +110,8 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
         if tool_name_lower not in TOOL_REGISTRY:
             raise ValueError(f"Unknown tool: {tool_name}. Available: {get_available_tools()}")
 
-        tool_cls, _ = TOOL_REGISTRY[tool_name_lower]
+        config_cls = TOOL_REGISTRY[tool_name_lower]
+        tool_cls = config_cls.tool_class
 
         # Get tag name from config or use default
         if config.tool_tag_names and i < len(config.tool_tag_names):
@@ -198,7 +195,7 @@ def _tool_args_post_init(self: Any) -> None:
     if self.tools and self.tool_configs:
         for i, (tool_name, config_str) in enumerate(zip(self.tools, self.tool_configs)):
             tool_name_lower = tool_name.lower()
-            _, config_cls = TOOL_REGISTRY[tool_name_lower]
+            config_cls = TOOL_REGISTRY[tool_name_lower]
 
             try:
                 config_dict = json.loads(config_str)
@@ -241,18 +238,16 @@ def _tool_args_to_tool_config(self: Any) -> "ToolConfig":
     """Convert ToolArgs to internal ToolConfig structure."""
     parsed_configs = getattr(self, "_parsed_configs", [])
 
-    # Build tool configs dict - only for tools that are specified
-    tool_configs = {}
-    for name, (_, config_cls) in TOOL_REGISTRY.items():
-        tool_configs[name] = config_cls()  # Default config
+    # Build tool configs dict - start with defaults
+    tool_configs_dict = {name: config_cls() for name, config_cls in TOOL_REGISTRY.items()}
 
     # Override with parsed configs for specified tools
     if self.tools:
         for i, tool_name in enumerate(self.tools):
             tool_name_lower = tool_name.lower()
-            _, config_cls = TOOL_REGISTRY[tool_name_lower]
+            config_cls = TOOL_REGISTRY[tool_name_lower]
             config_kwargs = parsed_configs[i] if i < len(parsed_configs) else {}
-            tool_configs[tool_name_lower] = config_cls(**config_kwargs)
+            tool_configs_dict[tool_name_lower] = config_cls(**config_kwargs)
 
     return ToolConfig(
         tools=self.tools,
@@ -260,7 +255,7 @@ def _tool_args_to_tool_config(self: Any) -> "ToolConfig":
         mask_tool_use=self.mask_tool_use,
         parser=self.tool_parser,
         tool_tag_names=self.tool_tag_names,
-        **tool_configs,
+        tool_configs=tool_configs_dict,
     )
 
 
@@ -268,33 +263,25 @@ def _tool_args_to_tool_config(self: Any) -> "ToolConfig":
 ToolArgs = _build_tool_args()
 
 
-def _build_tool_config() -> type:
-    """Build ToolConfig dataclass from tool registry.
-
-    This auto-generates the ToolConfig class with a field for each tool's config.
-    """
-    # Base fields
-    base_fields: list[tuple[str, type, Any]] = [
-        ("tools", list[str] | None, field(default=None)),
-        ("max_tool_calls", int, field(default=5)),
-        ("mask_tool_use", bool, field(default=True)),
-        ("parser", str, field(default="legacy")),
-        ("tool_tag_names", list[str] | None, field(default=None)),
-    ]
-
-    # Add a field for each tool config (tool_name is the config attr name)
-    for tool_name, (_, config_cls) in TOOL_REGISTRY.items():
-        base_fields.append((tool_name, config_cls, field(default_factory=config_cls)))
-
-    return make_dataclass(
-        "ToolConfig",
-        base_fields,
-        namespace={"__doc__": "Internal structured tool configuration. Auto-generated from TOOL_REGISTRY."},
-    )
+def _default_tool_configs() -> dict[str, BaseToolConfig]:
+    """Create default configs for all registered tools."""
+    return {name: config_cls() for name, config_cls in TOOL_REGISTRY.items()}
 
 
-# Build ToolConfig at module load time
-ToolConfig = _build_tool_config()
+@dataclass
+class ToolConfig:
+    """Internal structured tool configuration."""
+
+    tools: list[str] | None = None
+    max_tool_calls: int = 5
+    mask_tool_use: bool = True
+    parser: str = "legacy"
+    tool_tag_names: list[str] | None = None
+    tool_configs: dict[str, BaseToolConfig] = field(default_factory=_default_tool_configs)
+
+    def get_tool_config(self, tool_name: str) -> BaseToolConfig:
+        """Get the config for a specific tool."""
+        return self.tool_configs[tool_name.lower()]
 
 
 def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] | None = None) -> ToolParser | None:
@@ -375,7 +362,7 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
 
     for i, tool_name in enumerate(config.tools):
         tool_name_lower = tool_name.lower()
-        tool_config = getattr(config, tool_name_lower)  # config attr = tool name
+        tool_config = config.get_tool_config(tool_name_lower)
 
         if config.tool_tag_names and hasattr(tool_config, "tag_name"):
             tool_config.tag_name = config.tool_tag_names[i]
