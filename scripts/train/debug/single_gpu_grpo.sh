@@ -11,7 +11,7 @@ uv run python mason.py \
        --cluster ai2/saturn \
        --cluster ai2/ceres \
        --image "$BEAKER_IMAGE" \
-       --description "Single GPU on Beaker test script." \
+       --description "Single GPU grpo.py with OLMo3-7B test." \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
@@ -21,7 +21,7 @@ uv run python mason.py \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --budget ai2/oe-adapt \
        --gpus 1 \
-	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
@@ -32,7 +32,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen3-1.7B \
+    --model_name_or_path allenai/Olmo-3-1025-7B \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
@@ -52,7 +52,7 @@ uv run python mason.py \
     --seed 3 \
     --local_eval_every 1 \
     --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.3 \
+    --vllm_gpu_memory_utilization 0.5 \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
