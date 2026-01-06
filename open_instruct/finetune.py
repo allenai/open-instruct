@@ -256,6 +256,18 @@ class SFTConfig:
     trainer: TrainerConfig
     init_seed: int
 
+    def as_config_dict(self) -> dict[str, Any]:
+        """Return a dictionary representation of the config for logging."""
+        return {
+            "run_name": self.run_name,
+            "init_seed": self.init_seed,
+            "model": str(self.model),
+            "dataset": str(self.dataset),
+            "data_loader": str(self.data_loader),
+            "train_module": str(self.train_module),
+            "trainer": str(self.trainer),
+        }
+
     @classmethod
     def build(
         cls,
