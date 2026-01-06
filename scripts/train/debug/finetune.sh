@@ -9,7 +9,7 @@
 #   ./scripts/train/debug/finetune.sh <beaker_image>
 
 RUN_NAME="debug-sft-olmo2-7b"
-CHECKPOINT="s3://ai2-llm/checkpoints/OLMo-2/Olmo-2-1124-7B/step556000-unsharded"
+CHECKPOINT="/weka/oe-training-default/ai2-llm/checkpoints/OLMo-2/Olmo-2-1124-7B/step556000-unsharded"
 CLUSTER="ai2/jupiter"
 SEQ_LEN=4096
 NUM_NODES=1
