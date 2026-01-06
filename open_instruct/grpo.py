@@ -30,7 +30,6 @@ from typing import Literal
 import ray
 import torch
 import torch.distributed as dist
-from datasets import Dataset
 from huggingface_hub import HfApi
 from olmo_core import train
 from olmo_core.config import DType
@@ -47,13 +46,12 @@ from olmo_core.train.train_module.transformer import (
 )
 from ray.util import queue as ray_queue
 from rich.pretty import pprint
-from transformers import PreTrainedTokenizer
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import logger_utils, utils, vllm_utils
+from open_instruct import grpo_fast, logger_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_loader import DataPreparationActor
-from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
+from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
 from open_instruct.grpo_callbacks import (
     DataPreparationActorCheckpointCallback,
@@ -185,13 +183,6 @@ class GRPOExperimentConfig:
         )
 
 
-def make_tokenizer(tc: TokenizerConfig, model_config: ModelConfig) -> PreTrainedTokenizer:
-    tc.tokenizer_name_or_path = (
-        model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
-    )
-    return tc.tokenizer
-
-
 def setup_experiment_tracking(args: GRPOExperimentConfig, tc: TokenizerConfig, model_config: ModelConfig):
     beaker_config = None
     if is_beaker_job():
@@ -213,47 +204,6 @@ def setup_experiment_tracking(args: GRPOExperimentConfig, tc: TokenizerConfig, m
         args.wandb_entity = maybe_use_ai2_wandb_entity()
 
     return beaker_config
-
-
-def setup_datasets(
-    args: GRPOExperimentConfig,
-    tc: TokenizerConfig,
-    tokenizer: PreTrainedTokenizer,
-    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
-) -> tuple[Dataset, Dataset | None]:
-    train_dataset = get_cached_dataset_tulu(
-        dataset_mixer_list=streaming_config.dataset_mixer_list,
-        dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
-        tc=tc,
-        dataset_transform_fn=streaming_config.dataset_transform_fn,
-        transform_fn_args=streaming_config.transform_fn_args,
-        target_columns=streaming_config.dataset_target_columns,
-        dataset_cache_mode=streaming_config.dataset_cache_mode,
-        dataset_config_hash=streaming_config.dataset_config_hash,
-        hf_entity=args.hf_entity,
-        dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
-        dataset_skip_cache=streaming_config.dataset_skip_cache,
-    )
-    train_dataset = train_dataset.shuffle(seed=args.seed)
-    train_dataset.set_format(type="pt")
-
-    eval_dataset = None
-    if streaming_config.eval_dataset_mixer_list:
-        eval_dataset = get_cached_dataset_tulu(
-            dataset_mixer_list=streaming_config.eval_dataset_mixer_list,
-            dataset_mixer_list_splits=streaming_config.eval_dataset_mixer_list_splits or ["train"],
-            tc=tc,
-            dataset_transform_fn=streaming_config.dataset_transform_fn,
-            transform_fn_args=streaming_config.transform_fn_args,
-            target_columns=streaming_config.dataset_target_columns,
-            dataset_cache_mode=streaming_config.dataset_cache_mode,
-            hf_entity=args.hf_entity,
-            dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
-            dataset_skip_cache=streaming_config.dataset_skip_cache,
-        )
-        eval_dataset.set_format(type="pt")
-
-    return train_dataset, eval_dataset
 
 
 def create_generation_config(
@@ -316,7 +266,7 @@ def main(
 
     logger_utils.setup_logger(rank=rank)
 
-    tokenizer = make_tokenizer(tc, model_config)
+    tokenizer = grpo_fast.make_tokenizer(tc, model_config)
 
     args.num_training_steps = args.total_episodes // (
         streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
@@ -326,7 +276,7 @@ def main(
         logging.getLogger().setLevel(logging.DEBUG)
 
     beaker_config = setup_experiment_tracking(args, tc, model_config)
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config)
+    train_dataset, eval_dataset = grpo_fast.setup_datasets(args, tc, tokenizer, streaming_config)
 
     if len(train_dataset) < (
         needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
