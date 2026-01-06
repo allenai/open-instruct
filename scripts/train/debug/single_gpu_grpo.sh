@@ -57,4 +57,5 @@ uv run python mason.py \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --push_to_hub false \
-    --single_gpu_mode
+    --single_gpu_mode \
+    --add_bos
