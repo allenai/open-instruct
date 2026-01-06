@@ -2051,7 +2051,7 @@ requires-dist = [
     { name = "tensorboard", specifier = ">=2.18.0" },
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = ">=2.8.0,<2.9", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = ">=2.8.0,<2.9" },
-    { name = "torchao", specifier = ">=0.9.0" },
+    { name = "torchao", specifier = ">=0.7.0,<0.9.0" },
     { name = "transformers", specifier = ">=4.57.0" },
     { name = "uvicorn", marker = "extra == 'code'", specifier = ">=0.20.0" },
     { name = "vllm", specifier = "==0.11.0" },
@@ -3357,11 +3357,11 @@ wheels = [
 
 [[package]]
 name = "torchao"
-version = "0.15.0"
+version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/57/2d/472b9362dceae05a4599e2b94f86e69a29c0e20964a6af84f34f6ead5938/torchao-0.15.0-cp310-abi3-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:1cbe813201314ba6329a650a76944502f3e8ec4b1b44523f3f48676810d8d1f6", size = 7163930, upload-time = "2025-12-18T23:14:41.876Z" },
-    { url = "https://files.pythonhosted.org/packages/f6/3b/6b9d5618720f63dbc2e2509cd6b57aae9c0d61b738d1d2172f4d5d9efaab/torchao-0.15.0-py3-none-any.whl", hash = "sha256:3f3812676048ef8a2a0e9d492d12d8971ba7a7ebb16f54aa56f690414e130d2c", size = 1080679, upload-time = "2025-12-18T23:14:43.807Z" },
+    { url = "https://files.pythonhosted.org/packages/14/9a/74d00ac123b507dd6e4f589bab4a7872f981f32627fb3851e2670575b1ca/torchao-0.8.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:372c071869d4ebca527055bb2e5d889ca6762fcadee1c562609a47ff48fc14da", size = 4748885, upload-time = "2025-01-15T22:47:50.52Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/d7/151e05197fe24e5f00eec2720c91876626bccbc4d7e51f1c992413128dbf/torchao-0.8.0-py3-none-any.whl", hash = "sha256:ae0640aae719f041eb3a814d0a03fcfe504cf40a9de58daca656933136ca70f4", size = 676033, upload-time = "2025-01-15T22:47:52.954Z" },
 ]
 
 [[package]]

@@ -794,7 +794,7 @@ torch==2.8.0+cu128 ; sys_platform != 'darwin'
     #   vllm
     #   xformers
     #   xgrammar
-torchao==0.15.0
+torchao==0.8.0
     # via open-instruct
 torchaudio==2.8.0
     # via vllm
