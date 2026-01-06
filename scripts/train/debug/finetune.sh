@@ -48,7 +48,7 @@ python open_instruct/finetune.py cache_dataset_only \
     --tokenizer_name_or_path allenai/OLMo-2-1124-7B
 
 echo "Step 2: Running training..."
-torchrun --nproc_per_node=8 open_instruct/finetune.py train \
+torchrun --nproc_per_node=8 --rdzv-backend=c10d --rdzv-endpoint=localhost:0 open_instruct/finetune.py train \
     '"$RUN_NAME"' \
     '"$CHECKPOINT"' \
     '"$CLUSTER"' \
@@ -76,7 +76,7 @@ else
         --tokenizer_name_or_path allenai/OLMo-2-1124-7B
 
     echo "Step 2: Running training..."
-    uv run torchrun --nproc_per_node=8 open_instruct/finetune.py train \
+    uv run torchrun --nproc_per_node=8 --rdzv-backend=c10d --rdzv-endpoint=localhost:0 open_instruct/finetune.py train \
         "$RUN_NAME" \
         "$CHECKPOINT" \
         "$CLUSTER" \
