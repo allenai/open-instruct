@@ -137,7 +137,7 @@ class TestDataCollatorDatasetIndex(unittest.TestCase):
         cls.tokenizer.pad_token = cls.tokenizer.eos_token
         cls.model = AutoModelForCausalLM.from_pretrained(cls.model_name, torch_dtype=torch.bfloat16).cuda()
 
-    def test_collator_preserves_dataset_index(self):
+    def test_collator_preserves_index(self):
         samples = [
             {
                 "chosen_input_ids": torch.tensor([1, 2, 3, 4, 5]),
@@ -146,7 +146,7 @@ class TestDataCollatorDatasetIndex(unittest.TestCase):
                 "rejected_input_ids": torch.tensor([1, 2, 6, 7, 8]),
                 "rejected_labels": torch.tensor([-100, -100, 6, 7, 8]),
                 "rejected_attention_mask": torch.tensor([1, 1, 1, 1, 1]),
-                "dataset_index": i,
+                "index": i,
             }
             for i in range(4)
         ]
@@ -154,8 +154,8 @@ class TestDataCollatorDatasetIndex(unittest.TestCase):
         collator = DataCollatorForSeq2SeqDPO(tokenizer=self.tokenizer, model=self.model, padding="longest")
         batch = collator(samples)
 
-        self.assertIn("dataset_index", batch)
-        self.assertTrue(torch.equal(batch["dataset_index"], torch.tensor([0, 1, 2, 3])))
+        self.assertIn("index", batch)
+        self.assertTrue(torch.equal(batch["index"], torch.tensor([0, 1, 2, 3])))
 
 
 if __name__ == "__main__":

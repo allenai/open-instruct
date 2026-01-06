@@ -514,8 +514,8 @@ def build_reference_logprobs_cache(
             else:
                 chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
 
-            chosen_tensor[batch["dataset_index"]] = chosen_logps
-            rejected_tensor[batch["dataset_index"]] = rejected_logps
+            chosen_tensor[batch["index"]] = chosen_logps
+            rejected_tensor[batch["index"]] = rejected_logps
 
     # Use MAX instead of SUM because Accelerate's distributed sampler can duplicate
     # examples across ranks when even_batches=True. MAX works because duplicate
@@ -691,7 +691,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
         )
-        train_dataset = train_dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
 
@@ -1020,7 +1019,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-                    ref_logps = reference_cache[batch["dataset_index"]]
+                    ref_logps = reference_cache[batch["index"]]
                     reference_chosen_logps = ref_logps["chosen_logps"]
                     reference_rejected_logps = ref_logps["rejected_logps"]
                     losses, _, _ = dpo_loss(
@@ -1040,7 +1039,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         label_smoothing=args.dpo_label_smoothing,
                     )
                 elif args.dpo_loss_type == "wpo":
-                    ref_logps = reference_cache[batch["dataset_index"]]
+                    ref_logps = reference_cache[batch["index"]]
                     reference_chosen_logps = ref_logps["chosen_logps"]
                     reference_rejected_logps = ref_logps["rejected_logps"]
                     losses, _, _ = wpo_loss(
