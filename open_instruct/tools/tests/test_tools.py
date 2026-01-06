@@ -82,9 +82,9 @@ class TestPythonCodeTool(unittest.TestCase):
         tool_default = PythonCodeTool(api_endpoint=self.api_endpoint)
         self.assertEqual(tool_default.tool_function_name, "python")
 
-    def test_from_config(self):
+    def test_build_from_config(self):
         config = PythonCodeToolConfig(api_endpoint=self.api_endpoint, timeout_seconds=5)
-        tool = PythonCodeTool.from_config(config)
+        tool = config.build()
         self.assertEqual(tool.api_endpoint, self.api_endpoint)
         self.assertEqual(tool.timeout_seconds, 5)
 
@@ -141,13 +141,13 @@ class TestTagNameOverride(unittest.TestCase):
     def test_s2_custom_tag_via_config(self):
         """S2SearchTool can use a custom tag via config."""
         config = S2SearchToolConfig(tag_name="search")
-        tool = S2SearchTool.from_config(config)
+        tool = config.build()
         self.assertEqual(tool.tool_function_name, "search")
 
     def test_serper_custom_tag_via_config(self):
         """SerperSearchTool can use a custom tag via config."""
         config = SerperSearchToolConfig(tag_name="websearch")
-        tool = SerperSearchTool.from_config(config)
+        tool = config.build()
         self.assertEqual(tool.tool_function_name, "websearch")
 
 
@@ -197,6 +197,75 @@ class TestToolConfigTagName(unittest.TestCase):
         self.assertIn("serper_search", tools)  # serper default is "serper_search"
 
 
+class TestToolConfigs(unittest.TestCase):
+    """Test the tool_configs list functionality."""
+
+    def test_tool_configs_simple(self):
+        """Test that tool_configs works for simple values."""
+        args = ToolArgs(tools=["serper_search"], tool_configs=['{"num_results": 10}'])
+        config = args.to_tool_config()
+        self.assertEqual(config.serper_search.num_results, 10)
+
+    def test_tool_configs_multiple_fields(self):
+        """Test that tool_configs works with multiple fields."""
+        args = ToolArgs(tools=["s2_search"], tool_configs=['{"num_results": 20, "tag_name": "papers"}'])
+        config = args.to_tool_config()
+        self.assertEqual(config.s2_search.num_results, 20)
+        self.assertEqual(config.s2_search.tag_name, "papers")
+
+    def test_tool_configs_multiple_tools(self):
+        """Test tool_configs with multiple tools."""
+        args = ToolArgs(
+            tools=["serper_search", "s2_search"], tool_configs=['{"num_results": 5}', '{"num_results": 15}']
+        )
+        config = args.to_tool_config()
+        self.assertEqual(config.serper_search.num_results, 5)
+        self.assertEqual(config.s2_search.num_results, 15)
+
+    def test_tool_configs_empty_dict_uses_defaults(self):
+        """Test that empty dict {} uses default values."""
+        args = ToolArgs(tools=["serper_search"], tool_configs=["{}"])
+        config = args.to_tool_config()
+        self.assertEqual(config.serper_search.num_results, 5)  # default
+
+    def test_tool_configs_invalid_json(self):
+        """Test that invalid JSON raises an error."""
+        with self.assertRaises(ValueError) as context:
+            ToolArgs(tools=["serper_search"], tool_configs=['{"num_results": invalid}'])
+        self.assertIn("Invalid JSON", str(context.exception))
+
+    def test_tool_configs_not_dict(self):
+        """Test that non-dict JSON raises an error."""
+        with self.assertRaises(ValueError) as context:
+            ToolArgs(tools=["serper_search"], tool_configs=['["a", "b"]'])
+        self.assertIn("must be a JSON object", str(context.exception))
+
+    def test_tool_configs_unknown_key(self):
+        """Test that unknown keys in config raise an error."""
+        with self.assertRaises(ValueError) as context:
+            ToolArgs(tools=["serper_search"], tool_configs=['{"unknown_field": 123}'])
+        self.assertIn("Unknown key", str(context.exception))
+
+    def test_tool_configs_length_mismatch(self):
+        """Test that mismatched lengths raise an error."""
+        with self.assertRaises(ValueError) as context:
+            ToolArgs(tools=["serper_search", "s2_search"], tool_configs=['{"num_results": 5}'])
+        self.assertIn("same length", str(context.exception))
+
+    def test_tool_configs_without_tools(self):
+        """Test that tool_configs without tools raises an error."""
+        with self.assertRaises(ValueError) as context:
+            ToolArgs(tool_configs=['{"num_results": 5}'])
+        self.assertIn("requires --tools", str(context.exception))
+
+    def test_tool_configs_mcp(self):
+        """Test tool_configs for MCP tool."""
+        args = ToolArgs(tools=["mcp"], tool_configs=['{"tool_names": "snippet_search,google_search", "timeout": 120}'])
+        config = args.to_tool_config()
+        self.assertEqual(config.mcp.tool_names, "snippet_search,google_search")
+        self.assertEqual(config.mcp.timeout, 120)
+
+
 class TestToolProxy(unittest.TestCase):
     """Test the ToolProxy and ToolActor classes."""
 
@@ -222,8 +291,8 @@ class TestToolProxy(unittest.TestCase):
 
         config = SerperSearchToolConfig(num_results=5)
 
-        # Step 1: Create actor from config
-        actor = create_tool_actor_from_config(class_path="open_instruct.tools.tools:SerperSearchTool", config=config)
+        # Step 1: Create actor from config (config.build() called inside actor)
+        actor = create_tool_actor_from_config(config=config)
 
         # Step 2: Wrap with proxy
         proxy = ToolProxy.from_actor(actor)
@@ -236,7 +305,7 @@ class TestToolProxy(unittest.TestCase):
         from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
 
         config = SerperSearchToolConfig(num_results=5)
-        actor = create_tool_actor_from_config(class_path="open_instruct.tools.tools:SerperSearchTool", config=config)
+        actor = create_tool_actor_from_config(config=config)
         proxy = ToolProxy.from_actor(actor)
 
         # Test that we can call the proxy and get a result

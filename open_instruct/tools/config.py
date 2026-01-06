@@ -1,19 +1,22 @@
 """
 Tool configuration system for composable tool arguments.
 
-Each tool defines its own Config dataclass (in tools.py) with:
-- A `cli_prefix` ClassVar that defines the CLI argument prefix
-- Fields that become CLI arguments as `--{prefix}{field_name}`
+Each tool defines its own Config dataclass (in tools.py) with fields
+that can be configured via JSON config dicts on the CLI.
 
 This module provides:
 - ToolArgs: flat dataclass for CLI argument parsing (HfArgumentParser compatible)
 - ToolConfig: internal structured config used by build_tools_from_config
 
-ToolArgs is built automatically from individual tool configs.
+CLI Usage:
+    --tools mcp python --tool_configs '{"tool_names": "snippet_search"}' '{"api_endpoint": "..."}'
+
+    The tool_configs list corresponds 1:1 with the tools list. Use {} for defaults.
 """
 
+import json
 import logging
-from dataclasses import MISSING, field, fields, make_dataclass
+from dataclasses import field, fields, make_dataclass
 from typing import Any
 
 from open_instruct.tools.parsers import (
@@ -48,28 +51,24 @@ logger = logging.getLogger(__name__)
 # The dict key is used as both the tool name and the config attribute name.
 #
 # To add a new tool:
-#   1. Create YourTool and YourToolConfig in tools.py (with cli_prefix on config)
+#   1. Create YourTool and YourToolConfig in tools.py
+#      - YourToolConfig should inherit from BaseToolConfig
+#      - Set tool_class as a ClassVar on the config
 #   2. Add an entry here: "mytool": (MyTool, MyToolConfig)
-#
-# That's it! CLI args and internal config are generated automatically.
 #
 # Example:
 #     # In tools.py
 #     @dataclass
-#     class MyToolConfig:
-#         cli_prefix: ClassVar[str] = "mytool_"
+#     class MyToolConfig(BaseToolConfig):
+#         tool_class: ClassVar[type[Tool]] = MyTool
 #         some_option: int = 10
-#
-#     class MyTool(Tool):
-#         @classmethod
-#         def from_config(cls, config: MyToolConfig) -> "MyTool":
-#             return cls(...)
+#         tag_name: str | None = None
 #
 #     # In config.py, add to TOOL_REGISTRY:
 #     "mytool": (MyTool, MyToolConfig),
 #
 #     # Now you can use:
-#     #   --tools mytool --mytool_some_option 20
+#     #   --tools mytool --tool_configs '{"some_option": 20}'
 
 TOOL_REGISTRY: dict[str, tuple[type[Tool], type]] = {
     "python": (PythonCodeTool, PythonCodeToolConfig),
@@ -79,8 +78,6 @@ TOOL_REGISTRY: dict[str, tuple[type[Tool], type]] = {
     "mcp": (DrAgentMCPTool, DrAgentMCPToolConfig),
 }
 
-# Fields to exclude from CLI exposure (common across all configs)
-EXCLUDED_FIELDS = {"tag_name", "cli_prefix"}
 
 # Built-in parsers that don't use vLLM
 _BUILTIN_PARSERS = ("legacy", "dr_tulu")
@@ -138,65 +135,21 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
     return definitions
 
 
-def _get_field_default(f: Any) -> Any:
-    """Extract the default value or factory from a dataclass field."""
-    if f.default is not MISSING:
-        return f.default
-    if f.default_factory is not MISSING:
-        return field(default_factory=f.default_factory)
-    return MISSING
-
-
-def _build_tool_args() -> tuple[type, dict[str, tuple[str, str]]]:
+def _build_tool_args() -> type:
     """
-    Build ToolArgs dataclass from tool config classes.
+    Build ToolArgs dataclass for CLI parsing.
 
     Returns:
-        Tuple of (ToolArgs class, mapping from CLI field to (config_attr, config_field))
+        The ToolArgs class with tool_configs list field.
     """
-    all_fields: list[tuple[str, type, Any]] = []
-    field_mapping: dict[str, tuple[str, str]] = {}
-    seen_cli_names: dict[str, str] = {}  # cli_name -> "config_attr.field_name" for error messages
-
-    # Base fields
-    base_fields = [
+    all_fields: list[tuple[str, type, Any]] = [
         ("tools", list[str] | None, field(default=None)),
+        ("tool_configs", list[str] | None, field(default=None)),
         ("max_tool_calls", int, field(default=5)),
         ("mask_tool_use", bool, field(default=True)),
         ("tool_parser", str, field(default="legacy")),
         ("tool_tag_names", list[str] | None, field(default=None)),
     ]
-    all_fields.extend(base_fields)
-
-    # Add fields from each tool config (tool_name is config_attr)
-    for config_attr, (_, config_cls) in TOOL_REGISTRY.items():
-        prefix = getattr(config_cls, "cli_prefix", "")
-
-        for f in fields(config_cls):
-            if f.name in EXCLUDED_FIELDS:
-                continue
-
-            cli_name = f"{prefix}{f.name}"
-
-            # Check for clashes
-            if cli_name in seen_cli_names:
-                raise ValueError(
-                    f"CLI argument clash: --{cli_name} is used by both "
-                    f"{seen_cli_names[cli_name]} and {config_attr}.{f.name}. "
-                    f"Change one of the field names or cli_prefix values to avoid this."
-                )
-            seen_cli_names[cli_name] = f"{config_attr}.{f.name}"
-
-            # Get default
-            default = _get_field_default(f)
-            if default is MISSING:
-                all_fields.append((cli_name, f.type, field()))
-            elif isinstance(default, field().__class__):
-                all_fields.append((cli_name, f.type, default))
-            else:
-                all_fields.append((cli_name, f.type, field(default=default)))
-
-            field_mapping[cli_name] = (config_attr, f.name)
 
     # Create class
     cls = make_dataclass(
@@ -204,29 +157,72 @@ def _build_tool_args() -> tuple[type, dict[str, tuple[str, str]]]:
         all_fields,
         namespace={
             "__doc__": """
-Flat tool arguments for CLI parsing with HfArgumentParser.
+Tool arguments for CLI parsing with HfArgumentParser.
 
-Auto-generated from tool config classes. Each tool config's fields are
-exposed with its cli_prefix prepended.
+Usage:
+    --tools mcp python --tool_configs '{"tool_names": "snippet_search"}' '{"api_endpoint": "..."}'
+
+The tool_configs list corresponds 1:1 with the tools list. Use '{}' for defaults.
 
 Use to_tool_config() to convert to the internal ToolConfig structure.
 """,
-            "_field_mapping": field_mapping,
             "__post_init__": _tool_args_post_init,
             "to_tool_config": _tool_args_to_tool_config,
         },
     )
 
-    return cls, field_mapping
+    return cls
 
 
 def _tool_args_post_init(self: Any) -> None:
-    """Validate tool arguments."""
+    """Validate tool arguments and parse JSON configs."""
+    # Validate tools
     if self.tools:
         available = get_available_tools()
         for tool in self.tools:
             if tool.lower() not in available:
                 raise ValueError(f"Unknown tool: {tool}. Available tools: {available}")
+
+    # Validate tool_configs length matches tools
+    if self.tool_configs is not None:
+        if not self.tools:
+            raise ValueError("--tool_configs requires --tools to be specified")
+        if len(self.tool_configs) != len(self.tools):
+            raise ValueError(
+                f"--tool_configs must have same length as --tools. "
+                f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
+            )
+
+    # Parse and validate JSON configs
+    parsed_configs: list[dict[str, Any]] = []
+    if self.tools and self.tool_configs:
+        for i, (tool_name, config_str) in enumerate(zip(self.tools, self.tool_configs)):
+            tool_name_lower = tool_name.lower()
+            _, config_cls = TOOL_REGISTRY[tool_name_lower]
+
+            try:
+                config_dict = json.loads(config_str)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in tool_configs[{i}] for '{tool_name}': {e}") from e
+
+            if not isinstance(config_dict, dict):
+                raise ValueError(
+                    f"tool_configs[{i}] for '{tool_name}' must be a JSON object, got {type(config_dict).__name__}"
+                )
+
+            # Validate keys
+            all_config_fields = {f.name for f in fields(config_cls)}
+            for key in config_dict:
+                if key not in all_config_fields:
+                    raise ValueError(
+                        f"Unknown key '{key}' in tool_configs[{i}] for '{tool_name}'. "
+                        f"Valid keys: {list(all_config_fields)}"
+                    )
+
+            parsed_configs.append(config_dict)
+
+    # Store parsed configs for use in to_tool_config()
+    object.__setattr__(self, "_parsed_configs", parsed_configs)
 
     if self.tool_parser not in get_available_parsers():
         raise ValueError(f"Unknown parser: {self.tool_parser}. Available: {get_available_parsers()}")
@@ -242,15 +238,21 @@ def _tool_args_post_init(self: Any) -> None:
 
 
 def _tool_args_to_tool_config(self: Any) -> "ToolConfig":
-    """Convert flat ToolArgs to internal ToolConfig structure."""
-    # Build kwargs for each config (tool_name is config_attr)
-    config_kwargs: dict[str, dict[str, Any]] = {name: {} for name in TOOL_REGISTRY}
+    """Convert ToolArgs to internal ToolConfig structure."""
+    parsed_configs = getattr(self, "_parsed_configs", [])
 
-    for cli_name, (config_attr, field_name) in self._field_mapping.items():
-        config_kwargs[config_attr][field_name] = getattr(self, cli_name)
+    # Build tool configs dict - only for tools that are specified
+    tool_configs = {}
+    for name, (_, config_cls) in TOOL_REGISTRY.items():
+        tool_configs[name] = config_cls()  # Default config
 
-    # Instantiate configs
-    tool_configs = {name: config_cls(**config_kwargs[name]) for name, (_, config_cls) in TOOL_REGISTRY.items()}
+    # Override with parsed configs for specified tools
+    if self.tools:
+        for i, tool_name in enumerate(self.tools):
+            tool_name_lower = tool_name.lower()
+            _, config_cls = TOOL_REGISTRY[tool_name_lower]
+            config_kwargs = parsed_configs[i] if i < len(parsed_configs) else {}
+            tool_configs[tool_name_lower] = config_cls(**config_kwargs)
 
     return ToolConfig(
         tools=self.tools,
@@ -263,7 +265,7 @@ def _tool_args_to_tool_config(self: Any) -> "ToolConfig":
 
 
 # Build ToolArgs at module load time
-ToolArgs, _CLI_TO_CONFIG_MAPPING = _build_tool_args()
+ToolArgs = _build_tool_args()
 
 
 def _build_tool_config() -> type:
@@ -373,17 +375,13 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
 
     for i, tool_name in enumerate(config.tools):
         tool_name_lower = tool_name.lower()
-        tool_cls, _ = TOOL_REGISTRY[tool_name_lower]
         tool_config = getattr(config, tool_name_lower)  # config attr = tool name
 
         if config.tool_tag_names and hasattr(tool_config, "tag_name"):
             tool_config.tag_name = config.tool_tag_names[i]
 
-        # Derive class_path from tool_cls
-        class_path = f"{tool_cls.__module__}:{tool_cls.__name__}"
-
-        # Step 1: Create ToolActor from config (tool instantiated inside Ray actor)
-        actor = create_tool_actor_from_config(class_path=class_path, config=tool_config)
+        # Step 1: Create ToolActor from config (config.build() called inside Ray actor)
+        actor = create_tool_actor_from_config(config=tool_config)
 
         # Step 2: Wrap ToolActor with ToolProxy
         proxy = ToolProxy.from_actor(actor)

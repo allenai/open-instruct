@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING, Any, ClassVar
 
 
 @dataclass
@@ -77,3 +77,40 @@ class Tool(ABC):
     @abstractmethod
     def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
         pass
+
+
+@dataclass
+class BaseToolConfig:
+    """Base configuration class for individual tools.
+
+    Subclasses should set `tool_class` to their corresponding Tool class.
+    The generic `build()` method passes all dataclass fields as kwargs to the tool constructor.
+
+    Override `build()` only if:
+    - Validation is needed before construction
+    - Field names don't match constructor params
+    - Custom initialization logic is required
+
+    Example:
+        @dataclass
+        class MyToolConfig(BaseToolConfig):
+            tool_class: ClassVar[type[Tool]] = MyTool
+
+            param1: str = "default"
+            param2: int = 10
+
+        config = MyToolConfig(param1="custom")
+        tool = config.build()  # Equivalent to MyTool(param1="custom", param2=10)
+    """
+
+    if TYPE_CHECKING:
+        # ClassVars are not included in asdict(), so they won't be passed to build()
+        tool_class: ClassVar[type[Tool]]
+
+    def build(self) -> Tool:
+        """Build the tool instance from this config.
+
+        Passes all dataclass instance fields as kwargs to tool_class.
+        Override this method for tools with validation or non-standard initialization.
+        """
+        return self.tool_class(**asdict(self))

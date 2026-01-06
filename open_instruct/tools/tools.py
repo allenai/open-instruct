@@ -1,6 +1,9 @@
 """
 Tools that follow the Tool(ABC) pattern.
-Each tool has a corresponding Config dataclass and a from_config() classmethod.
+
+Each tool has a corresponding Config dataclass that inherits from ToolConfig.
+The config's build() method creates the tool instance. Most configs use the
+generic build() from ToolConfig; override only when custom logic is needed.
 """
 
 import asyncio
@@ -10,14 +13,14 @@ import os
 import time
 import traceback
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from open_instruct.tools.utils import Tool, ToolOutput
+from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput
 
 logger = logging.getLogger(__name__)
 
@@ -106,20 +109,6 @@ class MaxCallsExceededTool(Tool):
 # =============================================================================
 
 
-@dataclass
-class PythonCodeToolConfig:
-    """Configuration for the Python code execution tool."""
-
-    cli_prefix: ClassVar[str] = "code_"
-
-    api_endpoint: str | None = None
-    """The API endpoint for the code execution server."""
-    timeout_seconds: int = 3
-    """Timeout in seconds for code execution."""
-    tag_name: str | None = None
-    """Override the default tag name (e.g., use <python> instead of <code>)."""
-
-
 class PythonCodeTool(Tool):
     """
     Executes Python code via a FastAPI endpoint.
@@ -140,12 +129,6 @@ class PythonCodeTool(Tool):
         self.api_endpoint = api_endpoint
         self.timeout_seconds = timeout_seconds
         self._tag_name = tag_name
-
-    @classmethod
-    def from_config(cls, config: PythonCodeToolConfig) -> "PythonCodeTool":
-        if not config.api_endpoint:
-            raise ValueError("api_endpoint must be set to use the Python code tool")
-        return cls(api_endpoint=config.api_endpoint, timeout_seconds=config.timeout_seconds, tag_name=config.tag_name)
 
     def __call__(self, text: str) -> ToolOutput:
         """Execute Python code via the API."""
@@ -193,23 +176,28 @@ class PythonCodeTool(Tool):
         return result
 
 
+@dataclass
+class PythonCodeToolConfig(BaseToolConfig):
+    """Configuration for the Python code execution tool."""
+
+    tool_class: ClassVar[type[Tool]] = PythonCodeTool
+
+    api_endpoint: str | None = None
+    """The API endpoint for the code execution server."""
+    timeout_seconds: int = 3
+    """Timeout in seconds for code execution."""
+    tag_name: str | None = None
+    """Override the default tag name (e.g., use <python> instead of <code>)."""
+
+    def build(self) -> PythonCodeTool:
+        if not self.api_endpoint:
+            raise ValueError("api_endpoint must be set to use the Python code tool")
+        return PythonCodeTool(**asdict(self))
+
+
 # =============================================================================
 # MassiveDSSearchTool + Config
 # =============================================================================
-
-
-@dataclass
-class MassiveDSSearchToolConfig:
-    """Configuration for the massive_ds search tool."""
-
-    cli_prefix: ClassVar[str] = "search_"
-
-    api_endpoint: str | None = None
-    """The API endpoint for the search engine."""
-    num_documents: int = 3
-    """The maximum number of documents to retrieve for each query."""
-    tag_name: str | None = None
-    """Override the default tag name."""
 
 
 class MassiveDSSearchTool(Tool):
@@ -223,18 +211,10 @@ class MassiveDSSearchTool(Tool):
         "required": ["text"],
     }
 
-    def __init__(
-        self, api_endpoint: str | None = None, number_documents_to_search: int = 3, tag_name: str | None = None
-    ) -> None:
+    def __init__(self, api_endpoint: str | None = None, num_documents: int = 3, tag_name: str | None = None) -> None:
         self.api_endpoint = api_endpoint
-        self.number_documents_to_search = number_documents_to_search
+        self.num_documents = num_documents
         self._tag_name = tag_name
-
-    @classmethod
-    def from_config(cls, config: MassiveDSSearchToolConfig) -> "MassiveDSSearchTool":
-        return cls(
-            api_endpoint=config.api_endpoint, number_documents_to_search=config.num_documents, tag_name=config.tag_name
-        )
 
     def __call__(self, text: str) -> ToolOutput:
         """Search for documents matching the query."""
@@ -271,14 +251,14 @@ class MassiveDSSearchTool(Tool):
         try:
             res = session.post(
                 url,
-                json={"query": text, "n_docs": self.number_documents_to_search, "domains": "dpr_wiki_contriever"},
+                json={"query": text, "n_docs": self.num_documents, "domains": "dpr_wiki_contriever"},
                 headers={"Content-Type": "application/json"},
                 timeout=(3, 15),
             )
             res.raise_for_status()
             data = res.json()
             passages = data.get("results", {}).get("passages", [[]])[0]
-            passages = passages[: self.number_documents_to_search]
+            passages = passages[: self.num_documents]
             passages = ["\n" + passage for passage in passages]
             all_snippets = "\n".join(passages).strip()
 
@@ -294,21 +274,23 @@ class MassiveDSSearchTool(Tool):
             return result
 
 
+@dataclass
+class MassiveDSSearchToolConfig(BaseToolConfig):
+    """Configuration for the massive_ds search tool."""
+
+    tool_class: ClassVar[type[Tool]] = MassiveDSSearchTool
+
+    api_endpoint: str | None = None
+    """The API endpoint for the search engine."""
+    num_documents: int = 3
+    """The maximum number of documents to retrieve for each query."""
+    tag_name: str | None = None
+    """Override the default tag name."""
+
+
 # =============================================================================
 # S2SearchTool + Config
 # =============================================================================
-
-
-@dataclass
-class S2SearchToolConfig:
-    """Configuration for the Semantic Scholar search tool."""
-
-    cli_prefix: ClassVar[str] = "s2_"
-
-    num_results: int = 10
-    """Number of results to return from Semantic Scholar."""
-    tag_name: str | None = None
-    """Override the default tag name (e.g., use <search> instead of <s2_search>)."""
 
 
 class S2SearchTool(Tool):
@@ -325,13 +307,9 @@ class S2SearchTool(Tool):
         "required": ["text"],
     }
 
-    def __init__(self, number_of_results: int = 10, tag_name: str | None = None) -> None:
-        self.number_of_results = number_of_results
+    def __init__(self, num_results: int = 10, tag_name: str | None = None) -> None:
+        self.num_results = num_results
         self._tag_name = tag_name
-
-    @classmethod
-    def from_config(cls, config: S2SearchToolConfig) -> "S2SearchTool":
-        return cls(number_of_results=config.num_results, tag_name=config.tag_name)
 
     def __call__(self, text: str) -> ToolOutput:
         """Search Semantic Scholar for documents matching the query."""
@@ -365,7 +343,7 @@ class S2SearchTool(Tool):
         try:
             res = session.get(
                 "https://api.semanticscholar.org/graph/v1/snippet/search",
-                params={"limit": self.number_of_results, "query": text},
+                params={"limit": self.num_results, "query": text},
                 headers={"x-api-key": api_key},
                 timeout=60,
             )
@@ -397,21 +375,21 @@ class S2SearchTool(Tool):
             return result
 
 
+@dataclass
+class S2SearchToolConfig(BaseToolConfig):
+    """Configuration for the Semantic Scholar search tool."""
+
+    tool_class: ClassVar[type[Tool]] = S2SearchTool
+
+    num_results: int = 10
+    """Number of results to return from Semantic Scholar."""
+    tag_name: str | None = None
+    """Override the default tag name (e.g., use <search> instead of <s2_search>)."""
+
+
 # =============================================================================
 # SerperSearchTool + Config
 # =============================================================================
-
-
-@dataclass
-class SerperSearchToolConfig:
-    """Configuration for the Serper (Google Search) tool."""
-
-    cli_prefix: ClassVar[str] = "serper_"
-
-    num_results: int = 5
-    """Number of results to return from Serper."""
-    tag_name: str | None = None
-    """Override the default tag name."""
 
 
 class SerperSearchTool(Tool):
@@ -430,13 +408,9 @@ class SerperSearchTool(Tool):
         "required": ["text"],
     }
 
-    def __init__(self, number_of_results: int = 5, tag_name: str | None = None) -> None:
-        self.number_of_results = number_of_results
+    def __init__(self, num_results: int = 5, tag_name: str | None = None) -> None:
+        self.num_results = num_results
         self._tag_name = tag_name
-
-    @classmethod
-    def from_config(cls, config: SerperSearchToolConfig) -> "SerperSearchTool":
-        return cls(number_of_results=config.num_results, tag_name=config.tag_name)
 
     def __call__(self, text: str) -> ToolOutput:
         """Search Google via Serper for documents matching the query."""
@@ -470,7 +444,7 @@ class SerperSearchTool(Tool):
         try:
             response = session.post(
                 "https://google.serper.dev/search",
-                json={"q": text, "num": self.number_of_results},
+                json={"q": text, "num": self.num_results},
                 headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
                 timeout=10,
             )
@@ -480,7 +454,7 @@ class SerperSearchTool(Tool):
             snippets = []
 
             # Extract snippets from organic results
-            for result in data.get("organic", [])[: self.number_of_results]:
+            for result in data.get("organic", [])[: self.num_results]:
                 title = result.get("title", "")
                 snippet = result.get("snippet", "")
                 link = result.get("link", "")
@@ -519,43 +493,21 @@ class SerperSearchTool(Tool):
             return result
 
 
+@dataclass
+class SerperSearchToolConfig(BaseToolConfig):
+    """Configuration for the Serper (Google Search) tool."""
+
+    tool_class: ClassVar[type[Tool]] = SerperSearchTool
+
+    num_results: int = 5
+    """Number of results to return from Serper."""
+    tag_name: str | None = None
+    """Override the default tag name."""
+
+
 # =============================================================================
 # DrAgentMCPTool + Config
 # =============================================================================
-
-
-@dataclass
-class DrAgentMCPToolConfig:
-    """Configuration for MCP (Model Context Protocol) tools."""
-
-    cli_prefix: ClassVar[str] = "mcp_"
-
-    tool_names: str = "snippet_search"
-    """Comma-separated list of MCP tool names to use."""
-    parser_name: str = "unified"
-    """The parser name for MCP tools."""
-    transport_type: str | None = None
-    """Transport type for MCP (default: StreamableHttpTransport)."""
-    host: str | None = None
-    """Host for MCP transport."""
-    port: int | None = None
-    """Port for MCP transport."""
-    timeout: int = 180
-    """Timeout in seconds for MCP tool calls."""
-    max_retries: int = 3
-    """Maximum retries for transient MCP errors."""
-    retry_backoff: float = 0.5
-    """Backoff factor for MCP retries."""
-    base_url: str | None = None
-    """Base URL for MCP tools."""
-    num_documents: int = 10
-    """Number of documents to search for MCP tools."""
-    use_localized_snippets: bool = False
-    """Whether to use localized snippets."""
-    context_chars: int = 6000
-    """Number of context characters for MCP tools."""
-    tag_name: str | None = None
-    """Override the default tag name. Not used for MCP tools."""
 
 
 class DrAgentMCPTool(Tool):
@@ -580,16 +532,16 @@ class DrAgentMCPTool(Tool):
 
     def __init__(
         self,
-        mcp_tool_names: list[str] | str,
-        mcp_parser_name: str = "unified",
+        tool_names: list[str] | str,
+        parser_name: str = "unified",
         transport_type: str | None = None,
-        mcp_host: str | None = None,
-        mcp_port: int | None = None,
+        host: str | None = None,
+        port: int | None = None,
         max_retries: int = 3,
         retry_backoff: float = 0.5,
-        mcp_timeout: int = 180,
+        timeout: int = 180,
         base_url: str | None = None,
-        number_documents_to_search: int = 10,
+        num_documents: int = 10,
         use_localized_snippets: bool = False,
         context_chars: int = 6000,
         tag_name: str | None = None,
@@ -606,19 +558,19 @@ class DrAgentMCPTool(Tool):
 
         # Configure transport
         self.transport_type = transport_type or os.environ.get("MCP_TRANSPORT", "StreamableHttpTransport")
-        self.mcp_host = mcp_host or os.environ.get("MCP_TRANSPORT_HOST", "0.0.0.0")
-        self.mcp_port = mcp_port or os.environ.get("MCP_TRANSPORT_PORT", "8000")
+        self.host = host or os.environ.get("MCP_TRANSPORT_HOST", "0.0.0.0")
+        self.port = port or os.environ.get("MCP_TRANSPORT_PORT", "8000")
 
-        if self.mcp_host is not None:
-            os.environ["MCP_TRANSPORT_HOST"] = str(self.mcp_host)
-        if self.mcp_port is not None:
-            os.environ["MCP_TRANSPORT_PORT"] = str(self.mcp_port)
+        if self.host is not None:
+            os.environ["MCP_TRANSPORT_HOST"] = str(self.host)
+        if self.port is not None:
+            os.environ["MCP_TRANSPORT_PORT"] = str(self.port)
 
-        # Support comma-separated string for mcp_tool_names
-        if isinstance(mcp_tool_names, str):
-            mcp_tool_names = [n.strip() for n in mcp_tool_names.split(",") if n.strip()]
+        # Support comma-separated string for tool_names
+        if isinstance(tool_names, str):
+            tool_names = [n.strip() for n in tool_names.split(",") if n.strip()]
 
-        for mcp_tool_name in mcp_tool_names:
+        for mcp_tool_name in tool_names:
             if mcp_tool_name not in MCP_TOOL_REGISTRY:
                 raise ValueError(f"Unknown MCP tool: {mcp_tool_name}. Available: {list(MCP_TOOL_REGISTRY.keys())}")
 
@@ -631,7 +583,7 @@ class DrAgentMCPTool(Tool):
             if "base_url" in valid_params:
                 filtered_kwargs["base_url"] = base_url
             if "number_documents_to_search" in valid_params:
-                filtered_kwargs["number_documents_to_search"] = number_documents_to_search
+                filtered_kwargs["number_documents_to_search"] = num_documents
             if "use_localized_snippets" in valid_params:
                 filtered_kwargs["use_localized_snippets"] = use_localized_snippets
             if "context_chars" in valid_params:
@@ -644,34 +596,14 @@ class DrAgentMCPTool(Tool):
 
             self.mcp_tools.append(
                 mcp_tool_cls(
-                    timeout=mcp_timeout,
+                    timeout=timeout,
                     name=mcp_tool_name,
-                    tool_parser=mcp_parser_name,
+                    tool_parser=parser_name,
                     transport_type=self.transport_type,
                     **filtered_kwargs,
                 )
             )
             self.stop_strings += self.mcp_tools[-1].tool_parser.stop_sequences
-
-    @classmethod
-    def from_config(cls, config: DrAgentMCPToolConfig) -> "DrAgentMCPTool":
-        if not MCP_AVAILABLE:
-            raise ImportError("MCP tools require dr_agent package. Install it with: uv sync --extra dr-tulu")
-        return cls(
-            mcp_tool_names=config.tool_names,
-            mcp_parser_name=config.parser_name,
-            transport_type=config.transport_type,
-            mcp_host=config.host,
-            mcp_port=config.port,
-            mcp_timeout=config.timeout,
-            max_retries=config.max_retries,
-            retry_backoff=config.retry_backoff,
-            base_url=config.base_url,
-            number_documents_to_search=config.num_documents,
-            use_localized_snippets=config.use_localized_snippets,
-            context_chars=config.context_chars,
-            tag_name=config.tag_name,
-        )
 
     def get_stop_strings(self) -> list[str]:
         """Return the stop strings for all MCP tools."""
@@ -741,3 +673,50 @@ class DrAgentMCPTool(Tool):
         )
         _log_tool_call(self.tool_function_name, text, result)
         return result
+
+
+@dataclass
+class DrAgentMCPToolConfig(BaseToolConfig):
+    """Configuration for MCP (Model Context Protocol) tools."""
+
+    tool_class: ClassVar[type[Tool]] = DrAgentMCPTool
+
+    tool_names: str = "snippet_search"
+    """Comma-separated list of MCP tool names to use."""
+    parser_name: str = "unified"
+    """The parser name for MCP tools."""
+    transport_type: str | None = None
+    """Transport type for MCP (default: StreamableHttpTransport)."""
+    host: str | None = None
+    """Host for MCP transport."""
+    port: int | None = None
+    """Port for MCP transport."""
+    timeout: int = 180
+    """Timeout in seconds for MCP tool calls."""
+    max_retries: int = 3
+    """Maximum retries for transient MCP errors."""
+    retry_backoff: float = 0.5
+    """Backoff factor for MCP retries."""
+    base_url: str | None = None
+    """Base URL for MCP tools."""
+    num_documents: int = 10
+    """Number of documents to search for MCP tools."""
+    use_localized_snippets: bool = False
+    """Whether to use localized snippets."""
+    context_chars: int = 6000
+    """Number of context characters for MCP tools."""
+    tag_name: str | None = None
+    """Override the default tag name. Not used for MCP tools."""
+
+
+# =============================================================================
+# Tool Config Registry
+# =============================================================================
+
+TOOL_CONFIG_REGISTRY: dict[str, type[BaseToolConfig]] = {
+    "python": PythonCodeToolConfig,
+    "massive_ds_search": MassiveDSSearchToolConfig,
+    "s2_search": S2SearchToolConfig,
+    "serper_search": SerperSearchToolConfig,
+    "mcp": DrAgentMCPToolConfig,
+}

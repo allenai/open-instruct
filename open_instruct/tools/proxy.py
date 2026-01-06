@@ -9,10 +9,9 @@ across processes. The flow is:
 3. Pass proxy to vLLM engines
 
 Usage:
-    # Create actor from config
+    # Create actor from config (config.build() is called inside the actor)
     actor = create_tool_actor_from_config(
-        class_path="open_instruct.tools.tools:SerperSearchTool",
-        config=serper_config,
+        config=serper_config,  # SerperSearchToolConfig instance
     )
 
     # Wrap with proxy
@@ -37,35 +36,24 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_CONCURRENCY = 512
 
 
-def _import_from_path(class_path: str) -> type:
-    """Import a class from a module:ClassName path."""
-    import importlib
-
-    module_name, class_name = class_path.split(":", 1)
-    module = importlib.import_module(module_name)
-    return getattr(module, class_name)
-
-
 @ray.remote
 class ToolActor:
     """Ray actor that holds and executes a tool.
 
-    This actor constructs the tool inside the actor from a class path and config,
+    This actor constructs the tool inside the actor from a config's build() method,
     avoiding the need to pickle tool objects with heavy dependencies (e.g., dr_agent).
     """
 
-    def __init__(self, *, class_path: str, config: Any):
+    def __init__(self, *, config: Any):
         """Initialize the actor by constructing a tool from config.
 
         Args:
-            class_path: "module.submodule:ClassName" for lazy import.
-            config: Config dataclass to pass to from_config().
+            config: ToolConfig dataclass with a build() method that returns a Tool.
         """
-        tool_cls = _import_from_path(class_path)
-        if not hasattr(tool_cls, "from_config"):
-            raise ValueError(f"Tool class {tool_cls} does not have from_config method")
+        if not hasattr(config, "build"):
+            raise ValueError(f"Config {type(config)} does not have a build() method")
 
-        self._tool = tool_cls.from_config(config)
+        self._tool = config.build()
 
         self.tool_function_name = self._tool.tool_function_name
         logger.info(f"ToolActor initialized for tool: {self.tool_function_name}")
@@ -90,17 +78,16 @@ class ToolActor:
 
 
 def create_tool_actor_from_config(
-    class_path: str, config: Any, max_concurrency: int = DEFAULT_MAX_CONCURRENCY, **actor_options: Any
+    config: Any, max_concurrency: int = DEFAULT_MAX_CONCURRENCY, **actor_options: Any
 ) -> ray.actor.ActorHandle:
     """Create a ToolActor from a config.
 
     This is the first step in the tool creation flow:
-    1. Create actor: actor = create_tool_actor_from_config(...)
+    1. Create actor: actor = create_tool_actor_from_config(config)
     2. Wrap with proxy: proxy = ToolProxy.from_actor(actor)
 
     Args:
-        class_path: "module.submodule:ClassName" for the tool class.
-        config: Config dataclass to pass to from_config().
+        config: ToolConfig dataclass with a build() method that returns a Tool.
         max_concurrency: Maximum number of concurrent calls the actor can handle.
         **actor_options: Additional options to pass to ray.remote() for the actor.
 
@@ -109,7 +96,7 @@ def create_tool_actor_from_config(
     """
     options = {"max_concurrency": max_concurrency, **actor_options}
     actor_cls = ToolActor.options(**options)
-    return actor_cls.remote(class_path=class_path, config=config)
+    return actor_cls.remote(config=config)
 
 
 class ToolProxy(Tool):
