@@ -46,6 +46,11 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 logger = logging.getLogger(__name__)
 
 
+def build_index_mapping(dataset: Dataset) -> dict[int, int]:
+    """Build a mapping from original row IDs to current positional indices."""
+    return {dataset[i]["index"]: i for i in range(len(dataset))}
+
+
 class HFDataLoader(data_loader.DataLoaderBase):
     """A DataLoader that wraps a HuggingFace Dataset for use with olmo_core's Trainer.
 
@@ -79,8 +84,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=0
         )
 
-        dataset_with_indices = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
-        self._original_dataset = dataset_with_indices.shard(num_shards=world_size, index=rank)
+        self._original_dataset = dataset.shard(num_shards=world_size, index=rank)
         self.dataset = self._original_dataset.shuffle(seed=seed)
         self.seed = seed
         self._batch_size = batch_size
@@ -89,6 +93,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._excluded_indices: set[int] = set()
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
+        self._index_to_position: dict[int, int] = build_index_mapping(self.dataset)
 
     def __next__(self) -> dict[str, Any]:
         if self._current_iter is None:
@@ -107,11 +112,15 @@ class HFDataLoader(data_loader.DataLoaderBase):
             self.batches_processed = 0
             raise
 
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        """Look up an example by its original dataset index."""
+        return self.dataset[self._index_to_position[index]]
+
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
         for i in range(self.batches_processed, self.effective_size):
             example = self.dataset[i]
-            yield example | {"prompt_id": f"{self._epoch}_{example['dataset_index']}"}
+            yield example | {"prompt_id": f"{self._epoch}_{example['index']}"}
 
     @property
     def total_batches(self) -> int:
@@ -140,7 +149,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Exclude a dataset index from future iterations.
 
         Args:
-            index: The dataset_index to exclude.
+            index: The index to exclude.
         """
         self._excluded_indices.add(index)
 
@@ -155,8 +164,9 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.batches_processed = 0
         shuffled = self._original_dataset.shuffle(seed=self.seed + self._epoch)
         # If this is slow, we can speed it up by making this a boolean mask.
-        self.dataset = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
+        self.dataset = shuffled.filter(lambda x: x["index"] not in self._excluded_indices)
         self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
+        self._index_to_position = build_index_mapping(self.dataset)
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
@@ -435,13 +445,13 @@ class BatchStatistics:
 def add_prompt_to_generator(
     example: dict[str, Any], epoch_number: int, param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
 ) -> None:
-    dataset_index = example["dataset_index"]
+    index = example["index"]
     param_prompt_Q.put(
         data_types.PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
-            dataset_index=dataset_index,
-            prompt_id=f"{epoch_number}_{dataset_index}",
+            index=index,
+            prompt_id=f"{epoch_number}_{index}",
             is_eval=is_eval,
         )
     )
@@ -516,10 +526,10 @@ def accumulate_inference_batches(
         assert len(result.responses) == generation_config.n, (
             f"Mismatch: individual prompt result has {len(result.responses)} responses "
             f"but expected {generation_config.n} samples per prompt. "
-            f"Dataset index: {result.dataset_index}, Prompt ID: {result.prompt_id}"
+            f"Index: {result.index}, Prompt ID: {result.prompt_id}"
         )
 
-        example = dataset[result.dataset_index]
+        example = dataset[result.index]
         query = example[INPUT_IDS_PROMPT_KEY]
         ground_truth = example[GROUND_TRUTHS_KEY]
         dataset_name = example[VERIFIER_SOURCE_KEY]
@@ -547,7 +557,7 @@ def accumulate_inference_batches(
         percent_solved = np.mean(result.reward_scores).item() / max_possible_score
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             assert iter_dataloader is not None
-            iter_dataloader.exclude_index(result.dataset_index)
+            iter_dataloader.exclude_index(result.index)
             total_no_resampled += 1
             logging.debug(
                 f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
@@ -655,7 +665,7 @@ def accumulate_inference_batches(
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=None,
+        index=None,
         prompt_id=results[0].prompt_id,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
