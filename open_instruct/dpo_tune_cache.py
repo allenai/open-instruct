@@ -93,6 +93,8 @@ from open_instruct.utils import (
 
 logger = get_logger(__name__)
 
+REFERENCE_LOGPROBS_CACHE_PATH = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
+
 
 @dataclass
 class FlatArguments:
@@ -190,7 +192,7 @@ class FlatArguments:
     """The hash of the dataset configuration."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
-    reference_logprobs_cache_path: str = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
+    reference_logprobs_cache_path: str = REFERENCE_LOGPROBS_CACHE_PATH
     """The path to cache reference logprobs to disk."""
     dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
@@ -521,6 +523,9 @@ def build_reference_logprobs_cache(
     if dist.is_initialized():
         dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
         dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
+
+    if torch.any(chosen_tensor == float("-inf")) or torch.any(rejected_tensor == float("-inf")):
+        raise RuntimeError("Some dataset indices were not filled during reference logprobs caching")
 
     model.train()
     cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})

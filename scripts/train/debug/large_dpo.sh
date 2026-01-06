@@ -39,4 +39,5 @@ uv run python mason.py \
     --logging_steps 1 \
     --dpo_loss_type dpo_norm \
     --dpo_beta 5 \
-    --gradient_checkpointing
+    --gradient_checkpointing \
+    --with_tracking
