@@ -17,7 +17,7 @@ GLOBAL_BATCH_SIZE=$((64 * SEQ_LEN))
 BUDGET="ai2/oe-adapt"
 WORKSPACE="ai2/open-instruct-dev"
 NUM_EPOCHS=1
-MODEL_CONFIG="olmo3_7B"
+MODEL_CONFIG="from_checkpoint"
 
 if [ -n "$1" ]; then
     BEAKER_IMAGE="$1"

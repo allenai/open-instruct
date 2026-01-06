@@ -128,7 +128,20 @@ MODEL_CONFIGS = {
     "olmo2_1B": TransformerConfig.olmo2_1B,
     "olmo2_3B": TransformerConfig.olmo2_3B,
 }
-DEFAULT_MODEL_CONFIG = "olmo3_7B"
+DEFAULT_MODEL_CONFIG = "from_checkpoint"
+
+
+def load_model_config_from_checkpoint(checkpoint_path: str, vocab_size: int) -> TransformerConfig:
+    """Load TransformerConfig from checkpoint's config.json file."""
+    from olmo_core.io import resource_path
+
+    config_path = join_path(checkpoint_path, "config.json")
+    with resource_path(config_path).open("r") as f:
+        config_dict = json.load(f)
+
+    model_config_dict = config_dict["model"]
+    model_config_dict["vocab_size"] = vocab_size
+    return TransformerConfig.from_dict(model_config_dict)
 
 
 def get_beaker_username() -> str | None:
@@ -335,9 +348,14 @@ class SFTConfig:
             shard_degree=dp_shard_degree,
         )
 
-        if model_config not in MODEL_CONFIGS:
-            raise ValueError(f"Unknown model_config: {model_config}. Available: {list(MODEL_CONFIGS.keys())}")
-        model = MODEL_CONFIGS[model_config](vocab_size=tokenizer_config.padded_vocab_size())
+        if model_config == "from_checkpoint":
+            model = load_model_config_from_checkpoint(checkpoint, tokenizer_config.padded_vocab_size())
+        elif model_config in MODEL_CONFIGS:
+            model = MODEL_CONFIGS[model_config](vocab_size=tokenizer_config.padded_vocab_size())
+        else:
+            raise ValueError(
+                f"Unknown model_config: {model_config}. Available: 'from_checkpoint' or {list(MODEL_CONFIGS.keys())}"
+            )
         model.block.attention.use_flash = True
 
         launch_config = None
@@ -773,8 +791,8 @@ def main() -> None:
     launch_parser.add_argument(
         "--model_config",
         default=DEFAULT_MODEL_CONFIG,
-        choices=list(MODEL_CONFIGS.keys()),
-        help=f"Model architecture to use (default: {DEFAULT_MODEL_CONFIG})",
+        choices=["from_checkpoint"] + list(MODEL_CONFIGS.keys()),
+        help=f"Model architecture to use. 'from_checkpoint' loads config from checkpoint (default: {DEFAULT_MODEL_CONFIG})",
     )
 
     # train subcommand
@@ -800,8 +818,8 @@ def main() -> None:
     train_parser.add_argument(
         "--model_config",
         default=DEFAULT_MODEL_CONFIG,
-        choices=list(MODEL_CONFIGS.keys()),
-        help=f"Model architecture to use (default: {DEFAULT_MODEL_CONFIG})",
+        choices=["from_checkpoint"] + list(MODEL_CONFIGS.keys()),
+        help=f"Model architecture to use. 'from_checkpoint' loads config from checkpoint (default: {DEFAULT_MODEL_CONFIG})",
     )
     train_parser.add_argument("--dry_run", action="store_true", help="Validate configuration without training")
 
