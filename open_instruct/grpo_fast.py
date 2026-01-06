@@ -754,44 +754,34 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return accumulation_counts
 
-def _compute_loss_metrics(
-        self, loss_stats_B: dict[str, torch.Tensor], total_valid_tokens: int
-    ) -> dict[str, float]:
-        """Compute weighted average metrics from per-batch loss statistics."""
-        token_counts = loss_stats_B["token_count"]
-        total_tokens = token_counts.sum()
-        # Zero weights when no tokens - all weighted sums become 0
-        weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
 
-        if self.args.load_ref_policy:
-            for j in range(4):
-                self.local_metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum()
-            self.local_metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum()
-        self.local_metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum()
-        self.local_metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum()
-        self.local_metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum()
-        self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
-        weighted_mean_ratio = self.local_metrics["val/ratio"]
-        self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
-        if self.args.record_entropy:
-            self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
+def _compute_loss_metrics(self, loss_stats_B: dict[str, torch.Tensor], total_valid_tokens: int) -> dict[str, float]:
+    """Compute weighted average metrics from per-batch loss statistics."""
+    token_counts = loss_stats_B["token_count"]
+    total_tokens = token_counts.sum()
+    # Zero weights when no tokens - all weighted sums become 0
+    weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
 
-        self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
-        self.local_metrics["_token_count"] = total_valid_tokens
-        return self.local_metrics.get_metrics_list()
+    if self.args.load_ref_policy:
+        for j in range(4):
+            self.local_metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum()
+        self.local_metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum()
+    self.local_metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum()
+    self.local_metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum()
+    self.local_metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum()
+    self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
+    weighted_mean_ratio = self.local_metrics["val/ratio"]
+    self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
+    if self.args.record_entropy:
+        self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
 
-def train(self, data_BT: CollatedBatchData, pad_token_id: int) -> dict[str, float]:
-    """Train the policy model on a batch of data.
+    self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
+    self.local_metrics["_token_count"] = total_valid_tokens
+    return self.local_metrics.get_metrics_list()
 
-    Args:
-        data_BT: CollatedBatchData containing:
-            - query_responses: Token IDs for query+response sequences (B, T)
-            - attention_masks: Attention mask (1=valid, 0=padding) (B, T)
-            - position_ids: Position indices for positional embeddings (B, T)
-            - advantages: Advantage estimates for RL training (B, T)
-            - response_masks: Binary mask for response tokens (B, T)
-            - vllm_logprobs: Log probabilities from vLLM engine (B, T)
-        pad_token_id: Token ID used for padding.
+
+def step(self):
+    """Execute one training step: fetch data from the dataloader and train on it.
 
     Returns:
         Tuple of (metrics_list, array_metrics) from training.
@@ -802,10 +792,11 @@ def train(self, data_BT: CollatedBatchData, pad_token_id: int) -> dict[str, floa
         logger.warning("[Training] Empty batch received, skipping training step")
         return [], {}
 
-    # split batch for sequence parallelism.
+    # split batch for sequence parallelism. Do before moving data to GPU.
     if self.splitter is not None:
         with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
             data_BT = self.splitter.split_collated_batch(data_BT)
+
     for f in dataclasses.fields(data_BT):
         to_device_inplace(getattr(data_BT, f.name), self.device)
     data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
@@ -831,9 +822,7 @@ def train(self, data_BT: CollatedBatchData, pad_token_id: int) -> dict[str, floa
         with Timer("Old logprobs Calculation", noop=self.rank != 0):
             local_old_logprobs_BT = None
             if not self.args.use_vllm_logprobs:
-                local_old_logprobs_BT = self.compute_logprobs(
-                    self.model, data_BT, self.pad_token_id, use_grad=False
-                )
+                local_old_logprobs_BT = self.compute_logprobs(self.model, data_BT, self.pad_token_id, use_grad=False)
 
             with torch.no_grad():
                 for i in range(len(data_BT.query_responses)):
@@ -859,14 +848,14 @@ def train(self, data_BT: CollatedBatchData, pad_token_id: int) -> dict[str, floa
     # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
     with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
         loss_stats_B: dict[str, torch.Tensor] = {
-            "kl": torch.zeros(4, num_samples, device=self.device),
-            "kl_loss": torch.zeros(num_samples, device=self.device),
-            "pg_clipfrac": torch.zeros(num_samples, device=self.device),
-            "pg_loss": torch.zeros(num_samples, device=self.device),
-            "loss": torch.zeros(num_samples, device=self.device),
-            "ratio": torch.zeros(num_samples, device=self.device),
-            "entropy": torch.zeros(num_samples, device=self.device),
-            "token_count": token_counts_per_sample,  # Pre-computed token counts (already on device)
+            "kl": torch.zeros(4, num_samples),
+            "kl_loss": torch.zeros(num_samples),
+            "pg_clipfrac": torch.zeros(num_samples),
+            "pg_loss": torch.zeros(num_samples),
+            "loss": torch.zeros(num_samples),
+            "ratio": torch.zeros(num_samples),
+            "entropy": torch.zeros(num_samples),
+            "token_count": token_counts_per_sample,
         }
         for epoch_idx in range(self.args.num_epochs):
             # Pre-compute total tokens for each accumulation group if using "token" normalization
@@ -903,12 +892,9 @@ def train(self, data_BT: CollatedBatchData, pad_token_id: int) -> dict[str, floa
                     valid_mask_BT = response_mask_BT & ~torch.isnan(vllm_logprobs_BT)
                     logprob_diff_BT = (local_logprobs_BT - vllm_logprobs_BT).abs()
                     masked_diff_BT = torch.masked_fill(logprob_diff_BT, ~valid_mask_BT, 0.0)
-                    zero_tensor = torch.zeros(1)  # convenience tensor so we can assume metrics are tensors
-                    mean_diff = (
-                        masked_diff_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else zero_tensor
-                    )
+                    mean_diff = masked_diff_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
                     max_diff = masked_diff_BT.max()
-                    std_diff = masked_diff_BT[valid_mask_BT].std() if valid_mask_BT.sum() > 1 else zero_tensor
+                    std_diff = masked_diff_BT[valid_mask_BT].std() if valid_mask_BT.sum() > 1 else 0.0
 
                     self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item()
                     self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
@@ -917,9 +903,7 @@ def train(self, data_BT: CollatedBatchData, pad_token_id: int) -> dict[str, floa
                     reverse_kl_BT = torch.exp(vllm_logprobs_BT) * (vllm_logprobs_BT - local_logprobs_BT)
                     masked_reverse_kl_BT = torch.masked_fill(reverse_kl_BT, ~valid_mask_BT, 0.0)
                     mean_reverse_kl = (
-                        masked_reverse_kl_BT.sum() / valid_mask_BT.sum()
-                        if valid_mask_BT.sum() > 0
-                        else zero_tensor
+                        masked_reverse_kl_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
                     )
                     self.local_metrics["debug/vllm_local_reverse_kl"] = mean_reverse_kl.item()
 
@@ -990,14 +974,10 @@ def train(self, data_BT: CollatedBatchData, pad_token_id: int) -> dict[str, floa
                         logprob_diff_is_BT = old_logprob_BT - vllm_logprobs_BT
                         # Clamp to prevent numerical overflow in exp
                         logprob_diff_is_BT = torch.where(
-                            valid_mask_BT,
-                            logprob_diff_is_BT.clamp(-10.0, 10.0),
-                            torch.zeros_like(logprob_diff_is_BT),
+                            valid_mask_BT, logprob_diff_is_BT.clamp(-10.0, 10.0), torch.zeros_like(logprob_diff_is_BT)
                         )
                         # Compute importance ratio only for valid positions
-                        tis_imp_ratio_BT = torch.where(
-                            valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
-                        )
+                        tis_imp_ratio_BT = torch.where(valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT)
                         # Apply cap
                         tis_imp_ratio_BT = torch.clamp(
                             tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
@@ -1051,9 +1031,9 @@ def train(self, data_BT: CollatedBatchData, pad_token_id: int) -> dict[str, floa
                     if self.args.record_entropy:
                         loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
 
-        batch_metrics = batch_data["metrics"]
         with torch.no_grad():
             return self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
+
 
 def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
     args = self.args
@@ -1108,12 +1088,11 @@ def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[st
 
         # Sync to GCS if configured (check the actual target, not just gs_bucket_path)
         if args.gs_checkpoint_state_dir is not None:
-            ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
-                checkpoint_state_dir, args.gs_checkpoint_state_dir
-            )
+            ray.remote(sync_gs_bucket).options(num_cpus=1).remote(checkpoint_state_dir, args.gs_checkpoint_state_dir)
     # add back the mpu
     if old_mpu is not None:
         self.model.mpu = old_mpu
+
 
 def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
     output_path = pathlib.Path(output_dir)
@@ -1176,6 +1155,7 @@ def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTra
 
         self.tokenizer.save_pretrained(output_dir)
         marker_path.touch()
+
 
 # we need this because we don't know which node is rank 0 is on
 def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
@@ -1358,7 +1338,8 @@ def validate_configs(
             "batches simultaneously. This is fine but might be unexpected behaviour."
         )
     assert (
-        streaming_config.num_samples_per_prompt_rollout * streaming_config.num_unique_prompts_rollout >= sum(num_learners_per_node) // sequence_parallel_size
+        streaming_config.num_samples_per_prompt_rollout * streaming_config.num_unique_prompts_rollout
+        >= sum(num_learners_per_node) // sequence_parallel_size
     ), (
         "num_samples_per_prompt_rollout * num_unique_prompts_rollout must be greater than or equal to world_size // sequence_parallel_size to ensure we have a batch for each rank in distributed training."
     )
@@ -1822,7 +1803,7 @@ def one_training_step(
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
-    weights = compute_token_weights(metrics_list)
+    weights = compute_token_weights(array_metrics)
 
     # Metrics that should be token-weighted (averages over tokens)
     token_weighted_metrics = {
@@ -1839,16 +1820,16 @@ def one_training_step(
         "val/ratio_var",
     }
     average_metrics = {}
-    for k in metrics_list[0]:
+    for k in array_metrics[0]:
         if k == "_token_count":
             # Don't include internal token count in final metrics
             continue
         if k in token_weighted_metrics:
             # Token-weighted average
-            average_metrics[k] = sum(m[k] * w for m, w in zip(metrics_list, weights))
+            average_metrics[k] = sum(m[k] * w for m, w in zip(array_metrics, weights))
         else:
-            # Simple average for other metrics (e.g., lr)
-            average_metrics[k] = sum(m[k] for m in metrics_list) / len(metrics_list)
+            # Simple average for other metrics
+            average_metrics[k] = sum(m[k] for m in array_metrics) / len(array_metrics)
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
