@@ -461,10 +461,12 @@ def compute_reference_logprobs_cache_hash(
     dataset_config_hash: str,
     max_train_samples: int | None,
     use_qlora: bool,
+    average_log_prob: bool,
 ) -> str:
     """Compute deterministic hash for reference logprobs cache."""
     config_str = json.dumps(
         {
+            "average_log_prob": average_log_prob,
             "concatenated_forward": concatenated_forward,
             "dataset_config_hash": dataset_config_hash,
             "dpo_loss_type": dpo_loss_type,
@@ -512,9 +514,8 @@ def build_reference_logprobs_cache(
             else:
                 chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
 
-            dataset_indices = batch["dataset_index"]
-            chosen_tensor[dataset_indices] = chosen_logps
-            rejected_tensor[dataset_indices] = rejected_logps
+            chosen_tensor[batch["dataset_index"]] = chosen_logps
+            rejected_tensor[batch["dataset_index"]] = rejected_logps
 
     # Use MAX instead of SUM because Accelerate's distributed sampler can duplicate
     # examples across ranks when even_batches=True. MAX works because duplicate
@@ -524,8 +525,14 @@ def build_reference_logprobs_cache(
         dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
         dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
 
-    if torch.any(chosen_tensor == float("-inf")) or torch.any(rejected_tensor == float("-inf")):
-        raise RuntimeError("Some dataset indices were not filled during reference logprobs caching")
+    missing_chosen = torch.where(chosen_tensor == float("-inf"))[0]
+    missing_rejected = torch.where(rejected_tensor == float("-inf"))[0]
+    if len(missing_chosen) > 0 or len(missing_rejected) > 0:
+        missing_indices = torch.unique(torch.cat([missing_chosen, missing_rejected]))
+        raise RuntimeError(
+            f"Missing {len(missing_indices)} indices during reference logprobs caching. "
+            f"First 10: {missing_indices[:10].tolist()}"
+        )
 
     model.train()
     cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
@@ -533,6 +540,9 @@ def build_reference_logprobs_cache(
     if cache_path is not None and accelerator.is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
+
+    if dist.is_initialized():
+        dist.barrier()
 
     return cache
 
@@ -693,6 +703,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             args.dataset_target_columns,
         )
         dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
+        average_log_prob = args.dpo_loss_type in ["simpo", "dpo_norm"]
         ref_cache_hash = compute_reference_logprobs_cache_hash(
             model_name_or_path=args.model_name_or_path,
             model_revision=args.model_revision,
@@ -703,6 +714,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             dataset_config_hash=dataset_config_hash,
             max_train_samples=args.max_train_samples,
             use_qlora=args.use_qlora,
+            average_log_prob=average_log_prob,
         )
         reference_cache_path = pathlib.Path(args.reference_logprobs_cache_path) / f"{ref_cache_hash}.pt"
         logger.info(f"Reference logprobs cache path: {reference_cache_path}")
@@ -956,10 +968,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             completed_steps = resume_step // args.gradient_accumulation_steps
             resume_step -= starting_epoch * len(train_dataloader)
 
-    print(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
-
-    print("=============before cache logprobs")
-    print_gpu_stats(init_gpu_memory)
+    logger.info(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
 
     # Cache the logprobs
     average_log_prob_loss_types = ["simpo", "dpo_norm"]
@@ -980,12 +989,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             use_lora=args.use_lora,
             cache_path=reference_cache_path,
         )
-        print("=============after cache logprobs")
-        print_gpu_stats(init_gpu_memory)
         torch.cuda.empty_cache()
 
-    print("=============after cache logprobs; clear cache")
-    print_gpu_stats(init_gpu_memory)
     # Only show the progress bar once on each machine.
     start_time = time.perf_counter()
     progress_bar = tqdm(

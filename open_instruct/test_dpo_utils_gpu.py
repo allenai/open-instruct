@@ -30,6 +30,7 @@ class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
             dataset_config_hash="abc123",
             max_train_samples=None,
             use_qlora=False,
+            average_log_prob=False,
         )
         hash2 = compute_reference_logprobs_cache_hash(
             model_name_or_path="model/path",
@@ -41,6 +42,7 @@ class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
             dataset_config_hash="abc123",
             max_train_samples=None,
             use_qlora=False,
+            average_log_prob=False,
         )
         self.assertEqual(hash1, hash2)
         self.assertEqual(len(hash1), 16)
@@ -56,6 +58,7 @@ class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
             dataset_config_hash="abc123",
             max_train_samples=None,
             use_qlora=False,
+            average_log_prob=False,
         )
         hash2 = compute_reference_logprobs_cache_hash(
             model_name_or_path="model/path",
@@ -67,6 +70,34 @@ class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
             dataset_config_hash="abc123",
             max_train_samples=None,
             use_qlora=False,
+            average_log_prob=True,
+        )
+        self.assertNotEqual(hash1, hash2)
+
+    def test_hash_changes_with_average_log_prob(self):
+        hash1 = compute_reference_logprobs_cache_hash(
+            model_name_or_path="model/path",
+            model_revision="main",
+            dpo_loss_type="dpo",
+            concatenated_forward=True,
+            packing=False,
+            use_lora=False,
+            dataset_config_hash="abc123",
+            max_train_samples=None,
+            use_qlora=False,
+            average_log_prob=False,
+        )
+        hash2 = compute_reference_logprobs_cache_hash(
+            model_name_or_path="model/path",
+            model_revision="main",
+            dpo_loss_type="dpo",
+            concatenated_forward=True,
+            packing=False,
+            use_lora=False,
+            dataset_config_hash="abc123",
+            max_train_samples=None,
+            use_qlora=False,
+            average_log_prob=True,
         )
         self.assertNotEqual(hash1, hash2)
 
