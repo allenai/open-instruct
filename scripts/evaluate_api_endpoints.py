@@ -139,7 +139,7 @@ def main():
     parser.add_argument(
         "--provider",
         type=str,
-        choices=["cirrascale", "modal", "parasail"],
+        choices=["cirrascale", "modal", "parasail", "deepinfra"],
         help="Provider of the model API endpoint. Currently supported: cirrascale, modal.",
     )
     parser.add_argument(
@@ -172,6 +172,11 @@ def main():
         type=float,
         default=0.6,
         help="Sampling temperature for the model.",
+    )
+    parser.add_argument(
+        "--clusters",
+        type=str,
+        help="Comma-separated list of Beaker clusters to use for evaluation runs.",
     )
     parser.add_argument(
         "--beaker_workspace",
@@ -230,6 +235,8 @@ def main():
                 "--model-type litellm",
                 f"--model-args '{json.dumps(model_args)}'"
             ]
+            if args.clusters:
+                command_list.append(f"--cluster {args.clusters}")
 
             gantry_args = {
                 "env-secret": "OPENAI_API_KEY=openai_api_key",
