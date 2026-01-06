@@ -66,7 +66,7 @@ from huggingface_hub import HfApi
 from ray.util import state as ray_state
 from rich.pretty import pprint
 from tqdm import tqdm
-from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
+from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import data_types, logger_utils
@@ -1893,23 +1893,20 @@ class ModelDims:
     @classmethod
     def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
         """Create ModelDims from a HuggingFace model name or path."""
-        from transformers import AutoConfig
-
         config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
         hidden_size = config.hidden_size
         intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)
         sliding_window = getattr(config, "sliding_window", None)
-        num_layers = config.num_hidden_layers
         num_sliding_window_layers = 0
         if sliding_window is not None:
             layer_types = getattr(config, "layer_types", None)
             if layer_types is not None:
                 num_sliding_window_layers = layer_types.count("sliding_attention")
             else:
-                num_sliding_window_layers = num_layers
+                num_sliding_window_layers = config.num_hidden_layers
         head_dim = getattr(config, "head_dim", hidden_size // config.num_attention_heads)
         return cls(
-            num_layers=num_layers,
+            num_layers=config.num_hidden_layers,
             hidden_size=hidden_size,
             intermediate_size=intermediate_size,
             vocab_size=config.vocab_size,
