@@ -8,8 +8,8 @@
 #   # Run on Beaker:
 #   ./scripts/train/debug/finetune.sh <beaker_image>
 
-RUN_NAME="debug-sft-olmo3-7b"
-CHECKPOINT="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round5-100B-olmo3_7b-anneal-decon-12T-00bb6023/step47684"
+RUN_NAME="debug-sft-olmo25-7b"
+CHECKPOINT="/weka/oe-training-default/ai2-llm/checkpoints/OLMo25/step1413814"
 CLUSTER="ai2/jupiter"
 SEQ_LEN=4096
 NUM_NODES=1
