@@ -46,7 +46,7 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 logger = logging.getLogger(__name__)
 
 
-def build_index_mapping(dataset: Dataset) -> dict[str, int]:
+def build_index_mapping(dataset: Dataset) -> dict[int, int]:
     """Build a mapping from original row IDs to current positional indices."""
     return {dataset[i]["index"]: i for i in range(len(dataset))}
 
