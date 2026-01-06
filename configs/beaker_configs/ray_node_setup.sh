@@ -5,6 +5,7 @@ export PATH="/root/.local/bin:$PATH"
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 export NCCL_CUMEM_ENABLE=0
 
+
 echo CURRENT_DATETIME=$CURRENT_DATETIME
 echo PYTHONPATH=$PYTHONPATH
 echo PATH=$PATH
