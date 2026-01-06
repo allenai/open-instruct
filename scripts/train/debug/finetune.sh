@@ -1,6 +1,9 @@
 #!/bin/bash
 # SFT debug script using OLMo-core training infrastructure.
 #
+# This script first creates a numpy dataset from HuggingFace data using
+# --cache_dataset_only mode, then runs training on the cached data.
+#
 # Usage:
 #   # Run on Beaker:
 #   ./scripts/train/debug/finetune.sh <beaker_image>
@@ -8,7 +11,6 @@
 RUN_NAME="debug-sft-olmo2-7b"
 CHECKPOINT="s3://ai2-llm/checkpoints/OLMo-2/Olmo-2-1124-7B/step556000-unsharded"
 CLUSTER="ai2/jupiter"
-DATASET_PATH="s3://ai2-llm/preprocessed/tulu-sft/tulu-3-sft-olmo-2-mixture-4096"
 SEQ_LEN=4096
 NUM_NODES=1
 GLOBAL_BATCH_SIZE=$((64 * SEQ_LEN))
@@ -25,36 +27,58 @@ if [ -n "$1" ]; then
         --workspace "$WORKSPACE" \
         --priority urgent \
         --image "$BEAKER_IMAGE" \
-        --description "OLMo-core SFT debug job." \
+        --description "OLMo-core SFT debug job - cache dataset and train." \
         --pure_docker_mode \
         --preemptible \
         --num_nodes "$NUM_NODES" \
         --budget "$BUDGET" \
         --gpus 8 \
         --non_resumable \
-        --no_auto_dataset_cache \
         -- \
-        torchrun --nproc_per_node=8 open_instruct/finetune.py train \
-            "$RUN_NAME" \
-            "$CHECKPOINT" \
-            "$CLUSTER" \
-            --dataset_path "$DATASET_PATH" \
-            --seq_len "$SEQ_LEN" \
-            --num_nodes "$NUM_NODES" \
-            --global_batch_size "$GLOBAL_BATCH_SIZE" \
-            --budget "$BUDGET" \
-            --workspace "$WORKSPACE" \
-            --num_epochs "$NUM_EPOCHS" \
-            --wandb_project open_instruct_internal \
-            --wandb_entity ai2-llm
+        bash -c '
+set -e
+OUTPUT_DIR="/weka/oe-adapt-default/allennlp/deletable_checkpoint/$(whoami)/debug-sft-data"
+
+echo "Step 1: Caching dataset to numpy format..."
+python open_instruct/finetune.py cache_dataset_only \
+    --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 0.01 \
+    --output_dir "$OUTPUT_DIR" \
+    --max_seq_length '"$SEQ_LEN"' \
+    --tokenizer_name_or_path allenai/OLMo-2-1124-7B
+
+echo "Step 2: Running training..."
+torchrun --nproc_per_node=8 open_instruct/finetune.py train \
+    '"$RUN_NAME"' \
+    '"$CHECKPOINT"' \
+    '"$CLUSTER"' \
+    --dataset_path "$OUTPUT_DIR" \
+    --seq_len '"$SEQ_LEN"' \
+    --num_nodes '"$NUM_NODES"' \
+    --global_batch_size '"$GLOBAL_BATCH_SIZE"' \
+    --budget '"$BUDGET"' \
+    --workspace '"$WORKSPACE"' \
+    --num_epochs '"$NUM_EPOCHS"' \
+    --wandb_project open_instruct_internal \
+    --wandb_entity ai2-llm
+'
 else
     echo "Running locally..."
     echo "Note: Local execution requires a GPU with CUDA support."
+    OUTPUT_DIR="output/debug-sft-data"
+
+    echo "Step 1: Caching dataset to numpy format..."
+    uv run python open_instruct/finetune.py cache_dataset_only \
+        --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 0.01 \
+        --output_dir "$OUTPUT_DIR" \
+        --max_seq_length "$SEQ_LEN" \
+        --tokenizer_name_or_path allenai/OLMo-2-1124-7B
+
+    echo "Step 2: Running training..."
     uv run torchrun --nproc_per_node=8 open_instruct/finetune.py train \
         "$RUN_NAME" \
         "$CHECKPOINT" \
         "$CLUSTER" \
-        --dataset_path "$DATASET_PATH" \
+        --dataset_path "$OUTPUT_DIR" \
         --seq_len "$SEQ_LEN" \
         --num_nodes "$NUM_NODES" \
         --global_batch_size "$GLOBAL_BATCH_SIZE" \
