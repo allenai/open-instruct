@@ -702,41 +702,6 @@ def accumulate_inference_batches(
     return combined_result, batch, combined_reward_metrics, batch_stats
 
 
-def pad_sequences_for_world_size(
-    packed_sequences: PackedSequences, world_size: int, pad_token_id: int, eos_token_id: int
-) -> None:
-    """Pads packed sequences so total count is divisible by world_size.
-
-    Mutates packed_sequences in place by appending dummy sequences.
-    """
-    total = len(packed_sequences.query_responses)
-    remainder = total % world_size
-    if remainder == 0:
-        return
-
-    shortfall = world_size - remainder
-    logger.warning(f"Padding {shortfall} sequences for world size. In future, you should adjust your compute.")
-
-    assert packed_sequences.position_ids is not None
-    assert packed_sequences.advantages is not None
-    assert packed_sequences.vllm_logprobs is not None
-
-    dummy_qr = torch.tensor([pad_token_id, eos_token_id], dtype=torch.long)
-    dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-    dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-    dummy_response_mask = torch.zeros_like(dummy_qr)
-    dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
-    dummy_logprobs = torch.zeros_like(dummy_qr, dtype=torch.float)
-
-    for _ in range(shortfall):
-        packed_sequences.query_responses.append(dummy_qr)
-        packed_sequences.attention_masks.append(dummy_attention)
-        packed_sequences.position_ids.append(dummy_position_ids)
-        packed_sequences.response_masks.append(dummy_response_mask)
-        packed_sequences.advantages.append(dummy_advantage)
-        packed_sequences.vllm_logprobs.append(dummy_logprobs)
-
-
 def prepare_collated_data_for_workers(
     packed_sequences: PackedSequences,
     world_size: int,
@@ -852,9 +817,7 @@ class DataPreparationActor:
         verbose: bool,
         work_dir: str,
         initial_state: dict | None = None,
-        allow_world_padding: bool = False,
     ):
-        self.allow_world_padding = allow_world_padding
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
         self.tokenizer = tokenizer
@@ -1004,11 +967,6 @@ class DataPreparationActor:
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
-
-            if self.allow_world_padding:
-                pad_sequences_for_world_size(
-                    packed_sequences, self.dp_world_size, self.tokenizer.pad_token_id, self.tokenizer.eos_token_id
-                )
 
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id
