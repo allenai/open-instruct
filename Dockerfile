@@ -71,8 +71,7 @@ FROM base AS deps
 
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
-    uv sync --frozen --no-install-project && \
-    uv run python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
+    uv run --frozen python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
 
 # Stage: final - Add source code
 FROM deps AS final
