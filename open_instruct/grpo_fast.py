@@ -366,18 +366,11 @@ class PolicyTrainerRayProcess(RayProcess):
         self._args = args
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
-        dp_world_size = world_size // args.sequence_parallel_size
-        dp_rank = groups._get_data_parallel_rank()
-        self._streaming_dataloader = streaming_config.build_dataloader(
-            data_prep_actor_name=data_prep_actor_name,
-            tokenizer=tokenizer,
-            dp_rank=dp_rank,
-            fs_local_rank=local_rank,
-            num_training_steps=args.num_training_steps,
-            work_dir=args.output_dir,
-            dp_world_size=dp_world_size,
-        )
-        self.dataloader = iter(self._streaming_dataloader)
+        self.world_size = world_size
+        self.local_rank = local_rank
+        self.dp_world_size = world_size // args.sequence_parallel_size
+        self._streaming_dataloader = None
+        self._data_prep_actor_name = data_prep_actor_name
 
     def get_dataloader_state(self) -> dict[str, Any]:
         return self._streaming_dataloader.state_dict()
@@ -431,6 +424,17 @@ class PolicyTrainerRayProcess(RayProcess):
         if not torch.distributed.is_initialized():
             torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=args.backend_timeout))
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
+
+        self._streaming_dataloader = streaming_config.build_dataloader(
+            data_prep_actor_name=self.data_prep_actor_name,
+            tokenizer=tokenizer,
+            dp_rank=groups._get_data_parallel_rank(),  # when sequence parallel is enable != local_rank
+            fs_local_rank=self.local_rank,
+            num_training_steps=args.num_training_steps,
+            work_dir=args.output_dir,
+            dp_world_size=self.dp_world_size,
+        )
+        self.dataloader = iter(self._streaming_dataloader)
 
         ds_config = get_train_ds_config(
             offload=args.deepspeed_offload_param,
