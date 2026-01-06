@@ -52,7 +52,6 @@ from transformers import PreTrainedTokenizer
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import logger_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
-from open_instruct.beaker_callback import BeakerCallbackV2
 from open_instruct.data_loader import DataPreparationActor
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
@@ -562,7 +561,7 @@ def main(
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
 
     if beaker_config is not None:
-        trainer_callbacks["beaker"] = BeakerCallbackV2(config=json_config)
+        trainer_callbacks["beaker"] = callbacks.BeakerCallback(config=json_config)
 
     if args.with_tracking:
         trainer_callbacks["wandb"] = callbacks.WandBCallback(
