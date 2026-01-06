@@ -134,14 +134,51 @@ DEFAULT_MODEL_CONFIG = "from_checkpoint"
 def load_model_config_from_checkpoint(checkpoint_path: str, vocab_size: int) -> TransformerConfig:
     """Load TransformerConfig from checkpoint's config.json file."""
     from olmo_core.io import resource_path
+    from olmo_core.nn.attention import AttentionConfig, SlidingWindowAttentionConfig
+    from olmo_core.nn.feed_forward import FeedForwardConfig
+    from olmo_core.nn.layer_norm import LayerNormConfig
+    from olmo_core.nn.lm_head import LMHeadConfig
+    from olmo_core.nn.rope import RoPEConfig
+    from olmo_core.nn.transformer.config import TransformerBlockConfig
 
     local_config_path = resource_path(checkpoint_path, "config.json")
     with local_config_path.open("r") as f:
         config_dict = json.load(f)
 
-    model_config_dict = config_dict["model"]
-    model_config_dict["vocab_size"] = vocab_size
-    return TransformerConfig.from_dict(model_config_dict)
+    m = config_dict["model"]
+    blk = m["block"]
+    att = blk["attention"]
+    ff = blk["feed_forward"]
+
+    sliding_window = None
+    if att.get("sliding_window"):
+        sw = att["sliding_window"]
+        sliding_window = SlidingWindowAttentionConfig(
+            pattern=sw.get("pattern"),
+            force_full_attention_on_first_layer=sw.get("force_full_attention_on_first_layer", False),
+            force_full_attention_on_last_layer=sw.get("force_full_attention_on_last_layer", True),
+        )
+
+    return TransformerConfig(
+        d_model=m["d_model"],
+        vocab_size=vocab_size,
+        n_layers=m["n_layers"],
+        block=TransformerBlockConfig(
+            attention=AttentionConfig(
+                n_heads=att["n_heads"],
+                n_kv_heads=att.get("n_kv_heads"),
+                bias=att.get("bias", False),
+                qk_norm=LayerNormConfig(name="rms", eps=1e-06) if att.get("qk_norm") else None,
+                rope=RoPEConfig(theta=att.get("rope", {}).get("theta", 500000), full_precision=True),
+                use_flash=att.get("use_flash", True),
+                sliding_window=sliding_window,
+            ),
+            layer_norm=LayerNormConfig(name="rms", eps=1e-06),
+            feed_forward=FeedForwardConfig(hidden_size=ff["hidden_size"], bias=ff.get("bias", False)),
+            name=blk.get("name", "reordered_norm"),
+        ),
+        lm_head=LMHeadConfig(layer_norm=LayerNormConfig(name="rms", eps=1e-06), bias=False),
+    )
 
 
 def get_beaker_username() -> str | None:
