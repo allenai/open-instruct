@@ -3,12 +3,12 @@ import sys
 import time
 from dataclasses import dataclass
 
-from open_instruct.utils import (
-    ArgumentParserPlus,
+from open_instruct.launch_utils import (
     BeakerRuntimeConfig,
     beaker_experiment_succeeded,
     get_beaker_dataset_ids,
 )
+from open_instruct.utils import ArgumentParserPlus
 
 """
 example usage
