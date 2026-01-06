@@ -94,6 +94,7 @@ except ImportError:
 from rich import print  # noqa: E402
 from tqdm import tqdm  # noqa: E402
 
+from open_instruct.beaker_callback import BeakerCallbackV2  # noqa: E402
 from open_instruct.dataset_transformation import (  # noqa: E402
     ATTENTION_MASK_KEY,
     DATASET_ORIGIN_KEY,
@@ -484,7 +485,8 @@ class SFTConfig:
                     enabled=wandb_project is not None,
                     cancel_check_interval=10,
                 ),
-            ),
+            )
+            .with_callback("beaker", BeakerCallbackV2()),
             init_seed=init_seed,
         )
 
