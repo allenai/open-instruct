@@ -366,14 +366,16 @@ class PolicyTrainerRayProcess(RayProcess):
         self._args = args
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
+        dp_world_size = world_size // args.sequence_parallel_size
+        dp_rank = groups._get_data_parallel_rank()
         self._streaming_dataloader = streaming_config.build_dataloader(
             data_prep_actor_name=data_prep_actor_name,
             tokenizer=tokenizer,
-            dp_rank=rank,
+            dp_rank=dp_rank,
             fs_local_rank=local_rank,
             num_training_steps=args.num_training_steps,
             work_dir=args.output_dir,
-            dp_world_size=world_size,
+            dp_world_size=dp_world_size,
         )
         self.dataloader = iter(self._streaming_dataloader)
 
@@ -456,7 +458,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_name_or_path=model_config.model_name_or_path,
             core_attn_implementation="flash_attention_2",
             sequence_parallel_size=args.sequence_parallel_size,
-            max_length=args.pack_length,
+            max_length=streaming_config.pack_length,
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
         )
@@ -1584,7 +1586,7 @@ def create_model_and_optimizer(
         seed=args.seed,
         per_device_train_batch_size=args.per_device_train_batch_size,
         global_batch_size=streaming_config.num_unique_prompts_rollout,
-        dp_world_size=args.world_size,
+        dp_world_size=args.world_size // args.sequence_parallel_size,
         max_possible_score=streaming_config.max_possible_score,
         actor_manager=actor_manager,
         model_dims=model_dims,
