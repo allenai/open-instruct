@@ -780,421 +780,421 @@ def _compute_loss_metrics(
         self.local_metrics["_token_count"] = total_valid_tokens
         return self.local_metrics.get_metrics_list()
 
-    def train(self, data_BT: CollatedBatchData, pad_token_id: int) -> dict[str, float]:
-        """Train the policy model on a batch of data.
+def train(self, data_BT: CollatedBatchData, pad_token_id: int) -> dict[str, float]:
+    """Train the policy model on a batch of data.
 
-        Args:
-            data_BT: CollatedBatchData containing:
-                - query_responses: Token IDs for query+response sequences (B, T)
-                - attention_masks: Attention mask (1=valid, 0=padding) (B, T)
-                - position_ids: Position indices for positional embeddings (B, T)
-                - advantages: Advantage estimates for RL training (B, T)
-                - response_masks: Binary mask for response tokens (B, T)
-                - vllm_logprobs: Log probabilities from vLLM engine (B, T)
-            pad_token_id: Token ID used for padding.
+    Args:
+        data_BT: CollatedBatchData containing:
+            - query_responses: Token IDs for query+response sequences (B, T)
+            - attention_masks: Attention mask (1=valid, 0=padding) (B, T)
+            - position_ids: Position indices for positional embeddings (B, T)
+            - advantages: Advantage estimates for RL training (B, T)
+            - response_masks: Binary mask for response tokens (B, T)
+            - vllm_logprobs: Log probabilities from vLLM engine (B, T)
+        pad_token_id: Token ID used for padding.
 
-        Returns:
-            Tuple of (metrics_list, array_metrics) from training.
-        """
-        batch_data = next(self.dataloader)
-        data_BT = batch_data["batch"]
-        if len(data_BT) == 0:
-            logger.warning("[Training] Empty batch received, skipping training step")
-            return [], {}
+    Returns:
+        Tuple of (metrics_list, array_metrics) from training.
+    """
+    batch_data = next(self.dataloader)
+    data_BT = batch_data["batch"]
+    if len(data_BT) == 0:
+        logger.warning("[Training] Empty batch received, skipping training step")
+        return [], {}
 
-        # split batch for sequence parallelism.
-        if self.splitter is not None:
-            with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
-                data_BT = self.splitter.split_collated_batch(data_BT)
-        for f in dataclasses.fields(data_BT):
-            to_device_inplace(getattr(data_BT, f.name), self.device)
-        data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
-        num_samples = len(data_BT)
-        accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
-        leftover = num_samples % accumulation_steps
-        if leftover > 0:
-            data_BT = data_BT[:-leftover]
-            logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
+    # split batch for sequence parallelism.
+    if self.splitter is not None:
+        with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
+            data_BT = self.splitter.split_collated_batch(data_BT)
+    for f in dataclasses.fields(data_BT):
+        to_device_inplace(getattr(data_BT, f.name), self.device)
+    data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
+    num_samples = len(data_BT)
+    accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
+    leftover = num_samples % accumulation_steps
+    if leftover > 0:
+        data_BT = data_BT[:-leftover]
+        logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
 
-        num_mini_batches = len(data_BT.query_responses) // accumulation_steps
+    num_mini_batches = len(data_BT.query_responses) // accumulation_steps
 
-        ref_logprobs_BT: list[torch.Tensor] = []
-        if self.args.load_ref_policy:
-            with Timer("Inference Calculation", noop=self.rank != 0):
-                ref_logprobs_BT = self.compute_logprobs(self.ref_policy, data_BT, self.pad_token_id, use_grad=False)
+    ref_logprobs_BT: list[torch.Tensor] = []
+    if self.args.load_ref_policy:
+        with Timer("Inference Calculation", noop=self.rank != 0):
+            ref_logprobs_BT = self.compute_logprobs(self.ref_policy, data_BT, self.pad_token_id, use_grad=False)
 
-        # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
-        # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
-        # from the generator (note that async mode means these are a bit diff!)
-        old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(len(data_BT.query_responses))]
-        if num_mini_batches > 1:
-            with Timer("Old logprobs Calculation", noop=self.rank != 0):
-                local_old_logprobs_BT = None
-                if not self.args.use_vllm_logprobs:
-                    local_old_logprobs_BT = self.compute_logprobs(
-                        self.model, data_BT, self.pad_token_id, use_grad=False
+    # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
+    # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
+    # from the generator (note that async mode means these are a bit diff!)
+    old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(len(data_BT.query_responses))]
+    if num_mini_batches > 1:
+        with Timer("Old logprobs Calculation", noop=self.rank != 0):
+            local_old_logprobs_BT = None
+            if not self.args.use_vllm_logprobs:
+                local_old_logprobs_BT = self.compute_logprobs(
+                    self.model, data_BT, self.pad_token_id, use_grad=False
+                )
+
+            with torch.no_grad():
+                for i in range(len(data_BT.query_responses)):
+                    vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
+                    vllm_old_logprob_BT = torch.masked_fill(
+                        vllm_old_logprob_BT, ~data_BT.response_masks[i][:, 1:], INVALID_LOGPROB
                     )
+                    vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=INVALID_LOGPROB)
 
-                with torch.no_grad():
-                    for i in range(len(data_BT.query_responses)):
-                        vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
-                        vllm_old_logprob_BT = torch.masked_fill(
-                            vllm_old_logprob_BT, ~data_BT.response_masks[i][:, 1:], INVALID_LOGPROB
-                        )
-                        vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=INVALID_LOGPROB)
-
-                        if self.args.use_vllm_logprobs:
-                            old_logprobs_BT[i] = vllm_old_logprob_BT
-                        else:
-                            old_logprobs_BT[i] = local_old_logprobs_BT[i]
-
-                        torch.cuda.empty_cache()
-
-        local_step = 0
-        num_samples = len(data_BT.query_responses)
-        # Pre-compute token counts per sample (for weighted averaging across SP ranks)
-        # This only needs to be done once since response_masks don't change across epochs
-        token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
-        total_valid_tokens = token_counts_per_sample.sum().item()
-        # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
-        with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            loss_stats_B: dict[str, torch.Tensor] = {
-                "kl": torch.zeros(4, num_samples, device=self.device),
-                "kl_loss": torch.zeros(num_samples, device=self.device),
-                "pg_clipfrac": torch.zeros(num_samples, device=self.device),
-                "pg_loss": torch.zeros(num_samples, device=self.device),
-                "loss": torch.zeros(num_samples, device=self.device),
-                "ratio": torch.zeros(num_samples, device=self.device),
-                "entropy": torch.zeros(num_samples, device=self.device),
-                "token_count": token_counts_per_sample,  # Pre-computed token counts (already on device)
-            }
-            for epoch_idx in range(self.args.num_epochs):
-                # Pre-compute total tokens for each accumulation group if using "token" normalization
-                # This ensures all minibatches in an accumulation group are normalized by the same total
-                if self.args.loss_denominator == "token":
-                    accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
-                else:
-                    accumulation_token_counts = {
-                        int(group_idx * accumulation_steps): self.args.loss_denominator
-                        for group_idx in range((len(data_BT.query_responses) // accumulation_steps) + 1)
-                    }
-
-                for i in range(num_samples):
-                    response_mask_BT = data_BT.response_masks[i][:, 1:]
-                    # retrieve the loss denominator for the current batch
-                    batch_start = (i // accumulation_steps) * accumulation_steps
-                    loss_denominator = accumulation_token_counts[batch_start]
-                    local_logprobs_BT, entropy_BT = self.forward(
-                        self.model,
-                        data_BT.query_responses[i],
-                        data_BT.attention_masks[i],
-                        data_BT.position_ids[i],
-                        self.pad_token_id,
-                        self.streaming_config.temperature,
-                        return_entropy=self.args.record_entropy,
-                    )
-                    local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
-                    vllm_logprobs_BT = data_BT.vllm_logprobs[i][:, 1:]
-                    vllm_logprobs_BT = torch.masked_fill(vllm_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
-                    vllm_logprobs_BT = torch.nan_to_num(vllm_logprobs_BT, nan=INVALID_LOGPROB)
-
-                    # Compare vLLM logprobs with local logprobs
-                    with torch.no_grad():
-                        valid_mask_BT = response_mask_BT & ~torch.isnan(vllm_logprobs_BT)
-                        logprob_diff_BT = (local_logprobs_BT - vllm_logprobs_BT).abs()
-                        masked_diff_BT = torch.masked_fill(logprob_diff_BT, ~valid_mask_BT, 0.0)
-                        zero_tensor = torch.zeros(1)  # convenience tensor so we can assume metrics are tensors
-                        mean_diff = (
-                            masked_diff_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else zero_tensor
-                        )
-                        max_diff = masked_diff_BT.max()
-                        std_diff = masked_diff_BT[valid_mask_BT].std() if valid_mask_BT.sum() > 1 else zero_tensor
-
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item()
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = std_diff.item()
-
-                        reverse_kl_BT = torch.exp(vllm_logprobs_BT) * (vllm_logprobs_BT - local_logprobs_BT)
-                        masked_reverse_kl_BT = torch.masked_fill(reverse_kl_BT, ~valid_mask_BT, 0.0)
-                        mean_reverse_kl = (
-                            masked_reverse_kl_BT.sum() / valid_mask_BT.sum()
-                            if valid_mask_BT.sum() > 0
-                            else zero_tensor
-                        )
-                        self.local_metrics["debug/vllm_local_reverse_kl"] = mean_reverse_kl.item()
-
-                    new_logprobs_BT = local_logprobs_BT
-
-                    # Cache the old logprobs
-                    if num_mini_batches > 1:
-                        old_logprob_BT = old_logprobs_BT[i]
+                    if self.args.use_vllm_logprobs:
+                        old_logprobs_BT[i] = vllm_old_logprob_BT
                     else:
-                        with torch.no_grad():
-                            if epoch_idx == 0:
-                                if self.args.use_vllm_logprobs:
-                                    old_logprobs_BT[i] = vllm_logprobs_BT
-                                else:
-                                    old_logprobs_BT[i] = local_logprobs_BT.detach()
-                            old_logprob_BT = old_logprobs_BT[i]
+                        old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
+                    torch.cuda.empty_cache()
+
+    local_step = 0
+    num_samples = len(data_BT.query_responses)
+    # Pre-compute token counts per sample (for weighted averaging across SP ranks)
+    # This only needs to be done once since response_masks don't change across epochs
+    token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
+    total_valid_tokens = token_counts_per_sample.sum().item()
+    # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
+    with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
+        loss_stats_B: dict[str, torch.Tensor] = {
+            "kl": torch.zeros(4, num_samples, device=self.device),
+            "kl_loss": torch.zeros(num_samples, device=self.device),
+            "pg_clipfrac": torch.zeros(num_samples, device=self.device),
+            "pg_loss": torch.zeros(num_samples, device=self.device),
+            "loss": torch.zeros(num_samples, device=self.device),
+            "ratio": torch.zeros(num_samples, device=self.device),
+            "entropy": torch.zeros(num_samples, device=self.device),
+            "token_count": token_counts_per_sample,  # Pre-computed token counts (already on device)
+        }
+        for epoch_idx in range(self.args.num_epochs):
+            # Pre-compute total tokens for each accumulation group if using "token" normalization
+            # This ensures all minibatches in an accumulation group are normalized by the same total
+            if self.args.loss_denominator == "token":
+                accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
+            else:
+                accumulation_token_counts = {
+                    int(group_idx * accumulation_steps): self.args.loss_denominator
+                    for group_idx in range((len(data_BT.query_responses) // accumulation_steps) + 1)
+                }
+
+            for i in range(num_samples):
+                response_mask_BT = data_BT.response_masks[i][:, 1:]
+                # retrieve the loss denominator for the current batch
+                batch_start = (i // accumulation_steps) * accumulation_steps
+                loss_denominator = accumulation_token_counts[batch_start]
+                local_logprobs_BT, entropy_BT = self.forward(
+                    self.model,
+                    data_BT.query_responses[i],
+                    data_BT.attention_masks[i],
+                    data_BT.position_ids[i],
+                    self.pad_token_id,
+                    self.streaming_config.temperature,
+                    return_entropy=self.args.record_entropy,
+                )
+                local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
+                vllm_logprobs_BT = data_BT.vllm_logprobs[i][:, 1:]
+                vllm_logprobs_BT = torch.masked_fill(vllm_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
+                vllm_logprobs_BT = torch.nan_to_num(vllm_logprobs_BT, nan=INVALID_LOGPROB)
+
+                # Compare vLLM logprobs with local logprobs
+                with torch.no_grad():
+                    valid_mask_BT = response_mask_BT & ~torch.isnan(vllm_logprobs_BT)
+                    logprob_diff_BT = (local_logprobs_BT - vllm_logprobs_BT).abs()
+                    masked_diff_BT = torch.masked_fill(logprob_diff_BT, ~valid_mask_BT, 0.0)
+                    zero_tensor = torch.zeros(1)  # convenience tensor so we can assume metrics are tensors
+                    mean_diff = (
+                        masked_diff_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else zero_tensor
+                    )
+                    max_diff = masked_diff_BT.max()
+                    std_diff = masked_diff_BT[valid_mask_BT].std() if valid_mask_BT.sum() > 1 else zero_tensor
+
+                    self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item()
+                    self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
+                    self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = std_diff.item()
+
+                    reverse_kl_BT = torch.exp(vllm_logprobs_BT) * (vllm_logprobs_BT - local_logprobs_BT)
+                    masked_reverse_kl_BT = torch.masked_fill(reverse_kl_BT, ~valid_mask_BT, 0.0)
+                    mean_reverse_kl = (
+                        masked_reverse_kl_BT.sum() / valid_mask_BT.sum()
+                        if valid_mask_BT.sum() > 0
+                        else zero_tensor
+                    )
+                    self.local_metrics["debug/vllm_local_reverse_kl"] = mean_reverse_kl.item()
+
+                new_logprobs_BT = local_logprobs_BT
+
+                # Cache the old logprobs
+                if num_mini_batches > 1:
+                    old_logprob_BT = old_logprobs_BT[i]
+                else:
+                    with torch.no_grad():
+                        if epoch_idx == 0:
+                            if self.args.use_vllm_logprobs:
+                                old_logprobs_BT[i] = vllm_logprobs_BT
+                            else:
+                                old_logprobs_BT[i] = local_logprobs_BT.detach()
+                        old_logprob_BT = old_logprobs_BT[i]
+
+                old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
+                assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
+                    f"Old logprobs mask should match response mask. "
+                    f"old_mask sum={old_logprobs_mask_BT.sum()}, "
+                    f"response_mask sum={response_mask_BT.sum()}"
+                )
+
+                # Calculate the policy's loss
+                logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
+                ratio_BT = torch.exp(logprobs_diff_BT)
+                if self.args.loss_fn == "dapo":
+                    pg_losses_BT = -data_BT.advantages[i][:, 1:] * ratio_BT
+                    pg_losses2_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
+                        ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher
+                    )
+                elif self.args.loss_fn == "cispo":
+                    # cispo: directly clip ratio, no lower bound.
+                    # reinforce loss, so multiply by new logprobs
+                    pg_losses_BT = (
+                        -data_BT.advantages[i][:, 1:]
+                        * torch.clamp(ratio_BT.detach(), max=1.0 + self.args.clip_higher)
+                        * new_logprobs_BT
+                    )
+                    pg_losses2_BT = pg_losses_BT
+                else:
+                    raise ValueError(f"Invalid loss function: {self.args.loss_fn}")
+
+                # Apply truncated importance sampling if enabled
+                if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
                     old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
+                    vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
+
                     assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
                         f"Old logprobs mask should match response mask. "
                         f"old_mask sum={old_logprobs_mask_BT.sum()}, "
                         f"response_mask sum={response_mask_BT.sum()}"
                     )
+                    assert torch.all(vllm_logprobs_mask_BT == response_mask_BT), (
+                        f"vLLM logprobs mask should match response mask. "
+                        f"vllm_mask sum={vllm_logprobs_mask_BT.sum()}, "
+                        f"response_mask sum={response_mask_BT.sum()}"
+                    )
 
-                    # Calculate the policy's loss
-                    logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
-                    ratio_BT = torch.exp(logprobs_diff_BT)
-                    if self.args.loss_fn == "dapo":
-                        pg_losses_BT = -data_BT.advantages[i][:, 1:] * ratio_BT
-                        pg_losses2_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
-                            ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher
-                        )
-                    elif self.args.loss_fn == "cispo":
-                        # cispo: directly clip ratio, no lower bound.
-                        # reinforce loss, so multiply by new logprobs
-                        pg_losses_BT = (
-                            -data_BT.advantages[i][:, 1:]
-                            * torch.clamp(ratio_BT.detach(), max=1.0 + self.args.clip_higher)
-                            * new_logprobs_BT
-                        )
-                        pg_losses2_BT = pg_losses_BT
-                    else:
-                        raise ValueError(f"Invalid loss function: {self.args.loss_fn}")
+                    valid_mask_BT = response_mask_BT
 
-                    # Apply truncated importance sampling if enabled
-                    if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
-                        old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
-                        vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
+                    # Initialize importance ratio to 1.0 (no effect) for all positions
+                    tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
 
-                        assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
-                            f"Old logprobs mask should match response mask. "
-                            f"old_mask sum={old_logprobs_mask_BT.sum()}, "
-                            f"response_mask sum={response_mask_BT.sum()}"
+                    if valid_mask_BT.any():
+                        # Calculate logprob difference only for valid positions
+                        logprob_diff_is_BT = old_logprob_BT - vllm_logprobs_BT
+                        # Clamp to prevent numerical overflow in exp
+                        logprob_diff_is_BT = torch.where(
+                            valid_mask_BT,
+                            logprob_diff_is_BT.clamp(-10.0, 10.0),
+                            torch.zeros_like(logprob_diff_is_BT),
                         )
-                        assert torch.all(vllm_logprobs_mask_BT == response_mask_BT), (
-                            f"vLLM logprobs mask should match response mask. "
-                            f"vllm_mask sum={vllm_logprobs_mask_BT.sum()}, "
-                            f"response_mask sum={response_mask_BT.sum()}"
+                        # Compute importance ratio only for valid positions
+                        tis_imp_ratio_BT = torch.where(
+                            valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
+                        )
+                        # Apply cap
+                        tis_imp_ratio_BT = torch.clamp(
+                            tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
                         )
 
-                        valid_mask_BT = response_mask_BT
+                    # Apply importance sampling to losses
+                    pg_losses_BT = pg_losses_BT * tis_imp_ratio_BT
+                    pg_losses2_BT = pg_losses2_BT * tis_imp_ratio_BT
 
-                        # Initialize importance ratio to 1.0 (no effect) for all positions
-                        tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
+                pg_loss_max_BT = torch.max(pg_losses_BT, pg_losses2_BT)
 
-                        if valid_mask_BT.any():
-                            # Calculate logprob difference only for valid positions
-                            logprob_diff_is_BT = old_logprob_BT - vllm_logprobs_BT
-                            # Clamp to prevent numerical overflow in exp
-                            logprob_diff_is_BT = torch.where(
-                                valid_mask_BT,
-                                logprob_diff_is_BT.clamp(-10.0, 10.0),
-                                torch.zeros_like(logprob_diff_is_BT),
-                            )
-                            # Compute importance ratio only for valid positions
-                            tis_imp_ratio_BT = torch.where(
-                                valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
-                            )
-                            # Apply cap
-                            tis_imp_ratio_BT = torch.clamp(
-                                tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
-                            )
+                if self.args.load_ref_policy:
+                    ref_logprob_BT = ref_logprobs_BT[i]
+                    # Here we recalculate kl: we want the KL loss to backpropagate through the model
+                    # We also clamp the KL loss to avoid numerical instability
+                    # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
+                    ref_logprobs_diff_BT = (new_logprobs_BT - ref_logprob_BT).clamp(-40.0, 40.0)
+                    kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
+                    # grpo change: directly subtract KL in loss (add)
+                    loss = masked_mean(
+                        pg_loss_max_BT + self.args.beta * kl_4BT[self.args.kl_estimator],
+                        response_mask_BT,
+                        None,
+                        loss_denominator,
+                    )
+                else:
+                    loss = masked_mean(pg_loss_max_BT, response_mask_BT, None, loss_denominator)
 
-                        # Apply importance sampling to losses
-                        pg_losses_BT = pg_losses_BT * tis_imp_ratio_BT
-                        pg_losses2_BT = pg_losses2_BT * tis_imp_ratio_BT
+                # we already took world size into account via the tokens
+                # but deepspeed will try to average over ranks, so multiply back
+                # up, adjusting for the sequence parallel size (adjust by dp world size).
+                loss *= self.args.world_size // self.args.sequence_parallel_size
 
-                    pg_loss_max_BT = torch.max(pg_losses_BT, pg_losses2_BT)
-
+                # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
+                torch.cuda.empty_cache()
+                self.model.backward(loss)
+                if (local_step + 1) % accumulation_steps == 0:
+                    self.model.step()
+                local_step += 1
+                with torch.no_grad():
                     if self.args.load_ref_policy:
-                        ref_logprob_BT = ref_logprobs_BT[i]
-                        # Here we recalculate kl: we want the KL loss to backpropagate through the model
-                        # We also clamp the KL loss to avoid numerical instability
-                        # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
-                        ref_logprobs_diff_BT = (new_logprobs_BT - ref_logprob_BT).clamp(-40.0, 40.0)
-                        kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
-                        # grpo change: directly subtract KL in loss (add)
-                        loss = masked_mean(
-                            pg_loss_max_BT + self.args.beta * kl_4BT[self.args.kl_estimator],
-                            response_mask_BT,
-                            None,
-                            loss_denominator,
-                        )
-                    else:
-                        loss = masked_mean(pg_loss_max_BT, response_mask_BT, None, loss_denominator)
+                        # NOTE: in packed implementation, kl calculation are averages over response tokens
+                        loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
+                        loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
+                    loss_stats_B["pg_clipfrac"][i] = masked_mean(
+                        (pg_losses2_BT > pg_losses_BT).float(), response_mask_BT
+                    )
+                    loss_stats_B["pg_loss"][i] = masked_mean(pg_loss_max_BT, response_mask_BT)
+                    loss_stats_B["loss"][i] = loss
+                    loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
+                    if self.args.record_entropy:
+                        loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
 
-                    # we already took world size into account via the tokens
-                    # but deepspeed will try to average over ranks, so multiply back
-                    # up, adjusting for the sequence parallel size (adjust by dp world size).
-                    loss *= self.args.world_size // self.args.sequence_parallel_size
+        batch_metrics = batch_data["metrics"]
+        with torch.no_grad():
+            return self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
 
-                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
-                    torch.cuda.empty_cache()
-                    self.model.backward(loss)
-                    if (local_step + 1) % accumulation_steps == 0:
-                        self.model.step()
-                    local_step += 1
-                    with torch.no_grad():
-                        if self.args.load_ref_policy:
-                            # NOTE: in packed implementation, kl calculation are averages over response tokens
-                            loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
-                            loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
-                        loss_stats_B["pg_clipfrac"][i] = masked_mean(
-                            (pg_losses2_BT > pg_losses_BT).float(), response_mask_BT
-                        )
-                        loss_stats_B["pg_loss"][i] = masked_mean(pg_loss_max_BT, response_mask_BT)
-                        loss_stats_B["loss"][i] = loss
-                        loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
-                        if self.args.record_entropy:
-                            loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
+def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
+    args = self.args
 
-            batch_metrics = batch_data["metrics"]
-            with torch.no_grad():
-                return self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
+    # Save comprehensive RNG states for each rank
+    rng_states = {
+        "torch_cpu_rng_state": torch.get_rng_state(),
+        "numpy_rng_state": np.random.get_state(),
+        "python_rng_state": random.getstate(),
+    }
 
-    def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
-        args = self.args
-
-        # Save comprehensive RNG states for each rank
-        rng_states = {
-            "torch_cpu_rng_state": torch.get_rng_state(),
-            "numpy_rng_state": np.random.get_state(),
-            "python_rng_state": random.getstate(),
+    # Save CUDA RNG states for all devices
+    if torch.cuda.is_available():
+        rng_states["torch_cuda_rng_states"] = {
+            f"cuda:{i}": torch.cuda.get_rng_state(i) for i in range(torch.cuda.device_count())
         }
+        rng_states["torch_cuda_rng_state_all"] = torch.cuda.get_rng_state_all()
 
-        # Save CUDA RNG states for all devices
-        if torch.cuda.is_available():
-            rng_states["torch_cuda_rng_states"] = {
-                f"cuda:{i}": torch.cuda.get_rng_state(i) for i in range(torch.cuda.device_count())
-            }
-            rng_states["torch_cuda_rng_state_all"] = torch.cuda.get_rng_state_all()
+    # Add RNG states to client_state
+    client_state["rng_states"] = rng_states
+    client_state["rank"] = self.rank
 
-        # Add RNG states to client_state
-        client_state["rng_states"] = rng_states
-        client_state["rank"] = self.rank
+    # Save reference policy checkpoint (model only, no optimizer)
+    if self.args.load_ref_policy:
+        ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
+        os.makedirs(ref_policy_dir, exist_ok=True)
 
-        # Save reference policy checkpoint (model only, no optimizer)
-        if self.args.load_ref_policy:
-            ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
-            os.makedirs(ref_policy_dir, exist_ok=True)
+        # For reference policy, we save just the model weights
+        # We can't use save_checkpoint because it would try to save DummyOptim
+        # which doesn't have state_dict
+        if self.rank == 0:
+            # Only rank 0 saves the model state
+            model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
+            # Save the state dict
+            torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
+            logger.info(f"Saved reference policy model to {ref_policy_dir}")
 
-            # For reference policy, we save just the model weights
-            # We can't use save_checkpoint because it would try to save DummyOptim
-            # which doesn't have state_dict
+        client_state["ref_policy_saved"] = True
+
+    # Save the main model checkpoint with enhanced client state
+    # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
+    old_mpu = None
+    if self.model.mpu is not None:
+        old_mpu = self.mpu
+        self.model.mpu = None
+    self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
+
+    # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
+    if self.rank == 0:
+        if args.keep_last_n_checkpoints >= 0:
+            clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoints)
+
+        # Sync to GCS if configured (check the actual target, not just gs_bucket_path)
+        if args.gs_checkpoint_state_dir is not None:
+            ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
+                checkpoint_state_dir, args.gs_checkpoint_state_dir
+            )
+    # add back the mpu
+    if old_mpu is not None:
+        self.model.mpu = old_mpu
+
+def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
+    output_path = pathlib.Path(output_dir)
+    marker_path = output_path / CHECKPOINT_COMPLETE_MARKER
+    if marker_path.exists():
+        logger.info(f"Checkpoint already complete at {output_dir}, skipping save")
+        return
+
+    model_to_save = self.model
+    if chat_template_name is not None and "olmo" in chat_template_name:
+        model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
+
+    if self.rank == 0:
+        output_path.mkdir(parents=True, exist_ok=True)
+
+    # save model weights for ZeRO2/3
+    if hasattr(model_to_save, "module"):
+        model_to_save = model_to_save.module
+
+    # gather parameters
+    output_state_dict = {}
+    for k, v in model_to_save.named_parameters():
+        # only gather z3 params
+        params_to_fetch = _z3_params_to_fetch([v])
+        with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
+            vv = v.data.cpu()
             if self.rank == 0:
-                # Only rank 0 saves the model state
-                model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
-                # Save the state dict
-                torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
-                logger.info(f"Saved reference policy model to {ref_policy_dir}")
-
-            client_state["ref_policy_saved"] = True
-
-        # Save the main model checkpoint with enhanced client state
-        # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
-        old_mpu = None
-        if self.model.mpu is not None:
-            old_mpu = self.mpu
-            self.model.mpu = None
-        self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
-
-        # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
-        if self.rank == 0:
-            if args.keep_last_n_checkpoints >= 0:
-                clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoints)
-
-            # Sync to GCS if configured (check the actual target, not just gs_bucket_path)
-            if args.gs_checkpoint_state_dir is not None:
-                ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
-                    checkpoint_state_dir, args.gs_checkpoint_state_dir
-                )
-        # add back the mpu
-        if old_mpu is not None:
-            self.model.mpu = old_mpu
-
-    def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
-        output_path = pathlib.Path(output_dir)
-        marker_path = output_path / CHECKPOINT_COMPLETE_MARKER
-        if marker_path.exists():
-            logger.info(f"Checkpoint already complete at {output_dir}, skipping save")
-            return
-
-        model_to_save = self.model
-        if chat_template_name is not None and "olmo" in chat_template_name:
-            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
-
-        if self.rank == 0:
-            output_path.mkdir(parents=True, exist_ok=True)
-
-        # save model weights for ZeRO2/3
-        if hasattr(model_to_save, "module"):
-            model_to_save = model_to_save.module
-
-        # gather parameters
-        output_state_dict = {}
-        for k, v in model_to_save.named_parameters():
-            # only gather z3 params
-            params_to_fetch = _z3_params_to_fetch([v])
-            with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
-                vv = v.data.cpu()
-                if self.rank == 0:
-                    output_state_dict[k] = vv
-
-        if self.rank == 0:
-            state_dict = model_to_save.state_dict()
-
-            # copy named_buffers with `persistent=True`
-            for k, v in model_to_save.named_buffers():
-                if k not in state_dict:
-                    continue
-                vv = v.data.cpu()
                 output_state_dict[k] = vv
 
-            state_dict_keys = set(state_dict.keys())
-            output_state_dict_keys = set(output_state_dict.keys())
+    if self.rank == 0:
+        state_dict = model_to_save.state_dict()
 
-            # corner case for tie_word_embeddings, such as Qwen2-0.5B
-            if getattr(model_to_save.config, "tie_word_embeddings", False) and "lm_head.weight" in state_dict_keys:
-                state_dict_keys.remove("lm_head.weight")
+        # copy named_buffers with `persistent=True`
+        for k, v in model_to_save.named_buffers():
+            if k not in state_dict:
+                continue
+            vv = v.data.cpu()
+            output_state_dict[k] = vv
 
-            assert state_dict_keys.issubset(output_state_dict_keys), (
-                f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
-            )
+        state_dict_keys = set(state_dict.keys())
+        output_state_dict_keys = set(output_state_dict.keys())
 
-            # only save peft weights https://github.com/microsoft/DeepSpeed/issues/4295
-            if isinstance(model_to_save, PeftModel):
-                model_to_save.save_pretrained(output_dir)
-                if self.stage == 3:
-                    torch.save(
-                        get_peft_model_state_dict(model_to_save, output_state_dict), output_path / "adapter_model.bin"
-                    )
-            else:
-                model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
+        # corner case for tie_word_embeddings, such as Qwen2-0.5B
+        if getattr(model_to_save.config, "tie_word_embeddings", False) and "lm_head.weight" in state_dict_keys:
+            state_dict_keys.remove("lm_head.weight")
 
-            self.tokenizer.save_pretrained(output_dir)
-            marker_path.touch()
+        assert state_dict_keys.issubset(output_state_dict_keys), (
+            f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
+        )
 
-    # we need this because we don't know which node is rank 0 is on
-    def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
-        args = self.args
-        if self.rank == 0:
-            ray.remote(launch_ai2_evals_on_weka).options(num_cpus=1).remote(
-                path=step_dir,
-                leaderboard_name=leaderboard_name,
-                oe_eval_max_length=args.oe_eval_max_length,
-                wandb_url=wandb_url,
-                training_step=training_step,
-                oe_eval_tasks=args.oe_eval_tasks,
-                stop_strings=streaming_config.stop_strings,
-                gs_bucket_path=args.gs_bucket_path,
-                eval_priority=args.eval_priority,
-                eval_workspace=args.eval_workspace,
-                beaker_image=args.oe_eval_beaker_image,
-                oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
-            )
+        # only save peft weights https://github.com/microsoft/DeepSpeed/issues/4295
+        if isinstance(model_to_save, PeftModel):
+            model_to_save.save_pretrained(output_dir)
+            if self.stage == 3:
+                torch.save(
+                    get_peft_model_state_dict(model_to_save, output_state_dict), output_path / "adapter_model.bin"
+                )
+        else:
+            model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
+
+        self.tokenizer.save_pretrained(output_dir)
+        marker_path.touch()
+
+# we need this because we don't know which node is rank 0 is on
+def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
+    args = self.args
+    if self.rank == 0:
+        ray.remote(launch_ai2_evals_on_weka).options(num_cpus=1).remote(
+            path=step_dir,
+            leaderboard_name=leaderboard_name,
+            oe_eval_max_length=args.oe_eval_max_length,
+            wandb_url=wandb_url,
+            training_step=training_step,
+            oe_eval_tasks=args.oe_eval_tasks,
+            stop_strings=streaming_config.stop_strings,
+            gs_bucket_path=args.gs_bucket_path,
+            eval_priority=args.eval_priority,
+            eval_workspace=args.eval_workspace,
+            beaker_image=args.oe_eval_beaker_image,
+            oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
+        )
 
 
 class ModelGroup:
