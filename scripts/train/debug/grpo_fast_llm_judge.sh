@@ -1,7 +1,7 @@
 # note: judge may not be alive, internal ai2 host.
 export HOSTED_VLLM_API_BASE=http://saturn-cs-aus-234.reviz.ai2.in:8001/v1
 
-uv run python open_instruct/grpo_fast.py \
+uv run python open_instruct/grpo.py \
     --dataset_mixer_list hamishivi/virtuoussy_multi_subject_rlvr 64 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/virtuoussy_multi_subject_rlvr 16 \
