@@ -306,13 +306,8 @@ def main(
     vllm_config: data_loader_lib.VLLMConfig,
 ) -> None:
     """Main entry point for GRPO training with OLMo-core Trainer."""
-    if args.single_gpu_mode:
-        os.environ.setdefault("LOCAL_RANK", "0")
-        os.environ.setdefault("RANK", "0")
-        os.environ.setdefault("WORLD_SIZE", "1")
-        os.environ.setdefault("LOCAL_WORLD_SIZE", "1")
-
-    train.prepare_training_environment(seed=args.seed)
+    backend = None if args.single_gpu_mode else "cpu:gloo,cuda:nccl"
+    train.prepare_training_environment(seed=args.seed, backend=backend)
 
     rank = get_rank() if is_distributed() else 0
     world_size = get_world_size() if is_distributed() else 1
