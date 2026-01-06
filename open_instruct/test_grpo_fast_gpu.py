@@ -97,13 +97,15 @@ class TestGeneration(TestGrpoFastBase):
             temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, stop=stop, logprobs=1
         )
         request = PromptRequest(
-            prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
+            prompt=prompt_token_ids, index=0, prompt_id="test_0", generation_config=generation_config
         )
 
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
         ray.get(pg.ready())
 
-        train_dataset = datasets.Dataset.from_dict({"ground_truth": [["4"]], "dataset": ["test"], "prompt": [prompt]})
+        train_dataset = datasets.Dataset.from_dict(
+            {"ground_truth": [["4"]], "dataset": ["test"], "prompt": [prompt], "index": [0]}
+        )
         reward_config = RewardConfig()
 
         engines = create_vllm_engines(
@@ -213,7 +215,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         self._ray_queues.extend([param_prompt_Q, inference_results_Q])
 
         train_dataset = datasets.Dataset.from_dict(
-            {"ground_truth": [["Paris"]], "dataset": ["test"], "prompt": [test_prompt]}
+            {"ground_truth": [["Paris"]], "dataset": ["test"], "prompt": [test_prompt], "index": [0]}
         )
         reward_config = RewardConfig()
 
@@ -237,7 +239,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
         ray.get(engines[0].ready.remote())
         generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=5, seed=42)
         request = PromptRequest(
-            prompt=prompt_token_ids, dataset_index=0, prompt_id="test_0", generation_config=generation_config
+            prompt=prompt_token_ids, index=0, prompt_id="test_0", generation_config=generation_config
         )
 
         param_prompt_Q.put(request)

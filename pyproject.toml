@@ -108,11 +108,6 @@ filterwarnings = [
 line-length = 119
 target-version = ['py310']
 
-[tool.isort]
-known_first_party = ["open_instruct"]
-profile = "black"
-src_paths = ["open_instruct"]
-
 [tool.ruff]
 target-version = "py310"
 line-length = 119
@@ -147,7 +142,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["open_instruct"]
+known-first-party = ["open_instruct", "mason"]
 # case insensitive to match isort --profile black
 case-sensitive = false
 # Disable split-on-trailing-comma to work with skip-magic-trailing-comma
