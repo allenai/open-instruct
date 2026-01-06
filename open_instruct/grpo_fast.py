@@ -426,7 +426,7 @@ class PolicyTrainerRayProcess(RayProcess):
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         self._streaming_dataloader = streaming_config.build_dataloader(
-            data_prep_actor_name=self.data_prep_actor_name,
+            data_prep_actor_name=self._data_prep_actor_name,
             tokenizer=tokenizer,
             dp_rank=groups._get_data_parallel_rank(),  # when sequence parallel is enable != local_rank
             fs_local_rank=self.local_rank,
