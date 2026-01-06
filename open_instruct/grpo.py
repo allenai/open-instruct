@@ -125,7 +125,6 @@ class GRPOExperimentConfig:
     gather_whole_model: bool = True
     enable_queue_dashboard: bool = True
     queue_dashboard_port: int | None = None
-    gradient_checkpointing: bool = False
 
     verbose: bool = False
     with_tracking: bool = False
