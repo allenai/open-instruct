@@ -1432,7 +1432,7 @@ def get_train_ds_config(
         zero_opt_dict["stage3_max_live_parameters"] = 0
         zero_opt_dict["stage3_max_reuse_distance"] = 0
 
-    config = {
+    return {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
         "bf16": {"enabled": bf16},
@@ -1442,8 +1442,6 @@ def get_train_ds_config(
         "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
         "sequence_parallel_size": sequence_parallel_size,
     }
-
-    return config
 
 
 def get_eval_ds_config(

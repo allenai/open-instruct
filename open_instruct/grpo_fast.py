@@ -788,10 +788,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
                 )
             else:
-                old_mpu = None
-                if self.mpu is not None:
-                    old_mpu = self.mpu
-                    self.model.mpu = None
+                # remove mpu for loading checkpoints, add it back after loading
+                old_mpu = self.mpu
+                self.model.mpu = None
                 path, states = self.model.load_checkpoint(
                     args.checkpoint_state_dir,
                     load_module_strict=True,
@@ -799,8 +798,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     load_lr_scheduler_states=True,
                     load_module_only=False,
                 )
-                if old_mpu is not None:
-                    self.model.mpu = old_mpu
+                self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 optimization_steps_done = states["training_step"]
@@ -862,13 +860,10 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics = utils.MetricsTracker(device=self.device)
 
         if self.mpu is not None:
-            sp_group = groups._get_sequence_parallel_group()
-            sp_world_size = groups._get_sequence_parallel_world_size()
-            sp_rank = groups._get_sequence_parallel_rank()
             self.splitter = UlyssesSPSplitter(
-                sp_rank=sp_rank,
-                sp_group=sp_group,
-                sp_world_size=sp_world_size,
+                sp_rank=groups._get_sequence_parallel_rank(),
+                sp_group=groups._get_sequence_parallel_group(),
+                sp_world_size=groups._get_sequence_parallel_world_size(),
                 device=self.device,
                 pad_token_id=self.tokenizer.pad_token_id,
             )
@@ -1541,8 +1536,12 @@ def compute_token_weights(metrics_list: list[dict[str, float]]) -> list[float]:
 
     Important for sequence parallel where different ranks may have different token counts.
     """
-    token_counts = [m.get("_token_count", 1.0) for m in metrics_list]
-    total_tokens = sum(token_counts)
+    token_counts = []
+    total_tokens = 0.0
+    for m in metrics_list:
+        tc = m.get("_token_count", 1.0)
+        token_counts.append(tc)
+        total_tokens += tc
     if total_tokens > 0:
         return [tc / total_tokens for tc in token_counts]
     return [1.0 / len(metrics_list)] * len(metrics_list)
