@@ -168,17 +168,34 @@ def load_model_config_from_checkpoint(checkpoint_path: str, vocab_size: int) -> 
                 n_heads=att["n_heads"],
                 n_kv_heads=att.get("n_kv_heads"),
                 bias=att.get("bias", False),
-                qk_norm=LayerNormConfig(name="rms", eps=1e-06) if att.get("qk_norm") else None,
+                qk_norm=LayerNormConfig(
+                    name=att["qk_norm"].get("name", "rms"),
+                    eps=att["qk_norm"].get("eps", 1e-06),
+                    bias=att["qk_norm"].get("bias", False),
+                )
+                if att.get("qk_norm")
+                else None,
                 rope=RoPEConfig(theta=att.get("rope", {}).get("theta", 500000), full_precision=True),
                 use_flash=att.get("use_flash", True),
                 sliding_window=sliding_window,
                 use_head_qk_norm=att.get("use_head_qk_norm"),
             ),
-            layer_norm=LayerNormConfig(name="rms", eps=1e-06),
+            layer_norm=LayerNormConfig(
+                name=blk.get("layer_norm", {}).get("name", "rms"),
+                eps=blk.get("layer_norm", {}).get("eps", 1e-06),
+                bias=blk.get("layer_norm", {}).get("bias", False),
+            ),
             feed_forward=FeedForwardConfig(hidden_size=ff["hidden_size"], bias=ff.get("bias", False)),
             name=blk.get("name", "reordered_norm"),
         ),
-        lm_head=LMHeadConfig(layer_norm=LayerNormConfig(name="rms", eps=1e-06), bias=False),
+        lm_head=LMHeadConfig(
+            layer_norm=LayerNormConfig(
+                name=m.get("lm_head", {}).get("layer_norm", {}).get("name", "rms"),
+                eps=m.get("lm_head", {}).get("layer_norm", {}).get("eps", 1e-06),
+                bias=m.get("lm_head", {}).get("layer_norm", {}).get("bias", False),
+            ),
+            bias=m.get("lm_head", {}).get("bias", False),
+        ),
     )
 
 
