@@ -172,6 +172,7 @@ def load_model_config_from_checkpoint(checkpoint_path: str, vocab_size: int) -> 
                 rope=RoPEConfig(theta=att.get("rope", {}).get("theta", 500000), full_precision=True),
                 use_flash=att.get("use_flash", True),
                 sliding_window=sliding_window,
+                use_head_qk_norm=att.get("use_head_qk_norm"),
             ),
             layer_norm=LayerNormConfig(name="rms", eps=1e-06),
             feed_forward=FeedForwardConfig(hidden_size=ff["hidden_size"], bias=ff.get("bias", False)),
