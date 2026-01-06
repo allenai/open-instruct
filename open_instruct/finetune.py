@@ -121,6 +121,15 @@ CLUSTER_TO_GPU_TYPE = {
     "ai2/neptune": "NVIDIA B200",
 }
 
+MODEL_CONFIGS = {
+    "olmo2_7B": TransformerConfig.olmo2_7B,
+    "olmo2_13B": TransformerConfig.olmo2_13B,
+    "olmo3_7B": TransformerConfig.olmo3_7B,
+    "olmo2_1B": TransformerConfig.olmo2_1B,
+    "olmo2_3B": TransformerConfig.olmo2_3B,
+}
+DEFAULT_MODEL_CONFIG = "olmo3_7B"
+
 
 def get_beaker_username() -> str | None:
     return os.environ.get("BEAKER_USER") or os.environ.get("BEAKER_EXPERIMENT_AUTHOR")
@@ -290,6 +299,7 @@ class SFTConfig:
         num_epochs: int = 3,
         wandb_project: str | None = None,
         wandb_entity: str | None = None,
+        model_config: str = DEFAULT_MODEL_CONFIG,
     ) -> "SFTConfig":
         root_dir = get_root_dir(cluster)
         user_name = get_beaker_username()
@@ -325,7 +335,9 @@ class SFTConfig:
             shard_degree=dp_shard_degree,
         )
 
-        model = TransformerConfig.olmo2_7B(vocab_size=tokenizer_config.padded_vocab_size())
+        if model_config not in MODEL_CONFIGS:
+            raise ValueError(f"Unknown model_config: {model_config}. Available: {list(MODEL_CONFIGS.keys())}")
+        model = MODEL_CONFIGS[model_config](vocab_size=tokenizer_config.padded_vocab_size())
         model.block.attention.use_flash = True
 
         launch_config = None
@@ -347,6 +359,7 @@ class SFTConfig:
                     f"--budget={budget}",
                     f"--workspace={workspace}",
                     f"--dataset_path={dataset_path}",
+                    f"--model_config={model_config}",
                     *overrides,
                 ],
                 cluster=cluster,
@@ -757,6 +770,12 @@ def main() -> None:
     launch_parser.add_argument("--wandb_project", default=None)
     launch_parser.add_argument("--wandb_entity", default=None)
     launch_parser.add_argument("--follow", action="store_true")
+    launch_parser.add_argument(
+        "--model_config",
+        default=DEFAULT_MODEL_CONFIG,
+        choices=list(MODEL_CONFIGS.keys()),
+        help=f"Model architecture to use (default: {DEFAULT_MODEL_CONFIG})",
+    )
 
     # train subcommand
     train_parser = subparsers.add_parser("train", help="Execute training")
@@ -778,18 +797,13 @@ def main() -> None:
     train_parser.add_argument("--wandb_project", default=None)
     train_parser.add_argument("--wandb_entity", default=None)
     train_parser.add_argument("--no_save_tokenizer", action="store_true")
-
-    # dry_run subcommand
-    dry_run_parser = subparsers.add_parser("dry_run", help="Validate configuration")
-    dry_run_parser.add_argument("run_name", help="Name of the run")
-    dry_run_parser.add_argument("pretrain_checkpoint", help="Path to pretrain checkpoint")
-    dry_run_parser.add_argument("cluster", help="Beaker cluster")
-    dry_run_parser.add_argument("--dataset_path", required=True, help="Path to pre-tokenized dataset")
-    dry_run_parser.add_argument("--seq_len", type=int, default=DEFAULT_SEQUENCE_LENGTH)
-    dry_run_parser.add_argument("--num_nodes", type=int, default=DEFAULT_NUM_NODES)
-    dry_run_parser.add_argument("--global_batch_size", type=int, default=64 * DEFAULT_SEQUENCE_LENGTH)
-    dry_run_parser.add_argument("--budget", default="ai2/oe-training")
-    dry_run_parser.add_argument("--workspace", default="ai2/tulu-3")
+    train_parser.add_argument(
+        "--model_config",
+        default=DEFAULT_MODEL_CONFIG,
+        choices=list(MODEL_CONFIGS.keys()),
+        help=f"Model architecture to use (default: {DEFAULT_MODEL_CONFIG})",
+    )
+    train_parser.add_argument("--dry_run", action="store_true", help="Validate configuration without training")
 
     args, overrides = parser.parse_known_args()
 
@@ -824,7 +838,7 @@ def main() -> None:
         cache_dataset_only(cache_args, tc)
         return
 
-    if args.cmd in ("launch", "dry_run"):
+    if args.cmd == "launch":
         prepare_cli_environment()
     elif args.cmd == "train":
         prepare_training_environment()
@@ -853,21 +867,23 @@ def main() -> None:
         budget=args.budget,
         workspace=args.workspace,
         dataset_path=dataset_path,
-        learning_rate=getattr(args, "learning_rate", 8e-5),
-        warmup_ratio=getattr(args, "warmup_ratio", 0.03),
-        num_epochs=getattr(args, "num_epochs", 3),
-        wandb_project=getattr(args, "wandb_project", None),
-        wandb_entity=getattr(args, "wandb_entity", None),
+        learning_rate=args.learning_rate,
+        warmup_ratio=args.warmup_ratio,
+        num_epochs=args.num_epochs,
+        wandb_project=args.wandb_project,
+        wandb_entity=args.wandb_entity,
+        model_config=args.model_config,
     )
 
-    if args.cmd == "dry_run":
-        print("Dry run completed. Configuration is valid.")
-    elif args.cmd == "launch":
+    if args.cmd == "launch":
         if config.launch is None:
             raise RuntimeError("Launch mode not available (beaker-py version incompatible with olmo_core)")
         config.launch.launch(follow=args.follow)
     elif args.cmd == "train":
-        no_save_tokenizer = getattr(args, "no_save_tokenizer", False)
+        if args.dry_run:
+            print("Dry run completed. Configuration is valid.")
+            return
+        no_save_tokenizer = args.no_save_tokenizer
         try:
             train(args.pretrain_checkpoint, config, no_save_tokenizer)
         finally:

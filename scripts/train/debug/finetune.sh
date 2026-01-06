@@ -8,7 +8,7 @@
 #   # Run on Beaker:
 #   ./scripts/train/debug/finetune.sh <beaker_image>
 
-RUN_NAME="debug-sft-olmo2-7b"
+RUN_NAME="debug-sft-olmo3-7b"
 CHECKPOINT="/weka/oe-training-default/ai2-llm/checkpoints/OLMo3-midtraining/anneal-round5-100B-olmo3_7b-anneal-decon-12T-00bb6023/step47684"
 CLUSTER="ai2/jupiter"
 SEQ_LEN=4096
@@ -17,6 +17,7 @@ GLOBAL_BATCH_SIZE=$((64 * SEQ_LEN))
 BUDGET="ai2/oe-adapt"
 WORKSPACE="ai2/open-instruct-dev"
 NUM_EPOCHS=1
+MODEL_CONFIG="olmo3_7B"
 
 if [ -n "$1" ]; then
     BEAKER_IMAGE="$1"
@@ -58,6 +59,7 @@ torchrun --nproc_per_node=8 open_instruct/finetune.py train \
     --budget '"$BUDGET"' \
     --workspace '"$WORKSPACE"' \
     --num_epochs '"$NUM_EPOCHS"' \
+    --model_config '"$MODEL_CONFIG"' \
     --wandb_project open_instruct_internal \
     --wandb_entity ai2-llm
 '
@@ -82,5 +84,6 @@ else
         --seq_len "$SEQ_LEN" \
         --num_nodes "$NUM_NODES" \
         --global_batch_size "$GLOBAL_BATCH_SIZE" \
-        --num_epochs "$NUM_EPOCHS"
+        --num_epochs "$NUM_EPOCHS" \
+        --model_config "$MODEL_CONFIG"
 fi
