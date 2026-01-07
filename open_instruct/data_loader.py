@@ -55,8 +55,8 @@ def _compute_per_tool_metrics(tools_called: list[list[str]] | None) -> dict[str,
 
     Returns:
         Dictionary with per-tool metrics:
-        - val/tool_{tool_name}_called_rate: Fraction of responses that called this tool
-        - val/tool_{tool_name}_call_count: Average number of times this tool was called per response
+        - tool/{tool_name}_called_rate: Fraction of responses that called this tool
+        - tool/{tool_name}_call_count: Average number of times this tool was called per response
     """
     if not tools_called:
         return {}
@@ -88,8 +88,8 @@ def _compute_per_tool_metrics(tools_called: list[list[str]] | None) -> dict[str,
         counts_array = np.array(counts)
         # Clean the tool name for use in metric keys (remove special chars)
         clean_name = tool_name.replace("<", "").replace(">", "").replace("/", "_")
-        metrics[f"val/tool_{clean_name}_called_rate"] = float((counts_array > 0).mean())
-        metrics[f"val/tool_{clean_name}_call_count"] = float(counts_array.mean())
+        metrics[f"tool/{clean_name}_called_rate"] = float((counts_array > 0).mean())
+        metrics[f"tool/{clean_name}_call_count"] = float(counts_array.mean())
 
     return metrics
 
@@ -1094,13 +1094,13 @@ class DataPreparationActor:
                     "val/advantages_min": advantages.min(),
                     "val/advantages_max": advantages.max(),
                     "val/advantages_hist": advantages,
-                    "val/num_calls_rate": np.array(result.request_info.num_calls).mean(),
-                    "val/timeouts_rate": np.array(result.request_info.timeouts).mean(),
-                    "val/tool_errors_rate": np.array(
+                    "tool/all_num_calls_rate": np.array(result.request_info.num_calls).mean(),
+                    "tool/all_timeouts_rate": np.array(result.request_info.timeouts).mean(),
+                    "tool/all_errors_rate": np.array(
                         [len(item) > 0 for item in result.request_info.tool_errors]
                     ).mean(),
-                    "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
-                    "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
+                    "tool/all_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
+                    "tool/all_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
                     **reward_metrics,
                     **batch_metrics_prefixed,
                 }
@@ -1140,11 +1140,11 @@ class DataPreparationActor:
                         good_calls = total_calls - total_errors - total_timeouts
                         good_rate = good_calls / total_calls if total_calls > 0 else 0.0
 
-                        step_metrics[f"val/tool_{tool_name}_called_rate"] = called_rate
-                        step_metrics[f"val/tool_{tool_name}_calls_per_sample"] = calls_per_sample
-                        step_metrics[f"val/tool_{tool_name}_error_rate"] = error_rate
-                        step_metrics[f"val/tool_{tool_name}_timeout_rate"] = timeout_rate
-                        step_metrics[f"val/tool_{tool_name}_good_rate"] = good_rate
+                        step_metrics[f"tool/{tool_name}_called_rate"] = called_rate
+                        step_metrics[f"tool/{tool_name}_calls_per_sample"] = calls_per_sample
+                        step_metrics[f"tool/{tool_name}_error_rate"] = error_rate
+                        step_metrics[f"tool/{tool_name}_timeout_rate"] = timeout_rate
+                        step_metrics[f"tool/{tool_name}_good_rate"] = good_rate
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens

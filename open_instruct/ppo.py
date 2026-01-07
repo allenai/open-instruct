@@ -1366,12 +1366,12 @@ def data_preparation_thread(
             "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
             "val/sequence_lengths_solved_hist": sequence_length_solved,
             "val/stop_rate": stop_rate,
-            "val/num_calls_rate": np.array(num_calls).mean(),
-            "val/timeouts_rate": np.array(timeouts).mean(),
-            "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
-            "val/good_outputs_rate": np.array(good_outputs).mean(),
-            "val/tool_runtimes_rate": np.array(tool_runtimes).mean(),
-            "val/tool_calleds_rate": np.array(tool_calleds).mean(),
+            "tool/all_num_calls_rate": np.array(num_calls).mean(),
+            "tool/all_timeouts_rate": np.array(timeouts).mean(),
+            "tool/all_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
+            "tool/all_good_outputs_rate": np.array(good_outputs).mean(),
+            "tool/all_runtimes_rate": np.array(tool_runtimes).mean(),
+            "tool/all_calleds_rate": np.array(tool_calleds).mean(),
             **reward_metrics,
         }
 
@@ -1400,11 +1400,11 @@ def data_preparation_thread(
                 good_calls = total_calls - total_errors - total_timeouts
                 good_rate = good_calls / total_calls if total_calls > 0 else 0.0
 
-                metrics[f"val/tool_{tool_name}_called_rate"] = called_rate
-                metrics[f"val/tool_{tool_name}_calls_per_sample"] = calls_per_sample
-                metrics[f"val/tool_{tool_name}_error_rate"] = error_rate
-                metrics[f"val/tool_{tool_name}_timeout_rate"] = timeout_rate
-                metrics[f"val/tool_{tool_name}_good_rate"] = good_rate
+                metrics[f"tool/{tool_name}_called_rate"] = called_rate
+                metrics[f"tool/{tool_name}_calls_per_sample"] = calls_per_sample
+                metrics[f"tool/{tool_name}_error_rate"] = error_rate
+                metrics[f"tool/{tool_name}_timeout_rate"] = timeout_rate
+                metrics[f"tool/{tool_name}_good_rate"] = good_rate
 
         if args.save_traces:
             traces = {
