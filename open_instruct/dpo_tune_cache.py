@@ -448,37 +448,6 @@ def build_deepspeed_config(
     return config
 
 
-def compute_reference_logprobs_cache_hash(
-    model_name_or_path: str,
-    model_revision: str | None,
-    dpo_loss_type: str,
-    concatenated_forward: bool,
-    packing: bool,
-    use_lora: bool,
-    dataset_config_hash: str,
-    max_train_samples: int | None,
-    use_qlora: bool,
-    average_log_prob: bool,
-) -> str:
-    """Compute deterministic hash for reference logprobs cache."""
-    config_str = json.dumps(
-        {
-            "average_log_prob": average_log_prob,
-            "concatenated_forward": concatenated_forward,
-            "dataset_config_hash": dataset_config_hash,
-            "dpo_loss_type": dpo_loss_type,
-            "max_train_samples": max_train_samples,
-            "model_name_or_path": model_name_or_path,
-            "model_revision": model_revision,
-            "packing": packing,
-            "use_lora": use_lora,
-            "use_qlora": use_qlora,
-        },
-        sort_keys=True,
-    )
-    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
-
-
 def compute_reference_cache_hash(args: FlatArguments, tc: TokenizerConfig) -> str:
     """Compute deterministic hash for reference logprobs cache from FlatArguments."""
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
@@ -491,18 +460,22 @@ def compute_reference_cache_hash(args: FlatArguments, tc: TokenizerConfig) -> st
     )
     dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
     average_log_prob = args.dpo_loss_type in ["simpo", "dpo_norm"]
-    return compute_reference_logprobs_cache_hash(
-        model_name_or_path=args.model_name_or_path,
-        model_revision=args.model_revision,
-        dpo_loss_type=args.dpo_loss_type,
-        concatenated_forward=args.concatenated_forward,
-        packing=args.packing,
-        use_lora=args.use_lora,
-        dataset_config_hash=dataset_config_hash,
-        max_train_samples=args.max_train_samples,
-        use_qlora=args.use_qlora,
-        average_log_prob=average_log_prob,
+    config_str = json.dumps(
+        {
+            "average_log_prob": average_log_prob,
+            "concatenated_forward": args.concatenated_forward,
+            "dataset_config_hash": dataset_config_hash,
+            "dpo_loss_type": args.dpo_loss_type,
+            "max_train_samples": args.max_train_samples,
+            "model_name_or_path": args.model_name_or_path,
+            "model_revision": args.model_revision,
+            "packing": args.packing,
+            "use_lora": args.use_lora,
+            "use_qlora": args.use_qlora,
+        },
+        sort_keys=True,
     )
+    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
 def build_reference_logprobs_cache(
@@ -512,14 +485,12 @@ def build_reference_logprobs_cache(
     average_log_prob: bool,
     forward_fn: Callable,
     full_dataset_size: int,
+    reference_cache_hash: str,
     use_lora: bool = False,
-    reference_cache_hash: str | None = None,
 ) -> TensorCache:
     """Build a TensorCache with reference logprobs by computing logprobs once for all samples."""
-    cache_path = (
-        pathlib.Path(REFERENCE_LOGPROBS_CACHE_PATH) / f"{reference_cache_hash}.pt" if reference_cache_hash else None
-    )
-    if cache_path is not None and cache_path.exists():
+    cache_path = pathlib.Path(REFERENCE_LOGPROBS_CACHE_PATH) / f"{reference_cache_hash}.pt"
+    if cache_path.exists():
         logger.info(f"Loading reference logprobs cache from {cache_path}")
         return TensorCache.from_disk(cache_path, device=accelerator.device)
 
@@ -561,7 +532,7 @@ def build_reference_logprobs_cache(
     model.train()
     cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
 
-    if cache_path is not None and accelerator.is_main_process:
+    if accelerator.is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
 
