@@ -74,7 +74,6 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
-from open_instruct.model_utils import TensorCache
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -487,12 +486,12 @@ def build_reference_logprobs_cache(
     full_dataset_size: int,
     reference_cache_hash: str,
     use_lora: bool = False,
-) -> TensorCache:
+) -> model_utils.TensorCache:
     """Build a TensorCache with reference logprobs by computing logprobs once for all samples."""
     cache_path = pathlib.Path(REFERENCE_LOGPROBS_CACHE_PATH) / f"{reference_cache_hash}.pt"
     if cache_path.exists():
         logger.info(f"Loading reference logprobs cache from {cache_path}")
-        return TensorCache.from_disk(cache_path, device=accelerator.device)
+        return model_utils.TensorCache.from_disk(cache_path, device=accelerator.device)
 
     model.eval()
     device = accelerator.device
@@ -530,7 +529,7 @@ def build_reference_logprobs_cache(
         )
 
     model.train()
-    cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
+    cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
 
     if accelerator.is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
@@ -688,7 +687,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
-
     if accelerator.is_main_process:
         visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
 
