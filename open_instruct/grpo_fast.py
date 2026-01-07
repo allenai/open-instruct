@@ -567,7 +567,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
             )
-        self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
+        self.local_metrics = utils.MetricsTracker(max_metrics=128, device=self.device)
 
         if self.mpu is not None:
             self.splitter = UlyssesSPSplitter(
