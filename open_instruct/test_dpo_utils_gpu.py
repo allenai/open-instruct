@@ -56,10 +56,10 @@ class TestDataCollatorDatasetIndex(unittest.TestCase):
         samples = [
             {
                 "chosen_input_ids": torch.tensor([1, 2, 3, 4, 5]),
-                "chosen_labels": torch.tensor([-100, -100, 3, 4, 5]),
+                "chosen_labels": [-100, -100, 3, 4, 5],
                 "chosen_attention_mask": torch.tensor([1, 1, 1, 1, 1]),
                 "rejected_input_ids": torch.tensor([1, 2, 6, 7, 8]),
-                "rejected_labels": torch.tensor([-100, -100, 6, 7, 8]),
+                "rejected_labels": [-100, -100, 6, 7, 8],
                 "rejected_attention_mask": torch.tensor([1, 1, 1, 1, 1]),
                 "index": i,
             }
