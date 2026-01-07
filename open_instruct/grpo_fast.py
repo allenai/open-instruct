@@ -363,7 +363,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self._args = args
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
-        self._streaming_dataloader = streaming_config.build_dataloader(
+        self._dataloader = streaming_config.build_dataloader(
             data_prep_actor_name=data_prep_actor_name,
             tokenizer=tokenizer,
             dp_rank=rank,
@@ -372,13 +372,12 @@ class PolicyTrainerRayProcess(RayProcess):
             work_dir=args.output_dir,
             dp_world_size=world_size,
         )
-        self.dataloader = iter(self._streaming_dataloader)
 
     def get_dataloader_state(self) -> dict[str, Any]:
-        return self._streaming_dataloader.state_dict()
+        return self._dataloader.state_dict()
 
     def load_dataloader_state(self, state_dict: dict[str, Any]) -> None:
-        self._streaming_dataloader.load_state_dict(state_dict)
+        self._dataloader.load_state_dict(state_dict)
 
     def from_pretrained(
         self,
@@ -731,7 +730,7 @@ class PolicyTrainerRayProcess(RayProcess):
         Returns:
             Tuple of (metrics_list, array_metrics) from training.
         """
-        batch_data = next(self.dataloader)
+        batch_data = next(self._dataloader)
         data_BT = batch_data["batch"]
         if len(data_BT) == 0:
             logger.warning("[Training] Empty batch received, skipping training step")

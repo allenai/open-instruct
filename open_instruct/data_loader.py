@@ -381,6 +381,19 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
         self.num_training_steps = num_training_steps
         self.training_step = 0
         self.current_epoch = 0
+        self._current_iter: Iterator[dict[str, Any]] | None = None
+
+    def __iter__(self) -> Iterator[dict[str, Any]]:
+        return iter(self._iter_batches())
+
+    def __next__(self) -> dict[str, Any]:
+        if self._current_iter is None:
+            self._current_iter = iter(self)
+        try:
+            return next(self._current_iter)
+        except StopIteration:
+            self._current_iter = None
+            raise
 
     @property
     def total_batches(self) -> int | None:
