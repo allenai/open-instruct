@@ -20,6 +20,7 @@ os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
     from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+    import deepspeed.comm as dist
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
@@ -56,6 +57,7 @@ import numpy as np
 import ray
 import requests
 import torch
+import torch.nn.functional as F
 import vllm.config
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
@@ -67,7 +69,7 @@ from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import logger_utils
+from open_instruct import data_types, logger_utils
 
 WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
 GCP_CLUSTERS = ["ai2/augusta"]
@@ -78,6 +80,7 @@ MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 DISK_USAGE_WARNING_THRESHOLD = 0.85
 CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://", "/filestore")
+INVALID_LOGPROB = 1.0  # Sentinel value for masked/invalid log probabilities
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -1406,6 +1409,7 @@ def get_train_ds_config(
     zpg=8,
     grad_accum_dtype=None,
     disable_trace_cache=False,
+    sequence_parallel_size=1,
 ):
     device = "cpu" if offload else "none"
     zero_opt_dict = {
@@ -1436,6 +1440,7 @@ def get_train_ds_config(
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
         "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
+        "sequence_parallel_size": sequence_parallel_size,
     }
 
 
@@ -2573,6 +2578,57 @@ def get_beaker_experiment_url() -> str | None:
         return url
     except Exception:
         return None
+
+
+@dataclass
+class UlyssesSPSplitter:
+    """Splits CollatedBatchData for Ulysses sequence parallelism.
+
+    Adapted from the UlyssesSPDataLoaderAdapter
+    (https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py#L427)
+    Rather than wrapping a dataloader, we just want to split a given batch into the shards across sp group.
+    """
+
+    sp_rank: int
+    sp_group: "torch.distributed.distributed_c10d.ProcessGroup"
+    sp_world_size: int
+    device: torch.device
+    pad_token_id: int
+
+    def split_collated_batch(self, data: data_types.CollatedBatchData) -> data_types.CollatedBatchData:
+        """Get this rank's shard of a CollatedBatchData for sequence parallelism."""
+        # Find max sequence length across all ranks to ensure consistent padding
+        local_max = max(t.shape[-1] for t in data.query_responses)
+        local_seqlen = torch.tensor([local_max], dtype=torch.int64, device=self.device)
+        seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
+        dist.all_gather(seqlens, local_seqlen, group=self.sp_group)
+        max_seqlen = max(x.item() for x in seqlens)
+
+        # Round up to be divisible by sp_world_size
+        max_seqlen = ((max_seqlen + self.sp_world_size - 1) // self.sp_world_size) * self.sp_world_size
+        chunk_len = max_seqlen // self.sp_world_size
+
+        # Compute start and end indices for this rank's chunk
+        start_idx = chunk_len * self.sp_rank
+        end_idx = chunk_len * (self.sp_rank + 1)
+
+        # slice and pad tensors for this sp rank
+        kwargs = {}
+        for field in dataclasses.fields(data):
+            if field.name == "query_responses":
+                pad_value = self.pad_token_id
+            elif field.name == "vllm_logprobs":
+                pad_value = INVALID_LOGPROB
+            else:
+                pad_value = 0
+            sharded = []
+            for t in getattr(data, field.name):
+                # For all tensors in batch, pad tensor to max_seqlen, then slice to get this SP rank's chunk
+                padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
+                sharded.append(padded_sliced)
+            kwargs[field.name] = sharded
+
+        return data_types.CollatedBatchData(**kwargs)
 
 
 def get_denominator(loss_denominator: str | float) -> float | str:
