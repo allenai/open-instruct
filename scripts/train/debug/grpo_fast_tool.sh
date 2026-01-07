@@ -49,6 +49,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 python open_instruct/grpo_fast.py \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
-    --tools code \
-    --code_api_endpoint http://0.0.0.0:1212/execute \
+    --tools python \
+    --tool_configs '{"api_endpoint": "http://0.0.0.0:1212/execute"}' \
+    --tool_tag_names code
     # --with_tracking

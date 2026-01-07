@@ -8,8 +8,8 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 
 # Note: The default search tool uses Serper (Google Search).
 # Set SERPER_API_KEY environment variable to use it.
-# For massive-ds search, use --tools massive_ds_search and
-# set --search_api_endpoint accordingly.
+# For massive-ds search, use --tools massive_ds_search with
+# appropriate --tool_configs.
 uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/augusta \
@@ -72,6 +72,7 @@ uv run python mason.py \
     --try_launch_beaker_eval_jobs_on_weka False \
     --vllm_num_engines 1 \
     --vllm_enable_prefix_caching \
-    --tools code search \
-    --max_tool_calls 5 \
-    --code_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute
+    --tools python serper_search \
+    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute"}' '{}' \
+    --tool_tag_names code search \
+    --max_tool_calls 5
