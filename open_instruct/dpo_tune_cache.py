@@ -815,7 +815,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
     )
 
-    # debugging tool for fewer samples
+    # Capture full dataset size BEFORE any max_train_samples filtering. This is used to
+    # allocate tensors for caching reference logprobs, where each sample's index maps to
+    # a position in the cache tensor. During distributed processing, we use MAX reduction
+    # (not SUM) because accelerate's distributed sampler can duplicate examples across
+    # ranks when even_batches=True - MAX works since duplicates compute identical logprobs.
     original_dataset_size = len(train_dataset)
     if args.max_train_samples is not None:
         max_train_samples = min(len(train_dataset), args.max_train_samples)
