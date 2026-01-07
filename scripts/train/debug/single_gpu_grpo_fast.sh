@@ -11,7 +11,7 @@ uv run python mason.py \
        --cluster ai2/saturn \
        --cluster ai2/ceres \
        --image "$BEAKER_IMAGE" \
-       --description "Single GPU grpo_fast.py with OLMo3-7B test." \
+       --description "Single GPU grpo_fast.py with Qwen3-1.7B test." \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
@@ -32,7 +32,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path allenai/Olmo-3-1025-7B \
+    --model_name_or_path Qwen/Qwen3-1.7B \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
@@ -52,10 +52,9 @@ uv run python mason.py \
     --seed 3 \
     --local_eval_every 1 \
     --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.5 \
+    --vllm_gpu_memory_utilization 0.3 \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --push_to_hub false \
-    --single_gpu_mode \
-    --add_bos
+    --single_gpu_mode

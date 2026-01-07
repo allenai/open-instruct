@@ -6,7 +6,7 @@ accelerate==1.12.0
     # via
     #   open-instruct
     #   peft
-ai2-olmo-core==2.3.0
+ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@001b5d62e5cb7b222b8f22cb5a4e71fdff03a37f
     # via open-instruct
 aiohappyeyeballs==2.6.1
     # via aiohttp
@@ -496,7 +496,9 @@ packaging==25.0
 paginate==0.5.7
     # via mkdocs-material
 pandas==2.3.3
-    # via datasets
+    # via
+    #   ai2-olmo-core
+    #   datasets
 parameterized==0.9.0
 partial-json-parser==0.2.1.1.post7
     # via vllm
