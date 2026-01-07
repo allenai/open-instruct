@@ -291,10 +291,6 @@ class Args:
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
-    # Tool settings (main tool args are in ToolArgs dataclass)
-    only_reward_good_outputs: bool = False
-    """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
-
     def __post_init__(self):
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
@@ -1282,10 +1278,8 @@ def setup_runtime_variables(
     args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig, tool_args: ToolArgs
 ) -> Args:
     """Set up runtime variables for the experiment."""
-    if streaming_config.tools and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
-        assert streaming_config.mask_tool_use, (
-            "Must mask tool use when using vLLM logprobs or truncated importance sampling."
-        )
+    if tool_args.tools and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
+        assert tool_args.mask_tool_use, "Must mask tool use when using vLLM logprobs or truncated importance sampling."
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
@@ -1454,6 +1448,7 @@ def create_model_and_optimizer(
         verbose=args.verbose,
         work_dir=args.output_dir,
         initial_state=data_prep_actor_state,
+        mask_tool_use=tool_config.mask_tool_use,
     )
 
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).

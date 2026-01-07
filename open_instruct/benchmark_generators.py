@@ -279,7 +279,7 @@ def setup_vllm_engines(
         pg=None,
         tools={},
         tool_parser_name=None,
-        max_tool_calls=streaming_config.max_tool_calls,
+        max_tool_calls=5,  # Default value; tools={} means this won't be used
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         actor_manager=actor_manager,

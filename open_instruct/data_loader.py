@@ -205,7 +205,6 @@ class StreamingDataLoaderConfig:
     no_resampling_pass_rate: float | None = None
     advantage_normalization_type: str = "standard"
     mask_truncated_completions: bool = False
-    mask_tool_use: bool = True
 
     # Dataset
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
@@ -258,17 +257,9 @@ class StreamingDataLoaderConfig:
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
-    # Tools
-    tools: list[str] | None = None
-    max_tool_calls: int = 5
+    # Reward behavior for tool use
     only_reward_good_outputs: bool = False
-
-    # RAG
-    number_documents_to_search: int = 3
-    search_api_endpoint: str | None = None
-
-    # Code tool
-    code_tool_api_endpoint: str | None = None
+    """Whether to only reward outputs where tool calls succeeded. Useful to force the model to use tool(s)."""
 
     # Computed at post_init
     max_possible_score: float = 1.0
@@ -305,12 +296,6 @@ class StreamingDataLoaderConfig:
 
         if self.stop_strings is None:
             self.stop_strings = []
-
-        if self.tools is not None and len(self.tools) > 0:
-            for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
 
         self.max_possible_score = 0.0
         if self.apply_verifiable_reward:
@@ -841,8 +826,10 @@ class DataPreparationActor:
         work_dir: str,
         initial_state: dict | None = None,
         allow_world_padding: bool = False,
+        mask_tool_use: bool = True,
     ):
         self.allow_world_padding = allow_world_padding
+        self.mask_tool_use = mask_tool_use
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
         self.tokenizer = tokenizer
@@ -983,7 +970,7 @@ class DataPreparationActor:
                 pack_length=self.config.pack_length,
                 pad_token_id=self.tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
-                mask_tool_use=self.config.mask_tool_use,
+                mask_tool_use=self.mask_tool_use,
             )
             lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
             lookup_advantages[1:] = advantages
