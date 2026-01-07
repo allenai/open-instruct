@@ -18,6 +18,7 @@ BUDGET="ai2/oe-adapt"
 WORKSPACE="ai2/open-instruct-dev"
 NUM_EPOCHS=1
 MODEL_CONFIG="from_checkpoint"
+CHECKPOINT_OUTPUT_DIR="/weka/oe-adapt-default/allennlp/deletable_checkpoint/finbarrt/test_please_delete_without_asking"
 
 if [ -n "$1" ]; then
     BEAKER_IMAGE="$1"
@@ -53,6 +54,7 @@ torchrun --nproc_per_node=8 --rdzv-backend=c10d --rdzv-endpoint=localhost:0 open
     '"$CHECKPOINT"' \
     '"$CLUSTER"' \
     --dataset_path "$OUTPUT_DIR" \
+    --output_dir '"$CHECKPOINT_OUTPUT_DIR"' \
     --seq_len '"$SEQ_LEN"' \
     --num_nodes '"$NUM_NODES"' \
     --global_batch_size '"$GLOBAL_BATCH_SIZE"' \
@@ -81,6 +83,7 @@ else
         "$CHECKPOINT" \
         "$CLUSTER" \
         --dataset_path "$OUTPUT_DIR" \
+        --output_dir "$OUTPUT_DIR/checkpoints" \
         --seq_len "$SEQ_LEN" \
         --num_nodes "$NUM_NODES" \
         --global_batch_size "$GLOBAL_BATCH_SIZE" \
