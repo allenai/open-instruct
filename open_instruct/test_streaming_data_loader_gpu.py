@@ -78,7 +78,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_streaming_dataloader_iteration_without_tools(self):
-        tokenizer_name = "EleutherAI/pythia-14m"
+        tokenizer_name = "Qwen/Qwen3-0.6B"
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
         prompts = ["What is 2+2?", "What is 3+3?", "What is 4+4?", "What is 5+5?"]

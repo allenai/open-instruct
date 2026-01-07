@@ -959,6 +959,7 @@ class DataPreparationActor:
                 pad_token_id=self.tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
                 mask_tool_use=self.config.mask_tool_use,
+                min_num_batches=self.dp_world_size,
             )
             lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
             lookup_advantages[1:] = advantages

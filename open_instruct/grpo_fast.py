@@ -339,6 +339,9 @@ class Args:
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+        assert self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout >= sum(
+            self.num_learners_per_node
+        ), "You must have at least as many samples as training GPUs (DP ranks) for distributed training!"
 
 
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
