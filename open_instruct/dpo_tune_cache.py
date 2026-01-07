@@ -56,7 +56,7 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, utils
+from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     TOKENIZED_PREFERENCE_DATASET_KEYS,
@@ -74,7 +74,7 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
-from open_instruct.model_utils import TensorCache, push_folder_to_hub, save_with_accelerate
+from open_instruct.model_utils import TensorCache
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -1203,7 +1203,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             accelerator.wait_for_everyone()
 
     if args.output_dir is not None:
-        save_with_accelerate(
+        model_utils.save_with_accelerate(
             accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
         )
 
@@ -1233,7 +1233,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
         )
     if args.push_to_hub and accelerator.is_main_process:
-        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+        model_utils.push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     accelerator.wait_for_everyone()
     if args.with_tracking:
         accelerator.end_training()
