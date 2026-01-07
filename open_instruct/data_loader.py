@@ -812,7 +812,9 @@ class DataPreparationActor:
         verbose: bool,
         work_dir: str,
         initial_state: dict | None = None,
+        mask_tool_use: bool = True,
     ):
+        self.mask_tool_use = mask_tool_use
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
         self.tokenizer = tokenizer
@@ -953,7 +955,7 @@ class DataPreparationActor:
                 pack_length=self.config.pack_length,
                 pad_token_id=self.tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
-                mask_tool_use=self.config.mask_tool_use,
+                mask_tool_use=self.mask_tool_use,
                 min_num_batches=self.dp_world_size,
             )
             lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
