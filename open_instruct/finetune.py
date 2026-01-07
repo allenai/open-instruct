@@ -369,7 +369,7 @@ class SFTConfig:
         wandb_project: str | None = None,
         wandb_entity: str | None = None,
         model_config: str = DEFAULT_MODEL_CONFIG,
-        output_dir: str = "output/",
+        save_folder: str = "output/",
     ) -> "SFTConfig":
         root_dir = get_root_dir(cluster)
 
@@ -462,7 +462,7 @@ class SFTConfig:
                 max_grad_norm=1.0,
             ),
             trainer=TrainerConfig(
-                save_folder=output_dir,
+                save_folder=save_folder,
                 load_strategy=LoadStrategy.never,
                 checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
                 save_overwrite=True,
@@ -878,7 +878,7 @@ def main() -> None:
         choices=["from_checkpoint"] + list(MODEL_CONFIGS.keys()),
         help=f"Model architecture to use. 'from_checkpoint' loads config from checkpoint (default: {DEFAULT_MODEL_CONFIG})",
     )
-    train_parser.add_argument("--output_dir", default="output/", help="Directory to save checkpoints")
+    train_parser.add_argument("--save_folder", default="output/", help="Directory to save checkpoints")
     train_parser.add_argument("--dry_run", action="store_true", help="Validate configuration without training")
 
     args, overrides = parser.parse_known_args()
@@ -949,7 +949,7 @@ def main() -> None:
         wandb_project=args.wandb_project,
         wandb_entity=args.wandb_entity,
         model_config=args.model_config,
-        output_dir=args.output_dir,
+        save_folder=args.save_folder,
     )
 
     if args.cmd == "launch":

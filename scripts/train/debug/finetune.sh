@@ -54,7 +54,7 @@ torchrun --nproc_per_node=8 --rdzv-backend=c10d --rdzv-endpoint=localhost:0 open
     '"$CHECKPOINT"' \
     '"$CLUSTER"' \
     --dataset_path "$OUTPUT_DIR" \
-    --output_dir '"$CHECKPOINT_OUTPUT_DIR"' \
+    --save_folder '"$CHECKPOINT_OUTPUT_DIR"' \
     --seq_len '"$SEQ_LEN"' \
     --num_nodes '"$NUM_NODES"' \
     --global_batch_size '"$GLOBAL_BATCH_SIZE"' \
@@ -83,7 +83,7 @@ else
         "$CHECKPOINT" \
         "$CLUSTER" \
         --dataset_path "$OUTPUT_DIR" \
-        --output_dir "$OUTPUT_DIR/checkpoints" \
+        --save_folder "$OUTPUT_DIR/checkpoints" \
         --seq_len "$SEQ_LEN" \
         --num_nodes "$NUM_NODES" \
         --global_batch_size "$GLOBAL_BATCH_SIZE" \
