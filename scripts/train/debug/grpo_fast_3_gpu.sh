@@ -1,3 +1,6 @@
+# debug script using 3 gpus to specifically test sequence parallelism
+# with minimal gpus (2 for training for seq parallel, 1 for inference)
+# useful for debugging multi-gpu training without too many gpus
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
