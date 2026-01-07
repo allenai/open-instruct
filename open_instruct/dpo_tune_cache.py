@@ -689,9 +689,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
 
-        ref_cache_hash = compute_reference_cache_hash(args, tc)
-        logger.info(f"Reference logprobs cache path: {REFERENCE_LOGPROBS_CACHE_PATH}/{ref_cache_hash}.pt")
-
     if accelerator.is_main_process:
         visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
 
@@ -964,7 +961,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             forward_fn=forward_fn,
             full_dataset_size=original_dataset_size,
             use_lora=args.use_lora,
-            reference_cache_hash=ref_cache_hash,
+            reference_cache_hash=compute_reference_cache_hash(args, tc),
         )
         logger.info("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
