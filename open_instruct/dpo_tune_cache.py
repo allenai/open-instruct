@@ -28,7 +28,6 @@ with contextlib.suppress(Exception):
 import hashlib
 import json
 import math
-import os
 import pathlib
 import random
 import shutil
@@ -192,8 +191,6 @@ class FlatArguments:
     """The hash of the dataset configuration."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
-    reference_logprobs_cache_path: str = REFERENCE_LOGPROBS_CACHE_PATH
-    """The path to cache reference logprobs to disk."""
     dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
@@ -482,6 +479,32 @@ def compute_reference_logprobs_cache_hash(
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
+def compute_reference_cache_hash(args: FlatArguments, tc: TokenizerConfig) -> str:
+    """Compute deterministic hash for reference logprobs cache from FlatArguments."""
+    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    dcs = load_dataset_configs(
+        args.dataset_mixer_list,
+        args.dataset_mixer_list_splits,
+        args.dataset_transform_fn,
+        transform_fn_args,
+        args.dataset_target_columns,
+    )
+    dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
+    average_log_prob = args.dpo_loss_type in ["simpo", "dpo_norm"]
+    return compute_reference_logprobs_cache_hash(
+        model_name_or_path=args.model_name_or_path,
+        model_revision=args.model_revision,
+        dpo_loss_type=args.dpo_loss_type,
+        concatenated_forward=args.concatenated_forward,
+        packing=args.packing,
+        use_lora=args.use_lora,
+        dataset_config_hash=dataset_config_hash,
+        max_train_samples=args.max_train_samples,
+        use_qlora=args.use_qlora,
+        average_log_prob=average_log_prob,
+    )
+
+
 def build_reference_logprobs_cache(
     model: torch.nn.Module,
     dataloader: torch.utils.data.DataLoader,
@@ -490,14 +513,15 @@ def build_reference_logprobs_cache(
     forward_fn: Callable,
     full_dataset_size: int,
     use_lora: bool = False,
-    cache_path: str | pathlib.Path | None = None,
+    reference_cache_hash: str | None = None,
 ) -> TensorCache:
     """Build a TensorCache with reference logprobs by computing logprobs once for all samples."""
-    if cache_path is not None:
-        cache_path = pathlib.Path(cache_path)
-        if cache_path.exists():
-            logger.info(f"Loading reference logprobs cache from {cache_path}")
-            return TensorCache.from_disk(cache_path, device=accelerator.device)
+    cache_path = (
+        pathlib.Path(REFERENCE_LOGPROBS_CACHE_PATH) / f"{reference_cache_hash}.pt" if reference_cache_hash else None
+    )
+    if cache_path is not None and cache_path.exists():
+        logger.info(f"Loading reference logprobs cache from {cache_path}")
+        return TensorCache.from_disk(cache_path, device=accelerator.device)
 
     model.eval()
     device = accelerator.device
@@ -694,29 +718,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
 
-        dcs = load_dataset_configs(
-            args.dataset_mixer_list,
-            args.dataset_mixer_list_splits,
-            args.dataset_transform_fn,
-            transform_fn_args,
-            args.dataset_target_columns,
-        )
-        dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
-        average_log_prob = args.dpo_loss_type in ["simpo", "dpo_norm"]
-        ref_cache_hash = compute_reference_logprobs_cache_hash(
-            model_name_or_path=args.model_name_or_path,
-            model_revision=args.model_revision,
-            dpo_loss_type=args.dpo_loss_type,
-            concatenated_forward=args.concatenated_forward,
-            packing=args.packing,
-            use_lora=args.use_lora,
-            dataset_config_hash=dataset_config_hash,
-            max_train_samples=args.max_train_samples,
-            use_qlora=args.use_qlora,
-            average_log_prob=average_log_prob,
-        )
-        reference_cache_path = pathlib.Path(args.reference_logprobs_cache_path) / f"{ref_cache_hash}.pt"
-        logger.info(f"Reference logprobs cache path: {reference_cache_path}")
+        ref_cache_hash = compute_reference_cache_hash(args, tc)
+        logger.info(f"Reference logprobs cache path: {REFERENCE_LOGPROBS_CACHE_PATH}/{ref_cache_hash}.pt")
 
     if accelerator.is_main_process:
         visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
@@ -800,7 +803,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         return model
 
     model = load_model()
-    print("=============model loaded")
+    logger.info("=============model loaded")
     print_gpu_stats(init_gpu_memory)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
@@ -884,7 +887,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
     else:
         optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
-    print("=============optimizer loaded")
+    logger.info("=============optimizer loaded")
     print_gpu_stats(init_gpu_memory)
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
@@ -918,7 +921,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
-    print("=============accelerate prepared")
+    logger.info("=============accelerate prepared")
     print_gpu_stats(init_gpu_memory)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
@@ -969,6 +972,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     logger.info(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
 
+    logger.info("=============before cache logprobs")
+    print_gpu_stats(init_gpu_memory)
+
     # Cache the logprobs
     average_log_prob_loss_types = ["simpo", "dpo_norm"]
     average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
@@ -986,9 +992,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             forward_fn=forward_fn,
             full_dataset_size=original_dataset_size,
             use_lora=args.use_lora,
-            cache_path=reference_cache_path,
+            reference_cache_hash=ref_cache_hash,
         )
+        logger.info("=============after cache logprobs")
+        print_gpu_stats(init_gpu_memory)
         torch.cuda.empty_cache()
+        logger.info("=============after cache logprobs; clear cache")
+        print_gpu_stats(init_gpu_memory)
 
     # Only show the progress bar once on each machine.
     start_time = time.perf_counter()
@@ -1233,9 +1243,9 @@ def print_gpu_stats(init_gpu_memory: int | None):
     if torch.cuda.is_available():
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
         peak_memory = init_gpu_memory - free_gpu_memory
-        print(f"Peak memory usage: {peak_memory / 1024**3:.2f} GB")
-        print(f"Total memory usage: {total_gpu_memory / 1024**3:.2f} GB")
-        print(f"Free memory: {free_gpu_memory / 1024**3:.2f} GB")
+        logger.info(f"Peak memory usage: {peak_memory / 1024**3:.2f} GB")
+        logger.info(f"Total memory usage: {total_gpu_memory / 1024**3:.2f} GB")
+        logger.info(f"Free memory: {free_gpu_memory / 1024**3:.2f} GB")
 
 
 if __name__ == "__main__":
