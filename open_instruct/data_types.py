@@ -43,7 +43,7 @@ class GenerationResult:
     finish_reasons: list[str]
     masks: list[list[int]]
     request_info: RequestInfo
-    dataset_index: int | None
+    index: int | None
     prompt_id: str | None
     token_statistics: TokenStatistics | None = None
     start_time: float | None = None
@@ -63,7 +63,7 @@ class PromptRequest:
 
     prompt: list[int]
     generation_config: Any
-    dataset_index: int
+    index: int
     prompt_id: str
     is_eval: bool = False
 

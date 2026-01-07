@@ -1646,12 +1646,15 @@ class DatasetTransformationCache:
                 print("dataset_skip_cache is True, so we will not load the dataset from cache")
             else:
                 # Use the split from the first dataset config as default
-                return load_dataset(
+                dataset = load_dataset(
                     repo_name,
                     split=DEFAULT_SPLIT_FOR_CACHED_DATASET,
                     revision=self.config_hash,
                     num_proc=max_num_processes(),
                 )
+                if "index" not in dataset.column_names:
+                    dataset = dataset.add_column("index", range(len(dataset)))
+                return dataset
 
         print(f"Cache not found, transforming datasets...")
 
@@ -1663,6 +1666,7 @@ class DatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+        combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
         if dataset_skip_cache:
             return combined_dataset
 
@@ -1743,6 +1747,8 @@ class LocalDatasetTransformationCache:
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
             dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
+            if "index" not in dataset.column_names:
+                dataset = dataset.add_column("index", range(len(dataset)))
             # Load statistics from cache if available
             stats_path = os.path.join(cache_path, "dataset_statistics.json")
             if os.path.exists(stats_path):
@@ -1804,6 +1810,7 @@ class LocalDatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+        combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
 
         # Prepare return statistics
         all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}

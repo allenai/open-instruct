@@ -317,7 +317,7 @@ def process_completed_request(request_id, outs, current_time, tools, request_met
             tool_error_counts=tool_error_counts,
             tool_timeout_counts=tool_timeout_counts,
         ),
-        dataset_index=metadata["dataset_index"],
+        index=metadata["index"],
         prompt_id=metadata["prompt_id"],
         token_statistics=TokenStatistics(
             num_prompt_tokens=len(metadata["prompt_token_ids"]),
@@ -434,7 +434,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
-        "dataset_index": request.dataset_index,
+        "index": request.index,
         "prompt_id": request.prompt_id,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
@@ -503,7 +503,8 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
 async def compute_rewards(
     actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset, is_eval: bool
 ) -> tuple[list[float], dict]:
-    example = dataset[result.dataset_index]
+    index_map = actor._eval_index_map if is_eval else actor._train_index_map
+    example = dataset[index_map[result.index]]
     decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
     k = len(result.responses)
@@ -595,6 +596,13 @@ class LLMRayActor:
         self.reward_fn = reward_config.build() if reward_config else None
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
+        self._train_index_map: dict[int, int] = (
+            {train_dataset[i]["index"]: i for i in range(len(train_dataset))} if train_dataset is not None else {}
+        )
+        self._eval_index_map: dict[int, int] = (
+            {eval_dataset[i]["index"]: i for i in range(len(eval_dataset))} if eval_dataset is not None else {}
+        )
+        self.reward_fn = reward_config.build() if reward_config else None
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()

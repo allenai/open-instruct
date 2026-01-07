@@ -46,52 +46,9 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 logger = logging.getLogger(__name__)
 
 
-def _compute_per_tool_metrics(tools_called: list[list[str]] | None) -> dict[str, float]:
-    """Compute per-tool metrics from tools_called data.
-
-    Args:
-        tools_called: List of lists where each inner list contains the stop_strs of tools
-            that were called for that response. May be None if tools are not used.
-
-    Returns:
-        Dictionary with per-tool metrics:
-        - tool/{tool_name}_called_rate: Fraction of responses that called this tool
-        - tool/{tool_name}_call_count: Average number of times this tool was called per response
-    """
-    if not tools_called:
-        return {}
-
-    # First pass: collect all unique tool names
-    all_tool_names: set[str] = set()
-    for response_tools in tools_called:
-        all_tool_names.update(response_tools)
-
-    if not all_tool_names:
-        return {}
-
-    # Second pass: count tool calls per response
-    tool_call_counts: dict[str, list[int]] = {tool: [] for tool in all_tool_names}
-
-    for response_tools in tools_called:
-        # Count tools for this response
-        counts_this_response: dict[str, int] = {}
-        for tool_name in response_tools:
-            counts_this_response[tool_name] = counts_this_response.get(tool_name, 0) + 1
-
-        # Record count for each tool (0 if not called)
-        for tool_name in all_tool_names:
-            tool_call_counts[tool_name].append(counts_this_response.get(tool_name, 0))
-
-    # Compute metrics
-    metrics = {}
-    for tool_name, counts in tool_call_counts.items():
-        counts_array = np.array(counts)
-        # Clean the tool name for use in metric keys (remove special chars)
-        clean_name = tool_name.replace("<", "").replace(">", "").replace("/", "_")
-        metrics[f"tool/{clean_name}_called_rate"] = float((counts_array > 0).mean())
-        metrics[f"tool/{clean_name}_call_count"] = float(counts_array.mean())
-
-    return metrics
+def build_index_mapping(dataset: Dataset) -> dict[int, int]:
+    """Build a mapping from original row IDs to current positional indices."""
+    return {dataset[i]["index"]: i for i in range(len(dataset))}
 
 
 class HFDataLoader(data_loader.DataLoaderBase):
@@ -127,8 +84,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=0
         )
 
-        dataset_with_indices = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
-        self._original_dataset = dataset_with_indices.shard(num_shards=world_size, index=rank)
+        self._original_dataset = dataset.shard(num_shards=world_size, index=rank)
         self.dataset = self._original_dataset.shuffle(seed=seed)
         self.seed = seed
         self._batch_size = batch_size
@@ -137,6 +93,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._excluded_indices: set[int] = set()
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
+        self._index_to_position: dict[int, int] = build_index_mapping(self.dataset)
 
     def __next__(self) -> dict[str, Any]:
         if self._current_iter is None:
@@ -155,11 +112,15 @@ class HFDataLoader(data_loader.DataLoaderBase):
             self.batches_processed = 0
             raise
 
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        """Look up an example by its original dataset index."""
+        return self.dataset[self._index_to_position[index]]
+
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
         for i in range(self.batches_processed, self.effective_size):
             example = self.dataset[i]
-            yield example | {"prompt_id": f"{self._epoch}_{example['dataset_index']}"}
+            yield example | {"prompt_id": f"{self._epoch}_{example['index']}"}
 
     @property
     def total_batches(self) -> int:
@@ -188,7 +149,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Exclude a dataset index from future iterations.
 
         Args:
-            index: The dataset_index to exclude.
+            index: The index to exclude.
         """
         self._excluded_indices.add(index)
 
@@ -203,8 +164,9 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.batches_processed = 0
         shuffled = self._original_dataset.shuffle(seed=self.seed + self._epoch)
         # If this is slow, we can speed it up by making this a boolean mask.
-        self.dataset = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
+        self.dataset = shuffled.filter(lambda x: x["index"] not in self._excluded_indices)
         self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
+        self._index_to_position = build_index_mapping(self.dataset)
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
@@ -466,13 +428,13 @@ class BatchStatistics:
 def add_prompt_to_generator(
     example: dict[str, Any], epoch_number: int, param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
 ) -> None:
-    dataset_index = example["dataset_index"]
+    index = example["index"]
     param_prompt_Q.put(
         data_types.PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
-            dataset_index=dataset_index,
-            prompt_id=f"{epoch_number}_{dataset_index}",
+            index=index,
+            prompt_id=f"{epoch_number}_{index}",
             is_eval=is_eval,
         )
     )
@@ -547,10 +509,10 @@ def accumulate_inference_batches(
         assert len(result.responses) == generation_config.n, (
             f"Mismatch: individual prompt result has {len(result.responses)} responses "
             f"but expected {generation_config.n} samples per prompt. "
-            f"Dataset index: {result.dataset_index}, Prompt ID: {result.prompt_id}"
+            f"Index: {result.index}, Prompt ID: {result.prompt_id}"
         )
 
-        example = dataset[result.dataset_index]
+        example = dataset[result.index]
         query = example[INPUT_IDS_PROMPT_KEY]
         ground_truth = example[GROUND_TRUTHS_KEY]
         dataset_name = example[VERIFIER_SOURCE_KEY]
@@ -578,7 +540,7 @@ def accumulate_inference_batches(
         percent_solved = np.mean(result.reward_scores).item() / max_possible_score
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             assert iter_dataloader is not None
-            iter_dataloader.exclude_index(result.dataset_index)
+            iter_dataloader.exclude_index(result.index)
             total_no_resampled += 1
             logging.debug(
                 f"[Data Preparation Thread] Prompt solved at {percent_solved}, will be excluded from resampling, total no resampled: {total_no_resampled}"
@@ -698,7 +660,7 @@ def accumulate_inference_batches(
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=None,
+        index=None,
         prompt_id=results[0].prompt_id,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
@@ -733,41 +695,6 @@ def accumulate_inference_batches(
         total_prompts=len(results),
     )
     return combined_result, batch, combined_reward_metrics, batch_stats
-
-
-def pad_sequences_for_world_size(
-    packed_sequences: PackedSequences, world_size: int, pad_token_id: int, eos_token_id: int
-) -> None:
-    """Pads packed sequences so total count is divisible by world_size.
-
-    Mutates packed_sequences in place by appending dummy sequences.
-    """
-    total = len(packed_sequences.query_responses)
-    remainder = total % world_size
-    if remainder == 0:
-        return
-
-    shortfall = world_size - remainder
-    logger.warning(f"Padding {shortfall} sequences for world size. In future, you should adjust your compute.")
-
-    assert packed_sequences.position_ids is not None
-    assert packed_sequences.advantages is not None
-    assert packed_sequences.vllm_logprobs is not None
-
-    dummy_qr = torch.tensor([pad_token_id, eos_token_id], dtype=torch.long)
-    dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-    dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-    dummy_response_mask = torch.zeros_like(dummy_qr)
-    dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
-    dummy_logprobs = torch.zeros_like(dummy_qr, dtype=torch.float)
-
-    for _ in range(shortfall):
-        packed_sequences.query_responses.append(dummy_qr)
-        packed_sequences.attention_masks.append(dummy_attention)
-        packed_sequences.position_ids.append(dummy_position_ids)
-        packed_sequences.response_masks.append(dummy_response_mask)
-        packed_sequences.advantages.append(dummy_advantage)
-        packed_sequences.vllm_logprobs.append(dummy_logprobs)
 
 
 def prepare_collated_data_for_workers(
@@ -885,11 +812,7 @@ class DataPreparationActor:
         verbose: bool,
         work_dir: str,
         initial_state: dict | None = None,
-        allow_world_padding: bool = False,
-        mask_tool_use: bool = True,
     ):
-        self.allow_world_padding = allow_world_padding
-        self.mask_tool_use = mask_tool_use
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
         self.tokenizer = tokenizer
@@ -1030,7 +953,8 @@ class DataPreparationActor:
                 pack_length=self.config.pack_length,
                 pad_token_id=self.tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
-                mask_tool_use=self.mask_tool_use,
+                mask_tool_use=self.config.mask_tool_use,
+                min_num_batches=self.dp_world_size,
             )
             lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
             lookup_advantages[1:] = advantages
@@ -1039,11 +963,6 @@ class DataPreparationActor:
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
-
-            if self.allow_world_padding:
-                pad_sequences_for_world_size(
-                    packed_sequences, self.dp_world_size, self.tokenizer.pad_token_id, self.tokenizer.eos_token_id
-                )
 
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id

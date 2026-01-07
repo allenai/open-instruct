@@ -346,11 +346,10 @@ def submission_thread(
 
         # Create individual PromptRequest for each prompt in the batch
         for i, prompt in enumerate(prompts):
-            dataset_index = start_idx + i
             param_prompt_Q.put(
                 PromptRequest(
                     prompt=prompt,
-                    dataset_index=dataset_index,
+                    index=start_idx + i,
                     prompt_id=f"batch_{batch_idx}_prompt_{i}",
                     generation_config=generation_config,
                 )
@@ -409,11 +408,10 @@ def run_benchmark(
     warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
     # Create individual PromptRequest for each warmup prompt
     for i, prompt in enumerate(warmup_prompts):
-        dataset_index = warmup_start_idx + i
         param_prompt_Q.put(
             PromptRequest(
                 prompt=prompt,
-                dataset_index=dataset_index,
+                index=warmup_start_idx + i,
                 prompt_id=f"warmup_prompt_{i}",
                 generation_config=generation_config,
             )
@@ -472,10 +470,10 @@ def run_benchmark(
             for result in batch_results:
                 all_finish_reasons.extend(result.finish_reasons)
                 all_response_lengths.extend([len(response) for response in result.responses])
-                all_dataset_indices.append(result.dataset_index)
+                all_dataset_indices.append(result.index)
 
                 # Get prompt length for this result
-                prompt_data = dataset[result.dataset_index]
+                prompt_data = dataset[result.index]
                 prompt = prompt_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
                 all_prompt_lengths.append(len(prompt))
 
