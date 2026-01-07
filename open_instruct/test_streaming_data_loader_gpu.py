@@ -6,6 +6,7 @@ To run:
     ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
 """
 
+import contextlib
 import logging
 import pathlib
 import subprocess
@@ -120,7 +121,9 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
         generation_config = SamplingConfig(temperature=0.7, top_p=1.0, max_tokens=32, n=2)
 
-        _actor = data_loader.DataPreparationActor.options(name="test_no_tools").remote(
+        with contextlib.suppress(ValueError):
+            ray.kill(ray.get_actor(data_loader.DATA_PREP_ACTOR_NAME))
+        _actor = data_loader.DataPreparationActor.options(name=data_loader.DATA_PREP_ACTOR_NAME).remote(
             dataset=train_dataset,
             inference_results_Q=inference_results_Q,
             param_prompt_Q=param_prompt_Q,
@@ -140,7 +143,6 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         )
 
         loader = data_loader.StreamingDataLoader(
-            data_prep_actor_name="test_no_tools",
             tokenizer=tokenizer,
             work_dir="/tmp",
             global_batch_size=2,
@@ -221,7 +223,9 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
 
         generation_config = SamplingConfig(temperature=0.7, top_p=1.0, max_tokens=128, n=2, stop=list(tools.keys()))
 
-        _actor = data_loader.DataPreparationActor.options(name="test_with_tools").remote(
+        with contextlib.suppress(ValueError):
+            ray.kill(ray.get_actor(data_loader.DATA_PREP_ACTOR_NAME))
+        _actor = data_loader.DataPreparationActor.options(name=data_loader.DATA_PREP_ACTOR_NAME).remote(
             dataset=train_dataset,
             inference_results_Q=inference_results_Q,
             param_prompt_Q=param_prompt_Q,
@@ -241,7 +245,6 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         )
 
         loader = data_loader.StreamingDataLoader(
-            data_prep_actor_name="test_with_tools",
             tokenizer=tokenizer,
             work_dir="/tmp",
             global_batch_size=2,

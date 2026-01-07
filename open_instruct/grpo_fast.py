@@ -39,7 +39,7 @@ with contextlib.suppress(Exception):
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, utils
-from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
+from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator
 
 # isort: on
 import asyncio
@@ -353,7 +353,6 @@ class PolicyTrainerRayProcess(RayProcess):
         args: Args,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
-        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
@@ -364,7 +363,6 @@ class PolicyTrainerRayProcess(RayProcess):
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
         self._streaming_dataloader = streaming_config.build_dataloader(
-            data_prep_actor_name=data_prep_actor_name,
             tokenizer=tokenizer,
             dp_rank=rank,
             fs_local_rank=local_rank,
@@ -1138,7 +1136,6 @@ class ModelGroup:
         args: Args,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
-        data_prep_actor_name: str,
         tokenizer: PreTrainedTokenizer,
     ):
         self.pg = pg
@@ -1154,7 +1151,7 @@ class ModelGroup:
             scheduling_strategy=PlacementGroupSchedulingStrategy(
                 placement_group=self.pg, placement_group_bundle_index=0
             ),
-        ).remote(world_size, 0, 0, None, None, args, streaming_config, vllm_config, data_prep_actor_name, tokenizer)
+        ).remote(world_size, 0, 0, None, None, args, streaming_config, vllm_config, tokenizer)
 
         self.models.append(master_policy)
         results, _ = ray_get_with_progress(
@@ -1187,18 +1184,7 @@ class ModelGroup:
                 num_cpus=self.num_cpus_per_actor,
                 num_gpus=self.num_gpus_per_actor,
                 scheduling_strategy=scheduling_strategy,
-            ).remote(
-                world_size,
-                rank,
-                0,
-                master_addr,
-                master_port,
-                args,
-                streaming_config,
-                vllm_config,
-                data_prep_actor_name,
-                tokenizer,
-            )
+            ).remote(world_size, rank, 0, master_addr, master_port, args, streaming_config, vllm_config, tokenizer)
             self.models.append(worker_policy)
 
 
@@ -1494,8 +1480,9 @@ def create_model_and_optimizer(
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
     # Create DataPreparationActor FIRST so StreamingDataLoader can find it
-    data_prep_actor_name = "data_prep_singleton"
-    _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
+    _data_prep_actor = data_loader_lib.DataPreparationActor.options(
+        name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=2
+    ).remote(  # type: ignore[unresolved-attribute]
         dataset=train_dataset,
         inference_results_Q=inference_results_Q,
         param_prompt_Q=prompt_Q,
@@ -1528,7 +1515,6 @@ def create_model_and_optimizer(
         args=args,
         streaming_config=streaming_config,
         vllm_config=vllm_config,
-        data_prep_actor_name=data_prep_actor_name,
         tokenizer=tokenizer,
     )
     inits = [
@@ -2152,8 +2138,9 @@ def run_training(
                 client_state["dataloader_state"] = ray.get(policy_group.models[0].get_dataloader_state.remote())
 
                 # Save DataPreparationActor state
-                data_prep_actor = ray.get_actor("data_prep_singleton")
-                client_state["data_prep_actor_state"] = ray.get(data_prep_actor.get_state.remote())
+                client_state["data_prep_actor_state"] = ray.get(
+                    ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME).get_state.remote()
+                )
 
                 ray_get_with_progress(
                     [
