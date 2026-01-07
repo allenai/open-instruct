@@ -73,6 +73,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             GROUND_TRUTHS_KEY: ground_truths,
             VERIFIER_SOURCE_KEY: ["test"] * len(prompts),
             RAW_PROMPT_KEY: prompts,
+            "index": list(range(len(prompts))),
         }
         return datasets.Dataset.from_dict(data)
 
