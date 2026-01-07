@@ -1141,6 +1141,9 @@ def vllm_generate_thread(
         tool_outputs = []
         tool_runtimes = []
         tool_calleds = []
+        tool_call_counts = []
+        tool_error_counts = []
+        tool_timeout_counts = []
         for outputs in all_outputs:
             response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
             finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
@@ -1152,6 +1155,11 @@ def vllm_generate_thread(
                 tool_outputs.extend([out.tool_output for output in outputs for out in output.outputs])
                 tool_runtimes.extend([out.tool_runtime for output in outputs for out in output.outputs])
                 tool_calleds.extend([out.tool_called for output in outputs for out in output.outputs])
+                tool_call_counts.extend([out.tool_call_counts or {} for output in outputs for out in output.outputs])
+                tool_error_counts.extend([out.tool_error_counts or {} for output in outputs for out in output.outputs])
+                tool_timeout_counts.extend(
+                    [out.tool_timeout_counts or {} for output in outputs for out in output.outputs]
+                )
         # if not using the tool, mask is all 1s
         if not args.tool_use:
             masks = [[1] * len(response_ids[i]) for i in range(len(response_ids))]
@@ -1161,11 +1169,24 @@ def vllm_generate_thread(
             tool_outputs = [""] * len(response_ids)
             tool_runtimes = [0] * len(response_ids)
             tool_calleds = [False] * len(response_ids)
+            tool_call_counts = [{}] * len(response_ids)
+            tool_error_counts = [{}] * len(response_ids)
+            tool_timeout_counts = [{}] * len(response_ids)
         return (
             response_ids,
             finish_reasons,
             masks,
-            (num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds),
+            (
+                num_calls,
+                timeouts,
+                tool_errors,
+                tool_outputs,
+                tool_runtimes,
+                tool_calleds,
+                tool_call_counts,
+                tool_error_counts,
+                tool_timeout_counts,
+            ),
         )
 
     for training_step in range(resume_training_step, num_training_steps + 1):
@@ -1208,7 +1229,17 @@ def data_preparation_thread(
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons, masks, infos = inference_results_Q.get()
-            num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+            (
+                num_calls,
+                timeouts,
+                tool_errors,
+                tool_outputs,
+                tool_runtimes,
+                tool_calleds,
+                tool_call_counts,
+                tool_error_counts,
+                tool_timeout_counts,
+            ) = infos
             good_outputs = [
                 len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
                 for i in range(len(tool_outputs))
@@ -1343,6 +1374,37 @@ def data_preparation_thread(
             "val/tool_calleds_rate": np.array(tool_calleds).mean(),
             **reward_metrics,
         }
+
+        # Compute per-tool metrics from tool_call_counts
+        if tool_call_counts:
+            # Aggregate all tool names across samples
+            all_tool_names: set[str] = set()
+            for counts in tool_call_counts:
+                all_tool_names.update(counts.keys())
+
+            for tool_name in all_tool_names:
+                # called_rate: % of samples that called this tool at least once
+                samples_that_called = sum(1 for counts in tool_call_counts if counts.get(tool_name, 0) > 0)
+                called_rate = samples_that_called / len(tool_call_counts)
+                # total_calls: total number of calls to this tool across all samples
+                total_calls = sum(counts.get(tool_name, 0) for counts in tool_call_counts)
+                # calls_per_sample: average calls per sample
+                calls_per_sample = total_calls / len(tool_call_counts)
+                # error_rate: total errors / total calls for this tool
+                total_errors = sum(counts.get(tool_name, 0) for counts in tool_error_counts)
+                error_rate = total_errors / total_calls if total_calls > 0 else 0.0
+                # timeout_rate: total timeouts / total calls for this tool
+                total_timeouts = sum(counts.get(tool_name, 0) for counts in tool_timeout_counts)
+                timeout_rate = total_timeouts / total_calls if total_calls > 0 else 0.0
+                # good_rate: (total_calls - errors - timeouts) / total_calls
+                good_calls = total_calls - total_errors - total_timeouts
+                good_rate = good_calls / total_calls if total_calls > 0 else 0.0
+
+                metrics[f"val/tool_{tool_name}_called_rate"] = called_rate
+                metrics[f"val/tool_{tool_name}_calls_per_sample"] = calls_per_sample
+                metrics[f"val/tool_{tool_name}_error_rate"] = error_rate
+                metrics[f"val/tool_{tool_name}_timeout_rate"] = timeout_rate
+                metrics[f"val/tool_{tool_name}_good_rate"] = good_rate
 
         if args.save_traces:
             traces = {
@@ -1885,7 +1947,17 @@ if __name__ == "__main__":
         infos: list[list[int]],
         queries: list[str] | None = None,
     ) -> list[float]:
-        num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+        (
+            num_calls,
+            timeouts,
+            tool_errors,
+            tool_outputs,
+            tool_runtimes,
+            tool_calleds,
+            _tool_call_counts,
+            _tool_error_counts,
+            _tool_timeout_counts,
+        ) = infos
         good_outputs = [
             len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
             for i in range(len(tool_outputs))

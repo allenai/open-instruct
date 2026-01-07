@@ -31,6 +31,8 @@ class RequestInfo:
     tool_calleds: list[bool]
     # Per-tool tracking: list of dicts mapping tool_name -> count for each sample
     tool_call_counts: list[dict[str, int]] | None = None
+    tool_error_counts: list[dict[str, int]] | None = None
+    tool_timeout_counts: list[dict[str, int]] | None = None
 
 
 @dataclass

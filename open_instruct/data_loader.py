@@ -46,6 +46,54 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 logger = logging.getLogger(__name__)
 
 
+def _compute_per_tool_metrics(tools_called: list[list[str]] | None) -> dict[str, float]:
+    """Compute per-tool metrics from tools_called data.
+
+    Args:
+        tools_called: List of lists where each inner list contains the stop_strs of tools
+            that were called for that response. May be None if tools are not used.
+
+    Returns:
+        Dictionary with per-tool metrics:
+        - val/tool_{tool_name}_called_rate: Fraction of responses that called this tool
+        - val/tool_{tool_name}_call_count: Average number of times this tool was called per response
+    """
+    if not tools_called:
+        return {}
+
+    # First pass: collect all unique tool names
+    all_tool_names: set[str] = set()
+    for response_tools in tools_called:
+        all_tool_names.update(response_tools)
+
+    if not all_tool_names:
+        return {}
+
+    # Second pass: count tool calls per response
+    tool_call_counts: dict[str, list[int]] = {tool: [] for tool in all_tool_names}
+
+    for response_tools in tools_called:
+        # Count tools for this response
+        counts_this_response: dict[str, int] = {}
+        for tool_name in response_tools:
+            counts_this_response[tool_name] = counts_this_response.get(tool_name, 0) + 1
+
+        # Record count for each tool (0 if not called)
+        for tool_name in all_tool_names:
+            tool_call_counts[tool_name].append(counts_this_response.get(tool_name, 0))
+
+    # Compute metrics
+    metrics = {}
+    for tool_name, counts in tool_call_counts.items():
+        counts_array = np.array(counts)
+        # Clean the tool name for use in metric keys (remove special chars)
+        clean_name = tool_name.replace("<", "").replace(">", "").replace("/", "_")
+        metrics[f"val/tool_{clean_name}_called_rate"] = float((counts_array > 0).mean())
+        metrics[f"val/tool_{clean_name}_call_count"] = float(counts_array.mean())
+
+    return metrics
+
+
 class HFDataLoader(data_loader.DataLoaderBase):
     """A DataLoader that wraps a HuggingFace Dataset for use with olmo_core's Trainer.
 
@@ -583,6 +631,9 @@ def accumulate_inference_batches(
     combined_tool_outputs = []
     combined_tool_runtimes = []
     combined_tool_calleds = []
+    combined_tool_call_counts = []
+    combined_tool_error_counts = []
+    combined_tool_timeout_counts = []
     combined_logprobs = []
 
     earliest_start_time = float("inf")
@@ -603,6 +654,12 @@ def accumulate_inference_batches(
         combined_tool_outputs.extend(result.request_info.tool_outputs)
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
+        if result.request_info.tool_call_counts is not None:
+            combined_tool_call_counts.extend(result.request_info.tool_call_counts)
+        if result.request_info.tool_error_counts is not None:
+            combined_tool_error_counts.extend(result.request_info.tool_error_counts)
+        if result.request_info.tool_timeout_counts is not None:
+            combined_tool_timeout_counts.extend(result.request_info.tool_timeout_counts)
 
         combined_logprobs.extend(result.logprobs)
 
@@ -631,6 +688,9 @@ def accumulate_inference_batches(
         tool_outputs=combined_tool_outputs,
         tool_runtimes=combined_tool_runtimes,
         tool_calleds=combined_tool_calleds,
+        tool_call_counts=combined_tool_call_counts if combined_tool_call_counts else None,
+        tool_error_counts=combined_tool_error_counts if combined_tool_error_counts else None,
+        tool_timeout_counts=combined_tool_timeout_counts if combined_tool_timeout_counts else None,
     )
 
     combined_result = data_types.GenerationResult(
@@ -1044,6 +1104,47 @@ class DataPreparationActor:
                     **reward_metrics,
                     **batch_metrics_prefixed,
                 }
+
+                # Compute per-tool metrics from tool_call_counts
+                if result.request_info.tool_call_counts:
+                    tool_call_counts_list = result.request_info.tool_call_counts
+                    tool_error_counts_list = result.request_info.tool_error_counts or [
+                        {} for _ in tool_call_counts_list
+                    ]
+                    tool_timeout_counts_list = result.request_info.tool_timeout_counts or [
+                        {} for _ in tool_call_counts_list
+                    ]
+
+                    # Aggregate all tool names across samples
+                    all_tool_names: set[str] = set()
+                    for counts in tool_call_counts_list:
+                        all_tool_names.update(counts.keys())
+
+                    for tool_name in all_tool_names:
+                        # called_rate: % of samples that called this tool at least once
+                        samples_that_called = sum(
+                            1 for counts in tool_call_counts_list if counts.get(tool_name, 0) > 0
+                        )
+                        called_rate = samples_that_called / len(tool_call_counts_list)
+                        # total_calls: total number of calls to this tool across all samples
+                        total_calls = sum(counts.get(tool_name, 0) for counts in tool_call_counts_list)
+                        # calls_per_sample: average calls per sample
+                        calls_per_sample = total_calls / len(tool_call_counts_list)
+                        # error_rate: total errors / total calls for this tool
+                        total_errors = sum(counts.get(tool_name, 0) for counts in tool_error_counts_list)
+                        error_rate = total_errors / total_calls if total_calls > 0 else 0.0
+                        # timeout_rate: total timeouts / total calls for this tool
+                        total_timeouts = sum(counts.get(tool_name, 0) for counts in tool_timeout_counts_list)
+                        timeout_rate = total_timeouts / total_calls if total_calls > 0 else 0.0
+                        # good_rate: (total_calls - errors - timeouts) / total_calls
+                        good_calls = total_calls - total_errors - total_timeouts
+                        good_rate = good_calls / total_calls if total_calls > 0 else 0.0
+
+                        step_metrics[f"val/tool_{tool_name}_called_rate"] = called_rate
+                        step_metrics[f"val/tool_{tool_name}_calls_per_sample"] = calls_per_sample
+                        step_metrics[f"val/tool_{tool_name}_error_rate"] = error_rate
+                        step_metrics[f"val/tool_{tool_name}_timeout_rate"] = timeout_rate
+                        step_metrics[f"val/tool_{tool_name}_good_rate"] = good_rate
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
