@@ -265,6 +265,7 @@ def execute_tool_call(
 
     Returns:
         Tuple of (formatted_output, metadata) where formatted_output is None if no tool was called.
+        On error, returns formatted error message so generation can continue.
     """
     tool_calls = tool_parser.get_tool_calls(text)
     if not tool_calls:
@@ -272,7 +273,8 @@ def execute_tool_call(
 
     tool_call = tool_calls[0]  # Process one at a time
     if tool_call.name not in tools:
-        return None, {"error": f"Unknown tool: {tool_call.name}"}
+        error_msg = f"Unknown tool: {tool_call.name}"
+        return tool_parser.format_tool_calls(f"Error: {error_msg}"), {"error": error_msg}
 
     if num_calls >= max_tool_calls:
         return tool_parser.format_tool_calls("Max tool calls exceeded."), {
@@ -282,13 +284,22 @@ def execute_tool_call(
 
     tool = tools[tool_call.name]
     try:
+        logger.info(f"Executing tool call: {tool_call.name} with args: {tool_call.args}")
         # Handle both sync and async tools
         if asyncio.iscoroutinefunction(tool.__call__):
             result = asyncio.run(tool(**tool_call.args))
         else:
             result = tool(**tool_call.args)
 
-        formatted_output = tool_parser.format_tool_calls(result.output)
+        # If tool returned an error with empty output, include the error in the output
+        if result.error and not result.output:
+            output_text = f"Error: {result.error}"
+        elif result.error:
+            output_text = f"{result.output}\n\nError: {result.error}"
+        else:
+            output_text = result.output
+
+        formatted_output = tool_parser.format_tool_calls(output_text)
         return formatted_output, {
             "tool_name": tool_call.name,
             "tool_args": tool_call.args,
@@ -299,7 +310,7 @@ def execute_tool_call(
         }
     except Exception as e:
         error_msg = f"Tool execution error: {e!s}"
-        formatted_output = tool_parser.format_tool_calls(error_msg)
+        formatted_output = tool_parser.format_tool_calls(f"Error: {error_msg}")
         return formatted_output, {"tool_name": tool_call.name, "tool_args": tool_call.args, "tool_error": error_msg}
 
 
