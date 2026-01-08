@@ -549,7 +549,7 @@ def main(
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
-    if is_beaker_job() and is_main_process and args.try_launch_beaker_eval_jobs:
+    if is_beaker_job() and is_main_process and args.try_launch_beaker_eval_jobs_on_weka:
         wandb_url = None
         if args.with_tracking:
             wandb_tracker = trainer_callbacks.get("wandb")
