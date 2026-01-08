@@ -165,7 +165,10 @@ class GRPOTrainModule(TrainModule):
 
     def optim_step(self) -> None:
         if self.max_grad_norm is not None:
-            grad_norm = self.model.clip_grad_norm_(self.max_grad_norm)
+            if hasattr(self.model, "clip_grad_norm_"):
+                grad_norm = self.model.clip_grad_norm_(self.max_grad_norm)
+            else:
+                grad_norm = nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
             self.trainer.record_metric("total grad norm", grad_norm, reduce_type=None, namespace="optim")
         if self.scheduler is not None:
             for group_idx, group in enumerate(self.optim.param_groups):
