@@ -103,13 +103,17 @@ class VLLMWeightSyncCallback(Callback):
         else:
             for name, param in model.named_parameters():
                 count += 1
-                refs = [
-                    engine.update_weight.remote(
-                        name, dtype=str(param.dtype), shape=param.shape, empty_cache=(count == num_params)
-                    )
-                    for engine in self.vllm_engines
-                ]
-                refss.extend(refs)
+                if is_rank0:
+                    refs = [
+                        engine.update_weight.remote(
+                            name, dtype=str(param.dtype), shape=param.shape, empty_cache=(count == num_params)
+                        )
+                        for engine in self.vllm_engines
+                    ]
+                    refss.extend(refs)
+
+                if self.model_update_group is not None:
+                    dist.broadcast(param.data, 0, group=self.model_update_group)
 
         if is_rank0 and refss:
             ray.get(refss)
