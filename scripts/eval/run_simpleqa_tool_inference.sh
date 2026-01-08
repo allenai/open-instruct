@@ -2,7 +2,7 @@
 # Tool-enabled inference on allenai/simpleqa_full
 # Uses the same tool setup as scripts/train/debug/tool_grpo_fast.sh
 model_name_or_path=$1
-export SERPER_API_KEY=$(beaker secret read hamishivi_SERPER_API_KEY --workspace ai2/olmo-instruct)
+export SERPER_API_KEY=$(beaker secret read hamishivi_SERPER_API_KEY --workspace ai2/dr-tulu-ablations)
 
 # Build the command
 uv run python -m open_instruct.tools.tool_inference \
