@@ -9,7 +9,6 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/saturn \
-       --cluster ai2/ceres \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU grpo.py with Qwen3-1.7B test." \
        --pure_docker_mode \
