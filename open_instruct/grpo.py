@@ -482,7 +482,7 @@ def main(
     trainer_callbacks["vllm_sync"] = VLLMWeightSyncCallback(
         vllm_engines=vllm_engines,
         model_update_group=model_update_group,
-        actor_manager=actor_manager,
+        actor_manager=None,
         gather_whole_model=args.gather_whole_model,
     )
 
