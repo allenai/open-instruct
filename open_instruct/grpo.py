@@ -260,6 +260,8 @@ def main(
         os.environ.setdefault("LOCAL_RANK", "0")
         os.environ.setdefault("RANK", "0")
         os.environ.setdefault("WORLD_SIZE", "1")
+        os.environ.setdefault("LOCAL_WORLD_SIZE", "1")
+        os.environ.setdefault("NUM_NODES", "1")
         os.environ.setdefault("MASTER_ADDR", "localhost")
         os.environ.setdefault("MASTER_PORT", "29500")
     backend = "cpu:gloo,cuda:nccl"  # Always initialize distributed (even single GPU)
