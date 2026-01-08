@@ -44,6 +44,7 @@ import torch.utils.data
 import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
+from accelerate.logging import get_logger
 from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
@@ -53,7 +54,7 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, utils
+from open_instruct import utils
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     TOKENIZED_PREFERENCE_DATASET_KEYS,
@@ -85,7 +86,7 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
 )
 
-logger = logger_utils.setup_logger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
