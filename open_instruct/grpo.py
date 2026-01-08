@@ -418,12 +418,14 @@ def main(
 
     optim_config = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay)
 
-    dp_config = TransformerDataParallelConfig(
-        name=DataParallelType.hsdp,
-        param_dtype=DType.bfloat16,
-        reduce_dtype=DType.float32,
-        wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
-    )
+    dp_config = None
+    if not args.single_gpu_mode:
+        dp_config = TransformerDataParallelConfig(
+            name=DataParallelType.hsdp,
+            param_dtype=DType.bfloat16,
+            reduce_dtype=DType.float32,
+            wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
+        )
 
     grpo_config = args.grpo_config
     grpo_config.temperature = streaming_config.temperature
