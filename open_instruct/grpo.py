@@ -397,7 +397,8 @@ def main(
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
 
     model_basename = model_config.model_name_or_path.split("/")[-1]
-    config_name = model_basename.lower().replace("-", "_").replace(".", "_")
+    config_name = model_basename.replace("-", "_").replace(".", "_")
+    config_name = config_name[:-1].lower() + "B" if config_name.endswith("B") else config_name.lower()
     if not hasattr(TransformerConfig, config_name):
         available = [
             m for m in dir(TransformerConfig) if not m.startswith("_") and callable(getattr(TransformerConfig, m))
