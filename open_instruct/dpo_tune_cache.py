@@ -598,8 +598,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if torch.cuda.is_available():
         init_gpu_memory = torch.cuda.mem_get_info()[0]
 
-    # Make one log on every process with the configuration for debugging.
-    logger.info(accelerator.state, main_process_only=False)
+    logger.info(accelerator.state)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
         transformers.utils.logging.set_verbosity_info()
