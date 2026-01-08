@@ -582,8 +582,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 }
             },
         )
-        wandb_tracker = accelerator.get_tracker("wandb")
-        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
+        if accelerator.is_main_process:
+            wandb_tracker = accelerator.get_tracker("wandb")
+            maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
+        else:
+            wandb_tracker = None
     else:
         wandb_tracker = None
 
