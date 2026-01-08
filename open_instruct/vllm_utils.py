@@ -54,7 +54,6 @@ from torch.distributed.distributed_c10d import (
 )
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
-from vllm.utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
@@ -429,7 +428,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
 
 
 def _create_server_args(model_path: str) -> argparse.Namespace:
-    parser = FlexibleArgumentParser()
+    parser = argparse.ArgumentParser()
     parser = make_arg_parser(parser)
     args = parser.parse_args(["--model", model_path])
     args.disable_fastapi_docs = True
