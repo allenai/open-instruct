@@ -380,3 +380,9 @@ class GRPOTrainModule(TrainModule):
 
     def eval_batch(self, batch: dict[str, Any], labels: Any = None) -> Any:
         return None
+
+    def num_flops_per_token(self, seq_len: int) -> int | None:
+        return None
+
+    def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int | None:
+        return None
