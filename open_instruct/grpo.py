@@ -409,7 +409,6 @@ def main(
 
     logger.info(f"Loading HuggingFace weights from {model_config.model_name_or_path}")
     load_hf_model(model_config.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
-    model = model.to(device=device, dtype=torch.bfloat16)
 
     ref_policy = None
     if args.load_ref_policy and args.beta > 0:
