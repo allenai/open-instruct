@@ -396,29 +396,15 @@ def main(
     else:
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
 
-    model_name = model_config.model_name_or_path.lower()
-    if "qwen3-0.6b" in model_name or "qwen3-0_6b" in model_name:
-        logger.info("Building OLMo-core model with Qwen3-0.6B config")
-        model_config_olmo = TransformerConfig.qwen3_0_6B()
-    elif "qwen3-1.7b" in model_name or "qwen3-1_7b" in model_name:
-        logger.info("Building OLMo-core model with Qwen3-1.7B config")
-        model_config_olmo = TransformerConfig.qwen3_1_7B()
-    elif "qwen3-4b" in model_name:
-        logger.info("Building OLMo-core model with Qwen3-4B config")
-        model_config_olmo = TransformerConfig.qwen3_4B()
-    elif "qwen3-8b" in model_name:
-        logger.info("Building OLMo-core model with Qwen3-8B config")
-        model_config_olmo = TransformerConfig.qwen3_8B()
-    elif "qwen3-14b" in model_name:
-        logger.info("Building OLMo-core model with Qwen3-14B config")
-        model_config_olmo = TransformerConfig.qwen3_14B()
-    elif "qwen3-32b" in model_name:
-        logger.info("Building OLMo-core model with Qwen3-32B config")
-        model_config_olmo = TransformerConfig.qwen3_32B()
-    else:
-        raise ValueError(
-            f"Unsupported model: {model_config.model_name_or_path}. Supported models: Qwen3-0.6B, 1.7B, 4B, 8B, 14B, 32B"
-        )
+    model_basename = model_config.model_name_or_path.split("/")[-1]
+    config_name = model_basename.lower().replace("-", "_").replace(".", "_")
+    if not hasattr(TransformerConfig, config_name):
+        available = [
+            m for m in dir(TransformerConfig) if not m.startswith("_") and callable(getattr(TransformerConfig, m))
+        ]
+        raise ValueError(f"No TransformerConfig.{config_name}() found. Available: {available}")
+    logger.info(f"Building OLMo-core model with TransformerConfig.{config_name}()")
+    model_config_olmo = getattr(TransformerConfig, config_name)()
     model = model_config_olmo.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {model_config.model_name_or_path}")
