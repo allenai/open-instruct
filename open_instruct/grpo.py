@@ -256,7 +256,7 @@ def main(
     vllm_config: data_loader_lib.VLLMConfig,
 ) -> None:
     """Main entry point for GRPO training with OLMo-core Trainer."""
-    backend = None if args.single_gpu_mode else "cpu:gloo,cuda:nccl"
+    backend = "cpu:gloo,cuda:nccl"  # Always initialize distributed (even single GPU)
     train.prepare_training_environment(seed=args.seed, backend=backend)
 
     rank = get_rank() if is_distributed() else 0
