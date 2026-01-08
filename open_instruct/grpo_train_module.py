@@ -294,7 +294,7 @@ class GRPOTrainModule(TrainModule):
                     return_entropy=self.grpo_config.record_entropy,
                 )
 
-                response_mask = data_BT.response_masks[sample_idx][:, 1:].bool()
+                response_mask = data_BT.response_masks[sample_idx][:, 1:].bool().to(new_logprobs.device)
                 new_logprobs = torch.where(
                     response_mask,
                     new_logprobs,
@@ -302,7 +302,7 @@ class GRPOTrainModule(TrainModule):
                 )
 
                 old_logprobs = old_logprobs_BT[sample_idx]
-                advantages = data_BT.advantages[sample_idx]
+                advantages = data_BT.advantages[sample_idx].to(new_logprobs.device)
 
                 log_ratio = new_logprobs - old_logprobs
                 ratio = torch.exp(log_ratio)
