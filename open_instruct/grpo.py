@@ -497,13 +497,10 @@ def main(
         save_interval=args.checkpoint_state_freq if args.checkpoint_state_freq > 0 else args.save_freq, save_async=True
     )
 
-    device_name = utils.get_device_name(torch.cuda.get_device_name(0))
-    device_peak_flops = int(utils.GPU_SPECS[device_name]["flops"])
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback(
         num_flops_per_token=model.num_flops_per_token(
             streaming_config.max_prompt_token_length + streaming_config.response_length
-        ),
-        device_peak_flops=device_peak_flops,
+        )
     )
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
 
