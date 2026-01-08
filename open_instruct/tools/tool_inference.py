@@ -495,5 +495,5 @@ def main(args: Args):
 
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args,))
-    (args,) = parser.parse()
+    args = parser.parse()
     main(args)
