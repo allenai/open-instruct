@@ -388,9 +388,9 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             self.current_epoch = epoch
 
     def get_mock_batch(self) -> dict[str, Any]:
-        dummy_qr = torch.tensor([self.tokenizer.pad_token_id, self.tokenizer.eos_token_id], dtype=torch.long)
-        dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-        dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
+        dummy_qr = torch.tensor([[self.tokenizer.pad_token_id, self.tokenizer.eos_token_id]], dtype=torch.long)
+        dummy_attention = torch.tensor([[1, 1]], dtype=torch.long)
+        dummy_position_ids = torch.arange(dummy_qr.shape[1], dtype=torch.long).unsqueeze(0)
         dummy_response_mask = torch.zeros_like(dummy_qr)
         dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
 
