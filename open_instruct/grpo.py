@@ -16,6 +16,10 @@ GRPO training with OLMo-core's Trainer.
 
 This module provides GRPO (Group Relative Policy Optimization) training using
 OLMo-core's native training infrastructure, replacing DeepSpeed with FSDP.
+
+Supports two distributed backends:
+- Ray (default): Proven to work with Beaker
+- Monarch (experimental): PyTorch-native, requires PyTorch 2.9+
 """
 
 import dataclasses
@@ -117,7 +121,9 @@ class GRPOExperimentConfig:
     use_vllm_logprobs: bool = False
 
     single_gpu_mode: bool = False
+    use_monarch: bool = False
     num_learners_per_node: list[int] = field(default_factory=lambda: [1])
+    num_nodes: int = 1
     deepspeed_stage: int = 0
     deepspeed_zpg: int = 8
     deepspeed_offload_param: bool = False
@@ -577,7 +583,63 @@ def main(
     logger.info("Finished GRPO training")
 
 
+async def main_monarch(
+    args: GRPOExperimentConfig,
+    tc: TokenizerConfig,
+    model_config: ModelConfig,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
+) -> None:
+    """Main entry point for GRPO training using Monarch actors.
+
+    This is an experimental alternative to the Ray-based main() function.
+    Requires PyTorch 2.9+ with torchmonarch.
+
+    Note: Multi-host support requires Monarch's hosts_from_config feature
+    which is currently NYI (Not Yet Implemented). For now, this only works
+    in single-host mode or requires manual host configuration.
+    """
+    from monarch.actor import Actor, current_rank, endpoint, this_host
+
+    from open_instruct.monarch_utils import get_beaker_job
+
+    logger.info("Starting Monarch-based GRPO training")
+
+    job = get_beaker_job(num_replicas=args.num_nodes, gpus_per_replica=8)
+    logger.info(f"BeakerJob created: replica_rank={job.replica_rank}, is_leader={job.is_leader}")
+
+    if args.num_nodes > 1:
+        logger.warning(
+            "Multi-node Monarch support requires hosts_from_config which is NYI. "
+            "Falling back to single-node mode. Use Ray-based main() for multi-node."
+        )
+
+    class GRPOTrainerActor(Actor):
+        """Monarch actor for GRPO training."""
+
+        def __init__(self, config_args, config_tc, config_model, config_streaming, config_vllm):
+            self.args = config_args
+            self.tc = config_tc
+            self.model_config = config_model
+            self.streaming_config = config_streaming
+            self.vllm_config = config_vllm
+            self.rank = current_rank().rank
+
+        @endpoint
+        async def train(self):
+            """Run GRPO training."""
+            main(self.args, self.tc, self.model_config, self.streaming_config, self.vllm_config)
+
+    proc_mesh = this_host().spawn_procs({"gpus": 1})
+    trainers = proc_mesh.spawn("grpo_trainer", GRPOTrainerActor, args, tc, model_config, streaming_config, vllm_config)
+    await trainers.train.call()
+
+    logger.info("Monarch-based GRPO training complete")
+
+
 if __name__ == "__main__":
+    import asyncio
+
     parser = ArgumentParserPlus(
         (
             GRPOExperimentConfig,
@@ -588,4 +650,9 @@ if __name__ == "__main__":
         )
     )
     args, tc, model_config, streaming_config, vllm_config = parser.parse_args_into_dataclasses()
-    main(args, tc, model_config, streaming_config, vllm_config)
+
+    if args.use_monarch:
+        logger.info("Using Monarch backend (experimental)")
+        asyncio.run(main_monarch(args, tc, model_config, streaming_config, vllm_config))
+    else:
+        main(args, tc, model_config, streaming_config, vllm_config)

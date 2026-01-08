@@ -25,15 +25,22 @@ annotated-doc==0.0.4
     # via fastapi
 annotated-types==0.7.0
     # via pydantic
+anthropic==0.71.0 ; sys_platform != 'darwin'
+    # via vllm
 antlr4-python3-runtime==4.11.0
     # via open-instruct
 anyio==4.12.0
     # via
+    #   anthropic
     #   httpx
+    #   mcp
     #   openai
+    #   sse-starlette
     #   starlette
     #   watchfiles
-astor==0.8.1
+apache-tvm-ffi==0.1.7 ; sys_platform != 'darwin'
+    # via flashinfer-python
+astor==0.8.1 ; sys_platform != 'darwin'
     # via depyf
 attrs==25.4.0
     # via
@@ -51,7 +58,7 @@ bettermap==1.3.1
     # via ai2-olmo-core
 bitsandbytes==0.49.0 ; sys_platform != 'darwin'
     # via open-instruct
-blake3==1.0.8
+blake3==1.0.8 ; sys_platform != 'darwin'
     # via vllm
 boto3==1.42.10
     # via cached-path
@@ -65,7 +72,7 @@ cachetools==6.2.4
     # via
     #   google-auth
     #   vllm
-cbor2==5.7.1
+cbor2==5.7.1 ; sys_platform != 'darwin'
     # via vllm
 certifi==2025.11.12
     # via
@@ -73,16 +80,19 @@ certifi==2025.11.12
     #   httpx
     #   requests
     #   sentry-sdk
-cffi==2.0.0
+cffi==2.0.0 ; (implementation_name == 'pypy' and sys_platform != 'darwin') or (platform_python_implementation != 'PyPy' and sys_platform != 'darwin')
     # via
+    #   cryptography
     #   pyzmq
-    #   soundfile
 cfgv==3.5.0
     # via pre-commit
 charset-normalizer==3.4.4
     # via requests
 click==8.2.1
     # via
+    #   click-option-group
+    #   clusterscope
+    #   flashinfer-python
     #   litellm
     #   mkdocs
     #   nltk
@@ -91,12 +101,19 @@ click==8.2.1
     #   typer
     #   uvicorn
     #   wandb
-cloudpickle==3.1.2
-    # via vllm
+click-option-group==0.5.9 ; sys_platform != 'darwin'
+    # via clusterscope
+cloudpickle==3.1.2 ; sys_platform != 'darwin'
+    # via
+    #   torchmonarch
+    #   vllm
+clusterscope==0.0.31 ; sys_platform != 'darwin'
+    # via torchmonarch
 colorama==0.4.6
     # via
     #   click
     #   colorful
+    #   loguru
     #   mkdocs
     #   mkdocs-material
     #   nvitop
@@ -105,10 +122,20 @@ colorama==0.4.6
     #   uvicorn
 colorful==0.5.8
     # via ray
-compressed-tensors==0.11.0
+compressed-tensors==0.12.2 ; sys_platform != 'darwin'
     # via vllm
 contourpy==1.3.3
     # via matplotlib
+cryptography==46.0.3 ; sys_platform != 'darwin'
+    # via pyjwt
+cuda-bindings==13.1.1 ; sys_platform != 'darwin'
+    # via cuda-python
+cuda-pathfinder==1.3.3 ; sys_platform != 'darwin'
+    # via
+    #   cuda-bindings
+    #   cuda-python
+cuda-python==13.1.1 ; sys_platform != 'darwin'
+    # via nvidia-cutlass-dsl
 cupy-cuda12x==13.6.0 ; sys_platform != 'darwin'
     # via ray
 cycler==0.12.1
@@ -119,7 +146,7 @@ debugpy==1.8.19
     # via open-instruct
 deepspeed==0.18.3
     # via open-instruct
-depyf==0.19.0
+depyf==0.20.0 ; sys_platform != 'darwin'
     # via vllm
 dill==0.4.0
     # via
@@ -127,34 +154,44 @@ dill==0.4.0
     #   datasets
     #   depyf
     #   multiprocess
-diskcache==5.6.3
+diskcache==5.6.3 ; sys_platform != 'darwin'
     # via vllm
 distlib==0.4.0
     # via virtualenv
 distro==1.9.0
-    # via openai
-dnspython==2.8.0
+    # via
+    #   anthropic
+    #   openai
+dnspython==2.8.0 ; sys_platform != 'darwin'
     # via email-validator
+docker==7.1.0 ; sys_platform != 'darwin'
+    # via torchx-nightly
 docker-pycreds==0.4.0
     # via wandb
+docstring-parser==0.17.0 ; sys_platform != 'darwin'
+    # via
+    #   anthropic
+    #   torchx-nightly
 einops==0.8.1
     # via
     #   deepspeed
     #   flash-attn
+    #   flashinfer-python
     #   vllm
-email-validator==2.3.0
+email-validator==2.3.0 ; sys_platform != 'darwin'
     # via
     #   fastapi
     #   pydantic
 fastapi==0.124.4
     # via
+    #   model-hosting-container-standards
     #   open-instruct
     #   vllm
-fastapi-cli==0.0.16
+fastapi-cli==0.0.16 ; sys_platform != 'darwin'
     # via fastapi
-fastapi-cloud-cli==0.7.0
+fastapi-cloud-cli==0.7.0 ; sys_platform != 'darwin'
     # via fastapi-cli
-fastar==0.8.0
+fastar==0.8.0 ; sys_platform != 'darwin'
     # via fastapi-cloud-cli
 fastrlock==0.8.3 ; sys_platform != 'darwin'
     # via cupy-cuda12x
@@ -165,15 +202,16 @@ filelock==3.20.1
     #   huggingface-hub
     #   ray
     #   torch
+    #   torchx-nightly
     #   transformers
     #   virtualenv
     #   vllm
 flash-attn==2.8.3 ; sys_platform != 'darwin'
     # via open-instruct
+flashinfer-python==0.5.3 ; sys_platform != 'darwin'
+    # via vllm
 fonttools==4.61.1
     # via matplotlib
-frozendict==2.4.7
-    # via compressed-tensors
 frozenlist==1.8.0
     # via
     #   aiohttp
@@ -183,7 +221,8 @@ fsspec==2025.10.0
     #   datasets
     #   huggingface-hub
     #   torch
-gguf==0.17.1
+    #   torchx-nightly
+gguf==0.17.1 ; sys_platform != 'darwin'
     # via vllm
 ghp-import==2.1.0
     # via mkdocs
@@ -231,15 +270,20 @@ hjson==3.1.0
     # via deepspeed
 httpcore==1.0.9
     # via httpx
-httptools==0.7.1
+httptools==0.7.1 ; sys_platform != 'darwin'
     # via uvicorn
 httpx==0.28.1
     # via
+    #   anthropic
     #   datasets
     #   fastapi
     #   fastapi-cloud-cli
     #   litellm
+    #   mcp
+    #   model-hosting-container-standards
     #   openai
+httpx-sse==0.4.3 ; sys_platform != 'darwin'
+    # via mcp
 huggingface-hub==0.36.0
     # via
     #   accelerate
@@ -257,6 +301,8 @@ idna==3.11
     #   httpx
     #   requests
     #   yarl
+ijson==3.4.0.post0 ; sys_platform != 'darwin'
+    # via vllm
 immutabledict==1.2.0
     # via open-instruct
 importlib-metadata==8.7.0
@@ -267,7 +313,7 @@ importlib-resources==6.5.2
     # via ai2-olmo-core
 iniconfig==2.3.0
     # via pytest
-interegular==0.3.3
+interegular==0.3.3 ; sys_platform != 'darwin'
     # via lm-format-enforcer
 jinja2==3.1.6
     # via
@@ -275,19 +321,22 @@ jinja2==3.1.6
     #   litellm
     #   mkdocs
     #   mkdocs-material
-    #   mlx-lm
     #   torch
 jiter==0.12.0
-    # via openai
+    # via
+    #   anthropic
+    #   openai
 jmespath==1.0.1
     # via
     #   boto3
     #   botocore
+    #   model-hosting-container-standards
 joblib==1.5.3
     # via nltk
 jsonschema==4.25.1
     # via
     #   litellm
+    #   mcp
     #   mistral-common
     #   ray
 jsonschema-specifications==2025.9.1
@@ -296,18 +345,22 @@ kiwisolver==1.4.9
     # via matplotlib
 langdetect==1.0.9
     # via open-instruct
-lark==1.2.2
-    # via vllm
+lark==1.2.2 ; sys_platform != 'darwin'
+    # via
+    #   torchmonarch
+    #   vllm
 liger-kernel==0.6.4 ; sys_platform != 'darwin'
     # via open-instruct
 litellm==1.75.0
     # via open-instruct
-llguidance==0.7.30 ; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+llguidance==1.3.0 ; (platform_machine == 'aarch64' and sys_platform != 'darwin') or (platform_machine == 'arm64' and sys_platform != 'darwin') or (platform_machine == 'ppc64le' and sys_platform != 'darwin') or (platform_machine == 's390x' and sys_platform != 'darwin') or (platform_machine == 'x86_64' and sys_platform != 'darwin')
     # via vllm
-llvmlite==0.44.0
+llvmlite==0.44.0 ; sys_platform != 'darwin'
     # via numba
-lm-format-enforcer==0.11.3
+lm-format-enforcer==0.11.3 ; sys_platform != 'darwin'
     # via vllm
+loguru==0.7.3 ; sys_platform != 'darwin'
+    # via compressed-tensors
 markdown==3.10
     # via
     #   mkdocs
@@ -323,13 +376,15 @@ markupsafe==3.0.3
     #   werkzeug
 matplotlib==3.10.8
     # via open-instruct
+mcp==1.25.0 ; sys_platform != 'darwin'
+    # via vllm
 mdurl==0.1.2
     # via markdown-it-py
 mergedeep==1.3.4
     # via
     #   mkdocs
     #   mkdocs-get-deps
-mistral-common==1.8.6
+mistral-common==1.8.6 ; sys_platform != 'darwin'
     # via vllm
 mkdocs==1.6.1
     # via mkdocs-material
@@ -338,19 +393,15 @@ mkdocs-get-deps==0.2.0
 mkdocs-material==9.7.0
 mkdocs-material-extensions==1.3.1
     # via mkdocs-material
-mlx==0.30.0 ; platform_machine == 'arm64' and sys_platform == 'darwin'
-    # via mlx-lm
-mlx-lm==0.28.4 ; platform_machine == 'arm64' and sys_platform == 'darwin'
-    # via xgrammar
-mlx-metal==0.30.0 ; platform_machine == 'arm64' and sys_platform == 'darwin'
-    # via mlx
+model-hosting-container-standards==0.1.12 ; sys_platform != 'darwin'
+    # via vllm
 mpmath==1.3.0
     # via sympy
 msgpack==1.1.2
     # via
     #   deepspeed
     #   ray
-msgspec==0.20.0
+msgspec==0.20.0 ; sys_platform != 'darwin'
     # via vllm
 multidict==6.7.0
     # via
@@ -360,18 +411,21 @@ multiprocess==0.70.17
     # via
     #   datasets
     #   open-instruct
+mypy-extensions==1.1.0 ; sys_platform != 'darwin'
+    # via typing-inspect
 networkx==3.6.1
     # via torch
 ninja==1.13.0
     # via
     #   deepspeed
+    #   flashinfer-python
     #   vllm
     #   xgrammar
 nltk==3.9.2
     # via open-instruct
 nodeenv==1.9.1
     # via pre-commit
-numba==0.61.2
+numba==0.61.2 ; sys_platform != 'darwin'
     # via vllm
 numpy==1.26.4
     # via
@@ -382,62 +436,69 @@ numpy==1.26.4
     #   cupy-cuda12x
     #   datasets
     #   deepspeed
+    #   flashinfer-python
     #   gguf
     #   matplotlib
     #   mistral-common
-    #   mlx-lm
     #   numba
+    #   nvidia-cutlass-dsl
     #   open-instruct
     #   opencv-python-headless
     #   pandas
     #   peft
     #   scipy
-    #   soundfile
-    #   soxr
     #   tensorboard
+    #   torchmonarch
     #   torchvision
     #   transformers
     #   vllm
-    #   xformers
     #   xgrammar
-nvidia-cublas-cu12==12.8.4.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cublas-cu12==12.8.4.1 ; sys_platform == 'linux'
     # via
     #   nvidia-cudnn-cu12
     #   nvidia-cusolver-cu12
     #   torch
-nvidia-cuda-cupti-cu12==12.8.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cuda-cupti-cu12==12.8.90 ; sys_platform == 'linux'
     # via torch
-nvidia-cuda-nvrtc-cu12==12.8.93 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cuda-nvrtc-cu12==12.8.93 ; sys_platform == 'linux'
     # via torch
-nvidia-cuda-runtime-cu12==12.8.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cuda-runtime-cu12==12.8.90 ; sys_platform == 'linux'
     # via torch
-nvidia-cudnn-cu12==9.10.2.21 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cudnn-cu12==9.10.2.21 ; sys_platform == 'linux'
     # via torch
-nvidia-cufft-cu12==11.3.3.83 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cudnn-frontend==1.17.0 ; sys_platform != 'darwin'
+    # via flashinfer-python
+nvidia-cufft-cu12==11.3.3.83 ; sys_platform == 'linux'
     # via torch
-nvidia-cufile-cu12==1.13.1.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cufile-cu12==1.13.1.3 ; sys_platform == 'linux'
     # via torch
-nvidia-curand-cu12==10.3.9.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-curand-cu12==10.3.9.90 ; sys_platform == 'linux'
     # via torch
-nvidia-cusolver-cu12==11.7.3.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cusolver-cu12==11.7.3.90 ; sys_platform == 'linux'
     # via torch
-nvidia-cusparse-cu12==12.5.8.93 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cusparse-cu12==12.5.8.93 ; sys_platform == 'linux'
     # via
     #   nvidia-cusolver-cu12
     #   torch
-nvidia-cusparselt-cu12==0.7.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cusparselt-cu12==0.7.1 ; sys_platform == 'linux'
     # via torch
+nvidia-cutlass-dsl==4.3.4 ; sys_platform != 'darwin'
+    # via flashinfer-python
 nvidia-ml-py==13.580.82
-    # via nvitop
-nvidia-nccl-cu12==2.27.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via
+    #   flashinfer-python
+    #   nvitop
+nvidia-nccl-cu12==2.27.5 ; sys_platform == 'linux'
     # via torch
-nvidia-nvjitlink-cu12==12.8.93 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-nvjitlink-cu12==12.8.93 ; sys_platform == 'linux'
     # via
     #   nvidia-cufft-cu12
     #   nvidia-cusolver-cu12
     #   nvidia-cusparse-cu12
     #   torch
-nvidia-nvtx-cu12==12.8.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-nvshmem-cu12==3.3.20 ; sys_platform == 'linux'
+    # via torch
+nvidia-nvtx-cu12==12.8.90 ; sys_platform == 'linux'
     # via torch
 nvitop==1.6.1
     # via open-instruct
@@ -447,13 +508,13 @@ openai==2.12.0
     # via
     #   litellm
     #   vllm
-openai-harmony==0.0.8
+openai-harmony==0.0.8 ; sys_platform != 'darwin'
     # via vllm
 opencensus==0.11.4
     # via ray
 opencensus-context==0.1.3
     # via opencensus
-opencv-python-headless==4.11.0.86
+opencv-python-headless==4.11.0.86 ; sys_platform != 'darwin'
     # via
     #   mistral-common
     #   vllm
@@ -462,6 +523,7 @@ opentelemetry-api==1.39.1
     #   opentelemetry-exporter-prometheus
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
+    #   torchmonarch
 opentelemetry-exporter-prometheus==0.60b1
     # via ray
 opentelemetry-proto==1.39.1
@@ -472,7 +534,7 @@ opentelemetry-sdk==1.39.1
     #   ray
 opentelemetry-semantic-conventions==0.60b1
     # via opentelemetry-sdk
-outlines-core==0.2.11
+outlines-core==0.2.11 ; sys_platform != 'darwin'
     # via vllm
 packaging==25.0
     # via
@@ -483,6 +545,7 @@ packaging==25.0
     #   cached-path
     #   datasets
     #   deepspeed
+    #   flashinfer-python
     #   huggingface-hub
     #   lm-format-enforcer
     #   matplotlib
@@ -500,7 +563,7 @@ pandas==2.3.3
     #   ai2-olmo-core
     #   datasets
 parameterized==0.9.0
-partial-json-parser==0.2.1.1.post7
+partial-json-parser==0.2.1.1.post7 ; sys_platform != 'darwin'
     # via vllm
 pathspec==0.12.1
     # via mkdocs
@@ -527,7 +590,7 @@ prometheus-client==0.23.1
     #   prometheus-fastapi-instrumentator
     #   ray
     #   vllm
-prometheus-fastapi-instrumentator==7.1.0
+prometheus-fastapi-instrumentator==7.1.0 ; sys_platform != 'darwin'
     # via vllm
 propcache==0.4.1
     # via
@@ -540,7 +603,6 @@ protobuf==5.29.5
     #   beaker-py
     #   google-api-core
     #   googleapis-common-protos
-    #   mlx-lm
     #   opentelemetry-proto
     #   proto-plus
     #   ray
@@ -569,41 +631,51 @@ pyasn1==0.6.1
     #   rsa
 pyasn1-modules==0.4.2
     # via google-auth
-pybase64==1.4.3
+pybase64==1.4.3 ; sys_platform != 'darwin'
     # via vllm
-pycountry==24.6.1
+pycountry==24.6.1 ; sys_platform != 'darwin'
     # via pydantic-extra-types
-pycparser==2.23 ; implementation_name != 'PyPy'
+pycparser==2.23 ; (implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' and sys_platform != 'darwin') or (implementation_name == 'pypy' and platform_python_implementation == 'PyPy' and sys_platform != 'darwin')
     # via cffi
 pydantic==2.12.5
     # via
+    #   anthropic
     #   compressed-tensors
     #   deepspeed
     #   fastapi
     #   fastapi-cloud-cli
     #   litellm
     #   lm-format-enforcer
+    #   mcp
     #   mistral-common
+    #   model-hosting-container-standards
     #   open-instruct
     #   openai
     #   openai-harmony
     #   pydantic-extra-types
+    #   pydantic-settings
     #   ray
     #   vllm
     #   xgrammar
 pydantic-core==2.41.5
     # via pydantic
-pydantic-extra-types==2.10.6
+pydantic-extra-types==2.10.6 ; sys_platform != 'darwin'
     # via mistral-common
+pydantic-settings==2.12.0 ; sys_platform != 'darwin'
+    # via mcp
 pygments==2.19.2
     # via
     #   mkdocs-material
     #   pytest
     #   rich
+pyjwt==2.10.1 ; sys_platform != 'darwin'
+    # via mcp
 pymdown-extensions==10.19.1
     # via mkdocs-material
 pyparsing==3.2.5
     # via matplotlib
+pyre-extensions==0.0.32 ; sys_platform != 'darwin'
+    # via torchmonarch
 pytest==9.0.2
 python-dateutil==2.9.0.post0
     # via
@@ -614,13 +686,20 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
     # via
     #   litellm
+    #   pydantic-settings
     #   uvicorn
-python-json-logger==4.0.0
+python-json-logger==4.0.0 ; sys_platform != 'darwin'
     # via vllm
-python-multipart==0.0.20
-    # via fastapi
+python-multipart==0.0.20 ; sys_platform != 'darwin'
+    # via
+    #   fastapi
+    #   mcp
 pytz==2025.2
     # via pandas
+pywin32==311 ; sys_platform == 'win32'
+    # via
+    #   docker
+    #   mcp
 pyyaml==6.0.3
     # via
     #   accelerate
@@ -631,7 +710,6 @@ pyyaml==6.0.3
     #   lm-format-enforcer
     #   mkdocs
     #   mkdocs-get-deps
-    #   mlx-lm
     #   omegaconf
     #   peft
     #   pre-commit
@@ -639,14 +717,17 @@ pyyaml==6.0.3
     #   pyyaml-env-tag
     #   ray
     #   responses
+    #   torchx-nightly
     #   transformers
     #   uvicorn
     #   vllm
     #   wandb
 pyyaml-env-tag==1.1
     # via mkdocs
-pyzmq==27.1.0
-    # via vllm
+pyzmq==27.1.0 ; sys_platform != 'darwin'
+    # via
+    #   torchmonarch
+    #   vllm
 ray==2.52.1
     # via
     #   open-instruct
@@ -667,6 +748,8 @@ requests==2.32.5
     #   beaker-py
     #   cached-path
     #   datasets
+    #   docker
+    #   flashinfer-python
     #   google-api-core
     #   google-cloud-storage
     #   huggingface-hub
@@ -676,6 +759,7 @@ requests==2.32.5
     #   ray
     #   responses
     #   tiktoken
+    #   torchmonarch
     #   transformers
     #   vllm
     #   wandb
@@ -686,11 +770,11 @@ rich==13.9.4
     #   cached-path
     #   rich-toolkit
     #   typer
-rich-toolkit==0.17.0
+rich-toolkit==0.17.0 ; sys_platform != 'darwin'
     # via
     #   fastapi-cli
     #   fastapi-cloud-cli
-rignore==0.7.6
+rignore==0.7.6 ; sys_platform != 'darwin'
     # via fastapi-cloud-cli
 rpds-py==0.30.0
     # via
@@ -707,12 +791,10 @@ safetensors==0.7.0
     #   ai2-olmo-core
     #   peft
     #   transformers
-scipy==1.16.3
+scipy==1.16.3 ; sys_platform != 'darwin'
     # via vllm
-sentencepiece==0.2.1
-    # via
-    #   mlx-lm
-    #   vllm
+sentencepiece==0.2.1 ; sys_platform != 'darwin'
+    # via vllm
 sentry-sdk==2.48.0
     # via
     #   fastapi-cloud-cli
@@ -723,13 +805,14 @@ setproctitle==1.3.7
     #   wandb
 setuptools==79.0.1
     # via
+    #   model-hosting-container-standards
     #   open-instruct
     #   tensorboard
     #   torch
     #   triton
     #   vllm
     #   wandb
-shellingham==1.5.4
+shellingham==1.5.4 ; sys_platform != 'darwin'
     # via typer
 six==1.17.0
     # via
@@ -743,17 +826,27 @@ smart-open==7.5.0
 smmap==5.0.2
     # via gitdb
 sniffio==1.3.1
-    # via openai
-soundfile==0.13.1
-    # via mistral-common
-soxr==1.0.0
-    # via mistral-common
+    # via
+    #   anthropic
+    #   openai
+sse-starlette==3.1.2 ; sys_platform != 'darwin'
+    # via mcp
 starlette==0.50.0
     # via
     #   fastapi
+    #   mcp
+    #   model-hosting-container-standards
     #   prometheus-fastapi-instrumentator
+    #   sse-starlette
+supervisor==4.3.0 ; sys_platform != 'darwin'
+    # via model-hosting-container-standards
 sympy==1.14.0
     # via torch
+tabulate==0.9.0 ; sys_platform != 'darwin'
+    # via
+    #   flashinfer-python
+    #   torchmonarch
+    #   torchx-nightly
 tensorboard==2.20.0
     # via open-instruct
 tensorboard-data-server==0.7.2
@@ -768,19 +861,14 @@ tokenizers==0.22.1
     #   litellm
     #   transformers
     #   vllm
-torch==2.8.0 ; sys_platform == 'darwin'
+torch==2.9.0 ; sys_platform == 'darwin'
     # via
     #   accelerate
     #   ai2-olmo-core
-    #   compressed-tensors
     #   deepspeed
     #   open-instruct
     #   peft
-    #   torchaudio
-    #   torchvision
-    #   vllm
-    #   xgrammar
-torch==2.8.0+cu128 ; sys_platform != 'darwin'
+torch==2.9.0+cu128 ; sys_platform != 'darwin'
     # via
     #   accelerate
     #   ai2-olmo-core
@@ -788,24 +876,30 @@ torch==2.8.0+cu128 ; sys_platform != 'darwin'
     #   compressed-tensors
     #   deepspeed
     #   flash-attn
+    #   flashinfer-python
     #   liger-kernel
     #   open-instruct
     #   peft
     #   torchaudio
+    #   torchmonarch
     #   torchvision
     #   vllm
-    #   xformers
     #   xgrammar
 torchao==0.15.0 ; sys_platform != 'darwin'
     # via open-instruct
-torchaudio==2.8.0
+torchaudio==2.9.0 ; sys_platform != 'darwin'
     # via vllm
-torchvision==0.23.0
+torchmonarch==0.2.0 ; sys_platform != 'darwin'
+    # via open-instruct
+torchvision==0.24.0 ; sys_platform != 'darwin'
     # via vllm
+torchx-nightly==2026.1.8 ; sys_platform != 'darwin'
+    # via torchmonarch
 tqdm==4.67.1
     # via
     #   datasets
     #   deepspeed
+    #   flashinfer-python
     #   gguf
     #   huggingface-hub
     #   nltk
@@ -816,29 +910,34 @@ tqdm==4.67.1
 transformers==4.57.3
     # via
     #   compressed-tensors
-    #   mlx-lm
     #   open-instruct
     #   peft
     #   vllm
     #   xgrammar
-triton==3.4.0 ; sys_platform != 'darwin'
+triton==3.4.0 ; sys_platform != 'darwin' and sys_platform != 'linux'
+    # via liger-kernel
+triton==3.5.0 ; sys_platform == 'linux'
     # via
     #   liger-kernel
     #   torch
     #   xgrammar
 ty==0.0.1a35
-typer==0.20.0
+typer==0.20.0 ; sys_platform != 'darwin'
     # via
     #   fastapi-cli
     #   fastapi-cloud-cli
 typing-extensions==4.15.0
     # via
     #   aiosignal
+    #   anthropic
     #   anyio
+    #   apache-tvm-ffi
     #   fastapi
     #   grpcio
     #   huggingface-hub
+    #   mcp
     #   mistral-common
+    #   nvidia-cutlass-dsl
     #   omegaconf
     #   openai
     #   opentelemetry-api
@@ -847,21 +946,30 @@ typing-extensions==4.15.0
     #   pydantic
     #   pydantic-core
     #   pydantic-extra-types
+    #   pyre-extensions
     #   referencing
     #   rich-toolkit
     #   starlette
     #   torch
+    #   torchmonarch
     #   typer
+    #   typing-inspect
     #   typing-inspection
     #   vllm
     #   xgrammar
+typing-inspect==0.9.0 ; sys_platform != 'darwin'
+    # via pyre-extensions
 typing-inspection==0.4.2
-    # via pydantic
+    # via
+    #   mcp
+    #   pydantic
+    #   pydantic-settings
 tzdata==2025.3
     # via pandas
 urllib3==2.6.2
     # via
     #   botocore
+    #   docker
     #   requests
     #   responses
     #   sentry-sdk
@@ -870,34 +978,35 @@ uvicorn==0.38.0
     #   fastapi
     #   fastapi-cli
     #   fastapi-cloud-cli
+    #   mcp
     #   open-instruct
-uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'
+uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'darwin' and sys_platform != 'win32'
     # via uvicorn
 virtualenv==20.35.4
     # via
     #   pre-commit
     #   ray
-vllm==0.11.0
+vllm==0.13.0 ; sys_platform != 'darwin'
     # via open-instruct
 wandb==0.18.1
     # via open-instruct
 watchdog==6.0.0
     # via mkdocs
-watchfiles==1.1.1
+watchfiles==1.1.1 ; sys_platform != 'darwin'
     # via
     #   uvicorn
     #   vllm
-websockets==15.0.1
+websockets==15.0.1 ; sys_platform != 'darwin'
     # via uvicorn
 werkzeug==3.1.4
     # via tensorboard
+win32-setctime==1.2.0 ; sys_platform == 'win32'
+    # via loguru
 windows-curses==2.4.1 ; sys_platform == 'win32'
     # via nvitop
 wrapt==2.0.1
     # via smart-open
-xformers==0.0.32.post1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via vllm
-xgrammar==0.1.25 ; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+xgrammar==0.1.27 ; (platform_machine == 'aarch64' and sys_platform != 'darwin') or (platform_machine == 'arm64' and sys_platform != 'darwin') or (platform_machine == 'ppc64le' and sys_platform != 'darwin') or (platform_machine == 's390x' and sys_platform != 'darwin') or (platform_machine == 'x86_64' and sys_platform != 'darwin')
     # via vllm
 xxhash==3.6.0
     # via datasets
