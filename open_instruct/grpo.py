@@ -57,6 +57,7 @@ from open_instruct.grpo_callbacks import (
     DataPreparationActorCheckpointCallback,
     RefPolicyUpdateCallback,
     VLLMWeightSyncCallback,
+    olmo_core_to_hf_name,
 )
 from open_instruct.grpo_train_module import GRPOConfig, GRPOTrainModule
 from open_instruct.model_utils import ModelConfig, push_folder_to_hub
@@ -492,6 +493,7 @@ def main(
         model_update_group=model_update_group,
         actor_manager=None,
         gather_whole_model=args.gather_whole_model,
+        name_mapper=olmo_core_to_hf_name,
     )
 
     if args.load_ref_policy and args.ref_policy_update_freq:
