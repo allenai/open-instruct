@@ -279,10 +279,10 @@ class GRPOTrainModule(TrainModule):
         num_samples = len(data_BT.query_responses)
         accumulation_steps = num_samples * self.grpo_config.num_epochs * self.grpo_config.num_mini_batches
 
-        total_pg_loss = 0.0
-        total_kl = 0.0
-        total_clip_frac = 0.0
-        total_entropy = 0.0
+        total_pg_loss = torch.tensor(0.0, device=self.device)
+        total_kl = torch.tensor(0.0, device=self.device)
+        total_clip_frac = torch.tensor(0.0, device=self.device)
+        total_entropy = torch.tensor(0.0, device=self.device)
         num_steps = 0
 
         for _epoch_idx in range(self.grpo_config.num_epochs):
@@ -336,16 +336,16 @@ class GRPOTrainModule(TrainModule):
                 loss = loss / accumulation_steps
                 loss.backward()
 
-                total_pg_loss += pg_loss.sum().item()
-                total_kl += kl.sum().item()
+                total_pg_loss = total_pg_loss + pg_loss.sum().detach()
+                total_kl = total_kl + kl.sum().detach()
                 clip_frac = (
                     ((ratio < 1.0 - self.grpo_config.clip_lower) | (ratio > 1.0 + self.grpo_config.clip_higher))
                     .float()
                     .mean()
                 )
-                total_clip_frac += clip_frac.item()
+                total_clip_frac = total_clip_frac + clip_frac.detach()
                 if entropy is not None:
-                    total_entropy += entropy[response_mask].mean().item()
+                    total_entropy = total_entropy + entropy[response_mask].mean().detach()
                 num_steps += 1
 
         if not dry_run:
@@ -354,11 +354,11 @@ class GRPOTrainModule(TrainModule):
         self.zero_grads()
 
         if not dry_run and num_steps > 0:
-            self.record_metric("train/pg_loss", total_pg_loss / num_steps, ReduceType.mean)
-            self.record_metric("train/kl", total_kl / num_steps, ReduceType.mean)
-            self.record_metric("train/clip_frac", total_clip_frac / num_steps, ReduceType.mean)
+            self.record_metric("train/pg_loss", (total_pg_loss / num_steps).item(), ReduceType.mean)
+            self.record_metric("train/kl", (total_kl / num_steps).item(), ReduceType.mean)
+            self.record_metric("train/clip_frac", (total_clip_frac / num_steps).item(), ReduceType.mean)
             if self.grpo_config.record_entropy:
-                self.record_metric("train/entropy", total_entropy / num_steps, ReduceType.mean)
+                self.record_metric("train/entropy", (total_entropy / num_steps).item(), ReduceType.mean)
 
     def _estimate_kl(self, log_ratio: torch.Tensor, ratio: torch.Tensor, estimator: int) -> torch.Tensor:
         """Estimate KL divergence using different estimators.

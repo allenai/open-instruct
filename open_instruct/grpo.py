@@ -50,6 +50,7 @@ from rich.pretty import pprint
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_fast, logger_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
+from open_instruct.beaker_callback import BeakerCallbackV2
 from open_instruct.data_loader import DataPreparationActor
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
@@ -257,15 +258,14 @@ def main(
     vllm_config: data_loader_lib.VLLMConfig,
 ) -> None:
     """Main entry point for GRPO training with OLMo-core Trainer."""
-    if args.single_gpu_mode:
-        os.environ.setdefault("LOCAL_RANK", "0")
-        os.environ.setdefault("RANK", "0")
-        os.environ.setdefault("WORLD_SIZE", "1")
-        os.environ.setdefault("LOCAL_WORLD_SIZE", "1")
-        os.environ.setdefault("NUM_NODES", "1")
-        os.environ.setdefault("MASTER_ADDR", "localhost")
-        os.environ.setdefault("MASTER_PORT", "29500")
-    backend = "cpu:gloo,cuda:nccl"  # Always initialize distributed (even single GPU)
+    os.environ.setdefault("LOCAL_RANK", "0")
+    os.environ.setdefault("RANK", "0")
+    os.environ.setdefault("WORLD_SIZE", "1")
+    os.environ.setdefault("LOCAL_WORLD_SIZE", "1")
+    os.environ.setdefault("NUM_NODES", "1")
+    os.environ.setdefault("MASTER_ADDR", "localhost")
+    os.environ.setdefault("MASTER_PORT", "29500")
+    backend = "cpu:gloo,cuda:nccl"
     train.prepare_training_environment(seed=args.seed, backend=backend)
 
     rank = get_rank() if is_distributed() else 0
@@ -399,11 +399,13 @@ def main(
     model = model.to(device=device, dtype=torch.bfloat16)
 
     ref_policy = None
-    if args.load_ref_policy:
+    if args.load_ref_policy and args.beta > 0:
         logger.info("Building reference policy...")
         ref_policy = model_config_olmo.build(init_device="cpu")
         load_hf_model(model_config.model_name_or_path, ref_policy.state_dict(), work_dir=args.output_dir)
         ref_policy = ref_policy.to(device=device, dtype=torch.bfloat16).eval()
+    elif args.load_ref_policy and args.beta == 0:
+        logger.info("Skipping reference policy loading (beta=0, KL penalty disabled)")
 
     streaming_dataloader = streaming_config.build_dataloader(
         data_prep_actor_name=data_prep_actor_name,
@@ -496,7 +498,7 @@ def main(
         name_mapper=olmo_core_to_hf_name,
     )
 
-    if args.load_ref_policy and args.ref_policy_update_freq:
+    if args.load_ref_policy and args.beta > 0 and args.ref_policy_update_freq:
         trainer_callbacks["ref_policy"] = RefPolicyUpdateCallback(
             ref_policy=ref_policy, alpha=args.alpha, update_interval=args.ref_policy_update_freq
         )
@@ -515,7 +517,7 @@ def main(
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
 
     if beaker_config is not None:
-        trainer_callbacks["beaker"] = callbacks.BeakerCallback(config=json_config)
+        trainer_callbacks["beaker"] = BeakerCallbackV2(config=json_config)
 
     if args.with_tracking:
         trainer_callbacks["wandb"] = callbacks.WandBCallback(
