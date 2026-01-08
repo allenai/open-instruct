@@ -35,14 +35,16 @@ import json
 import logging
 import os
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from datasets import Dataset, load_dataset
 from rich.pretty import pprint
 from tqdm import tqdm
+from tqdm.asyncio import tqdm as atqdm
 from transformers import AutoTokenizer, PreTrainedTokenizer
-from vllm import LLM, SamplingParams
+from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
 from open_instruct.tools.config import (
     TOOL_REGISTRY,
@@ -130,6 +132,8 @@ class Args:
     """Custom tag names for tools (must match length of --tools)."""
     max_tool_calls: int = 5
     """Maximum number of tool calls per generation."""
+    max_concurrent: int = 64
+    """Maximum number of concurrent async generations."""
 
     def __post_init__(self):
         # Validate input source
@@ -299,100 +303,142 @@ def execute_tool_call(
         return formatted_output, {"tool_name": tool_call.name, "tool_args": tool_call.args, "tool_error": error_msg}
 
 
-def generate_with_tools(
-    llm: LLM,
+async def generate_single_sample_with_tools(
+    engine: AsyncLLMEngine,
+    prompt_data: dict[str, Any],
+    sampling_params: SamplingParams,
+    tools: dict[str, Tool],
+    tool_parser: ToolParser,
+    max_tool_calls: int,
+    pbar: Any,
+) -> dict[str, Any]:
+    """Generate completion for a single sample with tool support (async).
+
+    Each sample runs as an independent async task, allowing true parallelism.
+    """
+    current_prompt = prompt_data["prompt"]
+    full_generation = ""
+    num_calls = 0
+    tool_metadata = []
+
+    while True:
+        request_id = str(uuid.uuid4())
+
+        # Generate asynchronously
+        final_output = None
+        async for output in engine.generate(current_prompt, sampling_params, request_id):
+            final_output = output
+
+        if final_output is None:
+            break
+
+        generation = final_output.outputs[0].text
+        full_generation += generation
+        finish_reason = final_output.outputs[0].finish_reason
+
+        # Check if we hit a tool stop sequence
+        if finish_reason == "stop" and tools:
+            tool_output, metadata = execute_tool_call(generation, tools, tool_parser, max_tool_calls, num_calls)
+
+            if tool_output:
+                num_calls += 1
+                tool_metadata.append(metadata)
+                full_generation += tool_output
+                current_prompt = current_prompt + generation + tool_output
+
+                if num_calls >= max_tool_calls:
+                    break
+                continue
+
+        # No more tool calls or max length reached
+        break
+
+    pbar.update(1)
+
+    return {
+        "idx": prompt_data["idx"],
+        "prompt": prompt_data["prompt"],
+        "messages": prompt_data["messages"],
+        "generation": full_generation,
+        "num_tool_calls": num_calls,
+        "tool_metadata": tool_metadata,
+        "original_sample": prompt_data["original_sample"],
+    }
+
+
+async def generate_with_tools_async(
+    engine: AsyncLLMEngine,
     prompts: list[dict[str, Any]],
     sampling_params: SamplingParams,
     tools: dict[str, Tool],
     tool_parser: ToolParser,
     max_tool_calls: int,
+    max_concurrent: int = 64,
 ) -> list[dict[str, Any]]:
-    """Generate completions with tool support.
+    """Generate completions with tool support using async parallelism.
 
-    This implements a simple tool calling loop:
-    1. Generate until a stop sequence (tool call) is hit
-    2. Execute the tool
-    3. Append the tool output to the prompt
-    4. Continue generating
+    Each sample runs as an independent async task. A semaphore limits concurrency
+    to avoid overwhelming the engine.
     """
-    results = []
+    semaphore = asyncio.Semaphore(max_concurrent)
 
-    for prompt_data in tqdm(prompts, desc="Generating"):
-        current_prompt = prompt_data["prompt"]
-        full_generation = ""
-        num_calls = 0
-        tool_metadata = []
+    async def bounded_generate(prompt_data: dict[str, Any], pbar: Any) -> dict[str, Any]:
+        async with semaphore:
+            return await generate_single_sample_with_tools(
+                engine, prompt_data, sampling_params, tools, tool_parser, max_tool_calls, pbar
+            )
 
-        while True:
-            # Generate
-            outputs = llm.generate([current_prompt], sampling_params=sampling_params)
+    with atqdm(total=len(prompts), desc="Generating") as pbar:
+        tasks = [bounded_generate(p, pbar) for p in prompts]
+        results = await asyncio.gather(*tasks)
 
-            output = outputs[0]
-            generation = output.outputs[0].text
-            full_generation += generation
-            finish_reason = output.outputs[0].finish_reason
-
-            # Check if we hit a tool stop sequence
-            if finish_reason == "stop" and tools:
-                # Try to execute tool
-                tool_output, metadata = execute_tool_call(generation, tools, tool_parser, max_tool_calls, num_calls)
-
-                if tool_output:
-                    num_calls += 1
-                    tool_metadata.append(metadata)
-
-                    # Append tool output and continue
-                    full_generation += tool_output
-                    current_prompt = current_prompt + generation + tool_output
-
-                    if num_calls >= max_tool_calls:
-                        break
-                    continue
-
-            # No more tool calls or max length reached
-            break
-
-        results.append(
-            {
-                "idx": prompt_data["idx"],
-                "prompt": prompt_data["prompt"],
-                "messages": prompt_data["messages"],
-                "generation": full_generation,
-                "num_tool_calls": num_calls,
-                "tool_metadata": tool_metadata,
-                "original_sample": prompt_data["original_sample"],
-            }
-        )
-
-    return results
+    return list(results)
 
 
-def generate_without_tools(
-    llm: LLM, prompts: list[dict[str, Any]], sampling_params: SamplingParams
+async def generate_single_sample_without_tools(
+    engine: AsyncLLMEngine, prompt_data: dict[str, Any], sampling_params: SamplingParams, pbar: Any
+) -> dict[str, Any]:
+    """Generate completion for a single sample without tools (async)."""
+    request_id = str(uuid.uuid4())
+
+    final_output = None
+    async for output in engine.generate(prompt_data["prompt"], sampling_params, request_id):
+        final_output = output
+
+    if final_output is None:
+        generation = ""
+    else:
+        generations = [o.text for o in final_output.outputs]
+        generation = generations[0] if len(generations) == 1 else generations
+
+    pbar.update(1)
+
+    return {
+        "idx": prompt_data["idx"],
+        "prompt": prompt_data["prompt"],
+        "messages": prompt_data["messages"],
+        "generation": generation,
+        "num_tool_calls": 0,
+        "tool_metadata": [],
+        "original_sample": prompt_data["original_sample"],
+    }
+
+
+async def generate_without_tools_async(
+    engine: AsyncLLMEngine, prompts: list[dict[str, Any]], sampling_params: SamplingParams, max_concurrent: int = 64
 ) -> list[dict[str, Any]]:
-    """Generate completions without tool support (batch mode)."""
-    prompt_texts = [p["prompt"] for p in prompts]
+    """Generate completions without tool support using async parallelism."""
+    semaphore = asyncio.Semaphore(max_concurrent)
 
-    logger.info(f"Generating {len(prompt_texts)} completions...")
-    outputs = llm.generate(prompt_texts, sampling_params=sampling_params)
+    async def bounded_generate(prompt_data: dict[str, Any], pbar: Any) -> dict[str, Any]:
+        async with semaphore:
+            return await generate_single_sample_without_tools(engine, prompt_data, sampling_params, pbar)
 
-    results = []
-    for prompt_data, output in zip(prompts, outputs):
-        generations = [o.text for o in output.outputs]
+    with atqdm(total=len(prompts), desc="Generating") as pbar:
+        tasks = [bounded_generate(p, pbar) for p in prompts]
+        results = await asyncio.gather(*tasks)
 
-        results.append(
-            {
-                "idx": prompt_data["idx"],
-                "prompt": prompt_data["prompt"],
-                "messages": prompt_data["messages"],
-                "generation": generations[0] if len(generations) == 1 else generations,
-                "num_tool_calls": 0,
-                "tool_metadata": [],
-                "original_sample": prompt_data["original_sample"],
-            }
-        )
-
-    return results
+    return list(results)
 
 
 def save_results(results: list[dict[str, Any]], output_file: str):
@@ -406,8 +452,8 @@ def save_results(results: list[dict[str, Any]], output_file: str):
     logger.info(f"Saved {len(results)} results to {output_file}")
 
 
-def main(args: Args):
-    """Main inference function."""
+async def main_async(args: Args):
+    """Main inference function (async)."""
     pprint(args)
 
     # Load tokenizer
@@ -446,9 +492,9 @@ def main(args: Args):
     # Prepare prompts
     prompts = prepare_prompts(dataset, tokenizer, args, tool_definitions)
 
-    # Initialize vLLM
-    logger.info(f"Initializing vLLM with model: {args.model_name_or_path}")
-    llm = LLM(
+    # Initialize async vLLM engine
+    logger.info(f"Initializing async vLLM engine with model: {args.model_name_or_path}")
+    engine_args = AsyncEngineArgs(
         model=args.model_name_or_path,
         revision=args.revision,
         tokenizer_revision=args.revision,
@@ -458,6 +504,7 @@ def main(args: Args):
         enforce_eager=args.enforce_eager,
         trust_remote_code=args.trust_remote_code,
     )
+    engine = AsyncLLMEngine.from_engine_args(engine_args)
 
     # Build sampling params
     sampling_params = SamplingParams(
@@ -470,13 +517,16 @@ def main(args: Args):
         seed=args.seed,
     )
     logger.info(f"Sampling params: {sampling_params}")
+    logger.info(f"Max concurrent requests: {args.max_concurrent}")
 
     # Generate
     start_time = time.time()
     if tools and tool_parser:
-        results = generate_with_tools(llm, prompts, sampling_params, tools, tool_parser, tool_config.max_tool_calls)
+        results = await generate_with_tools_async(
+            engine, prompts, sampling_params, tools, tool_parser, tool_config.max_tool_calls, args.max_concurrent
+        )
     else:
-        results = generate_without_tools(llm, prompts, sampling_params)
+        results = await generate_without_tools_async(engine, prompts, sampling_params, args.max_concurrent)
     elapsed = time.time() - start_time
 
     logger.info(f"Generation complete in {elapsed:.2f}s ({len(results) / elapsed:.2f} samples/sec)")
@@ -491,6 +541,11 @@ def main(args: Args):
         logger.info(
             f"Tool usage summary: {total_calls} total calls across {samples_with_calls}/{len(results)} samples"
         )
+
+
+def main(args: Args):
+    """Entry point that runs the async main function."""
+    asyncio.run(main_async(args))
 
 
 if __name__ == "__main__":
