@@ -15,7 +15,7 @@ uv run python -m open_instruct.tools.tool_inference \
     --max_new_tokens 16384 \
     --tensor_parallel_size 1 \
     --tools serper_search python \
-    --tool_configs '{}' '{\"api_endpoint\": \"https://open-instruct-tool-server-10554368204.us-central1.run.app/execute\"}' \
+    --tool_configs '{}' '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute"}' \
     --tool_tag_names search code \
     --tool_parser vllm_hermes \
     --max_tool_calls 5
