@@ -200,6 +200,13 @@ class GRPOTrainModule(TrainModule):
         Returns:
             Tuple of (logprobs [batch, seq_len], entropy or None).
         """
+        device = next(model.parameters()).device
+        query_responses = query_responses.to(device)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
+        if position_ids is not None:
+            position_ids = position_ids.to(device)
+
         output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
         logits = output.logits if hasattr(output, "logits") else output
         logits = logits / temperature
@@ -235,7 +242,7 @@ class GRPOTrainModule(TrainModule):
                     self.grpo_config.temperature,
                     return_entropy=False,
                 )
-                response_mask_BT = data_BT.response_masks[i]
+                response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
                 logprob_BT = torch.where(
                     response_mask_BT[:, 1:].bool(),
                     logprob_BT,
