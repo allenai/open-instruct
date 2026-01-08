@@ -43,6 +43,9 @@ class VLLMWeightSyncCallback(Callback):
         if not self.vllm_engines:
             return
 
+        if not dist.is_initialized():
+            return
+
         import ray
 
         torch.cuda.empty_cache()
