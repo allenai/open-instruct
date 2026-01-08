@@ -66,11 +66,30 @@ class VLLMWeightSyncCallback(Callback):
         count = 0
         num_params = len(list(model.named_parameters()))
 
-        if self.gather_whole_model:
+        is_distributed = dist.is_initialized()
+        is_rank0 = (not is_distributed) or (dist.get_rank() == 0)
+        is_fsdp = isinstance(model, FSDP)
+
+        if self.gather_whole_model and is_fsdp:
             with FSDP.summon_full_params(model, writeback=False, rank0_only=True):
                 for name, param in model.named_parameters():
                     count += 1
-                    if dist.get_rank() == 0:
+                    if is_rank0:
+                        refs = [
+                            engine.update_weight.remote(
+                                name, dtype=str(param.dtype), shape=param.shape, empty_cache=(count == num_params)
+                            )
+                            for engine in self.vllm_engines
+                        ]
+                        refss.extend(refs)
+
+                    if self.model_update_group is not None:
+                        dist.broadcast(param.data, 0, group=self.model_update_group)
+        elif is_fsdp:
+            for name, param in model.named_parameters():
+                count += 1
+                with FSDP.summon_full_params(model, writeback=False, rank0_only=True):
+                    if is_rank0:
                         refs = [
                             engine.update_weight.remote(
                                 name, dtype=str(param.dtype), shape=param.shape, empty_cache=(count == num_params)
@@ -84,20 +103,15 @@ class VLLMWeightSyncCallback(Callback):
         else:
             for name, param in model.named_parameters():
                 count += 1
-                with FSDP.summon_full_params(model, writeback=False, rank0_only=True):
-                    if dist.get_rank() == 0:
-                        refs = [
-                            engine.update_weight.remote(
-                                name, dtype=str(param.dtype), shape=param.shape, empty_cache=(count == num_params)
-                            )
-                            for engine in self.vllm_engines
-                        ]
-                        refss.extend(refs)
+                refs = [
+                    engine.update_weight.remote(
+                        name, dtype=str(param.dtype), shape=param.shape, empty_cache=(count == num_params)
+                    )
+                    for engine in self.vllm_engines
+                ]
+                refss.extend(refs)
 
-                    if self.model_update_group is not None:
-                        dist.broadcast(param.data, 0, group=self.model_update_group)
-
-        if dist.get_rank() == 0 and refss:
+        if is_rank0 and refss:
             ray.get(refss)
 
 
@@ -123,8 +137,13 @@ class RefPolicyUpdateCallback(Callback):
             return
 
         model = self.trainer.train_module.model
+        is_fsdp = isinstance(model, FSDP)
 
-        with FSDP.summon_full_params(model, writeback=False, rank0_only=False):
+        if is_fsdp:
+            with FSDP.summon_full_params(model, writeback=False, rank0_only=False):
+                for ref_param, param in zip(self.ref_policy.parameters(), model.parameters(), strict=True):
+                    ref_param.data.mul_(1.0 - self.alpha).add_(param.data, alpha=self.alpha)
+        else:
             for ref_param, param in zip(self.ref_policy.parameters(), model.parameters(), strict=True):
                 ref_param.data.mul_(1.0 - self.alpha).add_(param.data, alpha=self.alpha)
 
