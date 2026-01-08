@@ -54,7 +54,7 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, utils
+from open_instruct import utils
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     TOKENIZED_PREFERENCE_DATASET_KEYS,
@@ -582,19 +582,23 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 }
             },
         )
+        if accelerator.is_main_process:
+            wandb_tracker = accelerator.get_tracker("wandb")
+            wandb_url = wandb_tracker.run.get_url() if hasattr(wandb_tracker, "run") else None
+            maybe_update_beaker_description(wandb_url=wandb_url)
+        else:
+            wandb_tracker = None
+    else:
+        wandb_tracker = None
 
     if accelerator.is_main_process:
-        wandb_tracker = accelerator.get_tracker("wandb")
-        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None)
         pprint([args, tc])
 
     init_gpu_memory = None
     if torch.cuda.is_available():
         init_gpu_memory = torch.cuda.mem_get_info()[0]
 
-    # Make one log on every process with the configuration for debugging.
-    logger_utils.setup_logger()
-    logger.info(accelerator.state, main_process_only=False)
+    logger.info(accelerator.state)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
         transformers.utils.logging.set_verbosity_info()
@@ -712,7 +716,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         return model
 
     model = load_model()
-    print("=============model loaded")
+    logger.info("=============model loaded")
     print_gpu_stats(init_gpu_memory)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
@@ -795,7 +799,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
     else:
         optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
-    print("=============optimizer loaded")
+    logger.info("=============optimizer loaded")
     print_gpu_stats(init_gpu_memory)
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
@@ -829,7 +833,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
-    print("=============accelerate prepared")
+    logger.info("=============accelerate prepared")
     print_gpu_stats(init_gpu_memory)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
@@ -878,9 +882,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             completed_steps = resume_step // args.gradient_accumulation_steps
             resume_step -= starting_epoch * len(train_dataloader)
 
-    print(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
+    logger.info("Starting from epoch %s and step %s.", starting_epoch, completed_steps)
 
-    print("=============before cache logprobs")
+    logger.info("=============before cache logprobs")
     print_gpu_stats(init_gpu_memory)
 
     # Cache the logprobs
@@ -902,11 +906,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             range(starting_epoch, args.num_train_epochs),
             forward_fn,
         )
-        print("=============after cache logprobs")
+        logger.info("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
         torch.cuda.empty_cache()  # clear cache
 
-    print("=============after cache logprobs; clear cache")
+    logger.info("=============after cache logprobs; clear cache")
     print_gpu_stats(init_gpu_memory)
     # Only show the progress bar once on each machine.
     start_time = time.perf_counter()
@@ -1074,7 +1078,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                             current_step=completed_steps,
                             total_steps=args.max_train_steps,
                             start_time=start_time,
-                            wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
+                            wandb_url=wandb_tracker.run.get_url()
+                            if wandb_tracker and hasattr(wandb_tracker, "run")
+                            else None,
                         )
                     # Reset the local metrics
                     local_metrics.metrics.zero_()
@@ -1130,7 +1136,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
+            wandb_url=wandb_tracker.run.get_url() if wandb_tracker and hasattr(wandb_tracker, "run") else None,
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
             eval_workspace=args.eval_workspace,
@@ -1148,9 +1154,9 @@ def print_gpu_stats(init_gpu_memory: int | None):
     if torch.cuda.is_available():
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
         peak_memory = init_gpu_memory - free_gpu_memory
-        print(f"Peak memory usage: {peak_memory / 1024**3:.2f} GB")
-        print(f"Total memory usage: {total_gpu_memory / 1024**3:.2f} GB")
-        print(f"Free memory: {free_gpu_memory / 1024**3:.2f} GB")
+        logger.info("Peak memory usage: %.2f GB", peak_memory / 1024**3)
+        logger.info("Total memory usage: %.2f GB", total_gpu_memory / 1024**3)
+        logger.info("Free memory: %.2f GB", free_gpu_memory / 1024**3)
 
 
 if __name__ == "__main__":
