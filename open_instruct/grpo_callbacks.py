@@ -43,10 +43,12 @@ class VLLMWeightSyncCallback(Callback):
         if not self.vllm_engines:
             return
 
+        import ray
+
         torch.cuda.empty_cache()
 
         if self.actor_manager is not None:
-            self.actor_manager.pause()
+            ray.get(self.actor_manager.pause.remote())
 
         model = self.trainer.train_module.model
 
@@ -54,7 +56,7 @@ class VLLMWeightSyncCallback(Callback):
             self._broadcast_weights(model)
         finally:
             if self.actor_manager is not None:
-                self.actor_manager.resume()
+                ray.get(self.actor_manager.resume.remote())
 
     def _broadcast_weights(self, model: nn.Module) -> None:
         """Broadcast weights from training model to vLLM engines."""
