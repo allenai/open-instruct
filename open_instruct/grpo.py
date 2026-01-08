@@ -381,8 +381,8 @@ def main(
     else:
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
 
-    logger.info(f"Building OLMo-core model with vocab_size={tokenizer.vocab_size}")
-    model_config_olmo = TransformerConfig.qwen3_1_7B(vocab_size=tokenizer.vocab_size)
+    logger.info("Building OLMo-core model with Qwen3-1.7B config")
+    model_config_olmo = TransformerConfig.qwen3_1_7B()
     model = model_config_olmo.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {model_config.model_name_or_path}")
