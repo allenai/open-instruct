@@ -332,6 +332,12 @@ async def generate_single_sample_with_tools(
     num_calls = 0
     tool_metadata = []
 
+    # Get the output prefix/postfix to properly format tool responses
+    # e.g., prefix="<|im_start|>user\n", postfix="<|im_start|>assistant\n"
+    output_prefix = getattr(tool_parser, "output_prefix", "")
+    output_postfix = getattr(tool_parser, "output_postfix", "")
+    logger.info(f"Tool parser prefix: {output_prefix!r}, postfix: {output_postfix!r}")
+
     while True:
         request_id = str(uuid.uuid4())
 
@@ -354,8 +360,11 @@ async def generate_single_sample_with_tools(
             if tool_output:
                 num_calls += 1
                 tool_metadata.append(metadata)
-                full_generation += tool_output
-                current_prompt = current_prompt + generation + tool_output
+
+                # Add prefix + tool output + postfix to properly format and prompt continuation
+                formatted_tool_response = output_prefix + tool_output + output_postfix
+                full_generation += formatted_tool_response
+                current_prompt = current_prompt + generation + formatted_tool_response
 
                 if num_calls >= max_tool_calls:
                     break
