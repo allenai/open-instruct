@@ -49,6 +49,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         local_rank: int,
         master_addr: str | None,
         master_port: int | None,
+        num_nodes: int,
+        local_world_size: int,
         model_name_or_path: str,
         grpo_config: GRPOConfig,
         learning_rate: float,
@@ -73,6 +75,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         tokenizer: PreTrainedTokenizer,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
+        self.num_nodes = num_nodes
+        self.local_world_size = local_world_size
         self.tokenizer = tokenizer
         self.pad_token_id = tokenizer.pad_token_id
         self.model_name_or_path = model_name_or_path
@@ -112,6 +116,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         Returns:
             The training step to resume from (1 if starting fresh).
         """
+        os.environ["NUM_NODES"] = str(self.num_nodes)
+        os.environ["LOCAL_WORLD_SIZE"] = str(self.local_world_size)
+
         backend = "cpu:gloo,cuda:nccl"
         train.prepare_training_environment(seed=self.seed, backend=backend)
 
@@ -356,6 +363,18 @@ class OLMoCoreModelGroup:
         self.num_cpus_per_actor = 4
         self.models = []
         world_size = sum(num_gpus_per_node)
+        num_nodes = len(num_gpus_per_node)
+
+        def get_node_info(rank, num_gpus_per_node):
+            """Returns (node_index, local_rank, local_world_size) for a given global rank."""
+            node_idx = 0
+            remaining_rank = rank
+            while remaining_rank >= num_gpus_per_node[node_idx]:
+                remaining_rank -= num_gpus_per_node[node_idx]
+                node_idx += 1
+            return node_idx, remaining_rank, num_gpus_per_node[node_idx]
+
+        node_idx, local_rank, local_world_size = get_node_info(0, num_gpus_per_node)
 
         master_policy = PolicyTrainerOLMoCoreProcess.options(
             num_cpus=self.num_cpus_per_actor,
@@ -364,9 +383,11 @@ class OLMoCoreModelGroup:
         ).remote(
             world_size=world_size,
             rank=0,
-            local_rank=0,
+            local_rank=local_rank,
             master_addr=None,
             master_port=None,
+            num_nodes=num_nodes,
+            local_world_size=local_world_size,
             model_name_or_path=model_name_or_path,
             grpo_config=grpo_config,
             learning_rate=learning_rate,
@@ -397,16 +418,10 @@ class OLMoCoreModelGroup:
         )
         (master_addr, master_port) = results[0]
 
-        def get_bundle_index(rank, num_gpus_per_node):
-            bundle_idx = 0
-            while rank >= num_gpus_per_node[bundle_idx]:
-                rank -= num_gpus_per_node[bundle_idx]
-                bundle_idx += 1
-            return bundle_idx
-
         for rank in range(1, world_size):
+            node_idx, local_rank, local_world_size = get_node_info(rank, num_gpus_per_node)
             scheduling_strategy = PlacementGroupSchedulingStrategy(
-                placement_group=pg, placement_group_bundle_index=get_bundle_index(rank, num_gpus_per_node)
+                placement_group=pg, placement_group_bundle_index=node_idx
             )
             worker_policy = PolicyTrainerOLMoCoreProcess.options(
                 num_cpus=self.num_cpus_per_actor,
@@ -415,9 +430,11 @@ class OLMoCoreModelGroup:
             ).remote(
                 world_size=world_size,
                 rank=rank,
-                local_rank=0,
+                local_rank=local_rank,
                 master_addr=master_addr,
                 master_port=master_port,
+                num_nodes=num_nodes,
+                local_world_size=local_world_size,
                 model_name_or_path=model_name_or_path,
                 grpo_config=grpo_config,
                 learning_rate=learning_rate,
