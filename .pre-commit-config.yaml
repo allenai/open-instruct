@@ -25,7 +25,7 @@ repos:
     hooks:
       - id: export-requirements
         name: Export requirements.txt from uv.lock
-        entry: bash -c "uv export --format requirements-txt --no-hashes --all-extras --no-emit-project --output-file requirements.txt && perl -pi -e 's/ ;.*$//' requirements.txt"
+        entry: bash -c "uv export --format requirements-txt --no-hashes --all-extras --no-emit-project --output-file requirements.txt"
         language: system
         pass_filenames: false
         files: ^uv\.lock$
