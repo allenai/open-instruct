@@ -458,8 +458,10 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
         dataset_config_hashes = []
         skip_caching = args.no_auto_dataset_cache
         if sys.platform == "darwin" and not args.no_auto_dataset_cache:
-            console.log("[yellow]⚠️  Skipping local dataset caching on macOS (vllm not available)[/yellow]")
-            skip_caching = True
+            console.log(
+                "[yellow]⚠️  On macOS, consider using --no-auto-dataset-cache "
+                "(vllm not available for local caching)[/yellow]"
+            )
         if not skip_caching:
             for file in OPEN_INSTRUCT_COMMANDS:
                 try:

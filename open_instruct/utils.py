@@ -58,10 +58,8 @@ import ray
 import requests
 import torch
 import torch.nn.functional as F
+import vllm.config
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
-
-if sys.platform != "darwin":
-    import vllm.config
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
