@@ -40,4 +40,5 @@ uv run python mason.py \
     --dpo_loss_type dpo_norm \
     --dpo_beta 5 \
     --gradient_checkpointing \
+    --report_to wandb \
     --with_tracking

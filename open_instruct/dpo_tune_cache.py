@@ -19,6 +19,7 @@ DPO tuning script. Adapted from our finetuning script.
 # isort: off
 import contextlib
 import os
+import re
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
@@ -193,6 +194,9 @@ class FlatArguments:
     dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
+    ref_logprobs_cache_dir: str | None = field(
+        default=None, metadata={"help": "Directory to cache reference logprobs. Only supports num_train_epochs=1."}
+    )
     dataset_config_name: str | None = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
@@ -230,6 +234,12 @@ class FlatArguments:
     learning_rate: float = field(default=2e-5, metadata={"help": "The initial learning rate for AdamW optimizer."})
     logging_steps: int | None = field(
         default=None, metadata={"help": "Log the training loss and learning rate every logging_steps steps."}
+    )
+    log_grad_norm: bool = field(
+        default=False,
+        metadata={
+            "help": "Compute and log gradient norm every logging interval. Enables extra GPU syncs and may slow training."
+        },
     )
     lora_rank: int = field(default=64, metadata={"help": "The rank of lora."})
     lora_alpha: float = field(default=16, metadata={"help": "The alpha parameter of lora."})
@@ -388,6 +398,12 @@ class FlatArguments:
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
+        if self.zero_stage is not None:
+            if self.zero_stage not in [0, 1, 2, 3]:
+                raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
+            if self.offload_param and self.zero_stage != 3:
+                raise ValueError("offload_param can only be used with zero_stage 3")
+
         # Parse in args that could be `dict` sent in from the CLI as a string
         for dict_feld in self._VALID_DICT_FIELDS:
             passed_value = getattr(self, dict_feld)
@@ -398,12 +414,6 @@ class FlatArguments:
                 # Convert str values to types if applicable
                 loaded_dict = _convert_str_dict(loaded_dict)
                 setattr(self, dict_feld, loaded_dict)
-
-        if self.zero_stage is not None:
-            if self.zero_stage not in [0, 1, 2, 3]:
-                raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
-            if self.offload_param and self.zero_stage != 3:
-                raise ValueError("offload_param can only be used with zero_stage 3")
 
 
 def build_deepspeed_config(
@@ -541,6 +551,109 @@ def build_reference_logprobs_cache(
     return cache
 
 
+def get_ref_logprobs_cache_path(
+    cache_dir: str,
+    model_name_or_path: str,
+    dataset_config_hash: str,
+    max_train_samples: int | None = None,
+    world_size: int = 1,
+    process_rank: int = 0,
+    seed: int = 42,
+) -> str:
+    """Generate the cache file path for reference logprobs."""
+    model_name_sanitized = re.sub(r"[^\w\-_]", "_", model_name_or_path)
+    samples_str = f"_samples{max_train_samples}" if max_train_samples is not None else ""
+    cache_filename = (
+        f"{model_name_sanitized}_{dataset_config_hash}_ws{world_size}_rank{process_rank}{samples_str}_seed{seed}.pt"
+    )
+    return os.path.join(cache_dir, cache_filename)
+
+
+def maybe_save_ref_logprobs_to_disk(
+    cache_path: str | None, epoch_cached_reference_chosen_logps: list, epoch_cached_reference_rejected_logps: list
+) -> None:
+    """Save reference logprobs to disk if cache_path is provided."""
+    if cache_path is None:
+        return
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    cache_data = {
+        "epoch_cached_reference_chosen_logps": epoch_cached_reference_chosen_logps,
+        "epoch_cached_reference_rejected_logps": epoch_cached_reference_rejected_logps,
+    }
+    torch.save(cache_data, cache_path)
+    logger.info(f"Saved reference logprobs cache to {cache_path}")
+
+
+def load_ref_logprobs_from_disk(cache_path: str) -> tuple:
+    """Load reference logprobs from disk."""
+    if not os.path.exists(cache_path):
+        return None, None
+    logger.info(f"Loading reference logprobs cache from {cache_path}")
+    cache_data = torch.load(cache_path, weights_only=False)
+    return (cache_data["epoch_cached_reference_chosen_logps"], cache_data["epoch_cached_reference_rejected_logps"])
+
+
+def maybe_load_reference_logprobs_from_disk(
+    args: FlatArguments, tc: TokenizerConfig, accelerator: Accelerator
+) -> tuple[list | None, list | None, str | None]:
+    """Load reference logprobs from disk if cache directory is configured."""
+    if args.num_train_epochs != 1:
+        raise ValueError("Only one epoch is supported for reference logprobs caching.")
+    if args.ref_logprobs_cache_dir is None:
+        return None, None, None
+
+    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    dcs = load_dataset_configs(
+        args.dataset_mixer_list,
+        args.dataset_mixer_list_splits,
+        args.dataset_transform_fn,
+        transform_fn_args,
+        args.dataset_target_columns,
+        args.seed,
+    )
+    config_hash = compute_config_hash(dcs, tc)
+    cache_location = get_ref_logprobs_cache_path(
+        args.ref_logprobs_cache_dir,
+        args.model_name_or_path,
+        config_hash,
+        args.max_train_samples,
+        accelerator.num_processes,
+        accelerator.process_index,
+        args.seed,
+    )
+    epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = load_ref_logprobs_from_disk(
+        cache_location
+    )
+
+    if epoch_cached_reference_chosen_logps is not None:
+        num_epochs = len(epoch_cached_reference_chosen_logps)
+        num_batches = len(epoch_cached_reference_chosen_logps[0]) if num_epochs > 0 else 0
+
+        total_elements = sum(
+            sum(tensor.numel() for tensor in epoch_batches) for epoch_batches in epoch_cached_reference_chosen_logps
+        )
+        total_elements += sum(
+            sum(tensor.numel() for tensor in epoch_batches) for epoch_batches in epoch_cached_reference_rejected_logps
+        )
+
+        total_size_bytes = sum(
+            sum(tensor.element_size() * tensor.numel() for tensor in epoch_batches)
+            for epoch_batches in epoch_cached_reference_chosen_logps
+        )
+        total_size_bytes += sum(
+            sum(tensor.element_size() * tensor.numel() for tensor in epoch_batches)
+            for epoch_batches in epoch_cached_reference_rejected_logps
+        )
+        total_size_mb = total_size_bytes / (1024 * 1024)
+
+        logger.info(
+            f"Loaded cached reference logprobs: {num_epochs} epochs, {num_batches} batches per epoch, "
+            f"{total_elements} total logprobs, {total_size_mb:.2f} MB"
+        )
+
+    return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location
+
+
 def main(args: FlatArguments, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
@@ -562,6 +675,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             zero_hpz_partition_size=args.zero_hpz_partition_size,
         )
         deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=deepspeed_config)
+        logger.info(
+            f"Using DeepSpeed with ZeRO stage {args.zero_stage}, offload_optimizer={args.offload_optimizer}, offload_param={args.offload_param}"
+        )
 
     accelerator = Accelerator(
         dataloader_config=dataloader_config,
@@ -628,15 +744,16 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         if accelerator.is_main_process and is_beaker_job():
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
+
+        wandb_tags = []
+        if accelerator.is_main_process:
+            wandb_tags = get_wandb_tags()
+
         accelerator.init_trackers(
             args.wandb_project_name,
             experiment_config,
             init_kwargs={
-                "wandb": {
-                    "name": args.exp_name,
-                    "entity": args.wandb_entity,
-                    "tags": [args.exp_name] + get_wandb_tags(),
-                }
+                "wandb": {"name": args.exp_name, "entity": args.wandb_entity, "tags": [args.exp_name] + wandb_tags}
             },
         )
 
@@ -1037,6 +1154,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     weighted_aux_loss = args.load_balancing_weight * aux_loss
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
+
+                # compute gradient norm before any clipping (only on sync steps to reduce overhead)
+                grad_norm_this_step = None
+                if args.log_grad_norm and accelerator.sync_gradients:
+                    grad_norm_this_step = accelerator.clip_grad_norm_(model.parameters(), float("inf"))
+
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -1046,6 +1169,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
                 # We keep track of the loss at each logged step
                 with torch.no_grad():
+                    if grad_norm_this_step is not None and args.log_grad_norm:
+                        grad_norm_value = (
+                            grad_norm_this_step.item()
+                            if isinstance(grad_norm_this_step, torch.Tensor)
+                            else float(grad_norm_this_step)
+                        )
+                        local_metrics["grad_norm"] += grad_norm_value * args.gradient_accumulation_steps
+
                     local_metrics["train_loss"] += loss
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
@@ -1104,6 +1235,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         "logps/chosen": global_metrics["logps/chosen"],
                         "logps/rejected": global_metrics["logps/rejected"],
                     }
+                    if args.log_grad_norm:
+                        metrics_to_log["grad_norm"] = global_metrics["grad_norm"]
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         metrics_to_log.update(
                             {
