@@ -4,7 +4,7 @@ BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --description "Single GPU DPO run, for debugging purposes." \
+    --description "8 GPU DPO run, for debugging purposes." \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
@@ -12,7 +12,7 @@ uv run python mason.py \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
-    --gpus 1 -- torchrun --nproc_per_node=1 open_instruct/dpo.py \
+    --gpus 8 -- torchrun --nproc_per_node=8 open_instruct/dpo.py \
     --model_name_or_path allenai/Olmo-3-1025-7B \
     --chat_template_name olmo \
     --max_seq_length 1024 \
