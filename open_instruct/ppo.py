@@ -44,7 +44,6 @@ import socket
 import threading
 import time
 import traceback
-from argparse import Namespace
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
@@ -388,6 +387,8 @@ class Args:
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
+        # HfArgumentParser parses tuple[int, ...] elements as strings, so convert to int
+        self.max_tool_calls = tuple(int(x) for x in self.max_tool_calls)
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
@@ -463,7 +464,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
         )
@@ -512,7 +513,7 @@ class PolicyTrainerRayProcess(RayProcess):
             args.value_model_name_or_path,
             revision=args.value_model_revision,
             num_labels=1,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
         )
@@ -1881,11 +1882,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
     print("finished training")
 
-    accelerator = Namespace()
-    accelerator.is_main_process = True  # hack
-    if args.push_to_hub:
+    if args.push_to_hub and (not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0):
         print("Pushing model to hub")
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
 
 if __name__ == "__main__":

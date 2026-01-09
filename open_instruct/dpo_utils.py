@@ -365,4 +365,6 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             result["chosen_" + k] = chosen_features[k]
         for k in rejected_features:
             result["rejected_" + k] = rejected_features[k]
+        if "index" in features[0]:
+            result["index"] = torch.tensor([f["index"] for f in features])
         return result

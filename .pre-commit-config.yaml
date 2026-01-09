@@ -20,3 +20,12 @@ repos:
       - id: ruff-format
         args: [--config, pyproject.toml]
         files: ^(open_instruct/|[^/]*mason\.py$)
+
+  - repo: local
+    hooks:
+      - id: export-requirements
+        name: Export requirements.txt from uv.lock
+        entry: uv export --format requirements-txt --no-hashes --all-extras --no-emit-project --output-file requirements.txt
+        language: system
+        pass_filenames: false
+        files: ^uv\.lock$

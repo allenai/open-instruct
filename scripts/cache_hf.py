@@ -67,7 +67,7 @@ def main(args: Args):
             revision=args.tokenizer_revision or args.model_revision,
         )
         AutoModelForCausalLM.from_pretrained(
-            args.model_name_or_path, revision=args.model_revision, torch_dtype=torch.bfloat16
+            args.model_name_or_path, revision=args.model_revision, dtype=torch.bfloat16
         )
 
 

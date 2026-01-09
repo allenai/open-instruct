@@ -16,6 +16,8 @@
 
 import asyncio
 import itertools
+import pathlib
+import tempfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -40,6 +42,37 @@ from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
+
+
+@dataclass
+class TensorCache:
+    """A cache for tensors indexed by dataset indices."""
+
+    tensors: dict[str, torch.Tensor]
+
+    def __getitem__(self, indices: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Get cached tensors for the given indices."""
+        return {k: v[indices.long()] for k, v in self.tensors.items()}
+
+    def to(self, device: torch.device | str) -> "TensorCache":
+        """Move all tensors to the specified device."""
+        return TensorCache(tensors={k: v.to(device) for k, v in self.tensors.items()})
+
+    def to_disk(self, path: str | pathlib.Path) -> None:
+        """Save the cache to disk atomically using temp file and rename."""
+        path = pathlib.Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        cpu_tensors = {k: v.cpu() for k, v in self.tensors.items()}
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False, suffix=".tmp") as tmp:
+            tmp_path = pathlib.Path(tmp.name)
+            torch.save(cpu_tensors, tmp_path)
+        tmp_path.rename(path)
+
+    @classmethod
+    def from_disk(cls, path: str | pathlib.Path, device: torch.device | str | None = None) -> "TensorCache":
+        """Load a cache from disk."""
+        data = torch.load(path, weights_only=True, map_location=device)
+        return cls(tensors=data)
 
 
 @dataclass
@@ -99,8 +132,8 @@ class ModelConfig:
     """The model checkpoint for weights initialization."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
-    torch_dtype: str | None = None
-    """Override the default `torch.dtype` and load the model under this dtype."""
+    dtype: str | None = None
+    """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
     attn_implementation: Literal["flash_attention_2"] | None = None
     """Which attention implementation to use; you can run --attn_implementation=flash_attention_2, in which case
     you must install this manually by running `pip install flash-attn --no-build-isolation`"""
@@ -150,6 +183,40 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
             module.p = 0
 
 
+def maybe_load_checkpoint(
+    model: torch.nn.Module, checkpoint_path: str, device: torch.device, rank: int, throw_on_error: bool = True
+) -> None:
+    """Load a checkpoint into a model, with optional error handling.
+
+    Args:
+        model: The model to load the checkpoint into.
+        checkpoint_path: Path to the checkpoint file.
+        device: Device to load the checkpoint onto.
+        rank: Global process rank for logging.
+        throw_on_error: if true, throw an error if the checkpoint fails to load.
+    """
+
+    def _load_checkpoint(path: str, dev: torch.device):
+        state_dict = torch.load(path, map_location=dev)
+        if hasattr(model, "module"):
+            # Needed if wrapped by DeepSpeed.
+            model.module.load_state_dict(state_dict)
+        else:
+            # If a vanilla HF model.
+            model.load_state_dict(state_dict)
+        logger.info(f"{rank=}: Loaded checkpoint from {path}")
+
+    if not throw_on_error:
+        try:
+            _load_checkpoint(checkpoint_path, device)
+        except Exception as e:
+            logger.error(
+                f"{rank=}: Falling back to using base reference, Failed to load checkpoint from {checkpoint_path}: {e}"
+            )
+    else:
+        _load_checkpoint(checkpoint_path, device)
+
+
 def load_ref_policy(
     model_config: ModelConfig,
     ds_config: dict,
@@ -158,6 +225,9 @@ def load_ref_policy(
     device: torch.device,
     rank: int,
     checkpoint_path: str | None = None,
+    mpu: torch.distributed.distributed_c10d.ProcessGroup | None = None,
+    ref_policy_update_freq: int | None = None,
+    alpha: float = 0.0,
 ) -> transformers.PreTrainedModel:
     """Loads a reference policy model for evaluation.
 
@@ -169,6 +239,9 @@ def load_ref_policy(
         device: Target device for loading checkpoint.
         rank: Global process rank for logging.
         checkpoint_path: Optional path to model checkpoint to load.
+        mpu: Optional model parallel unit for sequence parallelism.
+        ref_policy_update_freq: Frequency of reference policy updates. If None, no updates occur.
+        alpha: Alpha value for polyak updates. If 0, no updates occur.
 
     Returns:
         Initialized reference policy model in evaluation mode.
@@ -178,24 +251,24 @@ def load_ref_policy(
     ref_policy: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
     disable_dropout_in_model(ref_policy)
-    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config)
+    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
     ref_policy.eval()
 
     if checkpoint_path:
-        state_dict = torch.load(checkpoint_path, map_location=device)
-        if hasattr(ref_policy, "module"):
-            # Needed if wrapped by DeepSpeed.
-            ref_policy.module.load_state_dict(state_dict)
-        else:
-            # If a vanilla HF model.
-            ref_policy.load_state_dict(state_dict)
-        logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
+        # throw an error if we fail to load AND we are updating the reference.
+        maybe_load_checkpoint(
+            model=ref_policy,
+            checkpoint_path=checkpoint_path,
+            device=device,
+            rank=rank,
+            throw_on_error=ref_policy_update_freq is not None and alpha != 0,
+        )
     return ref_policy
 
 
@@ -390,108 +463,6 @@ async def apply_verifiable_reward(
     return response_rewards, response_per_func_rewards
 
 
-def forward(model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int) -> torch.nn.Module:
-    """
-    Performs a forward pass through the model with the given query responses and pad token ID.
-    Args:
-        model (`torch.nn.Module`):
-            The model to perform the forward pass.
-        query_responses (`torch.Tensor`):
-            The tensor containing the query responses.
-        pad_token_id (`int`):
-            The token ID representing the pad token.
-    Returns:
-        `torch.nn.Module`:
-            The output of the model, including hidden states.
-    """
-    attention_mask = query_responses != pad_token_id
-    position_ids = attention_mask.cumsum(1) - attention_mask.long()
-    input_ids = torch.masked_fill(query_responses, ~attention_mask, 0)
-    return model(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        position_ids=position_ids,
-        return_dict=True,
-        output_hidden_states=True,
-    )
-
-
-def truncate_response(stop_token_id: int, pad_token_id: int, responses: torch.Tensor):
-    """
-    Truncates the responses at the first occurrence of the stop token, filling the rest with pad tokens.
-    Args:
-        stop_token_id (`int`):
-            The token ID representing the stop token where truncation occurs.
-        pad_token_id (`int`):
-            The token ID representing the pad token used to fill the truncated responses.
-        responses (`torch.Tensor`):
-            The tensor containing the responses to be truncated.
-    Returns:
-        `torch.Tensor`:
-            The truncated responses tensor with pad tokens filled after the stop token.
-    """
-    trunc_idxs = first_true_indices(responses == stop_token_id).unsqueeze(-1)
-    new_size = [1] * (len(responses.size()) - 1) + [responses.shape[1]]
-    idxs = torch.arange(responses.shape[1], device=responses.device).view(*new_size)
-    postprocessed_responses = torch.masked_fill(responses, idxs > trunc_idxs, pad_token_id)
-    return postprocessed_responses
-
-
-def generate(
-    lm_backbone: torch.nn.Module, queries: torch.Tensor, pad_token_id: int, generation_config: dict
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Generates sequences from the language model backbone in a way that does not affect padding tokens.
-    Args:
-        lm_backbone (`torch.nn.Module`):
-            The language model backbone used for generation.
-        queries (`torch.Tensor`):
-            The tensor containing the input queries.
-        pad_token_id (`int`):
-            The token ID representing the pad token.
-        generation_config (`dict`):
-            The configuration dictionary for generation settings.
-    Returns:
-        tuple:
-            - `generated_sequences` (`torch.Tensor`):
-                The concatenated tensor of input queries and generated sequences.
-            - `logits` (`torch.Tensor`):
-                The logits output from the generation process.
-    """
-    context_length = queries.shape[1]
-    attention_mask = queries != pad_token_id
-    input_ids = torch.masked_fill(queries, ~attention_mask, 0)
-    output = lm_backbone.generate(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        # position_ids=attention_mask.cumsum(1) - attention_mask.long(), # not needed: already adjusted in generations
-        # https://github.com/huggingface/transformers/blob/ac33aeeeee2a7a89b89c93c2962e6feb90daef0a/src/transformers/models/gpt2/modeling_gpt2.py#L1227-L1250
-        generation_config=generation_config,
-        return_dict_in_generate=True,
-        output_logits=True,
-    )
-    logits = torch.stack(output.logits, 1)
-    return torch.cat((queries, output.sequences[:, context_length:]), dim=1), logits
-
-
-@torch.no_grad()
-def batch_generation(
-    model: torch.nn.Module,
-    queries: torch.Tensor,
-    local_rollout_forward_batch_size: int,
-    pad_token_id: int,
-    generation_config: dict,
-):
-    query_responses = []
-    logitss = []
-    for i in range(0, queries.shape[0], local_rollout_forward_batch_size):
-        query = queries[i : i + local_rollout_forward_batch_size]
-        query_response, logits = generate(model, query, pad_token_id, generation_config)
-        query_responses.append(query_response)
-        logitss.append(logits)
-    return torch.cat(query_responses, 0), torch.cat(logitss, 0)
-
-
 def get_olmo3_generation_config(tokenizer):
     return transformers.GenerationConfig(
         temperature=None,
@@ -580,27 +551,25 @@ def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.T
 
 @retry_on_exception()
 def push_folder_to_hub(
-    accelerator: Accelerator,
-    output_dir: str,
-    hf_repo_id: str | None = None,
-    hf_repo_revision: str | None = None,
-    private: bool = True,
+    output_dir: str, hf_repo_id: str | None = None, hf_repo_revision: str | None = None, private: bool = True
 ):
-    if accelerator.is_main_process:
-        hf_repo_url = f"https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}"
-        api = HfApi()
-        if not api.repo_exists(hf_repo_id):
-            api.create_repo(hf_repo_id, exist_ok=True, private=private)
-        if hf_repo_revision is not None:
-            api.create_branch(repo_id=hf_repo_id, branch=hf_repo_revision, exist_ok=True)
-        api.upload_folder(
-            repo_id=hf_repo_id,
-            revision=hf_repo_revision,
-            folder_path=output_dir,
-            commit_message="upload checkpoint",
-            run_as_future=False,
-        )
-        print(f"🔥 pushed to {hf_repo_url}")
+    """Push a folder to Hugging Face Hub.
+
+    This function should only run on the main process. Callers are expected to gate calls themselves.
+    """
+    api = HfApi()
+    if not api.repo_exists(hf_repo_id):
+        api.create_repo(hf_repo_id, exist_ok=True, private=private)
+    if hf_repo_revision is not None:
+        api.create_branch(repo_id=hf_repo_id, branch=hf_repo_revision, exist_ok=True)
+    api.upload_folder(
+        repo_id=hf_repo_id,
+        revision=hf_repo_revision,
+        folder_path=output_dir,
+        commit_message="upload checkpoint",
+        run_as_future=False,
+    )
+    logger.info(f"🔥 pushed to https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}")
 
 
 # ----------------------------------------------------------------------------

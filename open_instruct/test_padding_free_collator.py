@@ -70,7 +70,7 @@ def _get_fa2_model_and_cfg(model_name: str, vocab_size: int, dtype: torch.dtype)
     model_cfg = MODEL_CFGS[model_name]
     model_kwargs = MODEL_KWARGS[model_name]
     cfg = model_cfg(
-        **{**model_kwargs, "torch_dtype": dtype, "attn_implementation": "flash_attention_2", "vocab_size": vocab_size}
+        **{**model_kwargs, "dtype": dtype, "attn_implementation": "flash_attention_2", "vocab_size": vocab_size}
     )
     model = model_cls(cfg).to("cuda", dtype=dtype)
     return model, cfg

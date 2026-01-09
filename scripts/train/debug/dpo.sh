@@ -5,8 +5,8 @@ uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
     --description "Single GPU DPO run, for debugging purposes." \
-    --workspace ai2/tulu-thinker \
-    --priority high \
+    --workspace ai2/open-instruct-dev \
+    --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --preemptible \
@@ -34,4 +34,5 @@ uv run python mason.py \
     --add_bos \
     --chat_template_name olmo \
     --seed 123 \
+    --try_launch_beaker_eval_jobs false \
     --with_tracking

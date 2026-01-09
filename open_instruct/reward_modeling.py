@@ -422,8 +422,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
     save_with_accelerate(accelerator, model, tokenizer, args.output_dir, chat_template_name=tc.chat_template_name)
-    if args.push_to_hub:
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+    if args.push_to_hub and accelerator.is_main_process:
+        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
 
 if __name__ == "__main__":
