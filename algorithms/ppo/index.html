@@ -1,0 +1,1261 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/algorithms/ppo/">
+      
+      
+        <link rel="prev" href="../grpo/">
+      
+      
+        <link rel="next" href="../reward_modeling/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+    
+    
+      
+        <title>Proximal Policy Optimization (PPO) - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.618322db.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#proximal-policy-optimization-ppo" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Proximal Policy Optimization (PPO)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/ai2_internal_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../trained_model.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    None
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proximal Policy Optimization (PPO)
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proximal Policy Optimization (PPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#implemented-variants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implemented Variants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ppo_vllm_thread_ray_gtrlpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ppo_vllm_thread_ray_gtrl.py
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ppo_vllm_thread_ray_gtrl.py">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#debug-single-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debug (Single GPU)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproduce-allenaillama-31-tulu-31-8b-2-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproduce allenai/Llama-3.1-Tulu-3.1-8B (2 Nodes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#quality-of-life-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quality of life tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#training-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training Metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation details
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acknowledgements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acknowledgements
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#implemented-variants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implemented Variants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ppo_vllm_thread_ray_gtrlpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ppo_vllm_thread_ray_gtrl.py
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ppo_vllm_thread_ray_gtrl.py">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#debug-single-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debug (Single GPU)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproduce-allenaillama-31-tulu-31-8b-2-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproduce allenai/Llama-3.1-Tulu-3.1-8B (2 Nodes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#quality-of-life-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quality of life tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#training-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training Metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation details
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acknowledgements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acknowledgements
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="proximal-policy-optimization-ppo">Proximal Policy Optimization (PPO)</h1>
+<h2 id="implemented-variants">Implemented Variants</h2>
+<ul>
+<li><code>open_instruct/grpo_vllm_thread_ray_gtrl.py</code> contains the script for training PPO models.</li>
+</ul>
+<h2 id="ppo_vllm_thread_ray_gtrlpy"><code>ppo_vllm_thread_ray_gtrl.py</code></h2>
+<p>This implementation has the following features:</p>
+<ul>
+<li>Uses a thread-based approach to parallelize the training and inference processes, based on <a href="https://arxiv.org/abs/2410.18252">Asynchronous RLHF</a>.</li>
+<li>Uses vLLM and Ray to parallelize the training process, based on how <a href="https://github.com/OpenRLHF/OpenRLHF">OpenRLHF</a> does it</li>
+</ul>
+<h3 id="debug-single-gpu">Debug (Single GPU)</h3>
+<p>You can run the script in a single GPU mode to debug the training process.</p>
+<div class="highlight"><pre><span></span><code>bash<span class="w"> </span>scripts/train/debug/ppo.sh
+</code></pre></div>
+<h3 id="reproduce-allenaillama-31-tulu-31-8b-2-nodes">Reproduce <code>allenai/Llama-3.1-Tulu-3.1-8B</code> (2 Nodes)</h3>
+<p>You can reproduce our <code>allenai/Llama-3.1-Tulu-3-8B</code> model by running the following command:</p>
+<div class="highlight"><pre><span></span><code>bash<span class="w"> </span>scripts/train/tulu3/ppo_8b.sh
+</code></pre></div>
+<h3 id="quality-of-life-tools">Quality of life tools</h3>
+<p>Note that when running with <code>--push_to_hub</code> and <code>--with_tracking</code>, the HF repo is automatically tracked to wandb, so we link the tracked run and the trained model.</p>
+<p><img alt="reward modeling tracked hf repo" src="../reward_modeling_hf_repo.png" /></p>
+<p>Furthermore, we also track the dataset length visualization in wandb (see detail in <a href="#dataset-processing">here</a>)</p>
+<p><img alt="token length visualization in wandb" src="../reward_modeling_token_wandb.png" /></p>
+<p>Finally, we also include samples</p>
+<p><img alt="reward modeling preference sample texts" src="../reward_modeling_preference_sample_texts.png" /></p>
+<h3 id="training-metrics">Training Metrics</h3>
+<p>During training, the following metrics are logged:</p>
+<ul>
+<li><code>episode</code>: the global episode number training has gone through (e.g., <code>3000</code> means we have trained on 3000 data points already -- in the case of RLVR that is prompts, which can repeat)</li>
+<li><code>lr</code>: the current learning rate</li>
+<li><code>epoch</code>: the fraction or multiple of the epoch (e.g., <code>2.7</code> means we have trained on the dataset for 2 epochs and 70% of the third epoch)</li>
+<li><code>objective/kl</code>: the KL divergence between the current policy and the reference policy (sum of the KL divergence of each response token)</li>
+<li><code>objective/scores</code>: the scores of the current response, rated by a combination of reward model and other rewards (e.g., R1 style format reward, verifiable reward, etc.)</li>
+<li><code>objective/rlhf_reward</code>: the RLHF reward, which is <code>objective/scores</code> - <code>beta</code> * <code>objective/kl</code></li>
+<li><code>objective/non_score_reward</code>: <code>beta</code> * <code>objective/kl</code></li>
+<li><code>objective/entropy</code>: the entropy of the current policy</li>
+<li><code>objective/loss</code>: the PPO loss</li>
+<li><code>objective/verifiable_correct_rate</code>: the rate at which responses are verifiably correct, providing a measure of response accuracy</li>
+<li><code>loss/policy_avg</code>: the average policy loss, indicating the mean loss incurred during policy updates</li>
+<li><code>policy/approxkl_avg</code>: the average approximate KL divergence, used to monitor policy stability</li>
+<li><code>policy/clipfrac_avg</code>: the average fraction of updates where the policy was clipped, indicating how often clipping occurs</li>
+<li><code>policy/entropy_avg</code>: the average entropy of the policy, providing a measure of policy randomness</li>
+<li><code>time/from_scratch</code>: the time taken to train the model from scratch</li>
+<li><code>time/training</code>: the time taken to do one training step</li>
+<li><code>val/sequence_lengths</code>: the length of the sequences in the generated responses</li>
+<li><code>val/num_stop_token_ids</code>: the number of stop tokens in the generated responses</li>
+</ul>
+<h2 id="implementation-details">Implementation details</h2>
+<p>These are relevant implementation details on reward modeling:</p>
+<ol>
+<li>The tokenizer pads from the left, so it's straightforward to do generations.</li>
+<li>Disable dropout in the model: this is an implementation detail in PPO training (see p.3. in https://arxiv.org/pdf/1909.08593).</li>
+<li>Layer initialization: we initialize the score's weight according to <code>std=1 / np.sqrt(model.config.hidden_size + 1)</code> (see p. 11 in https://arxiv.org/abs/2009.01325)</li>
+<li>Vocab size for RM and Policy: we use the same vocab size for the reward model and the policy model. This is to ensure that the reward model can score all the tokens in the policy model. We added a <code>ValueError</code> for situations when <code>policy.config.vocab_size != reward_model.config.vocab_size</code>.</li>
+<li>Retrain on the same prompts: say we only have 10k prompts but we specified <code>--episodes 100k</code>, we will shuffle the prompts at every 10k episodes and retrain on them.</li>
+<li>Truncate responses at the stop token: we truncate the responses at the <code>--stop_token eos</code> to ensure the generation is stopped at the stop token.</li>
+<li>Non-stop penalty: we use a non-stop penalty to the reward model to penalize the model for not stopping at the stop token. For example, if the model does not end at the stop token, we penalize the model by <code>-10.0</code> (see <code>--penalty_reward_value -10.0</code>).</li>
+<li>Async training and generation: we follow the architecture in https://arxiv.org/abs/2310.00036 to do rollout and training asynchronously. This is to ensure that the training is not bottlenecked by the generation.</li>
+</ol>
+<p><div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">queue</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Agent</span><span class="p">():</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">param</span> <span class="o">=</span> <span class="mi">1</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">learn</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">param</span> <span class="o">+=</span> <span class="mi">1</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">query_generator_fn</span><span class="p">():</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">100</span><span class="p">):</span>
+        <span class="k">yield</span> <span class="n">i</span>
+
+
+<span class="n">ITER</span> <span class="o">=</span> <span class="mi">7</span>
+<span class="n">batch_size</span> <span class="o">=</span> <span class="mi">32</span>
+<span class="n">agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">()</span>
+<span class="n">data_Q</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">Queue</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">param_and_query_Q</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">Queue</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">actor</span><span class="p">():</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">ITER</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">params</span><span class="p">,</span> <span class="n">query</span> <span class="o">=</span> <span class="n">param_and_query_Q</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">params</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[actor] generating data π_</span><span class="si">{</span><span class="n">params</span><span class="si">}</span><span class="s2"> -&gt; p_</span><span class="si">{</span><span class="n">query</span><span class="si">}</span><span class="s2"> D_π_</span><span class="si">{</span><span class="n">data</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="c1"># simulate data generation</span>
+        <span class="n">data_Q</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">query</span><span class="p">,</span> <span class="n">data</span><span class="p">))</span>
+
+<span class="n">actor_thread</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">actor</span><span class="p">)</span>
+<span class="n">actor_thread</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+
+<span class="c1"># initial param put</span>
+<span class="n">generator</span> <span class="o">=</span> <span class="n">query_generator_fn</span><span class="p">()</span>
+<span class="n">next_queries</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">generator</span><span class="p">)</span>
+<span class="n">param_and_query_Q</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">agent</span><span class="o">.</span><span class="n">param</span><span class="p">,</span> <span class="n">next_queries</span><span class="p">))</span>
+
+<span class="c1"># cleanba style stuff</span>
+<span class="n">async_mode</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">ITER</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+    <span class="n">queries</span> <span class="o">=</span> <span class="n">next_queries</span>
+    <span class="k">if</span> <span class="n">async_mode</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">g</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">next_queries</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">generator</span><span class="p">)</span>
+        <span class="n">param_and_query_Q</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">agent</span><span class="o">.</span><span class="n">param</span><span class="p">,</span> <span class="n">next_queries</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">g</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">next_queries</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">generator</span><span class="p">)</span>
+            <span class="n">param_and_query_Q</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="n">agent</span><span class="o">.</span><span class="n">param</span><span class="p">,</span> <span class="n">next_queries</span><span class="p">))</span> <span class="c1"># note the indent here is different</span>
+            <span class="n">queries</span> <span class="o">=</span> <span class="n">next_queries</span>
+    <span class="n">_</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="n">data_Q</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+    <span class="n">old_param</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">param</span>
+    <span class="n">agent</span><span class="o">.</span><span class="n">learn</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="c1"># simulate training</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;--[leaner] get π_</span><span class="si">{</span><span class="n">old_param</span><span class="si">}</span><span class="s2"> -&gt;  p_</span><span class="si">{</span><span class="n">queries</span><span class="si">}</span><span class="s2"> D_π_</span><span class="si">{</span><span class="n">data</span><span class="si">}</span><span class="s2"> -&gt; π_</span><span class="si">{</span><span class="n">agent</span><span class="o">.</span><span class="n">param</span><span class="si">}</span><span class="s2">, time: </span><span class="si">{</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">start_time</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="n">actor_thread</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code># async_mode = True
+[actor] generating data π_1 -&gt; p_1 D_π_1
+[actor] generating data π_1 -&gt; p_1 D_π_1
+--[leaner] get π_1 -&gt;  p_1 D_π_1 -&gt; π_2, time: 2.0003671646118164
+[actor] generating data π_2 -&gt; p_2 D_π_2
+--[leaner] get π_2 -&gt;  p_1 D_π_1 -&gt; π_3, time: 3.0012056827545166
+[actor] generating data π_3 -&gt; p_3 D_π_3
+--[leaner] get π_3 -&gt;  p_2 D_π_2 -&gt; π_4, time: 4.001934766769409
+[actor] generating data π_4 -&gt; p_4 D_π_4
+--[leaner] get π_4 -&gt;  p_3 D_π_3 -&gt; π_5, time: 5.002779722213745
+[actor] generating data π_5 -&gt; p_5 D_π_5
+--[leaner] get π_5 -&gt;  p_4 D_π_4 -&gt; π_6, time: 6.003664970397949
+[actor] generating data π_6 -&gt; p_6 D_π_6
+--[leaner] get π_6 -&gt;  p_5 D_π_5 -&gt; π_7, time: 7.004390716552734
+--[leaner] get π_7 -&gt;  p_6 D_π_6 -&gt; π_8, time: 8.00534439086914
+
+# async_mode = False
+[actor] generating data π_1 -&gt; p_1 D_π_1
+--[leaner] get π_1 -&gt;  p_1 D_π_1 -&gt; π_2, time: 2.000866174697876
+[actor] generating data π_2 -&gt; p_2 D_π_2
+--[leaner] get π_2 -&gt;  p_2 D_π_2 -&gt; π_3, time: 4.002583980560303
+[actor] generating data π_3 -&gt; p_3 D_π_3
+--[leaner] get π_3 -&gt;  p_3 D_π_3 -&gt; π_4, time: 6.003793239593506
+[actor] generating data π_4 -&gt; p_4 D_π_4
+--[leaner] get π_4 -&gt;  p_4 D_π_4 -&gt; π_5, time: 8.005346775054932
+[actor] generating data π_5 -&gt; p_5 D_π_5
+--[leaner] get π_5 -&gt;  p_5 D_π_5 -&gt; π_6, time: 10.00696587562561
+[actor] generating data π_6 -&gt; p_6 D_π_6
+--[leaner] get π_6 -&gt;  p_6 D_π_6 -&gt; π_7, time: 12.00776195526123
+[actor] generating data π_7 -&gt; p_7 D_π_7
+--[leaner] get π_7 -&gt;  p_7 D_π_7 -&gt; π_8, time: 14.009297132492065
+</code></pre></div></p>
+<h2 id="acknowledgements">Acknowledgements</h2>
+<p>We would like to thank the following resources for PPO theory:</p>
+<ul>
+<li><a href="https://arxiv.org/abs/1707.06347">Proximal Policy Optimization Algorithms</a></li>
+<li><a href="https://arxiv.org/abs/2403.17031">The N+ Implementation Details of RLHF with PPO: A Case Study on TL;DR Summarization</a></li>
+<li><a href="https://arxiv.org/abs/2410.18252">Asynchronous RLHF</a></li>
+</ul>
+<p>We would like to thank the following resources for distributed Ray usage:</p>
+<ul>
+<li><a href="https://github.com/OpenRLHF/OpenRLHF">OpenRLHF/OpenRLHF</a></li>
+</ul>
+<p>We would like to thank the following projects for general infrastructure:</p>
+<ul>
+<li><a href="https://github.com/vllm-project/vllm">vLLM</a></li>
+<li><a href="https://github.com/ray-project/ray">Ray</a></li>
+<li><a href="https://github.com/deepspeedai/DeepSpeed">DeepSpeedAI/DeepSpeed</a></li>
+<li><a href="https://github.com/huggingface/transformers">HuggingFace/Transformers</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
