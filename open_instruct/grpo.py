@@ -49,6 +49,7 @@ from olmo_core.train.train_module.transformer import (
     TransformerDataParallelWrappingStrategy,
 )
 from ray.util import queue as ray_queue
+from ray.util.placement_group import placement_group
 from rich.pretty import pprint
 
 from open_instruct import data_loader as data_loader_lib
@@ -362,6 +363,13 @@ def main(
 
     tool_objects = setup_tools(streaming_config)
 
+    if args.single_gpu_mode:
+        bundles = [{"GPU": 1, "CPU": 4}]
+        pg = placement_group(bundles, strategy="PACK")
+        ray.get(pg.ready())
+    else:
+        pg = None
+
     vllm_engines = vllm_utils.create_vllm_engines(
         vllm_config.vllm_num_engines,
         vllm_config.vllm_tensor_parallel_size,
@@ -373,8 +381,8 @@ def main(
         vllm_config.vllm_enable_prefix_caching,
         streaming_config.max_prompt_token_length + streaming_config.response_length,
         vllm_config.vllm_gpu_memory_utilization,
-        False,
-        pg=None,
+        args.single_gpu_mode,
+        pg=pg,
         tools=tool_objects,
         max_tool_calls=streaming_config.max_tool_calls,
         mask_tool_use=streaming_config.mask_tool_use,
