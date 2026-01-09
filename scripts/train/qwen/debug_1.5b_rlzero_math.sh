@@ -1,10 +1,10 @@
 #!/bin/bash
 
-EXP_NAME="olmo3_7b_rlzero_math"
-MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
+EXP_NAME="qwen1.5distill_rlzero_math"
+MODEL_NAME_OR_PATH="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
 DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
-LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 16"
+LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 32"
 LOCAL_EVAL_SPLITS="train train"
 
 EVALS="aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero"
@@ -23,14 +23,14 @@ uv run mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/olmo-instruct \
-    --priority high \
+    --priority normal \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 9 \
+    --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
-    --gpus 8 \
+    --gpus 4 \
     --budget ai2/oe-adapt \
     -- source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run open_instruct/grpo_fast.py \
@@ -53,16 +53,16 @@ uv run mason.py \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
-    --response_length 16384 \
+    --response_length 8192 \
     --pack_length 18432 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name olmo_thinker_rlzero \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 768000 \
-    --deepspeed_stage 3 \
-    --num_learners_per_node 8 8 \
-    --vllm_num_engines 56 \
+    --total_episodes 256000 \
+    --deepspeed_stage 2 \
+    --num_learners_per_node 1 \
+    --vllm_num_engines 3 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
@@ -77,7 +77,8 @@ uv run mason.py \
     --mask_truncated_completions False \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
-    --eval_priority high \
+    --eval_priority normal \
     --eval_on_step_0 True \
     --oe_eval_tasks $EVALS \
-    --oe_eval_gpu_multiplier 4 $@
+    --load_ref_policy False \
+    --oe_eval_gpu_multiplier 2 $@
