@@ -9,8 +9,7 @@ Or use: python server.py (runs on port 8765 by default)
 import random
 from typing import Annotated
 
-from fastmcp import FastMCP
-from pydantic import Field
+from mcp.server.fastmcp import FastMCP
 
 # Create the MCP server
 mcp = FastMCP("Weather API Server")
@@ -49,7 +48,7 @@ def _get_city_weather(city: str) -> dict:
 
 @mcp.tool()
 def get_current_weather(
-    city: Annotated[str, Field(description="The name of the city to get weather for (e.g., 'New York', 'London')")]
+    city: Annotated[str, "The name of the city to get weather for (e.g., 'New York', 'London')"],
 ) -> str:
     """Get the current weather for a city."""
     weather = _get_city_weather(city)
@@ -64,8 +63,8 @@ def get_current_weather(
 
 @mcp.tool()
 def get_weather_forecast(
-    city: Annotated[str, Field(description="The name of the city to get the forecast for")],
-    days: Annotated[int, Field(description="Number of days for the forecast (1-7)", default=3)] = 3,
+    city: Annotated[str, "The name of the city to get the forecast for"],
+    days: Annotated[int, "Number of days for the forecast (1-7)"] = 3,
 ) -> str:
     """Get the weather forecast for a city."""
     days = max(1, min(7, days))  # Clamp to 1-7 days
@@ -93,8 +92,8 @@ def get_weather_forecast(
 
 @mcp.tool()
 def compare_weather(
-    city1: Annotated[str, Field(description="The first city to compare")],
-    city2: Annotated[str, Field(description="The second city to compare")],
+    city1: Annotated[str, "The first city to compare"],
+    city2: Annotated[str, "The second city to compare"],
 ) -> str:
     """Compare the current weather between two cities."""
     weather1 = _get_city_weather(city1)

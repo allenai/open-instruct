@@ -801,10 +801,12 @@ class GenericMCPTool(Tool):
 
                 tools = {}
                 for tool in tools_response.tools:
+                    input_schema = tool.inputSchema or {"type": "object", "properties": {}}
+                    logger.info(f"Discovered MCP tool: {tool.name}, schema: {input_schema}")
                     tools[tool.name] = {
                         "name": tool.name,
                         "description": tool.description or "",
-                        "input_schema": tool.inputSchema or {"type": "object", "properties": {}},
+                        "input_schema": input_schema,
                     }
                 return tools
 
