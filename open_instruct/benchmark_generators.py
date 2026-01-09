@@ -220,7 +220,10 @@ def setup_dataset(
 
     # Transform function arguments
     transform_fn_args = [
-        {},  # For rlvr_tokenize_v1
+        {
+            "system_prompt_override": None,
+            "user_prompt_transform": streaming_config.user_prompt_transform,
+        },  # For rlvr_tokenize_v1
         {"max_prompt_token_length": streaming_config.max_prompt_token_length},  # For rlvr_filter_v1
     ]
 
