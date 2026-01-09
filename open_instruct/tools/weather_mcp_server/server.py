@@ -7,8 +7,10 @@ Or use: python server.py (runs on port 8765 by default)
 """
 
 import random
+from typing import Annotated
 
 from fastmcp import FastMCP
+from pydantic import Field
 
 # Create the MCP server
 mcp = FastMCP("Weather API Server")
@@ -46,15 +48,10 @@ def _get_city_weather(city: str) -> dict:
 
 
 @mcp.tool()
-def get_current_weather(city: str) -> str:
-    """Get the current weather for a city.
-
-    Args:
-        city: The name of the city to get weather for (e.g., "New York", "London", "Tokyo")
-
-    Returns:
-        A string describing the current weather conditions.
-    """
+def get_current_weather(
+    city: Annotated[str, Field(description="The name of the city to get weather for (e.g., 'New York', 'London')")]
+) -> str:
+    """Get the current weather for a city."""
     weather = _get_city_weather(city)
     return (
         f"Current weather in {city.title()}:\n"
@@ -66,16 +63,11 @@ def get_current_weather(city: str) -> str:
 
 
 @mcp.tool()
-def get_weather_forecast(city: str, days: int = 3) -> str:
-    """Get the weather forecast for a city.
-
-    Args:
-        city: The name of the city to get the forecast for
-        days: Number of days for the forecast (1-7, default 3)
-
-    Returns:
-        A string with the weather forecast for the specified number of days.
-    """
+def get_weather_forecast(
+    city: Annotated[str, Field(description="The name of the city to get the forecast for")],
+    days: Annotated[int, Field(description="Number of days for the forecast (1-7)", default=3)] = 3,
+) -> str:
+    """Get the weather forecast for a city."""
     days = max(1, min(7, days))  # Clamp to 1-7 days
     base_weather = _get_city_weather(city)
 
@@ -100,16 +92,11 @@ def get_weather_forecast(city: str, days: int = 3) -> str:
 
 
 @mcp.tool()
-def compare_weather(city1: str, city2: str) -> str:
-    """Compare the current weather between two cities.
-
-    Args:
-        city1: The first city to compare
-        city2: The second city to compare
-
-    Returns:
-        A string comparing the weather between the two cities.
-    """
+def compare_weather(
+    city1: Annotated[str, Field(description="The first city to compare")],
+    city2: Annotated[str, Field(description="The second city to compare")],
+) -> str:
+    """Compare the current weather between two cities."""
     weather1 = _get_city_weather(city1)
     weather2 = _get_city_weather(city2)
 

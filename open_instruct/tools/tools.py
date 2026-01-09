@@ -804,7 +804,7 @@ class GenericMCPTool(Tool):
                     tools[tool.name] = {
                         "name": tool.name,
                         "description": tool.description or "",
-                        "input_schema": tool.inputSchema if hasattr(tool, "inputSchema") else {},
+                        "input_schema": tool.inputSchema or {"type": "object", "properties": {}},
                     }
                 return tools
 
