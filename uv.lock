@@ -2546,6 +2546,9 @@ code = [
 dr-tulu = [
     { name = "dr-agent" },
 ]
+mcp = [
+    { name = "mcp" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -2579,6 +2582,7 @@ requires-dist = [
     { name = "liger-kernel", marker = "sys_platform != 'darwin'", specifier = ">=0.5.4" },
     { name = "litellm", specifier = ">=1.72.0,<1.75.2" },
     { name = "matplotlib", specifier = ">=3.9.3" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0.0" },
     { name = "multiprocess", specifier = "<0.70.18" },
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "numpy", specifier = "<2" },
@@ -2597,7 +2601,7 @@ requires-dist = [
     { name = "vllm", specifier = "==0.11.0" },
     { name = "wandb", specifier = "==0.18.1" },
 ]
-provides-extras = ["code", "dr-tulu"]
+provides-extras = ["code", "dr-tulu", "mcp"]
 
 [package.metadata.requires-dev]
 dev = [

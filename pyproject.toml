@@ -74,6 +74,9 @@ code = [
 dr-tulu = [
     "dr_agent",
 ]
+mcp = [
+    "mcp>=1.0.0",
+]
 
 [tool.uv]
 preview = true

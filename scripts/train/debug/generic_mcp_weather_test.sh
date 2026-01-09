@@ -52,9 +52,9 @@ echo "MCP endpoint: $MCP_ENDPOINT"
 # Run training with the generic_mcp tool
 echo "Starting GRPO training with generic_mcp tool..."
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run python open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 1.0 \
+    --dataset_mixer_list hamishivi/wots_the_weather 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 16 \
+    --dataset_mixer_eval_list hamishivi/wots_the_weather 16 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 512 \
     --response_length 512 \
