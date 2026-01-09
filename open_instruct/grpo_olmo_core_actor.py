@@ -273,8 +273,16 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         Returns:
             List of Ray ObjectRefs for the weight update calls.
         """
+        import sys
+
+        print(f"[DEBUG] broadcast_to_vllm starting on rank {self.rank}", flush=True)
+        sys.stdout.flush()
         torch.cuda.empty_cache()
+        print(f"[DEBUG] after cuda.empty_cache on rank {self.rank}", flush=True)
+        sys.stdout.flush()
         torch.cuda.set_device(self.local_rank)
+        print(f"[DEBUG] after cuda.set_device on rank {self.rank}", flush=True)
+        sys.stdout.flush()
 
         model = self.train_module.model
         params_list = list(model.named_parameters())
