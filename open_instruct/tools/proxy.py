@@ -72,9 +72,13 @@ class ToolActor:
             return list(self._tool.get_stop_strings())
         return []
 
-    def get_openai_tool_definition(self) -> dict:
-        """Get the tool definition in OpenAI format for function calling."""
-        return self._tool.get_openai_tool_definition()
+    def get_tool_names(self) -> list[str]:
+        """Get tool names exposed by this tool."""
+        return self._tool.get_tool_names()
+
+    def get_openai_tool_definitions(self) -> list[dict]:
+        """Get tool definitions in OpenAI format."""
+        return self._tool.get_openai_tool_definitions()
 
 
 def create_tool_actor_from_config(
@@ -105,12 +109,23 @@ class ToolProxy(Tool):
     This proxy is safe to send to other Ray actors because it only holds:
     - An actor handle (serializable)
     - The tool function name (string)
-    - The tool args (dict)
+    - Cached tool names (list)
+    - Optional bound tool name for routing
 
     All actual tool execution happens in the remote ToolActor.
+
+    When a tool exposes multiple names (like GenericMCPTool), each name gets
+    its own proxy instance pointing to the same actor. The proxy automatically
+    adds _mcp_tool_name when calling if bound to a specific tool.
     """
 
-    def __init__(self, actor_handle: ray.actor.ActorHandle, tool_function_name: str):
+    def __init__(
+        self,
+        actor_handle: ray.actor.ActorHandle,
+        tool_function_name: str,
+        tool_names: list[str] | None = None,
+        bound_tool_name: str | None = None,
+    ):
         """Initialize the proxy with an actor handle.
 
         Prefer using ToolProxy.from_actor() instead of calling this directly.
@@ -118,9 +133,13 @@ class ToolProxy(Tool):
         Args:
             actor_handle: Handle to the ToolActor that owns the actual tool.
             tool_function_name: The function name for this tool (used for parsing).
+            tool_names: List of all tool names this tool exposes.
+            bound_tool_name: If set, the specific tool name this proxy handles.
         """
         self._actor = actor_handle
         self._tool_function_name = tool_function_name
+        self._tool_names = tool_names or [tool_function_name]
+        self._bound_tool_name = bound_tool_name
 
     @property
     def tool_function_name(self) -> str:
@@ -128,27 +147,51 @@ class ToolProxy(Tool):
         return self._tool_function_name
 
     def __call__(self, **kwargs: Any) -> ToolOutput:
-        """Execute the tool via the remote actor."""
+        """Execute the tool via the remote actor.
+
+        If bound to a specific tool name, automatically adds _mcp_tool_name to kwargs.
+        """
+        if self._bound_tool_name:
+            kwargs["_mcp_tool_name"] = self._bound_tool_name
         return ray.get(self._actor.call.remote(**kwargs))
+
+    def bind_to_tool(self, tool_name: str) -> "ToolProxy":
+        """Create a new proxy instance bound to a specific tool name.
+
+        Used when a tool exposes multiple names - creates separate proxy instances
+        for each name, all pointing to the same actor.
+
+        Args:
+            tool_name: The tool name to bind to.
+
+        Returns:
+            A new ToolProxy instance bound to the specified tool name.
+        """
+        return ToolProxy(
+            actor_handle=self._actor,
+            tool_function_name=tool_name,
+            tool_names=self._tool_names,
+            bound_tool_name=tool_name,
+        )
 
     def get_stop_strings(self) -> list[str]:
         """Get stop strings from the remote tool."""
         return ray.get(self._actor.get_stop_strings.remote())
 
-    def get_openai_tool_definition(self) -> dict:
-        """Get the tool definition in OpenAI format for function calling.
+    def get_tool_names(self) -> list[str]:
+        """Get all tool names this tool exposes."""
+        return self._tool_names
 
-        Returns:
-            Dict in OpenAI tool format with type, function name, description, and parameters.
-        """
-        return ray.get(self._actor.get_openai_tool_definition.remote())
+    def get_openai_tool_definitions(self) -> list[dict]:
+        """Get tool definitions in OpenAI format."""
+        return ray.get(self._actor.get_openai_tool_definitions.remote())
 
     @classmethod
     def from_actor(cls, actor_handle: ray.actor.ActorHandle) -> ToolProxy:
         """Create a ToolProxy from an existing ToolActor.
 
         This is the second step in the tool creation flow:
-        1. Create actor: actor = create_tool_actor_from_config(...)
+        1. Create actor: actor = create_tool_actor_from_config(config)
         2. Wrap with proxy: proxy = ToolProxy.from_actor(actor)
 
         Args:
@@ -157,6 +200,10 @@ class ToolProxy(Tool):
         Returns:
             A ToolProxy that forwards calls to the actor.
         """
-        # Fetch metadata from the actor
         tool_function_name = ray.get(actor_handle.get_tool_function_name.remote())
-        return cls(actor_handle=actor_handle, tool_function_name=tool_function_name)
+        tool_names = ray.get(actor_handle.get_tool_names.remote())
+        return cls(
+            actor_handle=actor_handle,
+            tool_function_name=tool_function_name,
+            tool_names=tool_names,
+        )

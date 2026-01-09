@@ -4,6 +4,9 @@ import unittest
 
 from open_instruct.tools.config import ToolArgs, ToolConfig, build_tools_from_config
 from open_instruct.tools.tools import (
+    GENERIC_MCP_AVAILABLE,
+    GenericMCPTool,
+    GenericMCPToolConfig,
     MaxCallsExceededTool,
     PythonCodeTool,
     PythonCodeToolConfig,
@@ -367,6 +370,135 @@ class TestToolConfigs(unittest.TestCase):
         config = args.to_tool_config()
         self.assertEqual(config.get_tool_config("mcp").tool_names, "snippet_search,google_search")
         self.assertEqual(config.get_tool_config("mcp").timeout, 120)
+
+
+class TestGenericMCPTool(unittest.TestCase):
+    """Test the GenericMCPTool class."""
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_http_transport_requires_server_url(self):
+        """Test that HTTP transport requires server_url."""
+        with self.assertRaises(ValueError) as context:
+            GenericMCPTool(transport="http")
+        self.assertIn("server_url is required", str(context.exception))
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_stdio_transport_requires_command(self):
+        """Test that stdio transport requires command."""
+        with self.assertRaises(ValueError) as context:
+            GenericMCPTool(transport="stdio")
+        self.assertIn("command is required", str(context.exception))
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_http_initialization(self):
+        """Test that GenericMCPTool initializes correctly with HTTP transport."""
+        tool = GenericMCPTool(server_url="http://localhost:8000/mcp")
+        self.assertEqual(tool.server_url, "http://localhost:8000/mcp")
+        self.assertEqual(tool.transport, "http")
+        self.assertEqual(tool.tool_function_name, "generic_mcp")
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_stdio_initialization(self):
+        """Test that GenericMCPTool initializes correctly with stdio transport."""
+        tool = GenericMCPTool(
+            transport="stdio",
+            command="python",
+            args=["server.py"],
+            env={"MY_VAR": "value"},
+        )
+        self.assertEqual(tool.transport, "stdio")
+        self.assertEqual(tool.command, "python")
+        self.assertEqual(tool.args, ["server.py"])
+        self.assertEqual(tool.env, {"MY_VAR": "value"})
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_override_name(self):
+        """Test that override_name works correctly."""
+        tool = GenericMCPTool(server_url="http://localhost:8000/mcp", override_name="my_mcp")
+        self.assertEqual(tool.tool_function_name, "my_mcp")
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_tool_methods(self):
+        """Test that GenericMCPTool has the expected methods."""
+        tool = GenericMCPTool(server_url="http://localhost:8000/mcp")
+        self.assertTrue(hasattr(tool, "get_tool_names"))
+        self.assertTrue(hasattr(tool, "handles_tool"))
+        self.assertTrue(hasattr(tool, "get_openai_tool_definitions"))
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_no_tool_name_error(self):
+        """Test that calling without _mcp_tool_name returns an error."""
+        tool = GenericMCPTool(server_url="http://localhost:8000/mcp")
+        result = tool(query="test")  # Missing _mcp_tool_name
+        self.assertIn("No tool name provided", result.error)
+        self.assertEqual(result.output, "")
+
+    def test_config_build_http(self):
+        """Test building GenericMCPTool from config (HTTP)."""
+        if not GENERIC_MCP_AVAILABLE:
+            self.skipTest("mcp package not installed")
+
+        config = GenericMCPToolConfig(
+            server_url="http://localhost:8000/mcp",
+            timeout=120,
+            max_retries=5,
+        )
+        tool = config.build()
+        self.assertEqual(tool.server_url, "http://localhost:8000/mcp")
+        self.assertEqual(tool.timeout, 120)
+        self.assertEqual(tool.max_retries, 5)
+
+    def test_config_build_stdio(self):
+        """Test building GenericMCPTool from config (stdio)."""
+        if not GENERIC_MCP_AVAILABLE:
+            self.skipTest("mcp package not installed")
+
+        config = GenericMCPToolConfig(
+            transport="stdio",
+            command="python",
+            args=["server.py"],
+        )
+        tool = config.build()
+        self.assertEqual(tool.transport, "stdio")
+        self.assertEqual(tool.command, "python")
+        self.assertEqual(tool.args, ["server.py"])
+
+
+class TestGenericMCPToolConfig(unittest.TestCase):
+    """Test the GenericMCPToolConfig class."""
+
+    def test_tool_args_generic_mcp_http(self):
+        """Test tool_configs for generic_mcp tool with HTTP transport."""
+        args = ToolArgs(
+            tools=["generic_mcp"],
+            tool_configs=['{"server_url": "http://localhost:8000/mcp", "timeout": 120}'],
+        )
+        config = args.to_tool_config()
+        mcp_config = config.get_tool_config("generic_mcp")
+        self.assertEqual(mcp_config.server_url, "http://localhost:8000/mcp")
+        self.assertEqual(mcp_config.timeout, 120)
+
+    def test_tool_args_generic_mcp_stdio(self):
+        """Test tool_configs for generic_mcp tool with stdio transport."""
+        args = ToolArgs(
+            tools=["generic_mcp"],
+            tool_configs=['{"transport": "stdio", "command": "python", "args": ["server.py"]}'],
+        )
+        config = args.to_tool_config()
+        mcp_config = config.get_tool_config("generic_mcp")
+        self.assertEqual(mcp_config.transport, "stdio")
+        self.assertEqual(mcp_config.command, "python")
+        self.assertEqual(mcp_config.args, ["server.py"])
+
+    def test_tool_args_generic_mcp_with_env(self):
+        """Test tool_configs for generic_mcp tool with environment variables."""
+        args = ToolArgs(
+            tools=["generic_mcp"],
+            tool_configs=['{"transport": "stdio", "command": "python", "env": {"API_KEY": "secret"}}'],
+        )
+        config = args.to_tool_config()
+        mcp_config = config.get_tool_config("generic_mcp")
+        self.assertEqual(mcp_config.env, {"API_KEY": "secret"})
 
 
 class TestToolProxy(unittest.TestCase):

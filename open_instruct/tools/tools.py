@@ -682,3 +682,337 @@ class DrAgentMCPToolConfig(BaseToolConfig):
     """Whether to use localized snippets."""
     context_chars: int = 6000
     """Number of context characters for MCP tools."""
+
+
+# =============================================================================
+# GenericMCPTool + Config
+# =============================================================================
+
+# Optional imports for generic MCP tools (official MCP SDK)
+try:
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.stdio import stdio_client, StdioServerParameters
+
+    GENERIC_MCP_AVAILABLE = True
+except ImportError:
+    GENERIC_MCP_AVAILABLE = False
+
+
+class GenericMCPTool(Tool):
+    """
+    A generic MCP (Model Context Protocol) tool that connects to any MCP server.
+
+    This tool discovers available tools from the connected MCP server and exposes
+    them as first-class tools. Each discovered MCP tool appears as its own tool
+    to the model, allowing direct calls like `search(query="...")` instead of
+    `generic_mcp(tool_name="search", arguments={...})`.
+
+    Use `get_openai_tool_definitions()` to get all tool definitions, and
+    `get_tool_names()` to get the list of discovered tool names.
+
+    Requires the mcp package: uv sync --extra mcp
+
+    Example usage:
+        # Connect via HTTP
+        tool = GenericMCPTool(server_url="http://localhost:8000/mcp")
+
+        # Connect via stdio
+        tool = GenericMCPTool(
+            transport="stdio",
+            command="python",
+            args=["my_mcp_server.py"]
+        )
+
+        # Discover tools
+        tool_names = tool.get_tool_names()  # e.g., ["search", "read_file", "write_file"]
+
+        # Call a tool directly (model calls search(query="test"))
+        result = tool(_mcp_tool_name="search", query="test")
+    """
+
+    _default_tool_function_name = "generic_mcp"
+    _default_tool_description = "Generic MCP tool that connects to any MCP server"
+
+    def __init__(
+        self,
+        server_url: str | None = None,
+        transport: str = "http",
+        command: str | None = None,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        timeout: int = 60,
+        max_retries: int = 3,
+        retry_backoff: float = 0.5,
+        override_name: str | None = None,
+    ) -> None:
+        """Initialize a GenericMCPTool.
+
+        Args:
+            server_url: URL for HTTP transport (e.g., "http://localhost:8000/mcp").
+            transport: Transport type, either "http" or "stdio".
+            command: Command to run for stdio transport.
+            args: Arguments for the stdio command.
+            env: Environment variables for stdio transport.
+            timeout: Timeout in seconds for tool calls.
+            max_retries: Maximum number of retries for transient errors.
+            retry_backoff: Backoff factor for retries (uses exponential backoff).
+            override_name: Override the default tool function name (not typically used for multi-tools).
+        """
+        if not GENERIC_MCP_AVAILABLE:
+            raise ImportError("Generic MCP tools require the mcp package. Install it with: uv sync --extra mcp")
+
+        self._override_name = override_name
+        self.server_url = server_url
+        self.transport = transport
+        self.command = command
+        self.args = args or []
+        self.env = env or {}
+        self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_backoff = retry_backoff
+
+        # Validate configuration
+        if transport == "http" and not server_url:
+            raise ValueError("server_url is required for HTTP transport")
+        if transport == "stdio" and not command:
+            raise ValueError("command is required for stdio transport")
+
+        # Cache for discovered tools (populated lazily)
+        self._discovered_tools: dict[str, dict[str, Any]] | None = None
+
+    async def _get_client_context(self):
+        """Get the appropriate client context manager based on transport type."""
+        if self.transport == "http":
+            return streamablehttp_client(self.server_url)
+        elif self.transport == "stdio":
+            server_params = StdioServerParameters(
+                command=self.command,
+                args=self.args,
+                env=self.env if self.env else None,
+            )
+            return stdio_client(server_params)
+        else:
+            raise ValueError(f"Unknown transport type: {self.transport}")
+
+    async def _discover_tools(self) -> dict[str, dict[str, Any]]:
+        """Discover available tools from the MCP server.
+
+        Returns:
+            Dict mapping tool names to their definitions.
+        """
+        async with await self._get_client_context() as (read_stream, write_stream, *_):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                tools_response = await session.list_tools()
+
+                tools = {}
+                for tool in tools_response.tools:
+                    tools[tool.name] = {
+                        "name": tool.name,
+                        "description": tool.description or "",
+                        "input_schema": tool.inputSchema if hasattr(tool, "inputSchema") else {},
+                    }
+                return tools
+
+    async def _call_tool_async(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        """Call a tool on the MCP server asynchronously.
+
+        Args:
+            tool_name: Name of the tool to call.
+            arguments: Arguments to pass to the tool.
+
+        Returns:
+            The tool's response as a string.
+        """
+        async with await self._get_client_context() as (read_stream, write_stream, *_):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.call_tool(tool_name, arguments)
+
+                # Extract text content from result
+                if hasattr(result, "content"):
+                    text_parts = []
+                    for content in result.content:
+                        if hasattr(content, "text"):
+                            text_parts.append(content.text)
+                        elif hasattr(content, "data"):
+                            text_parts.append(str(content.data))
+                        else:
+                            text_parts.append(str(content))
+                    return "\n".join(text_parts)
+                return str(result)
+
+    def get_discovered_tools(self) -> dict[str, dict[str, Any]]:
+        """Get the list of discovered tools from the MCP server.
+
+        This will connect to the server and discover tools if not already cached.
+
+        Returns:
+            Dict mapping tool names to their definitions.
+        """
+        if self._discovered_tools is None:
+            self._discovered_tools = asyncio.run(self._discover_tools())
+        return self._discovered_tools
+
+    def get_tool_names(self) -> list[str]:
+        """Get the names of all tools exposed by this multi-tool.
+
+        Returns:
+            List of tool names that this tool handles.
+        """
+        return list(self.get_discovered_tools().keys())
+
+    def handles_tool(self, tool_name: str) -> bool:
+        """Check if this tool handles the given tool name.
+
+        Args:
+            tool_name: The name of the tool to check.
+
+        Returns:
+            True if this tool handles the given tool name.
+        """
+        return tool_name in self.get_discovered_tools()
+
+    def get_openai_tool_definitions(self) -> list[dict[str, Any]]:
+        """Get OpenAI-format tool definitions for all discovered MCP tools.
+
+        For multi-tools, this returns one definition per discovered tool.
+        This is used instead of get_openai_tool_definition() for multi-tools.
+
+        Returns:
+            List of tool definitions in OpenAI function calling format.
+        """
+        discovered = self.get_discovered_tools()
+        definitions = []
+        for tool_name, tool_info in discovered.items():
+            definitions.append({
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": tool_info.get("description", ""),
+                    "parameters": tool_info.get("input_schema", {"type": "object", "properties": {}}),
+                },
+            })
+        return definitions
+
+    def __call__(self, _mcp_tool_name: str | None = None, **kwargs: Any) -> ToolOutput:
+        """Call an MCP tool on the connected server.
+
+        This method is called with the tool name passed via _mcp_tool_name,
+        and the actual tool arguments passed as **kwargs.
+
+        Args:
+            _mcp_tool_name: The name of the MCP tool to call (set by the dispatcher).
+            **kwargs: Arguments to pass to the MCP tool.
+
+        Returns:
+            ToolOutput with the result.
+        """
+        start_time = time.time()
+
+        if not _mcp_tool_name:
+            result = ToolOutput(
+                output="",
+                error="No tool name provided. Use _mcp_tool_name to specify which MCP tool to call.",
+                called=True,
+                timeout=False,
+                runtime=0,
+            )
+            _log_tool_call(self.tool_function_name, str(kwargs), result)
+            return result
+
+        # Check if tool exists
+        if not self.handles_tool(_mcp_tool_name):
+            result = ToolOutput(
+                output="",
+                error=f"Unknown MCP tool: {_mcp_tool_name}. Available: {self.get_tool_names()}",
+                called=True,
+                timeout=False,
+                runtime=time.time() - start_time,
+            )
+            _log_tool_call(_mcp_tool_name, str(kwargs), result)
+            return result
+
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                output = asyncio.run(
+                    asyncio.wait_for(
+                        self._call_tool_async(_mcp_tool_name, kwargs),
+                        timeout=self.timeout,
+                    )
+                )
+                result = ToolOutput(
+                    output=output,
+                    called=True,
+                    error="",
+                    timeout=False,
+                    runtime=time.time() - start_time,
+                )
+                _log_tool_call(_mcp_tool_name, str(kwargs), result)
+                return result
+
+            except asyncio.TimeoutError:
+                result = ToolOutput(
+                    output="",
+                    error=f"Timeout after {self.timeout} seconds",
+                    called=True,
+                    timeout=True,
+                    runtime=time.time() - start_time,
+                )
+                _log_tool_call(_mcp_tool_name, str(kwargs), result)
+                return result
+
+            except Exception as e:
+                last_error = str(e)
+                # Retry on transient errors
+                if attempt + 1 < self.max_retries:
+                    time.sleep(self.retry_backoff * (2**attempt))
+                    continue
+
+        # All retries exhausted
+        result = ToolOutput(
+            output="",
+            error=last_error or "Unknown error",
+            called=True,
+            timeout=False,
+            runtime=time.time() - start_time,
+        )
+        _log_tool_call(_mcp_tool_name, str(kwargs), result)
+        return result
+
+
+@dataclass
+class GenericMCPToolConfig(BaseToolConfig):
+    """Configuration for the generic MCP tool.
+
+    This tool connects to any MCP server and exposes its tools. It supports
+    both HTTP and stdio transports.
+
+    Example CLI usage:
+        # HTTP transport
+        --tools generic_mcp --tool_configs '{"server_url": "http://localhost:8000/mcp"}'
+
+        # Stdio transport
+        --tools generic_mcp --tool_configs '{"transport": "stdio", "command": "python", "args": ["server.py"]}'
+    """
+
+    tool_class: ClassVar[type[Tool]] = GenericMCPTool
+
+    server_url: str | None = None
+    """URL for HTTP transport (e.g., 'http://localhost:8000/mcp')."""
+    transport: str = "http"
+    """Transport type: 'http' or 'stdio'."""
+    command: str | None = None
+    """Command to run for stdio transport."""
+    args: list[str] | None = None
+    """Arguments for the stdio command."""
+    env: dict[str, str] | None = None
+    """Environment variables for stdio transport."""
+    timeout: int = 60
+    """Timeout in seconds for tool calls."""
+    max_retries: int = 3
+    """Maximum number of retries for transient errors."""
+    retry_backoff: float = 0.5
+    """Backoff factor for retries."""

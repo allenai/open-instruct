@@ -155,6 +155,29 @@ class Tool(ABC):
             },
         }
 
+    def get_openai_tool_definitions(self) -> list[dict[str, Any]]:
+        """Export tool definitions in OpenAI function calling format.
+
+        For most tools, this returns a single-item list. Tools that expose
+        multiple functions (like GenericMCPTool) can override this to return
+        multiple definitions.
+
+        Returns:
+            List of tool definitions in OpenAI format.
+        """
+        return [self.get_openai_tool_definition()]
+
+    def get_tool_names(self) -> list[str]:
+        """Get the tool names this tool exposes.
+
+        For most tools, returns a single-item list with the tool's function name.
+        Tools that expose multiple functions can override this to return all names.
+
+        Returns:
+            List of tool names.
+        """
+        return [self.tool_function_name]
+
     @abstractmethod
     def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
         pass

@@ -28,6 +28,7 @@ from open_instruct.tools.parsers import (
 from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
 from open_instruct.tools.tools import (
     DrAgentMCPToolConfig,
+    GenericMCPToolConfig,
     MassiveDSSearchToolConfig,
     PythonCodeToolConfig,
     S2SearchToolConfig,
@@ -72,6 +73,7 @@ TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     "massive_ds_search": MassiveDSSearchToolConfig,
     "s2_search": S2SearchToolConfig,
     "mcp": DrAgentMCPToolConfig,
+    "generic_mcp": GenericMCPToolConfig,
 }
 
 
@@ -90,10 +92,11 @@ def get_available_parsers() -> list[str]:
 
 
 def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any]]:
-    """Get OpenAI-format tool definitions from ToolConfig without full tool instantiation.
+    """Get OpenAI-format tool definitions from ToolConfig.
 
-    This is useful for passing tool definitions to apply_chat_template before
-    the full tools are instantiated (which may require Ray actors, API endpoints, etc).
+    This instantiates each tool to get its definitions, which allows tools
+    to dynamically discover their schemas (e.g., GenericMCPTool discovers
+    tools from an MCP server).
 
     Args:
         config: The tool configuration.
@@ -110,31 +113,17 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
         if tool_name_lower not in TOOL_REGISTRY:
             raise ValueError(f"Unknown tool: {tool_name}. Available: {get_available_tools()}")
 
-        config_cls = TOOL_REGISTRY[tool_name_lower]
-        tool_cls = config_cls.tool_class
+        tool_config = config.get_tool_config(tool_name_lower)
 
-        # Get override name from config or use default
+        # Apply override name if specified
         if config.tool_override_names and i < len(config.tool_override_names):
-            override_name = config.tool_override_names[i]
-        else:
-            override_name = getattr(tool_cls, "_default_tool_function_name", tool_name_lower)
+            tool_config.override_name = config.tool_override_names[i]
 
-        # Get description and parameters from class attributes
-        description = getattr(tool_cls, "_default_tool_description", "")
-        parameters = getattr(tool_cls, "_default_tool_parameters", None)
-
-        # If no explicit parameters, infer from __call__ signature
-        if parameters is None:
-            from open_instruct.tools.utils import infer_tool_parameters
-
-            parameters = infer_tool_parameters(tool_cls.__call__)
-
-        definitions.append(
-            {
-                "type": "function",
-                "function": {"name": override_name, "description": description, "parameters": parameters},
-            }
-        )
+        try:
+            tool_instance = tool_config.build()
+            definitions.extend(tool_instance.get_openai_tool_definitions())
+        except Exception as e:
+            logger.warning(f"Failed to instantiate tool {tool_name} for definitions: {e}")
 
     return definitions
 
@@ -351,6 +340,10 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
     tools inside Ray actors. This provides a uniform pattern and avoids
     serialization issues with tools that have heavy dependencies.
 
+    Each tool name returned by get_tool_names() is registered as a separate
+    entry in the tools dict. For tools that expose multiple names (like
+    GenericMCPTool), each name gets a bound proxy pointing to the same actor.
+
     Note: This function does NOT create the parser. Use create_tool_parser()
     to create the parser lazily when needed (e.g., inside a Ray actor where
     the tokenizer is available).
@@ -380,10 +373,18 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
         # Step 2: Wrap ToolActor with ToolProxy
         proxy = ToolProxy.from_actor(actor)
 
-        proxies[proxy.tool_function_name] = proxy
+        # Step 3: Register a proxy for each tool name
+        tool_names = proxy.get_tool_names()
+        for name in tool_names:
+            # If the tool exposes multiple names, bind each to route correctly
+            if len(tool_names) > 1:
+                proxies[name] = proxy.bind_to_tool(name)
+            else:
+                proxies[name] = proxy
+
         proxy_list.append(proxy)
 
-    logger.info(f"Configured {len(proxies)} tool(s): {list(proxies.keys())}")
+    logger.info(f"Configured {len(proxy_list)} tool instance(s), {len(proxies)} tool name(s): {list(proxies.keys())}")
 
     # Get stop strings from proxies (fetched from actors)
     stop_strings: list[str] = []
