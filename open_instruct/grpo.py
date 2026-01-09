@@ -121,7 +121,6 @@ class GRPOExperimentConfig:
     use_vllm_logprobs: bool = False
 
     single_gpu_mode: bool = False
-    use_monarch: bool = False
     num_learners_per_node: list[int] = field(default_factory=lambda: [1])
     num_nodes: int = 1
     deepspeed_stage: int = 0
@@ -693,8 +692,4 @@ if __name__ == "__main__":
     )
     args, tc, model_config, streaming_config, vllm_config = parser.parse_args_into_dataclasses()
 
-    if args.use_monarch:
-        logger.info("Using Monarch backend (experimental)")
-        asyncio.run(main_monarch(args, tc, model_config, streaming_config, vllm_config))
-    else:
-        main(args, tc, model_config, streaming_config, vllm_config)
+    asyncio.run(main_monarch(args, tc, model_config, streaming_config, vllm_config))
