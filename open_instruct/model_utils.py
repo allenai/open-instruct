@@ -16,6 +16,8 @@
 
 import asyncio
 import itertools
+import pathlib
+import tempfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -40,6 +42,37 @@ from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
+
+
+@dataclass
+class TensorCache:
+    """A cache for tensors indexed by dataset indices."""
+
+    tensors: dict[str, torch.Tensor]
+
+    def __getitem__(self, indices: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Get cached tensors for the given indices."""
+        return {k: v[indices.long()] for k, v in self.tensors.items()}
+
+    def to(self, device: torch.device | str) -> "TensorCache":
+        """Move all tensors to the specified device."""
+        return TensorCache(tensors={k: v.to(device) for k, v in self.tensors.items()})
+
+    def to_disk(self, path: str | pathlib.Path) -> None:
+        """Save the cache to disk atomically using temp file and rename."""
+        path = pathlib.Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        cpu_tensors = {k: v.cpu() for k, v in self.tensors.items()}
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False, suffix=".tmp") as tmp:
+            tmp_path = pathlib.Path(tmp.name)
+            torch.save(cpu_tensors, tmp_path)
+        tmp_path.rename(path)
+
+    @classmethod
+    def from_disk(cls, path: str | pathlib.Path, device: torch.device | str | None = None) -> "TensorCache":
+        """Load a cache from disk."""
+        data = torch.load(path, weights_only=True, map_location=device)
+        return cls(tensors=data)
 
 
 @dataclass
@@ -150,6 +183,40 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
             module.p = 0
 
 
+def maybe_load_checkpoint(
+    model: torch.nn.Module, checkpoint_path: str, device: torch.device, rank: int, throw_on_error: bool = True
+) -> None:
+    """Load a checkpoint into a model, with optional error handling.
+
+    Args:
+        model: The model to load the checkpoint into.
+        checkpoint_path: Path to the checkpoint file.
+        device: Device to load the checkpoint onto.
+        rank: Global process rank for logging.
+        throw_on_error: if true, throw an error if the checkpoint fails to load.
+    """
+
+    def _load_checkpoint(path: str, dev: torch.device):
+        state_dict = torch.load(path, map_location=dev)
+        if hasattr(model, "module"):
+            # Needed if wrapped by DeepSpeed.
+            model.module.load_state_dict(state_dict)
+        else:
+            # If a vanilla HF model.
+            model.load_state_dict(state_dict)
+        logger.info(f"{rank=}: Loaded checkpoint from {path}")
+
+    if not throw_on_error:
+        try:
+            _load_checkpoint(checkpoint_path, device)
+        except Exception as e:
+            logger.error(
+                f"{rank=}: Falling back to using base reference, Failed to load checkpoint from {checkpoint_path}: {e}"
+            )
+    else:
+        _load_checkpoint(checkpoint_path, device)
+
+
 def load_ref_policy(
     model_config: ModelConfig,
     ds_config: dict,
@@ -158,6 +225,9 @@ def load_ref_policy(
     device: torch.device,
     rank: int,
     checkpoint_path: str | None = None,
+    mpu: torch.distributed.distributed_c10d.ProcessGroup | None = None,
+    ref_policy_update_freq: int | None = None,
+    alpha: float = 0.0,
 ) -> transformers.PreTrainedModel:
     """Loads a reference policy model for evaluation.
 
@@ -169,6 +239,9 @@ def load_ref_policy(
         device: Target device for loading checkpoint.
         rank: Global process rank for logging.
         checkpoint_path: Optional path to model checkpoint to load.
+        mpu: Optional model parallel unit for sequence parallelism.
+        ref_policy_update_freq: Frequency of reference policy updates. If None, no updates occur.
+        alpha: Alpha value for polyak updates. If 0, no updates occur.
 
     Returns:
         Initialized reference policy model in evaluation mode.
@@ -184,18 +257,18 @@ def load_ref_policy(
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
     disable_dropout_in_model(ref_policy)
-    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config)
+    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
     ref_policy.eval()
 
     if checkpoint_path:
-        state_dict = torch.load(checkpoint_path, map_location=device)
-        if hasattr(ref_policy, "module"):
-            # Needed if wrapped by DeepSpeed.
-            ref_policy.module.load_state_dict(state_dict)
-        else:
-            # If a vanilla HF model.
-            ref_policy.load_state_dict(state_dict)
-        logger.info(f"{rank=}: Loaded reference policy checkpoint from {checkpoint_path}")
+        # throw an error if we fail to load AND we are updating the reference.
+        maybe_load_checkpoint(
+            model=ref_policy,
+            checkpoint_path=checkpoint_path,
+            device=device,
+            rank=rank,
+            throw_on_error=ref_policy_update_freq is not None and alpha != 0,
+        )
     return ref_policy
 
 

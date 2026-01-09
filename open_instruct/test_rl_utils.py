@@ -296,6 +296,46 @@ class TestRLUtils(unittest.TestCase):
             response_masks=packed_sequences.response_masks[0].unsqueeze(0).numpy(),
         )
 
+    def test_pack_sequences_min_num_batches(self):
+        """Test that min_num_batches forces packing to produce more batches when possible."""
+        queries, responses, pad_token_id = get_test_data()
+        masks = [[1] * len(response) for response in responses]
+        vllm_logprobs = [[0.0] * len(response) for response in responses]
+
+        # With default packing (large pack_length), we get 2 sequences
+        packed_default = rl_utils.pack_sequences(
+            queries=queries,
+            responses=responses,
+            masks=masks,
+            pack_length=PACK_LENGTH,
+            pad_token_id=pad_token_id,
+            vllm_logprobs=vllm_logprobs,
+        )
+        default_num_sequences = len(packed_default.query_responses)
+        self.assertEqual(default_num_sequences, 2)  # Sanity check
+
+        # With min_num_batches=3, we should get 3 batches (one per query-response pair)
+        # since each pair can fit in its own batch
+        packed_with_min = rl_utils.pack_sequences(
+            queries=queries,
+            responses=responses,
+            masks=masks,
+            pack_length=PACK_LENGTH,
+            pad_token_id=pad_token_id,
+            vllm_logprobs=vllm_logprobs,
+            min_num_batches=3,
+        )
+        self.assertEqual(len(packed_with_min.query_responses), 3)
+
+        # Verify all data is still present (total tokens should be the same)
+        total_tokens_default = sum(len(seq) for seq in packed_default.query_responses)
+        total_tokens_with_min = sum(len(seq) for seq in packed_with_min.query_responses)
+        self.assertEqual(total_tokens_default, total_tokens_with_min)
+
+        # Verify no empty sequences
+        for seq in packed_with_min.query_responses:
+            self.assertGreater(len(seq), 0)
+
 
 class TestMaskedMean(unittest.TestCase):
     def test_original_axis_int(self):
@@ -354,6 +394,22 @@ class TestMaskedMean(unittest.TestCase):
             ]
         )
         self.assertTrue(torch.allclose(result, expected))
+
+    def test_empty_mask_returns_zero(self):
+        """Test that an all-zero mask returns 0 instead of NaN/inf (division by zero)."""
+        values = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        mask = torch.zeros_like(values)
+        result = rl_utils.masked_mean(values, mask, axis=1)
+        self.assertEqual(result.item(), 0.0)
+
+    def test_empty_mask_per_row(self):
+        """Test empty mask handling when some rows have valid elements and others don't."""
+        values = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        mask = torch.tensor([[1.0, 1.0, 0.0], [0.0, 0.0, 0.0]])  # Second row is empty
+        result = rl_utils.masked_mean(values, mask, axis=1)
+        # First row: (1+2)/2 = 1.5, second row: 0 (empty)
+        # Mean of [1.5, 0] = 0.75
+        self.assertAlmostEqual(result.item(), 0.75)
 
 
 if __name__ == "__main__":
