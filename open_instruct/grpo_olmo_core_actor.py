@@ -195,6 +195,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             device=device,
         )
 
+        self.trainer = train.TrainerConfig(
+            save_folder=self.output_dir,
+            max_duration=train.Duration.steps(self.num_training_steps),
+            metrics_collect_interval=10,
+        ).build(self.train_module, self.dataloader)
+
         logger.info(f"[Rank {self.rank}] OLMo-core model setup complete")
         return 1
 
