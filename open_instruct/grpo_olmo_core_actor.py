@@ -291,14 +291,23 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         num_params = len(params_list)
         refss = []
 
-        logger.info(f"[Rank {self.rank}] Starting broadcast_to_vllm for {num_params} parameters")
+        print(
+            f"[DEBUG] starting broadcast loop for {num_params} params on rank {self.rank}", file=sys.stderr, flush=True
+        )
 
         for count, (name, param) in enumerate(params_list, start=1):
             hf_name = olmo_core_to_hf_name(name)
-            if torch.distributed.get_rank() == 0:
-                logger.info(
-                    f"[Rank {self.rank}] Param {count}/{num_params}: {hf_name} - calling update_weight.remote()"
+            if count == 1:
+                print(
+                    f"[DEBUG] first param: {hf_name}, rank={torch.distributed.get_rank()}", file=sys.stderr, flush=True
                 )
+            if torch.distributed.get_rank() == 0:
+                if count <= 3:
+                    print(
+                        f"[DEBUG] Param {count}/{num_params}: calling update_weight.remote()",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 refs = [
                     engine.update_weight.remote(
                         hf_name, dtype=str(param.dtype), shape=tuple(param.shape), empty_cache=count == num_params
@@ -306,10 +315,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                     for engine in self.vllm_engines
                 ]
                 refss.extend(refs)
-                logger.info(f"[Rank {self.rank}] Param {count}/{num_params}: {hf_name} - calling broadcast()")
+                if count <= 3:
+                    print(f"[DEBUG] Param {count}/{num_params}: calling broadcast()", file=sys.stderr, flush=True)
             if torch.distributed.get_rank() == 0:
                 torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-                logger.info(f"[Rank {self.rank}] Param {count}/{num_params}: {hf_name} - broadcast complete")
+                if count <= 3:
+                    print(f"[DEBUG] Param {count}/{num_params}: broadcast complete", file=sys.stderr, flush=True)
 
         logger.info(f"[Rank {self.rank}] All broadcasts complete, returning {len(refss)} refs")
         all_refs = []
