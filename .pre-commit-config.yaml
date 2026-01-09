@@ -22,7 +22,7 @@ repos:
         files: ^(open_instruct/|[^/]*mason\.py$)
 
   - repo: https://github.com/scop/pre-commit-shfmt
-    rev: v3.8.0-1
+    rev: v3.12.0-2
     hooks:
       - id: shfmt
         args: ["-i", "4", "-w"]
