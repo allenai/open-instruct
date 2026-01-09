@@ -23,7 +23,7 @@ def live_subprocess_output(cmd: list[str]) -> str:
     return "\n".join(output_lines)
 
 
-def download_from_hf(model_name_or_path: str, revision: str) -> None:
+def download_from_hf(model_name_or_path: str, revision: str) -> str:
     cmd = ["huggingface-cli", "download", model_name_or_path, "--revision", revision]
     print(f"Downloading from HF with command: {cmd}")
     output = live_subprocess_output(cmd)
