@@ -123,7 +123,7 @@ class OpenInstructLegacyToolParser(ToolParser):
     which also matches DR Tulu and Open-R1 styles.
 
     Tools are invoked via <tool_name>content</tool_name> tags.
-    The content between tags is passed to the tool as a text argument.
+    The content between tags is passed to the tool's first required parameter.
     """
 
     def __init__(self, tool_list: list[Tool], output_wrap_name: str = "output"):
@@ -132,6 +132,25 @@ class OpenInstructLegacyToolParser(ToolParser):
         assert len(self.tool_names) == len(set(self.tool_names)), "Tool names must be unique"
         self.tool_stop_strings = [f"</{tool_name}>" for tool_name in self.tool_names]
         self.tool_start_strings = [f"<{tool_name}>" for tool_name in self.tool_names]
+
+        # Build mapping of tool_name -> first required parameter name
+        # This allows tools to use semantic parameter names (query, code, etc.)
+        self.tool_param_names: dict[str, str] = {}
+        for tool in tool_list:
+            params = tool.tool_parameters
+            required = params.get("required", [])
+            if required:
+                # Use the first required parameter
+                self.tool_param_names[tool.tool_function_name] = required[0]
+            else:
+                # Fallback: use first property if no required params
+                properties = params.get("properties", {})
+                if properties:
+                    self.tool_param_names[tool.tool_function_name] = next(iter(properties))
+                else:
+                    # Last resort fallback
+                    self.tool_param_names[tool.tool_function_name] = "text"
+
         # Build regex per tool to extract content
         self.tool_regexes = {
             tool_name: re.compile(re.escape(f"<{tool_name}>") + r"(.*?)" + re.escape(f"</{tool_name}>"), re.DOTALL)
@@ -144,9 +163,10 @@ class OpenInstructLegacyToolParser(ToolParser):
         for tool_name, tool_regex in self.tool_regexes.items():
             match = tool_regex.search(text)
             if match:
-                # The content between tags is passed as the first argument
+                # The content between tags is passed as the tool's first parameter
                 tool_content = match.group(1)
-                tool_calls.append(ToolCall(name=tool_name, args={"text": tool_content}))
+                param_name = self.tool_param_names.get(tool_name, "text")
+                tool_calls.append(ToolCall(name=tool_name, args={param_name: tool_content}))
         return tool_calls
 
     def format_tool_calls(self, tool_output: str) -> str:
@@ -167,6 +187,20 @@ class DRTuluToolParser(ToolParser):
 
     def __init__(self, tool_list: list[Tool]):
         self.tools = tool_list
+
+        # Build mapping of tool_name -> first required parameter name
+        self.tool_param_names: dict[str, str] = {}
+        for tool in tool_list:
+            params = tool.tool_parameters
+            required = params.get("required", [])
+            if required:
+                self.tool_param_names[tool.tool_function_name] = required[0]
+            else:
+                properties = params.get("properties", {})
+                if properties:
+                    self.tool_param_names[tool.tool_function_name] = next(iter(properties))
+                else:
+                    self.tool_param_names[tool.tool_function_name] = "text"
 
         # Collect stop strings from tools (e.g., "</tool>")
         self._stop_strings: list[str] = []
@@ -196,7 +230,8 @@ class DRTuluToolParser(ToolParser):
             if stop_str in text:
                 # Route to the first tool (MCP tool handles internal routing)
                 for tool in self.tools:
-                    return [ToolCall(name=tool.tool_function_name, args={"text": text})]
+                    param_name = self.tool_param_names.get(tool.tool_function_name, "text")
+                    return [ToolCall(name=tool.tool_function_name, args={param_name: text})]
         return []
 
     def format_tool_calls(self, tool_output: str) -> str:

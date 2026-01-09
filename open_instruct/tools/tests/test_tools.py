@@ -12,7 +12,11 @@ from open_instruct.tools.tools import (
     SerperSearchTool,
     SerperSearchToolConfig,
 )
-from open_instruct.tools.utils import ToolOutput
+from open_instruct.tools.utils import (
+    Tool,
+    ToolOutput,
+    infer_tool_parameters,
+)
 
 
 class TestToolOutput(unittest.TestCase):
@@ -23,6 +27,103 @@ class TestToolOutput(unittest.TestCase):
         self.assertEqual(output.error, "test error")
         self.assertFalse(output.timeout)
         self.assertEqual(output.runtime, 1.5)
+
+
+class TestParameterInference(unittest.TestCase):
+    """Test the parameter inference system."""
+
+    def test_infer_tool_parameters_simple(self):
+        """Test inferring parameters from a simple method."""
+        from typing import Annotated
+
+        from pydantic import Field
+
+        def example_call(self, query: Annotated[str, Field(description="The search query")]) -> ToolOutput:
+            """Example method."""
+            pass
+
+        schema = infer_tool_parameters(example_call)
+        self.assertEqual(schema["type"], "object")
+        self.assertIn("query", schema["properties"])
+        self.assertEqual(schema["properties"]["query"]["type"], "string")
+        self.assertEqual(schema["properties"]["query"]["description"], "The search query")
+        self.assertEqual(schema["required"], ["query"])
+
+    def test_infer_tool_parameters_with_defaults(self):
+        """Test inferring parameters with default values."""
+        from typing import Annotated
+
+        from pydantic import Field
+
+        def example_call(
+            self,
+            query: Annotated[str, Field(description="The search query")],
+            num_results: Annotated[int, Field(description="Number of results")] = 10,
+        ) -> ToolOutput:
+            """Example method."""
+            pass
+
+        schema = infer_tool_parameters(example_call)
+        self.assertEqual(schema["required"], ["query"])  # num_results has default, not required
+        self.assertEqual(schema["properties"]["num_results"]["default"], 10)
+
+    def test_infer_tool_parameters_multiple_types(self):
+        """Test inferring parameters with various types."""
+
+        def example_call(self, items: list[str], metadata: dict[str, int], enabled: bool = True) -> ToolOutput:
+            """Example method."""
+            pass
+
+        schema = infer_tool_parameters(example_call)
+        self.assertEqual(schema["properties"]["items"]["type"], "array")
+        self.assertEqual(schema["properties"]["items"]["items"]["type"], "string")
+        self.assertEqual(schema["properties"]["metadata"]["type"], "object")
+        self.assertEqual(schema["properties"]["enabled"]["type"], "boolean")
+        self.assertIn("items", schema["required"])
+        self.assertIn("metadata", schema["required"])
+
+
+class TestToolParameterSchemas(unittest.TestCase):
+    """Test that tools have correct parameter schemas (inferred or explicit)."""
+
+    def test_python_code_tool_parameters(self):
+        """Test PythonCodeTool parameter schema."""
+        tool = PythonCodeTool(api_endpoint="http://example.com")
+        params = tool.tool_parameters
+
+        self.assertEqual(params["type"], "object")
+        self.assertIn("code", params["properties"])
+        self.assertEqual(params["properties"]["code"]["type"], "string")
+        self.assertEqual(params["required"], ["code"])
+
+    def test_serper_search_tool_parameters(self):
+        """Test SerperSearchTool parameter schema."""
+        tool = SerperSearchTool()
+        params = tool.tool_parameters
+
+        self.assertEqual(params["type"], "object")
+        self.assertIn("query", params["properties"])
+        self.assertEqual(params["properties"]["query"]["type"], "string")
+        self.assertEqual(params["required"], ["query"])
+
+    def test_s2_search_tool_parameters(self):
+        """Test S2SearchTool parameter schema."""
+        tool = S2SearchTool()
+        params = tool.tool_parameters
+
+        self.assertEqual(params["type"], "object")
+        self.assertIn("query", params["properties"])
+        self.assertEqual(params["properties"]["query"]["type"], "string")
+        self.assertEqual(params["required"], ["query"])
+
+    def test_max_calls_exceeded_tool_parameters(self):
+        """Test MaxCallsExceededTool has empty parameters (explicit schema)."""
+        tool = MaxCallsExceededTool()
+        params = tool.tool_parameters
+
+        self.assertEqual(params["type"], "object")
+        self.assertEqual(params["properties"], {})
+        self.assertEqual(params["required"], [])
 
 
 class TestMaxCallsExceededTool(unittest.TestCase):
@@ -83,13 +184,13 @@ class TestPythonCodeTool(unittest.TestCase):
         self.assertEqual(tool_default.tool_function_name, "python")
 
     def test_build_from_config(self):
-        config = PythonCodeToolConfig(api_endpoint=self.api_endpoint, timeout_seconds=5)
+        config = PythonCodeToolConfig(api_endpoint=self.api_endpoint, timeout=5)
         tool = config.build()
         self.assertEqual(tool.api_endpoint, self.api_endpoint)
-        self.assertEqual(tool.timeout_seconds, 5)
+        self.assertEqual(tool.timeout, 5)
 
     def test_successful_code_execution(self):
-        result = self.tool(text='print("Hello, World!")')
+        result = self.tool(code='print("Hello, World!")')
 
         self.assertTrue(result.called)
         self.assertIn("Hello, World!", result.output)
@@ -98,21 +199,21 @@ class TestPythonCodeTool(unittest.TestCase):
         self.assertGreater(result.runtime, 0)
 
     def test_code_execution_with_error(self):
-        result = self.tool(text='print("unclosed string')
+        result = self.tool(code='print("unclosed string')
 
         self.assertTrue(result.called)
         self.assertTrue("SyntaxError" in result.output or len(result.error) > 0)
         self.assertFalse(result.timeout)
 
     def test_timeout_handling(self):
-        result = self.tool(text="import time\ntime.sleep(10)")
+        result = self.tool(code="import time\ntime.sleep(10)")
 
         self.assertTrue(result.called)
         self.assertTrue(result.timeout or "Timeout" in result.output or "timeout" in result.error)
         self.assertLess(result.runtime, 10)  # Should timeout before 10 seconds
 
     def test_computation(self):
-        result = self.tool(text='result = 5 * 7 + 3\nprint(f"The result is {result}")')
+        result = self.tool(code='result = 5 * 7 + 3\nprint(f"The result is {result}")')
 
         self.assertTrue(result.called)
         self.assertIn("The result is 38", result.output)
@@ -311,7 +412,7 @@ class TestToolProxy(unittest.TestCase):
         proxy = ToolProxy.from_actor(actor)
 
         # Test that we can call the proxy and get a result
-        result = proxy(text="test query")
+        result = proxy(query="test query")
         self.assertIsInstance(result, ToolOutput)
         # The result depends on the API, just check we got a response
         self.assertIsNotNone(result.output)

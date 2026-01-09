@@ -14,7 +14,9 @@ import time
 import traceback
 from collections.abc import Collection
 from dataclasses import asdict, dataclass
-from typing import Any, ClassVar
+from typing import Annotated, Any, ClassVar
+
+from pydantic import Field
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -98,9 +100,11 @@ class MaxCallsExceededTool(Tool):
 
     _default_tool_function_name = "max_calls_exceeded"
     _default_tool_description = "Returns an error when max tool calls limit is hit"
+    # No parameters needed - explicit empty schema
     _default_tool_parameters: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
 
-    def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
+    def __call__(self) -> ToolOutput:
+        """Return an error message indicating max tool calls exceeded."""
         return ToolOutput(output="Max tool calls exceeded.", called=False, error="", timeout=False, runtime=0)
 
 
@@ -119,20 +123,16 @@ class PythonCodeTool(Tool):
 
     _default_tool_function_name = "python"
     _default_tool_description = "Executes Python code and returns printed output."
-    _default_tool_parameters: dict[str, Any] = {
-        "type": "object",
-        "properties": {"text": {"type": "string", "description": "Python code to execute"}},
-        "required": ["text"],
-    }
+    # Parameters inferred from __call__ signature
 
-    def __init__(self, api_endpoint: str, timeout_seconds: int = 3, override_name: str | None = None) -> None:
+    def __init__(self, api_endpoint: str, timeout: int = 3, override_name: str | None = None) -> None:
         self.api_endpoint = api_endpoint
-        self.timeout_seconds = timeout_seconds
+        self.timeout = timeout
         self._override_name = override_name
 
-    def __call__(self, text: str) -> ToolOutput:
+    def __call__(self, code: Annotated[str, Field(description="Python code to execute")]) -> ToolOutput:
         """Execute Python code via the API."""
-        if not text or not text.strip():
+        if not code or not code.strip():
             result = ToolOutput(
                 output="",
                 error="Empty code. Please provide some code to execute.",
@@ -140,17 +140,17 @@ class PythonCodeTool(Tool):
                 timeout=False,
                 runtime=0,
             )
-            _log_tool_call(self.tool_function_name, text or "", result)
+            _log_tool_call(self.tool_function_name, code or "", result)
             return result
 
         all_outputs = []
-        timeout = False
+        timed_out = False
         error = ""
         start_time = time.time()
 
         try:
             response = requests.post(
-                self.api_endpoint, json={"code": text, "timeout": self.timeout_seconds}, timeout=self.timeout_seconds
+                self.api_endpoint, json={"code": code, "timeout": self.timeout}, timeout=self.timeout
             )
             result = response.json()
             output = result["output"]
@@ -161,8 +161,8 @@ class PythonCodeTool(Tool):
                 all_outputs.append("\n" + error)
 
         except requests.Timeout:
-            all_outputs.append(f"Timeout after {self.timeout_seconds} seconds")
-            timeout = True
+            all_outputs.append(f"Timeout after {self.timeout} seconds")
+            timed_out = True
 
         except Exception as e:
             error_message = f"Error calling API: {str(e)}\n"
@@ -170,9 +170,9 @@ class PythonCodeTool(Tool):
             all_outputs.append(error_message + error_traceback)
 
         result = ToolOutput(
-            output="\n".join(all_outputs), called=True, error=error, timeout=timeout, runtime=time.time() - start_time
+            output="\n".join(all_outputs), called=True, error=error, timeout=timed_out, runtime=time.time() - start_time
         )
-        _log_tool_call(self.tool_function_name, text, result)
+        _log_tool_call(self.tool_function_name, code, result)
         return result
 
 
@@ -184,7 +184,7 @@ class PythonCodeToolConfig(BaseToolConfig):
 
     api_endpoint: str | None = None
     """The API endpoint for the code execution server."""
-    timeout_seconds: int = 3
+    timeout: int = 3
     """Timeout in seconds for code execution."""
 
     def build(self) -> PythonCodeTool:
@@ -203,30 +203,26 @@ class MassiveDSSearchTool(Tool):
 
     _default_tool_function_name = "massive_ds_search"  # Distinct from SerperSearchTool's "search"
     _default_tool_description = "Searches Wikipedia/documents using the massive_ds retrieval system"
-    _default_tool_parameters: dict[str, Any] = {
-        "type": "object",
-        "properties": {"text": {"type": "string", "description": "The search query"}},
-        "required": ["text"],
-    }
+    # Parameters inferred from __call__ signature
 
     def __init__(
-        self, api_endpoint: str | None = None, num_documents: int = 3, override_name: str | None = None
+        self, api_endpoint: str | None = None, num_results: int = 3, override_name: str | None = None
     ) -> None:
         self.api_endpoint = api_endpoint
-        self.num_documents = num_documents
+        self.num_results = num_results
         self._override_name = override_name
 
-    def __call__(self, text: str) -> ToolOutput:
+    def __call__(self, query: Annotated[str, Field(description="The search query")]) -> ToolOutput:
         """Search for documents matching the query."""
-        if not text or not text.strip():
+        if not query or not query.strip():
             result = ToolOutput(
                 output="",
-                error="Empty query. Please provide some text in the query.",
+                error="Empty query. Please provide a search query.",
                 called=True,
                 timeout=False,
                 runtime=0,
             )
-            _log_tool_call(self.tool_function_name, text or "", result)
+            _log_tool_call(self.tool_function_name, query or "", result)
             return result
 
         start_time = time.time()
@@ -243,7 +239,7 @@ class MassiveDSSearchTool(Tool):
                     timeout=False,
                     runtime=time.time() - start_time,
                 )
-                _log_tool_call(self.tool_function_name, text, result)
+                _log_tool_call(self.tool_function_name, query, result)
                 return result
 
         session = _create_session_with_retries()
@@ -251,26 +247,26 @@ class MassiveDSSearchTool(Tool):
         try:
             res = session.post(
                 url,
-                json={"query": text, "n_docs": self.num_documents, "domains": "dpr_wiki_contriever"},
+                json={"query": query, "n_docs": self.num_results, "domains": "dpr_wiki_contriever"},
                 headers={"Content-Type": "application/json"},
                 timeout=(3, 15),
             )
             res.raise_for_status()
             data = res.json()
             passages = data.get("results", {}).get("passages", [[]])[0]
-            passages = passages[: self.num_documents]
+            passages = passages[: self.num_results]
             passages = ["\n" + passage for passage in passages]
             all_snippets = "\n".join(passages).strip()
 
             result = ToolOutput(
                 output=all_snippets, called=True, error="", timeout=False, runtime=time.time() - start_time
             )
-            _log_tool_call(self.tool_function_name, text, result)
+            _log_tool_call(self.tool_function_name, query, result)
             return result
 
         except requests.exceptions.RequestException as e:
             result = ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
-            _log_tool_call(self.tool_function_name, text, result)
+            _log_tool_call(self.tool_function_name, query, result)
             return result
 
 
@@ -282,7 +278,7 @@ class MassiveDSSearchToolConfig(BaseToolConfig):
 
     api_endpoint: str | None = None
     """The API endpoint for the search engine."""
-    num_documents: int = 3
+    num_results: int = 3
     """The maximum number of documents to retrieve for each query."""
 
 
@@ -299,27 +295,23 @@ class S2SearchTool(Tool):
 
     _default_tool_function_name = "s2_search"
     _default_tool_description = "Searches Semantic Scholar for academic papers and citations"
-    _default_tool_parameters: dict[str, Any] = {
-        "type": "object",
-        "properties": {"text": {"type": "string", "description": "The search query for Semantic Scholar"}},
-        "required": ["text"],
-    }
+    # Parameters inferred from __call__ signature
 
     def __init__(self, num_results: int = 10, override_name: str | None = None) -> None:
         self.num_results = num_results
         self._override_name = override_name
 
-    def __call__(self, text: str) -> ToolOutput:
+    def __call__(self, query: Annotated[str, Field(description="The search query for Semantic Scholar")]) -> ToolOutput:
         """Search Semantic Scholar for documents matching the query."""
-        if not text or not text.strip():
+        if not query or not query.strip():
             result = ToolOutput(
                 output="",
-                error="Empty query. Please provide some text in the query.",
+                error="Empty query. Please provide a search query.",
                 called=True,
                 timeout=False,
                 runtime=0,
             )
-            _log_tool_call(self.tool_function_name, text or "", result)
+            _log_tool_call(self.tool_function_name, query or "", result)
             return result
 
         start_time = time.time()
@@ -333,7 +325,7 @@ class S2SearchTool(Tool):
                 timeout=False,
                 runtime=time.time() - start_time,
             )
-            _log_tool_call(self.tool_function_name, text, result)
+            _log_tool_call(self.tool_function_name, query, result)
             return result
 
         session = _create_session_with_retries()
@@ -341,7 +333,7 @@ class S2SearchTool(Tool):
         try:
             res = session.get(
                 "https://api.semanticscholar.org/graph/v1/snippet/search",
-                params={"limit": self.num_results, "query": text},
+                params={"limit": self.num_results, "query": query},
                 headers={"x-api-key": api_key},
                 timeout=60,
             )
@@ -357,19 +349,19 @@ class S2SearchTool(Tool):
                     timeout=False,
                     runtime=time.time() - start_time,
                 )
-                _log_tool_call(self.tool_function_name, text, result)
+                _log_tool_call(self.tool_function_name, query, result)
                 return result
 
             all_snippets = "\n".join(snippets).strip()
             result = ToolOutput(
                 output=all_snippets, called=True, error="", timeout=False, runtime=time.time() - start_time
             )
-            _log_tool_call(self.tool_function_name, text, result)
+            _log_tool_call(self.tool_function_name, query, result)
             return result
 
         except requests.exceptions.RequestException as e:
             result = ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
-            _log_tool_call(self.tool_function_name, text, result)
+            _log_tool_call(self.tool_function_name, query, result)
             return result
 
 
@@ -398,27 +390,23 @@ class SerperSearchTool(Tool):
 
     _default_tool_function_name = "serper_search"  # Use "search" to match model training format
     _default_tool_description = "Google search via the Serper API"
-    _default_tool_parameters: dict[str, Any] = {
-        "type": "object",
-        "properties": {"text": {"type": "string", "description": "The search query for Google via Serper"}},
-        "required": ["text"],
-    }
+    # Parameters inferred from __call__ signature
 
     def __init__(self, num_results: int = 5, override_name: str | None = None) -> None:
         self.num_results = num_results
         self._override_name = override_name
 
-    def __call__(self, text: str) -> ToolOutput:
+    def __call__(self, query: Annotated[str, Field(description="The search query for Google")]) -> ToolOutput:
         """Search Google via Serper for documents matching the query."""
-        if not text or not text.strip():
+        if not query or not query.strip():
             result = ToolOutput(
                 output="",
-                error="Empty query. Please provide some text in the query.",
+                error="Empty query. Please provide a search query.",
                 called=True,
                 timeout=False,
                 runtime=0,
             )
-            _log_tool_call(self.tool_function_name, text or "", result)
+            _log_tool_call(self.tool_function_name, query or "", result)
             return result
 
         start_time = time.time()
@@ -432,7 +420,7 @@ class SerperSearchTool(Tool):
                 timeout=False,
                 runtime=time.time() - start_time,
             )
-            _log_tool_call(self.tool_function_name, text, result)
+            _log_tool_call(self.tool_function_name, query, result)
             return result
 
         session = _create_session_with_retries()
@@ -440,7 +428,7 @@ class SerperSearchTool(Tool):
         try:
             response = session.post(
                 "https://google.serper.dev/search",
-                json={"q": text, "num": self.num_results},
+                json={"q": query, "num": self.num_results},
                 headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
                 timeout=10,
             )
@@ -450,10 +438,10 @@ class SerperSearchTool(Tool):
             snippets = []
 
             # Extract snippets from organic results
-            for result in data.get("organic", [])[: self.num_results]:
-                title = result.get("title", "")
-                snippet = result.get("snippet", "")
-                link = result.get("link", "")
+            for item in data.get("organic", [])[: self.num_results]:
+                title = item.get("title", "")
+                snippet = item.get("snippet", "")
+                link = item.get("link", "")
                 if snippet:
                     snippets.append(f"**{title}**\n{snippet}\nSource: {link}")
 
@@ -473,19 +461,19 @@ class SerperSearchTool(Tool):
                     timeout=False,
                     runtime=time.time() - start_time,
                 )
-                _log_tool_call(self.tool_function_name, text, result)
+                _log_tool_call(self.tool_function_name, query, result)
                 return result
 
             all_snippets = "\n\n".join(snippets).strip()
             result = ToolOutput(
                 output=all_snippets, called=True, error="", timeout=False, runtime=time.time() - start_time
             )
-            _log_tool_call(self.tool_function_name, text, result)
+            _log_tool_call(self.tool_function_name, query, result)
             return result
 
         except requests.exceptions.RequestException as e:
             result = ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
-            _log_tool_call(self.tool_function_name, text, result)
+            _log_tool_call(self.tool_function_name, query, result)
             return result
 
 
@@ -518,11 +506,7 @@ class DrAgentMCPTool(Tool):
     _default_tool_description = (
         "MCP tools wrapper supporting snippet_search, google_search, massive_serve, browse_webpage"
     )
-    _default_tool_parameters: dict[str, Any] = {
-        "type": "object",
-        "properties": {"text": {"type": "string", "description": "The full prompt containing MCP tool calls"}},
-        "required": ["text"],
-    }
+    # Parameters inferred from __call__ signature
 
     def __init__(
         self,
@@ -535,7 +519,7 @@ class DrAgentMCPTool(Tool):
         retry_backoff: float = 0.5,
         timeout: int = 180,
         base_url: str | None = None,
-        num_documents: int = 10,
+        num_results: int = 10,
         use_localized_snippets: bool = False,
         context_chars: int = 6000,
         override_name: str | None = None,
@@ -577,7 +561,7 @@ class DrAgentMCPTool(Tool):
             if "base_url" in valid_params:
                 filtered_kwargs["base_url"] = base_url
             if "number_documents_to_search" in valid_params:
-                filtered_kwargs["number_documents_to_search"] = num_documents
+                filtered_kwargs["number_documents_to_search"] = num_results
             if "use_localized_snippets" in valid_params:
                 filtered_kwargs["use_localized_snippets"] = use_localized_snippets
             if "context_chars" in valid_params:
@@ -603,9 +587,8 @@ class DrAgentMCPTool(Tool):
         """Return the stop strings for all MCP tools."""
         return self.stop_strings
 
-    def __call__(self, text: str) -> ToolOutput:
-        """
-        Execute the appropriate MCP tool based on the text content.
+    def __call__(self, text: Annotated[str, Field(description="The full prompt text containing MCP tool call tags")]) -> ToolOutput:
+        """Execute the appropriate MCP tool based on the text content.
 
         Note: Unlike other tools, DrAgentMCPTool still parses the text to determine
         which underlying tool to call, as MCP tools share common tags.
@@ -693,8 +676,8 @@ class DrAgentMCPToolConfig(BaseToolConfig):
     """Backoff factor for MCP retries."""
     base_url: str | None = None
     """Base URL for MCP tools."""
-    num_documents: int = 10
-    """Number of documents to search for MCP tools."""
+    num_results: int = 10
+    """Number of documents/results to retrieve."""
     use_localized_snippets: bool = False
     """Whether to use localized snippets."""
     context_chars: int = 6000

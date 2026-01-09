@@ -121,9 +121,13 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
 
         # Get description and parameters from class attributes
         description = getattr(tool_cls, "_default_tool_description", "")
-        parameters = getattr(
-            tool_cls, "_default_tool_parameters", {"type": "object", "properties": {}, "required": []}
-        )
+        parameters = getattr(tool_cls, "_default_tool_parameters", None)
+
+        # If no explicit parameters, infer from __call__ signature
+        if parameters is None:
+            from open_instruct.tools.utils import infer_tool_parameters
+
+            parameters = infer_tool_parameters(tool_cls.__call__)
 
         definitions.append(
             {
