@@ -22,7 +22,7 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --gpus 1 \
        --no_auto_dataset_cache \
-	   -- source configs/beaker_configs/monarch_node_setup.sh \&\& python open_instruct/grpo.py \
+	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \

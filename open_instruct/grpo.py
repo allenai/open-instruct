@@ -26,9 +26,7 @@ import dataclasses
 import logging
 import os
 import shutil
-import socket
 from dataclasses import dataclass, field
-from datetime import timedelta
 from typing import Literal
 
 import ray
@@ -59,12 +57,7 @@ from open_instruct.beaker_callback import BeakerCallbackV2
 from open_instruct.data_loader import DataPreparationActor
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
-from open_instruct.grpo_callbacks import (
-    DataPreparationActorCheckpointCallback,
-    RefPolicyUpdateCallback,
-    VLLMWeightSyncCallback,
-    olmo_core_to_hf_name,
-)
+from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, olmo_core_to_hf_name
 from open_instruct.grpo_train_module import GRPOConfig, GRPOTrainModule
 from open_instruct.model_utils import ModelConfig, push_folder_to_hub
 from open_instruct.tool_utils import tools
@@ -263,26 +256,23 @@ def main(
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
 ) -> None:
-    """Main entry point for GRPO training with OLMo-core Trainer."""
-    os.environ.setdefault("LOCAL_RANK", "0")
-    os.environ.setdefault("RANK", "0")
-    os.environ.setdefault("WORLD_SIZE", "1")
-    os.environ.setdefault("LOCAL_WORLD_SIZE", "1")
-    os.environ.setdefault("NUM_NODES", "1")
-    os.environ.setdefault("MASTER_ADDR", "localhost")
-    os.environ.setdefault("MASTER_PORT", "29500")
-    backend = "cpu:gloo,cuda:nccl"
-    train.prepare_training_environment(seed=args.seed, backend=backend)
+    """Main entry point for GRPO training with OLMo-core Trainer using Ray actors.
 
-    rank = get_rank() if is_distributed() else 0
-    world_size = get_world_size() if is_distributed() else 1
-    is_main_process = rank == 0
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    This function coordinates distributed GRPO training across multiple GPUs and nodes
+    using Ray actors for both training and inference. The same code path is used for
+    single GPU mode and multi-node training.
+    """
+    import time
 
-    logger_utils.setup_logger(rank=rank)
+    import numpy as np
+    import wandb
 
+    from open_instruct.grpo_olmo_core_actor import OLMoCoreModelGroup
+
+    logger_utils.setup_logger(rank=0)
     tokenizer = grpo_fast.make_tokenizer(tc, model_config)
 
+    args.world_size = sum(args.num_learners_per_node)
     args.num_training_steps = args.total_episodes // (
         streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
     )
@@ -300,14 +290,9 @@ def main(
 
     if args.cache_dataset_only:
         logger.info("Dataset cached. Exiting because --cache_dataset_only was set.")
-        train.teardown_training_environment()
         return
 
-    if is_main_process:
-        os.makedirs(args.output_dir, exist_ok=True)
-    if is_distributed():
-        dist.barrier()
-
+    os.makedirs(args.output_dir, exist_ok=True)
     pprint([args, model_config])
 
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
@@ -351,7 +336,7 @@ def main(
         seed=args.seed,
         per_device_train_batch_size=args.per_device_train_batch_size,
         global_batch_size=streaming_config.num_unique_prompts_rollout,
-        dp_world_size=world_size,
+        dp_world_size=args.world_size,
         max_possible_score=streaming_config.max_possible_score,
         actor_manager=actor_manager,
         model_dims=model_dims,
@@ -363,12 +348,40 @@ def main(
 
     tool_objects = setup_tools(streaming_config)
 
-    if args.single_gpu_mode:
-        bundles = [{"GPU": 1, "CPU": 4}]
-        pg = placement_group(bundles, strategy="PACK")
-        ray.get(pg.ready())
-    else:
-        pg = None
+    bundles = [{"GPU": n, "CPU": n * 10} for n in args.num_learners_per_node]
+    pg = placement_group(bundles, strategy="STRICT_SPREAD")
+    ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
+
+    policy_group = OLMoCoreModelGroup(
+        pg=pg,
+        num_gpus_per_node=args.num_learners_per_node,
+        single_gpu_mode=args.single_gpu_mode,
+        model_name_or_path=model_config.model_name_or_path,
+        grpo_config=args.grpo_config,
+        learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        max_grad_norm=args.max_grad_norm,
+        lr_scheduler_type=args.lr_scheduler_type,
+        warm_up_steps=args.warm_up_steps,
+        warmup_ratio=args.warmup_ratio,
+        num_training_steps=args.num_training_steps,
+        num_epochs=args.num_epochs,
+        num_mini_batches=args.num_mini_batches,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        max_sequence_length=streaming_config.max_prompt_token_length + streaming_config.response_length,
+        load_ref_policy=args.load_ref_policy,
+        beta=args.beta,
+        seed=args.seed,
+        output_dir=args.output_dir,
+        streaming_config=streaming_config,
+        vllm_config=vllm_config,
+        data_prep_actor_name=data_prep_actor_name,
+        tokenizer=tokenizer,
+    )
+    logger.info("======== Policy group created =========")
+
+    ray_get_with_progress([m.setup_model.remote() for m in policy_group.models], desc="Setting up OLMo-core models")
+    logger.info("======== OLMo-core models initialized =========")
 
     vllm_engines = vllm_utils.create_vllm_engines(
         vllm_config.vllm_num_engines,
@@ -382,7 +395,7 @@ def main(
         streaming_config.max_prompt_token_length + streaming_config.response_length,
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
-        pg=pg,
+        pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=streaming_config.max_tool_calls,
         mask_tool_use=streaming_config.mask_tool_use,
@@ -403,162 +416,100 @@ def main(
     else:
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
 
-    model_basename = model_config.model_name_or_path.split("/")[-1]
-    config_name = model_basename.replace("-", "_").replace(".", "_")
-    config_name = config_name[:-1].lower() + "B" if config_name.endswith("B") else config_name.lower()
-    if not hasattr(TransformerConfig, config_name):
-        available = [
-            m for m in dir(TransformerConfig) if not m.startswith("_") and callable(getattr(TransformerConfig, m))
-        ]
-        raise ValueError(f"No TransformerConfig.{config_name}() found. Available: {available}")
-    logger.info(f"Building OLMo-core model with TransformerConfig.{config_name}()")
-    model_config_olmo = getattr(TransformerConfig, config_name)()
-    model = model_config_olmo.build(init_device="cpu")
-
-    logger.info(f"Loading HuggingFace weights from {model_config.model_name_or_path}")
-    load_hf_model(model_config.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
-
-    ref_policy = None
-    if args.load_ref_policy and args.beta > 0:
-        logger.info("Building reference policy...")
-        ref_policy = model_config_olmo.build(init_device="cpu")
-        load_hf_model(model_config.model_name_or_path, ref_policy.state_dict(), work_dir=args.output_dir)
-        ref_policy = ref_policy.to(device=device, dtype=torch.bfloat16).eval()
-    elif args.load_ref_policy and args.beta == 0:
-        logger.info("Skipping reference policy loading (beta=0, KL penalty disabled)")
-
-    streaming_dataloader = streaming_config.build_dataloader(
-        data_prep_actor_name=data_prep_actor_name,
-        tokenizer=tokenizer,
-        dp_rank=rank,
-        fs_local_rank=rank,
-        num_training_steps=args.num_training_steps,
-        work_dir=args.output_dir,
-        dp_world_size=world_size,
+    ray_get_with_progress(
+        [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
+        desc="Setting up model update group",
     )
+    logger.info("======== Model update group setup successfully =========")
 
-    num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
-    warmup_steps = args.warm_up_steps
-    if args.warmup_ratio > 0.0:
-        warmup_steps = int(num_scheduler_steps * args.warmup_ratio)
-
-    if args.lr_scheduler_type == "cosine":
-        scheduler = CosWithWarmup(warmup_steps=warmup_steps)
-    else:
-        scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
-
-    optim_config = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay)
-
-    dp_config = None
-    if not args.single_gpu_mode:
-        dp_config = TransformerDataParallelConfig(
-            name=DataParallelType.hsdp,
-            param_dtype=DType.bfloat16,
-            reduce_dtype=DType.float32,
-            wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
-        )
-
-    grpo_config = args.grpo_config
-    grpo_config.temperature = streaming_config.temperature
-
-    train_module = GRPOTrainModule(
-        model=model,
-        optim=optim_config,
-        rank_microbatch_size=args.per_device_train_batch_size,
-        max_sequence_length=streaming_config.max_prompt_token_length + streaming_config.response_length,
-        grpo_config=grpo_config,
-        tokenizer=tokenizer,
-        ref_policy=ref_policy,
-        dp_config=dp_config,
-        max_grad_norm=args.max_grad_norm,
-        scheduler=scheduler,
-        device=device,
-    )
-
-    model_update_group = None
-    if vllm_engines and rank == 0:
-        master_address = ray._private.services.get_node_ip_address()
-        with socket.socket() as sock:
-            sock.bind(("", 0))
-            master_port = sock.getsockname()[1]
-        vllm_world_size = vllm_config.vllm_num_engines * vllm_config.vllm_tensor_parallel_size + 1
-        backend = vllm_config.vllm_sync_backend
-        refs = [
-            engine.init_process_group.remote(
-                master_address,
-                master_port,
-                i * vllm_config.vllm_tensor_parallel_size + 1,
-                vllm_world_size,
-                "openrlhf",
-                backend=backend,
-                timeout_minutes=args.backend_timeout,
-            )
-            for i, engine in enumerate(vllm_engines)
-        ]
-        model_update_group = vllm_utils.init_process_group(
-            backend=backend,
-            init_method=f"tcp://{master_address}:{master_port}",
-            world_size=vllm_world_size,
-            rank=0,
-            group_name="openrlhf",
-            timeout=timedelta(minutes=args.backend_timeout),
-        )
-        ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
-    if is_distributed():
-        dist.barrier()
-
-    json_config = dataclasses.asdict(args)
-    trainer_callbacks: dict[str, callbacks.Callback] = {}
-
-    trainer_callbacks["vllm_sync"] = VLLMWeightSyncCallback(
-        vllm_engines=vllm_engines,
-        model_update_group=model_update_group,
-        actor_manager=None,
-        gather_whole_model=args.gather_whole_model,
-        name_mapper=olmo_core_to_hf_name,
-    )
-
-    if args.load_ref_policy and args.beta > 0 and args.ref_policy_update_freq:
-        trainer_callbacks["ref_policy"] = RefPolicyUpdateCallback(
-            ref_policy=ref_policy, alpha=args.alpha, update_interval=args.ref_policy_update_freq
-        )
-
-    trainer_callbacks["data_prep"] = DataPreparationActorCheckpointCallback(data_prep_actor_name=data_prep_actor_name)
-
-    trainer_callbacks["checkpointer"] = CheckpointerCallback(
-        save_interval=args.checkpoint_state_freq if args.checkpoint_state_freq > 0 else args.save_freq, save_async=True
-    )
-
-    trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback(
-        num_flops_per_token=model.num_flops_per_token(
-            streaming_config.max_prompt_token_length + streaming_config.response_length
-        )
-    )
-    trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
-
-    if beaker_config is not None:
-        trainer_callbacks["beaker"] = BeakerCallbackV2(config=json_config)
-
+    wandb_url = None
     if args.with_tracking:
-        trainer_callbacks["wandb"] = callbacks.WandBCallback(
-            name=args.run_name or args.exp_name,
+        all_configs = dataclasses.asdict(args)
+        wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
-            config=json_config,
+            config=all_configs,
+            name=args.run_name or args.exp_name,
+            save_code=True,
         )
+        wandb_url = wandb.run.get_url()
 
-    trainer = train.TrainerConfig(
-        save_folder=args.output_dir,
-        max_duration=train.Duration.steps(args.num_training_steps),
-        metrics_collect_interval=10,
-        callbacks=trainer_callbacks,
-    ).build(train_module, streaming_dataloader)
+    logger.info("Starting OLMo-core GRPO training with Ray actors...")
+    training_start_time = time.perf_counter()
 
-    logger.info("Starting OLMo-core GRPO training...")
-    trainer.fit()
+    for training_step in range(1, args.num_training_steps + 1):
+        step_start_time = time.perf_counter()
+
+        ray.get(actor_manager.set_should_stop.remote(True))
+
+        results, _ = ray_get_with_progress(
+            [policy_group.models[i].step.remote() for i in range(args.world_size)],
+            desc=f"Running training step {training_step}",
+        )
+        scalar_metrics_list, array_metrics_list = zip(*results)
+
+        if all(len(m) == 0 for m in scalar_metrics_list):
+            logger.warning("After packing, there is not enough data to train")
+            continue
+
+        weight_broadcast_futures = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+        sync_times, _ = ray_get_with_progress(weight_broadcast_futures, desc="Broadcasting weights to vLLM")
+
+        ray.get(actor_manager.set_should_stop.remote(False))
+
+        if (
+            args.load_ref_policy
+            and args.ref_policy_update_freq is not None
+            and training_step % args.ref_policy_update_freq == 0
+            and args.alpha > 0
+        ):
+            ray_get_with_progress(
+                [m.update_ref_policy.remote() for m in policy_group.models],
+                desc=f"Updating reference policy at step {training_step}",
+            )
+
+        if args.save_freq > 0 and training_step % args.save_freq == 0:
+            checkpoint_dir = f"{args.output_dir}_checkpoints"
+            step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
+            logger.info(f"Saving model at step {training_step} to {step_dir}")
+            ray_get_with_progress(
+                [m.save_model.remote(step_dir, tc.chat_template_name, tokenizer) for m in policy_group.models],
+                desc=f"Saving model at step {training_step}",
+            )
+
+        step_time = time.perf_counter() - step_start_time
+        total_training_time = time.perf_counter() - training_start_time
+
+        average_metrics = {}
+        for metrics in scalar_metrics_list:
+            for k, v in metrics.items():
+                if k not in average_metrics:
+                    average_metrics[k] = []
+                average_metrics[k].append(v)
+        average_metrics = {k: np.mean(v) for k, v in average_metrics.items()}
+
+        metrics = {
+            "training_step": training_step,
+            "time/total": step_time,
+            "time/weight_sync": np.mean(sync_times) if sync_times else 0,
+            "time/total_training": total_training_time,
+            **average_metrics,
+        }
+
+        logger.info(f"Step {training_step}: {metrics}")
+
+        if args.with_tracking:
+            wandb.log(metrics, step=training_step)
+
     logger.info("Training complete.")
 
-    if args.push_to_hub and is_main_process:
+    final_output_dir = args.output_dir
+    ray_get_with_progress(
+        [m.save_model.remote(final_output_dir, tc.chat_template_name, tokenizer) for m in policy_group.models],
+        desc="Saving final model",
+    )
+
+    if args.push_to_hub:
         push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
     if (
@@ -571,29 +522,22 @@ def main(
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
-    if is_beaker_job() and is_main_process and args.try_launch_beaker_eval_jobs_on_weka:
-        wandb_url = None
-        if args.with_tracking:
-            wandb_tracker = trainer_callbacks.get("wandb")
-            if wandb_tracker is not None and hasattr(wandb_tracker, "run") and wandb_tracker.run is not None:
-                wandb_url = wandb_tracker.run.get_url()
-        if args.hf_repo_revision is not None:
-            eval_path = args.output_dir
-            if beaker_config is not None and beaker_config.beaker_dataset_ids:
-                eval_path = beaker_config.beaker_dataset_ids[-1]
-            launch_ai2_evals_on_weka(
-                path=eval_path,
-                leaderboard_name=args.hf_repo_revision,
-                oe_eval_max_length=args.oe_eval_max_length,
-                wandb_url=wandb_url,
-                oe_eval_tasks=args.oe_eval_tasks,
-                gs_bucket_path=args.gs_bucket_path,
-                eval_workspace=args.eval_workspace,
-                eval_priority=args.eval_priority,
-                oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
-            )
+    if is_beaker_job() and args.try_launch_beaker_eval_jobs_on_weka and args.hf_repo_revision is not None:
+        eval_path = args.output_dir
+        if beaker_config is not None and beaker_config.beaker_dataset_ids:
+            eval_path = beaker_config.beaker_dataset_ids[-1]
+        launch_ai2_evals_on_weka(
+            path=eval_path,
+            leaderboard_name=args.hf_repo_revision,
+            oe_eval_max_length=args.oe_eval_max_length,
+            wandb_url=wandb_url,
+            oe_eval_tasks=args.oe_eval_tasks,
+            gs_bucket_path=args.gs_bucket_path,
+            eval_workspace=args.eval_workspace,
+            eval_priority=args.eval_priority,
+            oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
+        )
 
-    train.teardown_training_environment()
     logger.info("Finished GRPO training")
 
 
@@ -891,8 +835,6 @@ async def main_monarch(
 
 
 if __name__ == "__main__":
-    import asyncio
-
     parser = ArgumentParserPlus(
         (
             GRPOExperimentConfig,
@@ -904,4 +846,4 @@ if __name__ == "__main__":
     )
     args, tc, model_config, streaming_config, vllm_config = parser.parse_args_into_dataclasses()
 
-    asyncio.run(main_monarch(args, tc, model_config, streaming_config, vllm_config))
+    main(args, tc, model_config, streaming_config, vllm_config)
