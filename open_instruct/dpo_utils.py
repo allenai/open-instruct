@@ -364,8 +364,12 @@ def separate_forward(
 
 
 def concatenated_forward_olmo(
-    model: nn.Module, batch: dict[str, list | torch.LongTensor], average_log_prob: bool = False, packing: bool = False
-) -> tuple[torch.FloatTensor, torch.FloatTensor]:
+    model: nn.Module,
+    batch: dict[str, list | torch.LongTensor],
+    average_log_prob: bool = False,
+    packing: bool = False,
+    output_router_logits: bool = False,
+) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor | None]:
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
     We do this to avoid doing two forward passes, because it's faster for FSDP.
@@ -376,10 +380,12 @@ def concatenated_forward_olmo(
         batch: Dictionary containing chosen and rejected inputs.
         average_log_prob: Whether to average the log probabilities.
         packing: Whether to use padding-free packing.
+        output_router_logits: Unused for OLMo-core models (MoE aux loss handled separately).
 
     Returns:
-        Tuple of (chosen_logps, rejected_logps).
+        Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
     """
+    del output_router_logits
     if not packing:
         concatenated_batch = concatenated_inputs(batch)
     else:
@@ -401,12 +407,15 @@ def concatenated_forward_olmo(
         )
     chosen_logps = all_logps[:bs]
     rejected_logps = all_logps[bs:]
-    return chosen_logps, rejected_logps
+    return chosen_logps, rejected_logps, None
 
 
 def separate_forward_olmo(
-    model: nn.Module, batch: dict[str, list | torch.LongTensor], average_log_prob: bool = False
-) -> tuple[torch.FloatTensor, torch.FloatTensor]:
+    model: nn.Module,
+    batch: dict[str, list | torch.LongTensor],
+    average_log_prob: bool = False,
+    output_router_logits: bool = False,
+) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor | None]:
     """Run the model on chosen and rejected inputs separately.
 
     Uses OLMo-core Transformer interface: model(input_ids) returns logits tensor directly.
@@ -416,10 +425,12 @@ def separate_forward_olmo(
         model: The model to run (OLMo-core style model).
         batch: Dictionary containing chosen and rejected inputs.
         average_log_prob: Whether to average the log probabilities.
+        output_router_logits: Unused for OLMo-core models (MoE aux loss handled separately).
 
     Returns:
-        Tuple of (chosen_logps, rejected_logps).
+        Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
     """
+    del output_router_logits
     chosen_batch = process_batch(batch, "chosen")
     chosen_logits = model(chosen_batch["input_ids"]).to(torch.float32)
 
@@ -434,7 +445,7 @@ def separate_forward_olmo(
     del rejected_batch, rejected_logits
     torch.cuda.empty_cache()
 
-    return chosen_logps, rejected_logps
+    return chosen_logps, rejected_logps, None
 
 
 def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float, dim: int = -1) -> torch.Tensor:

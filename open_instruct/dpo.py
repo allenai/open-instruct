@@ -93,6 +93,41 @@ def config_to_json_serializable(obj: Any) -> Any:
     return obj
 
 
+OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
+    "allenai/OLMo-2-0425-1B": "olmo2_1B",
+    "allenai/OLMo-2-1124-7B": "olmo2_7B",
+    "allenai/OLMo-2-1124-13B": "olmo2_13B",
+    "allenai/OLMo-2-0325-32B": "olmo2_32B",
+    "allenai/Olmo-3-1025-7B": "olmo3_7B",
+    "allenai/OLMoE-1B-7B-0924": "olmoe_1B_7B",
+}
+
+
+def get_transformer_config(model_name_or_path: str, vocab_size: int) -> TransformerConfig:
+    """Get the appropriate TransformerConfig for a given model name.
+
+    Args:
+        model_name_or_path: HuggingFace model name or path.
+        vocab_size: Vocabulary size for the model.
+
+    Returns:
+        TransformerConfig configured for the specified model.
+
+    Raises:
+        ValueError: If the model name is not recognized.
+    """
+    config_name = OLMO_MODEL_CONFIG_MAP.get(model_name_or_path)
+    if config_name is None:
+        available = ", ".join(OLMO_MODEL_CONFIG_MAP.keys())
+        raise ValueError(
+            f"Model '{model_name_or_path}' not found in OLMO_MODEL_CONFIG_MAP. "
+            f"Available models: {available}. "
+            f"Add your model to OLMO_MODEL_CONFIG_MAP in dpo.py."
+        )
+    config_fn = getattr(TransformerConfig, config_name)
+    return config_fn(vocab_size=vocab_size)
+
+
 def compute_reference_logprobs_cache_hash(
     model_name_or_path: str,
     model_revision: str | None,
@@ -549,7 +584,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         raise ValueError("model_name_or_path must be specified")
 
     logger.info(f"Building OLMo-core model with vocab_size={tokenizer.vocab_size}")
-    model_config = TransformerConfig.olmo3_7B(vocab_size=tokenizer.vocab_size)
+    model_config = get_transformer_config(args.model_name_or_path, tokenizer.vocab_size)
     model = model_config.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")

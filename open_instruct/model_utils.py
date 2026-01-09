@@ -17,6 +17,7 @@
 import asyncio
 import itertools
 import pathlib
+import tempfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -55,11 +56,14 @@ class TensorCache:
         return {k: v.to(device)[indices.long()] for k, v in self.tensors.items()}
 
     def to_disk(self, path: str | pathlib.Path) -> None:
-        """Save the cache to disk."""
+        """Save the cache to disk atomically using temp file and rename."""
         path = pathlib.Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         cpu_tensors = {k: v.cpu() for k, v in self.tensors.items()}
-        torch.save(cpu_tensors, path)
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False, suffix=".tmp") as tmp:
+            tmp_path = pathlib.Path(tmp.name)
+            torch.save(cpu_tensors, tmp_path)
+        tmp_path.rename(path)
 
     @classmethod
     def from_disk(cls, path: str | pathlib.Path) -> "TensorCache":
