@@ -295,6 +295,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             f"[DEBUG] starting broadcast loop for {num_params} params on rank {self.rank}", file=sys.stderr, flush=True
         )
 
+        if torch.distributed.get_rank() == 0 and self.vllm_engines:
+            print("[DEBUG] checking vllm engines are ready", file=sys.stderr, flush=True)
+            ready_refs = [engine.ready.remote() for engine in self.vllm_engines]
+            ray.get(ready_refs)
+            print("[DEBUG] vllm engines are ready", file=sys.stderr, flush=True)
+
         for count, (name, param) in enumerate(params_list, start=1):
             hf_name = olmo_core_to_hf_name(name)
             if count == 1:
