@@ -8,6 +8,7 @@ uv run python mason.py \
         --cluster ai2/jupiter \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \
+	--no-host-networking \
         --workspace ai2/open-instruct-dev \
         --priority urgent \
 	--preemptible \
