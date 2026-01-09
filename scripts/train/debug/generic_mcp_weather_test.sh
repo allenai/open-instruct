@@ -51,7 +51,7 @@ echo "MCP endpoint: $MCP_ENDPOINT"
 
 # Run training with the generic_mcp tool
 echo "Starting GRPO training with generic_mcp tool..."
-VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run python open_instruct/grpo_fast.py \
+VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra mcp python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/wots_the_weather 100 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/wots_the_weather 16 \
