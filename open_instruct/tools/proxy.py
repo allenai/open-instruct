@@ -155,7 +155,7 @@ class ToolProxy(Tool):
             kwargs["_mcp_tool_name"] = self._bound_tool_name
         return ray.get(self._actor.call.remote(**kwargs))
 
-    def bind_to_tool(self, tool_name: str) -> "ToolProxy":
+    def bind_to_tool(self, tool_name: str) -> ToolProxy:
         """Create a new proxy instance bound to a specific tool name.
 
         Used when a tool exposes multiple names - creates separate proxy instances
@@ -202,8 +202,4 @@ class ToolProxy(Tool):
         """
         tool_function_name = ray.get(actor_handle.get_tool_function_name.remote())
         tool_names = ray.get(actor_handle.get_tool_names.remote())
-        return cls(
-            actor_handle=actor_handle,
-            tool_function_name=tool_function_name,
-            tool_names=tool_names,
-        )
+        return cls(actor_handle=actor_handle, tool_function_name=tool_function_name, tool_names=tool_names)

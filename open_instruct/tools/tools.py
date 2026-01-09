@@ -16,9 +16,8 @@ from collections.abc import Collection
 from dataclasses import asdict, dataclass
 from typing import Annotated, Any, ClassVar
 
-from pydantic import Field
-
 import requests
+from pydantic import Field
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -170,7 +169,11 @@ class PythonCodeTool(Tool):
             all_outputs.append(error_message + error_traceback)
 
         result = ToolOutput(
-            output="\n".join(all_outputs), called=True, error=error, timeout=timed_out, runtime=time.time() - start_time
+            output="\n".join(all_outputs),
+            called=True,
+            error=error,
+            timeout=timed_out,
+            runtime=time.time() - start_time,
         )
         _log_tool_call(self.tool_function_name, code, result)
         return result
@@ -216,11 +219,7 @@ class MassiveDSSearchTool(Tool):
         """Search for documents matching the query."""
         if not query or not query.strip():
             result = ToolOutput(
-                output="",
-                error="Empty query. Please provide a search query.",
-                called=True,
-                timeout=False,
-                runtime=0,
+                output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
             )
             _log_tool_call(self.tool_function_name, query or "", result)
             return result
@@ -301,15 +300,13 @@ class S2SearchTool(Tool):
         self.num_results = num_results
         self._override_name = override_name
 
-    def __call__(self, query: Annotated[str, Field(description="The search query for Semantic Scholar")]) -> ToolOutput:
+    def __call__(
+        self, query: Annotated[str, Field(description="The search query for Semantic Scholar")]
+    ) -> ToolOutput:
         """Search Semantic Scholar for documents matching the query."""
         if not query or not query.strip():
             result = ToolOutput(
-                output="",
-                error="Empty query. Please provide a search query.",
-                called=True,
-                timeout=False,
-                runtime=0,
+                output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
             )
             _log_tool_call(self.tool_function_name, query or "", result)
             return result
@@ -400,11 +397,7 @@ class SerperSearchTool(Tool):
         """Search Google via Serper for documents matching the query."""
         if not query or not query.strip():
             result = ToolOutput(
-                output="",
-                error="Empty query. Please provide a search query.",
-                called=True,
-                timeout=False,
-                runtime=0,
+                output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
             )
             _log_tool_call(self.tool_function_name, query or "", result)
             return result
@@ -587,7 +580,9 @@ class DrAgentMCPTool(Tool):
         """Return the stop strings for all MCP tools."""
         return self.stop_strings
 
-    def __call__(self, text: Annotated[str, Field(description="The full prompt text containing MCP tool call tags")]) -> ToolOutput:
+    def __call__(
+        self, text: Annotated[str, Field(description="The full prompt text containing MCP tool call tags")]
+    ) -> ToolOutput:
         """Execute the appropriate MCP tool based on the text content.
 
         Note: Unlike other tools, DrAgentMCPTool still parses the text to determine
@@ -691,8 +686,8 @@ class DrAgentMCPToolConfig(BaseToolConfig):
 # Optional imports for generic MCP tools (official MCP SDK)
 try:
     from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
     from mcp.client.streamable_http import streamablehttp_client
-    from mcp.client.stdio import stdio_client, StdioServerParameters
 
     GENERIC_MCP_AVAILABLE = True
 except ImportError:
@@ -787,9 +782,7 @@ class GenericMCPTool(Tool):
             return streamablehttp_client(self.server_url)
         elif self.transport == "stdio":
             server_params = StdioServerParameters(
-                command=self.command,
-                args=self.args,
-                env=self.env if self.env else None,
+                command=self.command, args=self.args, env=self.env if self.env else None
             )
             return stdio_client(server_params)
         else:
@@ -801,7 +794,7 @@ class GenericMCPTool(Tool):
         Returns:
             Dict mapping tool names to their definitions.
         """
-        async with await self._get_client_context() as (read_stream, write_stream, *_):
+        async with await self._get_client_context() as (read_stream, write_stream, *_):  # noqa: SIM117
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 tools_response = await session.list_tools()
@@ -825,7 +818,7 @@ class GenericMCPTool(Tool):
         Returns:
             The tool's response as a string.
         """
-        async with await self._get_client_context() as (read_stream, write_stream, *_):
+        async with await self._get_client_context() as (read_stream, write_stream, *_):  # noqa: SIM117
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 result = await session.call_tool(tool_name, arguments)
@@ -886,14 +879,16 @@ class GenericMCPTool(Tool):
         discovered = self.get_discovered_tools()
         definitions = []
         for tool_name, tool_info in discovered.items():
-            definitions.append({
-                "type": "function",
-                "function": {
-                    "name": tool_name,
-                    "description": tool_info.get("description", ""),
-                    "parameters": tool_info.get("input_schema", {"type": "object", "properties": {}}),
-                },
-            })
+            definitions.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "description": tool_info.get("description", ""),
+                        "parameters": tool_info.get("input_schema", {"type": "object", "properties": {}}),
+                    },
+                }
+            )
         return definitions
 
     def __call__(self, _mcp_tool_name: str | None = None, **kwargs: Any) -> ToolOutput:
@@ -938,17 +933,10 @@ class GenericMCPTool(Tool):
         for attempt in range(self.max_retries):
             try:
                 output = asyncio.run(
-                    asyncio.wait_for(
-                        self._call_tool_async(_mcp_tool_name, kwargs),
-                        timeout=self.timeout,
-                    )
+                    asyncio.wait_for(self._call_tool_async(_mcp_tool_name, kwargs), timeout=self.timeout)
                 )
                 result = ToolOutput(
-                    output=output,
-                    called=True,
-                    error="",
-                    timeout=False,
-                    runtime=time.time() - start_time,
+                    output=output, called=True, error="", timeout=False, runtime=time.time() - start_time
                 )
                 _log_tool_call(_mcp_tool_name, str(kwargs), result)
                 return result

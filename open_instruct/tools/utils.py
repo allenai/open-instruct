@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, get_type_hints
 
 from pydantic import create_model
 
-
 # =============================================================================
 # Parameter Inference
 # =============================================================================

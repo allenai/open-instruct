@@ -15,11 +15,7 @@ from open_instruct.tools.tools import (
     SerperSearchTool,
     SerperSearchToolConfig,
 )
-from open_instruct.tools.utils import (
-    Tool,
-    ToolOutput,
-    infer_tool_parameters,
-)
+from open_instruct.tools.utils import ToolOutput, infer_tool_parameters
 
 
 class TestToolOutput(unittest.TestCase):
@@ -400,12 +396,7 @@ class TestGenericMCPTool(unittest.TestCase):
     @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
     def test_stdio_initialization(self):
         """Test that GenericMCPTool initializes correctly with stdio transport."""
-        tool = GenericMCPTool(
-            transport="stdio",
-            command="python",
-            args=["server.py"],
-            env={"MY_VAR": "value"},
-        )
+        tool = GenericMCPTool(transport="stdio", command="python", args=["server.py"], env={"MY_VAR": "value"})
         self.assertEqual(tool.transport, "stdio")
         self.assertEqual(tool.command, "python")
         self.assertEqual(tool.args, ["server.py"])
@@ -438,11 +429,7 @@ class TestGenericMCPTool(unittest.TestCase):
         if not GENERIC_MCP_AVAILABLE:
             self.skipTest("mcp package not installed")
 
-        config = GenericMCPToolConfig(
-            server_url="http://localhost:8000/mcp",
-            timeout=120,
-            max_retries=5,
-        )
+        config = GenericMCPToolConfig(server_url="http://localhost:8000/mcp", timeout=120, max_retries=5)
         tool = config.build()
         self.assertEqual(tool.server_url, "http://localhost:8000/mcp")
         self.assertEqual(tool.timeout, 120)
@@ -453,11 +440,7 @@ class TestGenericMCPTool(unittest.TestCase):
         if not GENERIC_MCP_AVAILABLE:
             self.skipTest("mcp package not installed")
 
-        config = GenericMCPToolConfig(
-            transport="stdio",
-            command="python",
-            args=["server.py"],
-        )
+        config = GenericMCPToolConfig(transport="stdio", command="python", args=["server.py"])
         tool = config.build()
         self.assertEqual(tool.transport, "stdio")
         self.assertEqual(tool.command, "python")
@@ -470,8 +453,7 @@ class TestGenericMCPToolConfig(unittest.TestCase):
     def test_tool_args_generic_mcp_http(self):
         """Test tool_configs for generic_mcp tool with HTTP transport."""
         args = ToolArgs(
-            tools=["generic_mcp"],
-            tool_configs=['{"server_url": "http://localhost:8000/mcp", "timeout": 120}'],
+            tools=["generic_mcp"], tool_configs=['{"server_url": "http://localhost:8000/mcp", "timeout": 120}']
         )
         config = args.to_tool_config()
         mcp_config = config.get_tool_config("generic_mcp")
@@ -481,8 +463,7 @@ class TestGenericMCPToolConfig(unittest.TestCase):
     def test_tool_args_generic_mcp_stdio(self):
         """Test tool_configs for generic_mcp tool with stdio transport."""
         args = ToolArgs(
-            tools=["generic_mcp"],
-            tool_configs=['{"transport": "stdio", "command": "python", "args": ["server.py"]}'],
+            tools=["generic_mcp"], tool_configs=['{"transport": "stdio", "command": "python", "args": ["server.py"]}']
         )
         config = args.to_tool_config()
         mcp_config = config.get_tool_config("generic_mcp")
