@@ -16,8 +16,12 @@ BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk 
 
 RAY_NODE_PORT=8888
 mkdir -p "$HOME/.triton/autotune"  # Create Triton autotune cache directory to silence warnings
-ray stop --force
-rm -rf /tmp/ray/* 2>/dev/null || true
+
+# Aggressive cleanup of all Ray state
+ray stop --force 2>/dev/null || true
+rm -rf /tmp/ray 2>/dev/null || true
+rm -rf /tmp/ray_local_* 2>/dev/null || true
+rm -rf /dev/shm/ray_* 2>/dev/null || true
 
 # Use local temp dir to avoid conflicts with shared filesystem
 export RAY_TMPDIR=/tmp/ray_local_$$
