@@ -295,6 +295,8 @@ class Args:
     # Evaluation behavior
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
+    eval_pass_at_k: int = 1
+    """Number of completions per eval prompt for pass@k metrics."""
 
     def __post_init__(self):
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
@@ -1389,6 +1391,8 @@ def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.Stream
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )
+    if args.eval_pass_at_k < 1:
+        raise ValueError(f"pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
@@ -1735,7 +1739,7 @@ def create_generation_configs(args: Args, streaming_config: data_loader_lib.Stre
         seed=args.seed,
         logprobs=1,
     )
-    eval_generation_config = dataclasses.replace(generation_config, n=1)
+    eval_generation_config = dataclasses.replace(generation_config, n=args.eval_pass_at_k)
     return {"train": generation_config, "eval": eval_generation_config}
 
 
@@ -1967,6 +1971,7 @@ def maybe_evaluate(
     eval_dataset: Dataset,
     eval_generation_config,
     model_dims: utils.ModelDims,
+    max_possible_score: float,
     actor_manager=None,
 ):
     """Optionally evaluate the model."""
@@ -1991,6 +1996,7 @@ def maybe_evaluate(
             active_sampling=False,
             filter_zero_std_samples=False,
             replenish_prompts=False,
+            max_possible_score=max_possible_score,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -2000,6 +2006,22 @@ def maybe_evaluate(
             eval_result.finish_reasons
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+        eval_k = eval_generation_config.n
+        scores = np.array(eval_batch.scores)
+        pass_at_1 = None
+        pass_at_k = None
+        if max_possible_score <= 0:
+            logger.warning("Max possible score is %s; skipping pass@k metrics.", max_possible_score)
+        elif scores.size and scores.size % eval_k == 0:
+            scores_per_prompt = scores.reshape(-1, eval_k)
+            threshold = max_possible_score - 1e-8
+            pass_at_1 = (scores_per_prompt[:, 0] >= threshold).mean()
+            if eval_k > 1:
+                pass_at_k = (scores_per_prompt.max(axis=1) >= threshold).mean()
+        else:
+            logger.warning(
+                "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
+            )
         eval_metrics = {
             "eval/scores": np.array(eval_batch.scores).mean(),
             "eval/sequence_lengths": eval_sequence_lengths.mean(),
@@ -2008,6 +2030,10 @@ def maybe_evaluate(
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
         }
+        if pass_at_1 is not None:
+            eval_metrics["eval/pass_at_1"] = pass_at_1
+        if pass_at_k is not None:
+            eval_metrics[f"eval/pass_at_{eval_k}"] = pass_at_k
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
@@ -2314,6 +2340,7 @@ def run_training(
             eval_dataset,
             generation_configs["eval"],
             model_dims,
+            streaming_config.max_possible_score,
             actor_manager,
         )
 
