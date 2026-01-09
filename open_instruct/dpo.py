@@ -591,6 +591,12 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
     model = model.to(device=device, dtype=torch.bfloat16)
 
+    if args.gradient_checkpointing:
+        from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
+
+        logger.info("Enabling activation checkpointing...")
+        model.apply_activation_checkpointing(TransformerActivationCheckpointingMode.full)
+
     if args.dpo_config.packing:
         collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:

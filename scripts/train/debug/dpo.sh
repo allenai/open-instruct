@@ -27,6 +27,7 @@ uv run python mason.py \
     --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --seed 123 \
     --use_flash_attn \
+    --gradient_checkpointing \
     --logging_steps 10 \
     --with_tracking \
     --push_to_hub False \
