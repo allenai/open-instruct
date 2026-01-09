@@ -278,11 +278,15 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             return 0.0
 
         torch.cuda.empty_cache()
+        torch.cuda.set_device(self.local_rank)
 
         model = self.train_module.model
         params_list = list(model.named_parameters())
         num_params = len(params_list)
         all_refs = []
+
+        logger.info(f"[Rank {self.rank}] Broadcasting {num_params} parameters to vLLM")
+        logger.info(f"[Rank {self.rank}] First param device: {params_list[0][1].device}")
 
         for count, (name, param) in enumerate(params_list, start=1):
             hf_name = olmo_core_to_hf_name(name)
@@ -296,9 +300,17 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             ]
             all_refs.extend(refs)
 
+            if count == 1:
+                logger.info(f"[Rank {self.rank}] Starting broadcast for param 1/{num_params}: {hf_name}")
             torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+            if count == 1:
+                logger.info(f"[Rank {self.rank}] Completed broadcast for param 1/{num_params}")
+            elif count == num_params:
+                logger.info(f"[Rank {self.rank}] Completed broadcast for param {num_params}/{num_params}")
 
+        logger.info(f"[Rank {self.rank}] Waiting for ray.get on {len(all_refs)} refs")
         ray.get(all_refs)
+        logger.info(f"[Rank {self.rank}] ray.get completed")
 
         return time.perf_counter() - start_time
 
