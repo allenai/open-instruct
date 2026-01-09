@@ -676,48 +676,6 @@ def maybe_load_reference_logprobs_from_disk(
     return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location
 
 
-def build_deepspeed_config(
-    zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, zero_hpz_partition_size: int = 8
-) -> dict:
-    """Build a DeepSpeed configuration dict from the provided settings."""
-    config = {
-        "bf16": {"enabled": "auto"},
-        "zero_optimization": {
-            "stage": zero_stage,
-            "overlap_comm": True,
-            "contiguous_gradients": True,
-            "reduce_bucket_size": "auto",
-        },
-        "gradient_accumulation_steps": "auto",
-        "gradient_clipping": "auto",
-        "steps_per_print": 1e5,
-        "train_batch_size": "auto",
-        "train_micro_batch_size_per_gpu": "auto",
-        "wall_clock_breakdown": False,
-    }
-
-    if zero_stage == 3:
-        config["zero_optimization"].update(
-            {
-                "sub_group_size": 1e9,
-                "stage3_prefetch_bucket_size": "auto",
-                "stage3_param_persistence_threshold": "auto",
-                "stage3_max_live_parameters": 1e9,
-                "stage3_max_reuse_distance": 1e9,
-                "stage3_gather_16bit_weights_on_model_save": True,
-                "zero_hpz_partition_size": zero_hpz_partition_size,
-            }
-        )
-
-    if offload_optimizer:
-        config["zero_optimization"]["offload_optimizer"] = {"device": "cpu", "pin_memory": True}
-
-    if offload_param:
-        config["zero_optimization"]["offload_param"] = {"device": "cpu", "pin_memory": True}
-
-    return config
-
-
 def compute_grad_norm(model: torch.nn.Module, accelerator: Accelerator) -> torch.Tensor | None:
     """
     Compute the global L2 gradient norm across all parameters.
@@ -765,7 +723,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             zero_hpz_partition_size=args.zero_hpz_partition_size,
         )
         deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=deepspeed_config)
-        logger.info(f"Using DeepSpeed with ZeRO stage {args.zero_stage}, offload_optimizer={args.offload_optimizer}, offload_param={args.offload_param}")
+        logger.info(
+            f"Using DeepSpeed with ZeRO stage {args.zero_stage}, offload_optimizer={args.offload_optimizer}, offload_param={args.offload_param}"
+        )
 
     accelerator = Accelerator(
         dataloader_config=dataloader_config,
