@@ -19,9 +19,13 @@ mkdir -p "$HOME/.triton/autotune"  # Create Triton autotune cache directory to s
 ray stop --force
 rm -rf /tmp/ray/* 2>/dev/null || true
 
+# Use local temp dir to avoid conflicts with shared filesystem
+export RAY_TMPDIR=/tmp/ray_local_$$
+mkdir -p $RAY_TMPDIR
+
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
     echo "Starting Ray head node"
-    ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0
+    ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0 --temp-dir=$RAY_TMPDIR
 else
     echo "Starting Ray worker node $BEAKER_REPLICA_RANK"
     export RAY_ADDRESS="${BEAKER_LEADER_REPLICA_IP}:${RAY_NODE_PORT}"
