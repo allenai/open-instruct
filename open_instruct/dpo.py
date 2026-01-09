@@ -370,7 +370,7 @@ class DPOExperimentConfig(config.Config):
     def dpo_config(self) -> DPOConfig:
         return DPOConfig(
             dpo_beta=self.dpo_beta,
-            dpo_loss_type=self.dpo_loss_type,
+            dpo_loss_type=DPOLossType(self.dpo_loss_type),
             dpo_gamma_beta_ratio=self.dpo_gamma_beta_ratio,
             dpo_label_smoothing=self.dpo_label_smoothing,
             load_balancing_loss=self.load_balancing_loss,
@@ -475,7 +475,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     ref_cache_hash = compute_reference_logprobs_cache_hash(
         model_name_or_path=args.model_name_or_path,
         model_revision=args.model_revision,
-        dpo_loss_type=args.dpo_loss_type,
+        dpo_loss_type=DPOLossType(args.dpo_loss_type),
         concatenated_forward=args.concatenated_forward,
         packing=args.packing,
         use_lora=args.use_lora,
