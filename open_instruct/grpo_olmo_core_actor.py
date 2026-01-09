@@ -8,7 +8,6 @@ allowing distributed GRPO training across multiple GPUs and nodes.
 import logging
 import os
 import socket
-import time
 from datetime import timedelta
 from typing import Any
 
@@ -119,6 +118,14 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         """
         os.environ["NUM_NODES"] = str(self.num_nodes)
         os.environ["LOCAL_WORLD_SIZE"] = str(self.local_world_size)
+
+        # Pre-initialize torch.distributed WITHOUT device_id to avoid NCCL hangs.
+        # When multiple process groups exist (e.g., for vLLM weight sync), setting device_id
+        # in init_process_group can cause hangs. By initializing first without device_id,
+        # OLMo-core will detect it and wrap it instead of re-initializing.
+        # See grpo_fast.py for the same pattern with DeepSpeed.
+        if not torch.distributed.is_initialized():
+            torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=120))
 
         backend = "cpu:gloo,cuda:nccl"
         train.prepare_training_environment(seed=self.seed, backend=backend)
@@ -323,8 +330,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                     for engine in self.vllm_engines
                 ]
                 refss.extend(refs)
-                if count == 1:
-                    time.sleep(0.5)
                 if count <= 3:
                     print(f"[DEBUG] Param {count}/{num_params}: calling broadcast()", file=sys.stderr, flush=True)
             if torch.distributed.get_rank() == 0:
