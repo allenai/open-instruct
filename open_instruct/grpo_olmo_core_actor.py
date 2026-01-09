@@ -277,15 +277,28 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if self.rank != 0 or not self.vllm_engines:
             return 0.0
 
+        torch.cuda.empty_cache()
+
         model = self.train_module.model
+        params_list = list(model.named_parameters())
+        num_params = len(params_list)
+        all_refs = []
 
-        state_dict = {}
-        for name, param in model.named_parameters():
+        for count, (name, param) in enumerate(params_list, start=1):
             hf_name = olmo_core_to_hf_name(name)
-            state_dict[hf_name] = param.data.cpu()
+            empty_cache = count == num_params
 
-        refs = [engine.update_weight.remote(state_dict) for engine in self.vllm_engines]
-        ray.get(refs)
+            refs = [
+                engine.update_weight.remote(
+                    hf_name, dtype=str(param.dtype), shape=tuple(param.shape), empty_cache=empty_cache
+                )
+                for engine in self.vllm_engines
+            ]
+            all_refs.extend(refs)
+
+            torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+
+        ray.get(all_refs)
 
         return time.perf_counter() - start_time
 
