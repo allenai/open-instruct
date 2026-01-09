@@ -1921,6 +1921,7 @@ dependencies = [
     { name = "datasets", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "debugpy", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "deepspeed", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "fastapi", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "hf-transfer", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "immutabledict", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -1940,16 +1941,15 @@ dependencies = [
     { name = "torch", version = "2.9.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.9.0+cu129", source = { registry = "https://download.pytorch.org/whl/cu129" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "transformers", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "uvicorn", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "vllm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "wandb", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
 ]
 
 [package.optional-dependencies]
 code = [
-    { name = "fastapi", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "pydantic", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "requests", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "uvicorn", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
 ]
 
 [package.dev-dependencies]
@@ -1975,7 +1975,7 @@ requires-dist = [
     { name = "datasets", specifier = ">=4.0.0" },
     { name = "debugpy", specifier = ">=1.8.13" },
     { name = "deepspeed", specifier = ">=0.18.3" },
-    { name = "fastapi", marker = "extra == 'code'", specifier = ">=0.100.0" },
+    { name = "fastapi", specifier = ">=0.100.0" },
     { name = "flash-attn", marker = "sys_platform != 'darwin'", specifier = ">=2.8.3" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
@@ -1997,7 +1997,7 @@ requires-dist = [
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = ">=2.9.0,<2.10", index = "https://download.pytorch.org/whl/cu129" },
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = ">=2.9.0,<2.10" },
     { name = "transformers", specifier = ">=4.57.0" },
-    { name = "uvicorn", marker = "extra == 'code'", specifier = ">=0.20.0" },
+    { name = "uvicorn", specifier = ">=0.20.0" },
     { name = "vllm", marker = "sys_platform != 'darwin'", specifier = "==0.12.0" },
     { name = "wandb", specifier = "==0.18.1" },
 ]
