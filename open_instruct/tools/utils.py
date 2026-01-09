@@ -29,8 +29,8 @@ class Tool(ABC):
     _default_tool_description: str = ""
     # Default parameters schema (subclasses can override as class attribute)
     _default_tool_parameters: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
-    # Instance-level tag name (set in __init__ if provided, else uses default)
-    _tag_name: str | None = None
+    # Instance-level override name (set in __init__ if provided, else uses default)
+    _override_name: str | None = None
 
     @property
     def tool_function_name(self) -> str:
@@ -39,11 +39,11 @@ class Tool(ABC):
         This is used both as the XML tag name (e.g., <search>...</search>)
         and as the key for looking up the tool.
 
-        Can be overridden at instantiation via tag_name parameter to allow
+        Can be overridden at instantiation via override_name parameter to allow
         the same tool implementation to use different tags.
         """
-        if self._tag_name is not None:
-            return self._tag_name
+        if self._override_name is not None:
+            return self._override_name
         return self._default_tool_function_name
 
     @property
@@ -107,7 +107,7 @@ class BaseToolConfig:
         # ClassVars are not included in asdict(), so they won't be passed to build()
         tool_class: ClassVar[type[Tool]]
 
-    tag_name: str | None = None
+    override_name: str | None = None
     """Override the default tag/function name for this tool instance."""
 
     def build(self) -> Tool:

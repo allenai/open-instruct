@@ -128,8 +128,8 @@ class Args:
     """JSON configs for each tool (must match length of --tools)."""
     tool_parser: str = "legacy"
     """Tool parser type. Available: legacy, dr_tulu, vllm_hermes, vllm_llama3_json, vllm_qwen3_coder."""
-    tool_tag_names: list[str] | None = None
-    """Custom tag names for tools (must match length of --tools)."""
+    tool_override_names: list[str] | None = None
+    """Custom override names for tools (must match length of --tools)."""
     max_tool_calls: int = 5
     """Maximum number of tool calls per generation."""
     max_concurrent: int = 64
@@ -159,14 +159,14 @@ class Args:
                     f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
                 )
 
-        # Validate tool_tag_names length
-        if self.tool_tag_names is not None:
+        # Validate tool_override_names length
+        if self.tool_override_names is not None:
             if not self.tools:
-                raise ValueError("--tool_tag_names requires --tools to be specified")
-            if len(self.tool_tag_names) != len(self.tools):
+                raise ValueError("--tool_override_names requires --tools to be specified")
+            if len(self.tool_override_names) != len(self.tools):
                 raise ValueError(
-                    f"--tool_tag_names must have same length as --tools. "
-                    f"Got {len(self.tool_tag_names)} for {len(self.tools)} tools."
+                    f"--tool_override_names must have same length as --tools. "
+                    f"Got {len(self.tool_override_names)} for {len(self.tools)} tools."
                 )
 
         # Validate tool parser
@@ -220,7 +220,7 @@ def build_tool_config(args: Args) -> ToolConfig:
         tools=args.tools,
         max_tool_calls=args.max_tool_calls,
         parser=args.tool_parser,
-        tool_tag_names=args.tool_tag_names,
+        tool_override_names=args.tool_override_names,
         tool_configs=tool_configs_dict,
     )
 

@@ -6,6 +6,7 @@ export SERPER_API_KEY=$(beaker secret read hamishivi_SERPER_API_KEY --workspace 
 export CRAWL4AI_API_KEY=$(beaker secret read hamishivi_CRAWL4AI_API_KEY --workspace ai2/dr-tulu-ablations)
 export S2_API_KEY=$(beaker secret read hamishivi_S2_API_KEY --workspace ai2/dr-tulu-ablations)
 export CRAWL4AI_API_URL="http://kennel.csail.mit.edu:11236"  # shannons crawl4ai server.
+export CRAWL4AI_BLOCKLIST_PATH=/stage/rl-rag-mcp/utils/crawl4ai_block_list.txt
 
 # MCP server configuration (can be overridden via environment variables)
 MCP_PORT=${MCP_PORT:-8000}

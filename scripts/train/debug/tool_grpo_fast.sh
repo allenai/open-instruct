@@ -57,6 +57,6 @@ uv run python mason.py \
     --output_dir /output \
     --tools serper_search python \
     --tool_configs '{}' '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute"}' \
-    --tool_tag_names search code \
+    --tool_override_names search code \
     --tool_parser vllm_hermes \
     --push_to_hub false

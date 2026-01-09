@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 #     class MyToolConfig(BaseToolConfig):
 #         tool_class: ClassVar[type[Tool]] = MyTool
 #         some_option: int = 10
-#         # tag_name inherited from BaseToolConfig
+#         # override_name inherited from BaseToolConfig
 #
 #     # In config.py, add to TOOL_REGISTRY:
 #     "mytool": MyToolConfig,
@@ -113,11 +113,11 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
         config_cls = TOOL_REGISTRY[tool_name_lower]
         tool_cls = config_cls.tool_class
 
-        # Get tag name from config or use default
-        if config.tool_tag_names and i < len(config.tool_tag_names):
-            tag_name = config.tool_tag_names[i]
+        # Get override name from config or use default
+        if config.tool_override_names and i < len(config.tool_override_names):
+            override_name = config.tool_override_names[i]
         else:
-            tag_name = getattr(tool_cls, "_default_tool_function_name", tool_name_lower)
+            override_name = getattr(tool_cls, "_default_tool_function_name", tool_name_lower)
 
         # Get description and parameters from class attributes
         description = getattr(tool_cls, "_default_tool_description", "")
@@ -126,7 +126,10 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
         )
 
         definitions.append(
-            {"type": "function", "function": {"name": tag_name, "description": description, "parameters": parameters}}
+            {
+                "type": "function",
+                "function": {"name": override_name, "description": description, "parameters": parameters},
+            }
         )
 
     return definitions
@@ -145,7 +148,7 @@ def _build_tool_args() -> type:
         ("max_tool_calls", int, field(default=5)),
         ("mask_tool_use", bool, field(default=True)),
         ("tool_parser", str, field(default="legacy")),
-        ("tool_tag_names", list[str] | None, field(default=None)),
+        ("tool_override_names", list[str] | None, field(default=None)),
     ]
 
     # Create class
@@ -224,13 +227,13 @@ def _tool_args_post_init(self: Any) -> None:
     if self.tool_parser not in get_available_parsers():
         raise ValueError(f"Unknown parser: {self.tool_parser}. Available: {get_available_parsers()}")
 
-    if self.tool_tag_names is not None:
+    if self.tool_override_names is not None:
         if not self.tools:
-            raise ValueError("--tool_tag_names requires --tools to be specified")
-        if len(self.tool_tag_names) != len(self.tools):
+            raise ValueError("--tool_override_names requires --tools to be specified")
+        if len(self.tool_override_names) != len(self.tools):
             raise ValueError(
-                f"--tool_tag_names must have same length as --tools. "
-                f"Got {len(self.tool_tag_names)} for {len(self.tools)} tools."
+                f"--tool_override_names must have same length as --tools. "
+                f"Got {len(self.tool_override_names)} for {len(self.tools)} tools."
             )
 
 
@@ -254,7 +257,7 @@ def _tool_args_to_tool_config(self: Any) -> "ToolConfig":
         max_tool_calls=self.max_tool_calls,
         mask_tool_use=self.mask_tool_use,
         parser=self.tool_parser,
-        tool_tag_names=self.tool_tag_names,
+        tool_override_names=self.tool_override_names,
         tool_configs=tool_configs_dict,
     )
 
@@ -276,7 +279,7 @@ class ToolConfig:
     max_tool_calls: int = 5
     mask_tool_use: bool = True
     parser: str = "legacy"
-    tool_tag_names: list[str] | None = None
+    tool_override_names: list[str] | None = None
     tool_configs: dict[str, BaseToolConfig] = field(default_factory=_default_tool_configs)
 
     def get_tool_config(self, tool_name: str) -> BaseToolConfig:
@@ -364,8 +367,8 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
         tool_name_lower = tool_name.lower()
         tool_config = config.get_tool_config(tool_name_lower)
 
-        if config.tool_tag_names and hasattr(tool_config, "tag_name"):
-            tool_config.tag_name = config.tool_tag_names[i]
+        if config.tool_override_names and hasattr(tool_config, "override_name"):
+            tool_config.override_name = config.tool_override_names[i]
 
         # Step 1: Create ToolActor from config (config.build() called inside Ray actor)
         actor = create_tool_actor_from_config(config=tool_config)

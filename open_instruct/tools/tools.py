@@ -125,10 +125,10 @@ class PythonCodeTool(Tool):
         "required": ["text"],
     }
 
-    def __init__(self, api_endpoint: str, timeout_seconds: int = 3, tag_name: str | None = None) -> None:
+    def __init__(self, api_endpoint: str, timeout_seconds: int = 3, override_name: str | None = None) -> None:
         self.api_endpoint = api_endpoint
         self.timeout_seconds = timeout_seconds
-        self._tag_name = tag_name
+        self._override_name = override_name
 
     def __call__(self, text: str) -> ToolOutput:
         """Execute Python code via the API."""
@@ -209,10 +209,12 @@ class MassiveDSSearchTool(Tool):
         "required": ["text"],
     }
 
-    def __init__(self, api_endpoint: str | None = None, num_documents: int = 3, tag_name: str | None = None) -> None:
+    def __init__(
+        self, api_endpoint: str | None = None, num_documents: int = 3, override_name: str | None = None
+    ) -> None:
         self.api_endpoint = api_endpoint
         self.num_documents = num_documents
-        self._tag_name = tag_name
+        self._override_name = override_name
 
     def __call__(self, text: str) -> ToolOutput:
         """Search for documents matching the query."""
@@ -303,9 +305,9 @@ class S2SearchTool(Tool):
         "required": ["text"],
     }
 
-    def __init__(self, num_results: int = 10, tag_name: str | None = None) -> None:
+    def __init__(self, num_results: int = 10, override_name: str | None = None) -> None:
         self.num_results = num_results
-        self._tag_name = tag_name
+        self._override_name = override_name
 
     def __call__(self, text: str) -> ToolOutput:
         """Search Semantic Scholar for documents matching the query."""
@@ -402,9 +404,9 @@ class SerperSearchTool(Tool):
         "required": ["text"],
     }
 
-    def __init__(self, num_results: int = 5, tag_name: str | None = None) -> None:
+    def __init__(self, num_results: int = 5, override_name: str | None = None) -> None:
         self.num_results = num_results
-        self._tag_name = tag_name
+        self._override_name = override_name
 
     def __call__(self, text: str) -> ToolOutput:
         """Search Google via Serper for documents matching the query."""
@@ -536,13 +538,13 @@ class DrAgentMCPTool(Tool):
         num_documents: int = 10,
         use_localized_snippets: bool = False,
         context_chars: int = 6000,
-        tag_name: str | None = None,
+        override_name: str | None = None,
         **kwargs: Any,
     ) -> None:
         if not MCP_AVAILABLE:
             raise ImportError("MCP tools require dr_agent package. Install it with: uv sync --extra dr-tulu")
 
-        self._tag_name = tag_name
+        self._override_name = override_name
         self.mcp_tools: list[Any] = []
         self.stop_strings: list[str] = []
         self.max_retries = max_retries

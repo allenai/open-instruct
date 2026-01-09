@@ -74,11 +74,11 @@ class TestPythonCodeTool(unittest.TestCase):
         self.assertEqual(self.tool.api_endpoint, self.api_endpoint)
         self.assertEqual(self.tool.tool_function_name, "python")
 
-    def test_custom_tag_name(self):
-        """Test that tag_name overrides the default tool_function_name."""
-        tool = PythonCodeTool(api_endpoint=self.api_endpoint, tag_name="code")
+    def test_custom_override_name(self):
+        """Test that override_name overrides the default tool_function_name."""
+        tool = PythonCodeTool(api_endpoint=self.api_endpoint, override_name="code")
         self.assertEqual(tool.tool_function_name, "code")
-        # Without tag_name, should use default
+        # Without override_name, should use default
         tool_default = PythonCodeTool(api_endpoint=self.api_endpoint)
         self.assertEqual(tool_default.tool_function_name, "python")
 
@@ -120,8 +120,8 @@ class TestPythonCodeTool(unittest.TestCase):
         self.assertFalse(result.timeout)
 
 
-class TestTagNameOverride(unittest.TestCase):
-    """Test the tag_name override functionality for tools."""
+class TestOverrideNameOverride(unittest.TestCase):
+    """Test the override_name override functionality for tools."""
 
     def test_serper_default_tag(self):
         """SerperSearchTool defaults to 'serper_search' tag."""
@@ -130,7 +130,7 @@ class TestTagNameOverride(unittest.TestCase):
 
     def test_serper_custom_tag(self):
         """SerperSearchTool can use a custom tag."""
-        tool = SerperSearchTool(tag_name="google")
+        tool = SerperSearchTool(override_name="google")
         self.assertEqual(tool.tool_function_name, "google")
 
     def test_s2_default_tag(self):
@@ -140,57 +140,59 @@ class TestTagNameOverride(unittest.TestCase):
 
     def test_s2_custom_tag_via_config(self):
         """S2SearchTool can use a custom tag via config."""
-        config = S2SearchToolConfig(tag_name="search")
+        config = S2SearchToolConfig(override_name="search")
         tool = config.build()
         self.assertEqual(tool.tool_function_name, "search")
 
     def test_serper_custom_tag_via_config(self):
         """SerperSearchTool can use a custom tag via config."""
-        config = SerperSearchToolConfig(tag_name="websearch")
+        config = SerperSearchToolConfig(override_name="websearch")
         tool = config.build()
         self.assertEqual(tool.tool_function_name, "websearch")
 
 
-class TestToolConfigTagName(unittest.TestCase):
-    """Test tag_name handling in ToolConfig and build_tools_from_config."""
+class TestToolConfigOverrideName(unittest.TestCase):
+    """Test override_name handling in ToolConfig and build_tools_from_config."""
 
-    def test_single_tool_tag_name_override(self):
-        """Single tool with tag_name override."""
-        config = ToolConfig(tools=["s2_search"], tool_tag_names=["search"])
+    def test_single_tool_override_name_override(self):
+        """Single tool with override_name override."""
+        config = ToolConfig(tools=["s2_search"], tool_override_names=["search"])
         tools, stop_strings = build_tools_from_config(config)
         # The tool should be keyed by the overridden tag name
         self.assertIn("search", tools)
         self.assertEqual(tools["search"].tool_function_name, "search")
 
-    def test_multiple_tools_with_tag_names(self):
-        """Multiple tools with corresponding tag names."""
-        config = ToolConfig(tools=["s2_search", "serper_search"], tool_tag_names=["academic_search", "web_search"])
+    def test_multiple_tools_with_override_names(self):
+        """Multiple tools with corresponding override names."""
+        config = ToolConfig(
+            tools=["s2_search", "serper_search"], tool_override_names=["academic_search", "web_search"]
+        )
         tools, stop_strings = build_tools_from_config(config)
         self.assertIn("academic_search", tools)
         self.assertIn("web_search", tools)
         self.assertEqual(tools["academic_search"].tool_function_name, "academic_search")
         self.assertEqual(tools["web_search"].tool_function_name, "web_search")
 
-    def test_tool_args_to_config_tag_names(self):
-        """ToolArgs.to_tool_config() passes through tag_names list."""
-        args = ToolArgs(tools=["serper_search", "s2_search"], tool_tag_names=["search", "papers"])
+    def test_tool_args_to_config_override_names(self):
+        """ToolArgs.to_tool_config() passes through override_names list."""
+        args = ToolArgs(tools=["serper_search", "s2_search"], tool_override_names=["search", "papers"])
         config = args.to_tool_config()
-        self.assertEqual(config.tool_tag_names, ["search", "papers"])
+        self.assertEqual(config.tool_override_names, ["search", "papers"])
 
     def test_tool_args_validation_mismatched_lengths(self):
-        """ToolArgs raises error when tool_tag_names length doesn't match tools."""
+        """ToolArgs raises error when tool_override_names length doesn't match tools."""
         with self.assertRaises(ValueError) as context:
-            ToolArgs(tools=["serper_search", "s2_search"], tool_tag_names=["search"])
+            ToolArgs(tools=["serper_search", "s2_search"], tool_override_names=["search"])
         self.assertIn("same length", str(context.exception))
 
-    def test_tool_args_validation_tag_names_without_tools(self):
-        """ToolArgs raises error when tool_tag_names provided without tools."""
+    def test_tool_args_validation_override_names_without_tools(self):
+        """ToolArgs raises error when tool_override_names provided without tools."""
         with self.assertRaises(ValueError) as context:
-            ToolArgs(tool_tag_names=["search"])
+            ToolArgs(tool_override_names=["search"])
         self.assertIn("requires --tools", str(context.exception))
 
-    def test_no_tag_names_uses_defaults(self):
-        """When tool_tag_names is not provided, tools use their defaults."""
+    def test_no_override_names_uses_defaults(self):
+        """When tool_override_names is not provided, tools use their defaults."""
         config = ToolConfig(tools=["s2_search", "serper_search"])
         tools, stop_strings = build_tools_from_config(config)
         self.assertIn("s2_search", tools)
@@ -208,10 +210,10 @@ class TestToolConfigs(unittest.TestCase):
 
     def test_tool_configs_multiple_fields(self):
         """Test that tool_configs works with multiple fields."""
-        args = ToolArgs(tools=["s2_search"], tool_configs=['{"num_results": 20, "tag_name": "papers"}'])
+        args = ToolArgs(tools=["s2_search"], tool_configs=['{"num_results": 20, "override_name": "papers"}'])
         config = args.to_tool_config()
         self.assertEqual(config.get_tool_config("s2_search").num_results, 20)
-        self.assertEqual(config.get_tool_config("s2_search").tag_name, "papers")
+        self.assertEqual(config.get_tool_config("s2_search").override_name, "papers")
 
     def test_tool_configs_multiple_tools(self):
         """Test tool_configs with multiple tools."""
