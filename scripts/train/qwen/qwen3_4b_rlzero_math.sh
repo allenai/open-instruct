@@ -80,4 +80,5 @@ uv run mason.py \
     --eval_on_step_0 True \
     --oe_eval_tasks $EVALS \
     --load_ref_policy False \
+    --keep_last_n_checkpoints -1 \
     --oe_eval_gpu_multiplier 2 --push_to_hub False $@
