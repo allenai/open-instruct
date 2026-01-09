@@ -21,6 +21,12 @@ repos:
         args: [--config, pyproject.toml]
         files: ^(open_instruct/|[^/]*mason\.py$)
 
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.8.0-1
+    hooks:
+      - id: shfmt
+        args: ["-i", "4", "-w"]
+
   - repo: local
     hooks:
       - id: export-requirements

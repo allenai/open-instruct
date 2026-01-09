@@ -48,7 +48,7 @@ import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
-from accelerate.utils import DeepSpeedPlugin, DistributedType, InitProcessGroupKwargs, set_seed
+from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
@@ -155,22 +155,6 @@ class FlatArguments:
     )
     sync_each_batch: bool = False
     """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
-    zero_stage: int | None = field(
-        default=None,
-        metadata={
-            "help": "DeepSpeed ZeRO optimization stage (0, 1, 2, or 3). If None, DeepSpeed config must be provided via accelerate launch."
-        },
-    )
-    offload_optimizer: bool = field(
-        default=False,
-        metadata={"help": "Offload optimizer states to CPU to save GPU memory. Only used if zero_stage is set."},
-    )
-    offload_param: bool = field(
-        default=False, metadata={"help": "Offload parameters to CPU to save GPU memory. Only used with zero_stage 3."}
-    )
-    zero_hpz_partition_size: int = field(
-        default=8, metadata={"help": "Hierarchical partition size for ZeRO stage 3. Only used with zero_stage 3."}
-    )
     low_cpu_mem_usage: bool = field(
         default=False,
         metadata={
@@ -211,7 +195,7 @@ class FlatArguments:
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
     ref_logprobs_cache_dir: str | None = field(
-        default=None, metadata={"help": "Directory to cache reference logprobs. If None, no disk caching is used."}
+        default=None, metadata={"help": "Directory to cache reference logprobs. Only supports num_train_epochs=1."}
     )
     dataset_config_name: str | None = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
@@ -431,12 +415,6 @@ class FlatArguments:
                 loaded_dict = _convert_str_dict(loaded_dict)
                 setattr(self, dict_feld, loaded_dict)
 
-        if self.zero_stage is not None:
-            if self.zero_stage not in [0, 1, 2, 3]:
-                raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
-            if self.offload_param and self.zero_stage != 3:
-                raise ValueError("offload_param can only be used with zero_stage 3")
-
 
 def build_deepspeed_config(
     zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, zero_hpz_partition_size: int = 8
@@ -611,12 +589,12 @@ def load_ref_logprobs_from_disk(cache_path: str) -> tuple:
     if not os.path.exists(cache_path):
         return None, None
     logger.info(f"Loading reference logprobs cache from {cache_path}")
-    cache_data = torch.load(cache_path)
+    cache_data = torch.load(cache_path, weights_only=False)
     return (cache_data["epoch_cached_reference_chosen_logps"], cache_data["epoch_cached_reference_rejected_logps"])
 
 
 def maybe_load_reference_logprobs_from_disk(
-    args: FlatArguments, tc: TokenizerConfig, accelerator
+    args: FlatArguments, tc: TokenizerConfig, accelerator: Accelerator
 ) -> tuple[list | None, list | None, str | None]:
     """Load reference logprobs from disk if cache directory is configured."""
     if args.num_train_epochs != 1:
@@ -674,32 +652,6 @@ def maybe_load_reference_logprobs_from_disk(
         )
 
     return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps, cache_location
-
-
-def compute_grad_norm(model: torch.nn.Module, accelerator: Accelerator) -> torch.Tensor | None:
-    """
-    Compute the global L2 gradient norm across all parameters.
-    Uses DeepSpeed's cached norm when available so ZeRO-sharded grads are handled correctly.
-    Returns None if the norm cannot be computed (e.g., no grads yet).
-    """
-    if accelerator.distributed_type == DistributedType.DEEPSPEED:
-        ds_engine_wrapper = getattr(accelerator, "deepspeed_engine_wrapped", None)
-        if ds_engine_wrapper is not None and hasattr(ds_engine_wrapper, "get_global_grad_norm"):
-            grad_norm = ds_engine_wrapper.get_global_grad_norm()
-            if grad_norm is not None:
-                return torch.as_tensor(grad_norm, device=accelerator.device, dtype=torch.float32)
-
-    unwrapped_model = accelerator.unwrap_model(model)
-    total_norm = torch.zeros((), device="cpu")
-    has_grads = False
-    for param in unwrapped_model.parameters():
-        if param.grad is None:
-            continue
-        has_grads = True
-        total_norm += param.grad.detach().float().pow(2).sum().cpu()
-    if not has_grads:
-        return None
-    return total_norm.sqrt().to(accelerator.device)
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
@@ -1198,7 +1150,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     raise ValueError(f"Invalid dpo loss type {args.dpo_loss_type}.")
                 # TODO: metric logging
                 loss = losses.mean()
-                grad_norm = None
                 if args.load_balancing_loss:
                     weighted_aux_loss = args.load_balancing_weight * aux_loss
                     loss += weighted_aux_loss
@@ -1212,8 +1163,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
-                if args.log_grad_norm and accelerator.sync_gradients:
-                    grad_norm = compute_grad_norm(model, accelerator)
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()
@@ -1226,7 +1175,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                             if isinstance(grad_norm_this_step, torch.Tensor)
                             else float(grad_norm_this_step)
                         )
-                        local_metrics["grad_norm_tyler"] += grad_norm_value * args.gradient_accumulation_steps
+                        local_metrics["grad_norm"] += grad_norm_value * args.gradient_accumulation_steps
 
                     local_metrics["train_loss"] += loss
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
@@ -1242,8 +1191,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         local_metrics["rewards/margin"] += margin
                     local_metrics["logps/chosen"] += policy_chosen_logps.mean()
                     local_metrics["logps/rejected"] += policy_rejected_logps.mean()
-                    if args.log_grad_norm and grad_norm is not None:
-                        local_metrics["grad_norm"] += grad_norm * args.gradient_accumulation_steps
                     if args.load_balancing_loss:
                         local_metrics["aux_loss"] += weighted_aux_loss
 
@@ -1290,7 +1237,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     }
                     if args.log_grad_norm:
                         metrics_to_log["grad_norm"] = global_metrics["grad_norm"]
-                        metrics_to_log["grad_norm_tyler"] = global_metrics["grad_norm_tyler"]
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                         metrics_to_log.update(
                             {
