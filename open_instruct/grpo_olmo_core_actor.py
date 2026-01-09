@@ -281,8 +281,13 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         torch.cuda.set_device(self.local_rank)
         print(f"[DEBUG] after cuda.set_device on rank {self.rank}", file=sys.stderr, flush=True)
 
+        print(f"[DEBUG] getting train_module.model on rank {self.rank}", file=sys.stderr, flush=True)
         model = self.train_module.model
+        print(f"[DEBUG] got model on rank {self.rank}", file=sys.stderr, flush=True)
         params_list = list(model.named_parameters())
+        print(
+            f"[DEBUG] got params_list with {len(params_list)} params on rank {self.rank}", file=sys.stderr, flush=True
+        )
         num_params = len(params_list)
         refss = []
 
