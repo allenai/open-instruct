@@ -453,7 +453,10 @@ def main(
             continue
 
         weight_broadcast_futures = [m.broadcast_to_vllm.remote() for m in policy_group.models]
-        sync_times, _ = ray_get_with_progress(weight_broadcast_futures, desc="Broadcasting weights to vLLM")
+        nested_refs, sync_times = ray_get_with_progress(weight_broadcast_futures, desc="Broadcasting weights to vLLM")
+        all_update_refs = [ref for refs in nested_refs for ref in refs]
+        if all_update_refs:
+            ray.get(all_update_refs)
 
         ray.get(actor_manager.set_should_stop.remote(False))
 

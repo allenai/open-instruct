@@ -264,55 +264,40 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         return scalar_metrics, array_metrics
 
-    def broadcast_to_vllm(self) -> float:
+    def broadcast_to_vllm(self) -> list:
         """Broadcast model weights to vLLM engines.
 
+        Follows the same pattern as grpo_fast.py - returns Ray ObjectRefs
+        for the caller to wait on, rather than blocking internally.
+
         Returns:
-            Time taken for the broadcast in seconds.
+            List of Ray ObjectRefs for the weight update calls.
         """
-        import time
-
-        start_time = time.perf_counter()
-
-        if self.rank != 0 or not self.vllm_engines:
-            return 0.0
-
         torch.cuda.empty_cache()
         torch.cuda.set_device(self.local_rank)
 
         model = self.train_module.model
         params_list = list(model.named_parameters())
         num_params = len(params_list)
-        all_refs = []
-
-        logger.info(f"[Rank {self.rank}] Broadcasting {num_params} parameters to vLLM")
-        logger.info(f"[Rank {self.rank}] First param device: {params_list[0][1].device}")
+        refss = []
 
         for count, (name, param) in enumerate(params_list, start=1):
             hf_name = olmo_core_to_hf_name(name)
-            empty_cache = count == num_params
+            if torch.distributed.get_rank() == 0:
+                refs = [
+                    engine.update_weight.remote(
+                        hf_name, dtype=str(param.dtype), shape=tuple(param.shape), empty_cache=count == num_params
+                    )
+                    for engine in self.vllm_engines
+                ]
+                refss.extend(refs)
+            if torch.distributed.get_rank() == 0:
+                torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
 
-            refs = [
-                engine.update_weight.remote(
-                    hf_name, dtype=str(param.dtype), shape=tuple(param.shape), empty_cache=empty_cache
-                )
-                for engine in self.vllm_engines
-            ]
-            all_refs.extend(refs)
-
-            if count == 1:
-                logger.info(f"[Rank {self.rank}] Starting broadcast for param 1/{num_params}: {hf_name}")
-            torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-            if count == 1:
-                logger.info(f"[Rank {self.rank}] Completed broadcast for param 1/{num_params}")
-            elif count == num_params:
-                logger.info(f"[Rank {self.rank}] Completed broadcast for param {num_params}/{num_params}")
-
-        logger.info(f"[Rank {self.rank}] Waiting for ray.get on {len(all_refs)} refs")
-        ray.get(all_refs)
-        logger.info(f"[Rank {self.rank}] ray.get completed")
-
-        return time.perf_counter() - start_time
+        all_refs = []
+        if torch.distributed.get_rank() == 0:
+            all_refs.extend(refss)
+        return all_refs
 
     def update_ref_policy(self) -> None:
         """Update reference policy using Polyak averaging."""
