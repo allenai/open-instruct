@@ -624,21 +624,56 @@ async def main_monarch(
     class GRPOTrainerActor(Actor):
         """Monarch actor for GRPO training."""
 
-        def __init__(self, config_args, config_tc, config_model, config_streaming, config_vllm):
+        def __init__(
+            self,
+            config_args,
+            config_tc,
+            config_model,
+            config_streaming,
+            config_vllm,
+            master_addr: str,
+            master_port: str,
+            world_size: int,
+        ):
+            rank = current_rank().rank
+
+            os.environ["RANK"] = str(rank)
+            os.environ["LOCAL_RANK"] = str(rank)
+            os.environ["WORLD_SIZE"] = str(world_size)
+            os.environ["LOCAL_WORLD_SIZE"] = str(world_size)
+            os.environ["MASTER_ADDR"] = master_addr
+            os.environ["MASTER_PORT"] = master_port
+
             self.args = config_args
             self.tc = config_tc
             self.model_config = config_model
             self.streaming_config = config_streaming
             self.vllm_config = config_vllm
-            self.rank = current_rank().rank
 
         @endpoint
         async def train(self):
             """Run GRPO training."""
             main(self.args, self.tc, self.model_config, self.streaming_config, self.vllm_config)
 
-    proc_mesh = this_host().spawn_procs({"gpus": 1})
-    trainers = proc_mesh.spawn("grpo_trainer", GRPOTrainerActor, args, tc, model_config, streaming_config, vllm_config)
+    from open_instruct.actor_manager import find_free_port
+
+    num_training_gpus = args.num_learners_per_node[0] if args.num_learners_per_node else 8
+    master_addr = os.environ.get("MASTER_ADDR", "localhost")
+    master_port = str(find_free_port())
+
+    proc_mesh = this_host().spawn_procs({"gpus": num_training_gpus})
+    trainers = proc_mesh.spawn(
+        "grpo_trainer",
+        GRPOTrainerActor,
+        args,
+        tc,
+        model_config,
+        streaming_config,
+        vllm_config,
+        master_addr,
+        master_port,
+        num_training_gpus,
+    )
     await trainers.train.call()
 
     logger.info("Monarch-based GRPO training complete")
