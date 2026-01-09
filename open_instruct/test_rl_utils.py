@@ -395,6 +395,22 @@ class TestMaskedMean(unittest.TestCase):
         )
         self.assertTrue(torch.allclose(result, expected))
 
+    def test_empty_mask_returns_zero(self):
+        """Test that an all-zero mask returns 0 instead of NaN/inf (division by zero)."""
+        values = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        mask = torch.zeros_like(values)
+        result = rl_utils.masked_mean(values, mask, axis=1)
+        self.assertEqual(result.item(), 0.0)
+
+    def test_empty_mask_per_row(self):
+        """Test empty mask handling when some rows have valid elements and others don't."""
+        values = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        mask = torch.tensor([[1.0, 1.0, 0.0], [0.0, 0.0, 0.0]])  # Second row is empty
+        result = rl_utils.masked_mean(values, mask, axis=1)
+        # First row: (1+2)/2 = 1.5, second row: 0 (empty)
+        # Mean of [1.5, 0] = 0.75
+        self.assertAlmostEqual(result.item(), 0.75)
+
 
 if __name__ == "__main__":
     unittest.main()
