@@ -15,11 +15,9 @@ def live_subprocess_output(cmd: list[str]) -> str:
             output_lines.append(line.strip())
     process.wait()
     if process.returncode != 0:
-        # Since stderr is redirected to stdout, the full output (including errors) is in output_lines.
         full_output = "\n".join(output_lines)
         error_message = f"Command `{' '.join(cmd)}` failed with return code {process.returncode}:\n{full_output}"
         raise Exception(error_message)
-
 
     return "\n".join(output_lines)
 
