@@ -8,6 +8,7 @@ allowing distributed GRPO training across multiple GPUs and nodes.
 import logging
 import os
 import socket
+import time
 from datetime import timedelta
 from typing import Any
 
@@ -322,6 +323,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                     for engine in self.vllm_engines
                 ]
                 refss.extend(refs)
+                if count == 1:
+                    time.sleep(0.5)
                 if count <= 3:
                     print(f"[DEBUG] Param {count}/{num_params}: calling broadcast()", file=sys.stderr, flush=True)
             if torch.distributed.get_rank() == 0:
