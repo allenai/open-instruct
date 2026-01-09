@@ -13,6 +13,7 @@ uv run python mason.py \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU on Beaker test script." \
        --pure_docker_mode \
+       --no-host-networking \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
        --num_nodes 1 \
