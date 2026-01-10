@@ -39,7 +39,7 @@ wheels = [
 [[package]]
 name = "ai2-olmo-core"
 version = "2.4.0"
-source = { git = "https://github.com/allenai/OLMo-core.git?rev=finbarr%2Fqwen-3#001b5d62e5cb7b222b8f22cb5a4e71fdff03a37f" }
+source = { git = "https://github.com/allenai/OLMo-core.git?rev=finbarr%2Fskip-init-if-initialized#142dd11ecce00fdf6bbde8833c018de3594399ff" }
 dependencies = [
     { name = "bettermap" },
     { name = "cached-path" },
@@ -2265,7 +2265,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.10.1" },
-    { name = "ai2-olmo-core", git = "https://github.com/allenai/OLMo-core.git?rev=finbarr%2Fqwen-3" },
+    { name = "ai2-olmo-core", git = "https://github.com/allenai/OLMo-core.git?rev=finbarr%2Fskip-init-if-initialized" },
     { name = "antlr4-python3-runtime", specifier = "==4.11" },
     { name = "backoff", specifier = ">=2.2.1" },
     { name = "bitsandbytes", marker = "sys_platform != 'darwin'", specifier = ">=0.44.1" },

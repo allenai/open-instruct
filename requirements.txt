@@ -6,7 +6,7 @@ accelerate==1.12.0
     # via
     #   open-instruct
     #   peft
-ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@001b5d62e5cb7b222b8f22cb5a4e71fdff03a37f
+ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@142dd11ecce00fdf6bbde8833c018de3594399ff
     # via open-instruct
 aiohappyeyeballs==2.6.1
     # via aiohttp
