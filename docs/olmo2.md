@@ -259,7 +259,7 @@ python open_instruct/grpo_fast.py \
     --non_stop_penalty_value 0.0 \
     --num_epochs 1 \
     --num_learners_per_node 4 8 \
-    --num_mini_batches 1 \
+    --num_mini_batches 2 \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 48 \
     --pack_length 4096 \
@@ -305,7 +305,7 @@ python open_instruct/grpo_fast.py \
     --non_stop_penalty_value 0.0 \
     --num_epochs 1 \
     --num_learners_per_node 4 8 \
-    --num_mini_batches 1 \
+    --num_mini_batches 2 \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 48 \
     --pack_length 4096 \
