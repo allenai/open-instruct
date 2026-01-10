@@ -432,14 +432,17 @@ class F1Verifier(VerifierFunction):
         super().__init__("string_f1", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self, tokenized_prediction: list[int], prediction: str, label: str | list[str], query: str | None = None
     ) -> VerificationResult:
         # remove thinking section from the prediction
         prediction = prediction.split("</think>")[-1]
         # remove answer tags from the prediction
         prediction = prediction.replace("<answer>", "").replace("</answer>", "")
         # return f1 score
-        score = f1_score(prediction, label)["f1"]
+        if isinstance(label, list):
+            score = max(f1_score(prediction, str(lab))["f1"] for lab in label)
+        else:
+            score = f1_score(prediction, label)["f1"]
         return VerificationResult(score=score)
 
 

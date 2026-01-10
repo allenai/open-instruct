@@ -103,6 +103,8 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, calculate_advantages_packed, pack_sequences
+from open_instruct.tools.config import ToolArgs, build_tools_from_config
+from open_instruct.tools.proxy import create_tool_proxies
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -360,25 +362,9 @@ class Args:
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
-    # Tool settings
-    tools: list[str] | None = None
-    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: tuple[int, ...] = (5,)
-    """Maximum number of tool calls allowed. Can be either a single integer (applies to all tools) or a tuple of integers
-    with length 1 (applies to all tools) or matching the length of the tools list (per-tool limit)."""
-    mask_tool_use: bool = True
-    """Whether to mask the tool output. By default on."""
+    # Tool settings (main tool args are in ToolArgs dataclass)
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs from the tools or not."""
-
-    # rl-rag specific settngs
-    number_documents_to_search: int = 3
-    """The maximum number of documents to retrieve for each query."""
-    search_api_endpoint: str | None = None
-    """The API endpoint for the search engine."""
-
-    # code-tool specific settings
-    code_tool_api_endpoint: str | None = None
 
     def __post_init__(self):
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
@@ -1155,6 +1141,9 @@ def vllm_generate_thread(
         tool_outputs = []
         tool_runtimes = []
         tool_calleds = []
+        tool_call_counts = []
+        tool_error_counts = []
+        tool_timeout_counts = []
         for outputs in all_outputs:
             response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
             finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
@@ -1166,6 +1155,11 @@ def vllm_generate_thread(
                 tool_outputs.extend([out.tool_output for output in outputs for out in output.outputs])
                 tool_runtimes.extend([out.tool_runtime for output in outputs for out in output.outputs])
                 tool_calleds.extend([out.tool_called for output in outputs for out in output.outputs])
+                tool_call_counts.extend([out.tool_call_counts or {} for output in outputs for out in output.outputs])
+                tool_error_counts.extend([out.tool_error_counts or {} for output in outputs for out in output.outputs])
+                tool_timeout_counts.extend(
+                    [out.tool_timeout_counts or {} for output in outputs for out in output.outputs]
+                )
         # if not using the tool, mask is all 1s
         if not args.tool_use:
             masks = [[1] * len(response_ids[i]) for i in range(len(response_ids))]
@@ -1175,11 +1169,24 @@ def vllm_generate_thread(
             tool_outputs = [""] * len(response_ids)
             tool_runtimes = [0] * len(response_ids)
             tool_calleds = [False] * len(response_ids)
+            tool_call_counts = [{}] * len(response_ids)
+            tool_error_counts = [{}] * len(response_ids)
+            tool_timeout_counts = [{}] * len(response_ids)
         return (
             response_ids,
             finish_reasons,
             masks,
-            (num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds),
+            (
+                num_calls,
+                timeouts,
+                tool_errors,
+                tool_outputs,
+                tool_runtimes,
+                tool_calleds,
+                tool_call_counts,
+                tool_error_counts,
+                tool_timeout_counts,
+            ),
         )
 
     for training_step in range(resume_training_step, num_training_steps + 1):
@@ -1222,7 +1229,17 @@ def data_preparation_thread(
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons, masks, infos = inference_results_Q.get()
-            num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+            (
+                num_calls,
+                timeouts,
+                tool_errors,
+                tool_outputs,
+                tool_runtimes,
+                tool_calleds,
+                tool_call_counts,
+                tool_error_counts,
+                tool_timeout_counts,
+            ) = infos
             good_outputs = [
                 len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
                 for i in range(len(tool_outputs))
@@ -1349,14 +1366,45 @@ def data_preparation_thread(
             "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
             "val/sequence_lengths_solved_hist": sequence_length_solved,
             "val/stop_rate": stop_rate,
-            "val/num_calls_rate": np.array(num_calls).mean(),
-            "val/timeouts_rate": np.array(timeouts).mean(),
-            "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
-            "val/good_outputs_rate": np.array(good_outputs).mean(),
-            "val/tool_runtimes_rate": np.array(tool_runtimes).mean(),
-            "val/tool_calleds_rate": np.array(tool_calleds).mean(),
+            "tool/all_num_calls_rate": np.array(num_calls).mean(),
+            "tool/all_timeouts_rate": np.array(timeouts).mean(),
+            "tool/all_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
+            "tool/all_good_outputs_rate": np.array(good_outputs).mean(),
+            "tool/all_runtimes_rate": np.array(tool_runtimes).mean(),
+            "tool/all_calleds_rate": np.array(tool_calleds).mean(),
             **reward_metrics,
         }
+
+        # Compute per-tool metrics from tool_call_counts
+        if tool_call_counts:
+            # Aggregate all tool names across samples
+            all_tool_names: set[str] = set()
+            for counts in tool_call_counts:
+                all_tool_names.update(counts.keys())
+
+            for tool_name in all_tool_names:
+                # called_rate: % of samples that called this tool at least once
+                samples_that_called = sum(1 for counts in tool_call_counts if counts.get(tool_name, 0) > 0)
+                called_rate = samples_that_called / len(tool_call_counts)
+                # total_calls: total number of calls to this tool across all samples
+                total_calls = sum(counts.get(tool_name, 0) for counts in tool_call_counts)
+                # calls_per_sample: average calls per sample
+                calls_per_sample = total_calls / len(tool_call_counts)
+                # error_rate: total errors / total calls for this tool
+                total_errors = sum(counts.get(tool_name, 0) for counts in tool_error_counts)
+                error_rate = total_errors / total_calls if total_calls > 0 else 0.0
+                # timeout_rate: total timeouts / total calls for this tool
+                total_timeouts = sum(counts.get(tool_name, 0) for counts in tool_timeout_counts)
+                timeout_rate = total_timeouts / total_calls if total_calls > 0 else 0.0
+                # good_rate: (total_calls - errors - timeouts) / total_calls
+                good_calls = total_calls - total_errors - total_timeouts
+                good_rate = good_calls / total_calls if total_calls > 0 else 0.0
+
+                metrics[f"tool/{tool_name}_called_rate"] = called_rate
+                metrics[f"tool/{tool_name}_calls_per_sample"] = calls_per_sample
+                metrics[f"tool/{tool_name}_error_rate"] = error_rate
+                metrics[f"tool/{tool_name}_timeout_rate"] = timeout_rate
+                metrics[f"tool/{tool_name}_good_rate"] = good_rate
 
         if args.save_traces:
             traces = {
@@ -1387,7 +1435,7 @@ def data_preparation_thread(
         )
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, tool_args: ToolArgs, reward_fn: Callable):
     # ------------------------------------------------------------
     # Setup tokenizer
     tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
@@ -1434,7 +1482,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = args.tools is not None and len(args.tools) > 0
+    args.tool_use = tool_args.tools is not None and len(tool_args.tools) > 0
 
     # ------------------------------------------------------------
     # Setup experiment tracking and seeds
@@ -1521,25 +1569,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     max_len = args.max_prompt_token_length + args.response_length
     # make tool list
     tool_objects = {}
-    if args.tools:
-        for tool in args.tools:
-            if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
+    # Set up tools using the composable tool configuration
+    tool_config = tool_args.to_tool_config()
+    tool_setup = build_tools_from_config(tool_config)
+    tool_objects = tool_setup.tools
 
-                tool = SearchTool(
-                    start_str="<query>",
-                    end_str="</query>",
-                    api_endpoint=args.search_api_endpoint,
-                    number_documents_to_search=args.number_documents_to_search,
-                )
-                tool_objects[tool.end_str] = tool
-            elif tool.lower() == "code":
-                from open_instruct.tool_utils.tools import PythonCodeTool
-
-                tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
-                tool_objects[tool.end_str] = tool
-            else:
-                raise ValueError(f"Unknown tool: {tool}")
+    # Wrap tools in Ray actors for better serialization across processes
+    if tool_objects:
+        print(f"Wrapping {len(tool_objects)} tool(s) in ToolProxy actors")
+        tool_objects = create_tool_proxies(tool_objects)
 
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
@@ -1555,7 +1593,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
-        max_tool_calls=args.max_tool_calls,
+        tool_parser=tool_setup.parser,
+        max_tool_calls=tool_config.max_tool_calls,
     )
     resume_training_step = ray.get(inits)[0] + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
@@ -1571,7 +1610,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # Setup training
     stop_strings = [] if args.stop_strings is None else args.stop_strings
     if args.tool_use:
-        stop_strings += list(tool_objects.keys())
+        stop_strings += tool_setup.stop_strings
     generation_config = SamplingParams(
         temperature=args.temperature,
         top_p=0.98,  # prevent rare out-of-vocab tokens with qwen
@@ -1890,11 +1929,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
-    args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
+    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig, ToolArgs))
+    args, tokenizer_config, model_config, tool_args = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
+    assert isinstance(tool_args, ToolArgs)
 
     reward_fn_mapping = build_all_verifiers(args)
 
@@ -1907,7 +1947,17 @@ if __name__ == "__main__":
         infos: list[list[int]],
         queries: list[str] | None = None,
     ) -> list[float]:
-        num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+        (
+            num_calls,
+            timeouts,
+            tool_errors,
+            tool_outputs,
+            tool_runtimes,
+            tool_calleds,
+            _tool_call_counts,
+            _tool_error_counts,
+            _tool_timeout_counts,
+        ) = infos
         good_outputs = [
             len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
             for i in range(len(tool_outputs))
@@ -1970,4 +2020,4 @@ if __name__ == "__main__":
 
         return scores, metrics
 
-    main(args, tokenizer_config, model_config, reward_fn)
+    main(args, tokenizer_config, model_config, tool_args, reward_fn)

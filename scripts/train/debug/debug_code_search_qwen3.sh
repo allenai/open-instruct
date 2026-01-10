@@ -1,8 +1,8 @@
 #!/bin/bash
-# Local tool use training script with code execution and search
-#
+# 1-gpu training script for code and search tools with vllm qwen3 xml parser.
+
 # Note: replace with your own key if outside of ai2.
-export SERPER_API_KEY=$(beaker secret read hamishivi_SERPER_API_KEY --workspace ai2/olmo-instruct)
+export SERPER_API_KEY=$(beaker secret read hamishivi_SERPER_API_KEY --workspace ai2/dr-tulu-ablations)
 
 # Check if we're using local code server or remote
 USE_LOCAL_CODE_SERVER=${USE_LOCAL_CODE_SERVER:-false}
@@ -34,11 +34,12 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 16 \
     --dataset_mixer_eval_list_splits train \
-    --max_prompt_token_length 512 \
-    --response_length 512 \
+    --max_prompt_token_length 2048 \
+    --response_length 2048 \
     --active_sampling \
+    --inflight_updates \
     --async_steps 8 \
-    --pack_length 1024 \
+    --pack_length 4096 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
     --num_samples_per_prompt_rollout 4 \
@@ -46,13 +47,13 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
-    --chat_template_name r1_simple_chat_postpend_think_tool_vllm \
     --learning_rate 3e-7 \
     --total_episodes 200 \
-    --deepspeed_stage 2 \
+    --deepspeed_stage 3 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
+    --vllm_num_engines 1 \
     --beta 0.01 \
     --seed 3 \
     --local_eval_every 1 \
@@ -65,8 +66,6 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --tools serper_search python \
     --tool_configs '{}' '{"api_endpoint": "'"$CODE_SERVER_ENDPOINT"'"}' \
     --tool_override_names search code \
+    --tool_parser vllm_hermes \
     --push_to_hub false
-    # To swap search backend while keeping same tags, change to:
-    # --tools s2_search python \
-    # --tool_configs '{}' '{"api_endpoint": "'"$CODE_SERVER_ENDPOINT"'"}' \
-    # --tool_override_names search code \
+

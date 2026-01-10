@@ -1284,12 +1284,26 @@ def rlvr_tokenize_v1(
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
+    system_prompt_override: Optional[str] = None,
+    tools: Optional[List[Dict[str, Any]]] = None,
 ):
     if len(row[sft_messages_key]) == 1:
         prompt = row[sft_messages_key]
     else:
         prompt = row[sft_messages_key][:-1]
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+
+    # Override system prompt if provided
+    if system_prompt_override:
+        if prompt and prompt[0]["role"] == "system":
+            prompt = prompt[1:]
+        prompt = [{"role": "system", "content": system_prompt_override}] + list(prompt)
+
+    # Build kwargs for apply_chat_template
+    chat_template_kwargs: Dict[str, Any] = {"add_generation_prompt": True}
+    if tools:
+        chat_template_kwargs["tools"] = tools
+
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
@@ -1348,6 +1362,7 @@ def rlvr_tokenize_v3(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
     system_prompt_override: Optional[str] = None,
+    tools: Optional[List[Dict[str, Any]]] = None,
 ):
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
@@ -1360,7 +1375,12 @@ def rlvr_tokenize_v3(
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+    # Build kwargs for apply_chat_template
+    chat_template_kwargs: Dict[str, Any] = {"add_generation_prompt": True}
+    if tools:
+        chat_template_kwargs["tools"] = tools
+
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
     row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
