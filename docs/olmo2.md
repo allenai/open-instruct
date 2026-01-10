@@ -317,7 +317,6 @@ python open_instruct/grpo_fast.py \
     --per_device_train_batch_size 1 \
     --response_length 2048 \
     --save_freq 200 \
-    --save_traces True \
     --seed 1 \
     --stop_strings "</answer>" \
     --temperature 1.0 \
