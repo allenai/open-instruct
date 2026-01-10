@@ -324,8 +324,10 @@ def create_vllm_parser(
         VllmToolParser configured for the specified model family.
 
     Example:
-        >>> tools = [tool.get_openai_tool_definition() for tool in my_tools]
-        >>> parser = create_vllm_parser("hermes", tokenizer, tool_definitions=tools)
+        >>> tool_definitions = []
+        >>> for tool in my_tools:
+        ...     tool_definitions.extend(tool.get_openai_tool_definitions())
+        >>> parser = create_vllm_parser("hermes", tokenizer, tool_definitions=tool_definitions)
     """
     if parser_name not in VLLM_PARSERS:
         available = get_available_vllm_parsers()

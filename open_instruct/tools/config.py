@@ -312,7 +312,9 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
         # Extract tool definitions for vLLM parsers
         tool_definitions = None
         if tools:
-            tool_definitions = [tool.get_openai_tool_definition() for tool in tools.values()]
+            tool_definitions = []
+            for tool in tools.values():
+                tool_definitions.extend(tool.get_openai_tool_definitions())
 
         vllm_parser_name = get_vllm_parser_mapping()[parser_name]
         return create_vllm_parser(vllm_parser_name, tokenizer, tool_definitions=tool_definitions)

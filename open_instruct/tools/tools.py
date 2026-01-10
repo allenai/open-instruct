@@ -804,11 +804,8 @@ class GenericMCPTool(Tool):
 
                 tools = {}
                 for tool in tools_response.tools:
-                    # Debug: log the raw tool object attributes
-                    print(f"MCP tool raw: name={tool.name}, desc={tool.description}, "
-                               f"inputSchema={tool.inputSchema}, attrs={dir(tool)}")
                     input_schema = tool.inputSchema or {"type": "object", "properties": {}}
-                    print(f"Discovered MCP tool: {tool.name}, schema: {input_schema}")
+                    logger.info(f"Discovered MCP tool: {tool.name}, schema keys: {list(input_schema.get('properties', {}).keys())}")
                     tools[tool.name] = {
                         "name": tool.name,
                         "description": tool.description or "",
@@ -878,8 +875,8 @@ class GenericMCPTool(Tool):
     def get_openai_tool_definitions(self) -> list[dict[str, Any]]:
         """Get OpenAI-format tool definitions for all discovered MCP tools.
 
-        For multi-tools, this returns one definition per discovered tool.
-        This is used instead of get_openai_tool_definition() for multi-tools.
+        Returns one definition per discovered MCP tool, each with its own
+        name, description, and parameter schema.
 
         Returns:
             List of tool definitions in OpenAI function calling format.

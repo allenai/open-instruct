@@ -2299,7 +2299,9 @@ def main(
     # Get tool definitions for dataset transformation (chat template needs them)
     tool_definitions = None
     if tool_objects:
-        tool_definitions = [tool.get_openai_tool_definition() for tool in tool_objects.values()]
+        tool_definitions = []
+        for tool in tool_objects.values():
+            tool_definitions.extend(tool.get_openai_tool_definitions())
         logger.info(f"Tool definitions for chat template: {[t['function']['name'] for t in tool_definitions]}")
 
     # Add tool stop strings to streaming_config.stop_strings

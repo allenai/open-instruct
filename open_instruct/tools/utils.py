@@ -136,26 +136,11 @@ class Tool(ABC):
         cls._inferred_parameters = infer_tool_parameters(self.__call__)
         return cls._inferred_parameters
 
-    def get_openai_tool_definition(self) -> dict[str, Any]:
-        """Export tool definition in OpenAI function calling format.
+    def get_openai_tool_definitions(self) -> list[dict[str, Any]]:
+        """Export tool definitions in OpenAI function calling format.
 
         This format is compatible with vLLM's tool calling and chat templates.
         See: https://docs.vllm.ai/en/latest/features/tool_calling/
-
-        Returns:
-            Dict in OpenAI tool format with type, function name, description, and parameters.
-        """
-        return {
-            "type": "function",
-            "function": {
-                "name": self.tool_function_name,
-                "description": self.tool_description,
-                "parameters": self.tool_parameters,
-            },
-        }
-
-    def get_openai_tool_definitions(self) -> list[dict[str, Any]]:
-        """Export tool definitions in OpenAI function calling format.
 
         For most tools, this returns a single-item list. Tools that expose
         multiple functions (like GenericMCPTool) can override this to return
@@ -164,7 +149,16 @@ class Tool(ABC):
         Returns:
             List of tool definitions in OpenAI format.
         """
-        return [self.get_openai_tool_definition()]
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": self.tool_function_name,
+                    "description": self.tool_description,
+                    "parameters": self.tool_parameters,
+                },
+            }
+        ]
 
     def get_tool_names(self) -> list[str]:
         """Get the tool names this tool exposes.
