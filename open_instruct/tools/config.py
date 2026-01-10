@@ -16,7 +16,7 @@ CLI Usage:
 
 import json
 import logging
-from dataclasses import dataclass, field, fields, make_dataclass
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 from open_instruct.tools.parsers import (
@@ -115,10 +115,6 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
 
         tool_config = config.get_tool_config(i)
 
-        # Apply override name if specified
-        if config.tool_override_names and i < len(config.tool_override_names):
-            tool_config.override_name = config.tool_override_names[i]
-
         try:
             tool_instance = tool_config.build()
             definitions.extend(tool_instance.get_openai_tool_definitions())
@@ -128,133 +124,102 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
     return definitions
 
 
-def _build_tool_args() -> type:
+@dataclass
+class ToolArgs:
     """
-    Build ToolArgs dataclass for CLI parsing.
+    Tool arguments for CLI parsing with HfArgumentParser.
 
-    Returns:
-        The ToolArgs class with tool_configs list field.
+    Usage:
+        --tools mcp python --tool_configs '{"tool_names": "snippet_search"}' '{"api_endpoint": "..."}'
+
+    The tool_configs list corresponds 1:1 with the tools list. Use '{}' for defaults.
+    Override names are set via the 'override_name' field in each tool's config JSON.
+
+    Use to_tool_config() to convert to the internal ToolConfig structure.
     """
-    all_fields: list[tuple[str, type, Any]] = [
-        ("tools", list[str] | None, field(default=None)),
-        ("tool_configs", list[str] | None, field(default=None)),
-        ("max_tool_calls", int, field(default=5)),
-        ("mask_tool_use", bool, field(default=True)),
-        ("tool_parser", str, field(default="legacy")),
-        ("tool_override_names", list[str] | None, field(default=None)),
-    ]
 
-    # Create class
-    cls = make_dataclass(
-        "ToolArgs",
-        all_fields,
-        namespace={
-            "__doc__": """
-Tool arguments for CLI parsing with HfArgumentParser.
+    tools: list[str] | None = None
+    tool_configs: list[str] | None = None
+    max_tool_calls: int = 5
+    mask_tool_use: bool = True
+    tool_parser: str = "legacy"
 
-Usage:
-    --tools mcp python --tool_configs '{"tool_names": "snippet_search"}' '{"api_endpoint": "..."}'
+    # Internal: parsed configs stored after validation
+    _parsed_configs: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
-The tool_configs list corresponds 1:1 with the tools list. Use '{}' for defaults.
+    def __post_init__(self) -> None:
+        """Validate tool arguments and parse JSON configs."""
+        # Validate tools
+        if self.tools:
+            available = get_available_tools()
+            for tool in self.tools:
+                if tool.lower() not in available:
+                    raise ValueError(f"Unknown tool: {tool}. Available tools: {available}")
 
-Use to_tool_config() to convert to the internal ToolConfig structure.
-""",
-            "__post_init__": _tool_args_post_init,
-            "to_tool_config": _tool_args_to_tool_config,
-        },
-    )
-
-    return cls
-
-
-def _tool_args_post_init(self: Any) -> None:
-    """Validate tool arguments and parse JSON configs."""
-    # Validate tools
-    if self.tools:
-        available = get_available_tools()
-        for tool in self.tools:
-            if tool.lower() not in available:
-                raise ValueError(f"Unknown tool: {tool}. Available tools: {available}")
-
-    # Validate tool_configs length matches tools
-    if self.tool_configs is not None:
-        if not self.tools:
-            raise ValueError("--tool_configs requires --tools to be specified")
-        if len(self.tool_configs) != len(self.tools):
-            raise ValueError(
-                f"--tool_configs must have same length as --tools. "
-                f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
-            )
-
-    # Parse and validate JSON configs
-    parsed_configs: list[dict[str, Any]] = []
-    if self.tools and self.tool_configs:
-        for i, (tool_name, config_str) in enumerate(zip(self.tools, self.tool_configs)):
-            tool_name_lower = tool_name.lower()
-            config_cls = TOOL_REGISTRY[tool_name_lower]
-
-            try:
-                config_dict = json.loads(config_str)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in tool_configs[{i}] for '{tool_name}': {e}") from e
-
-            if not isinstance(config_dict, dict):
+        # Validate tool_configs length matches tools
+        if self.tool_configs is not None:
+            if not self.tools:
+                raise ValueError("--tool_configs requires --tools to be specified")
+            if len(self.tool_configs) != len(self.tools):
                 raise ValueError(
-                    f"tool_configs[{i}] for '{tool_name}' must be a JSON object, got {type(config_dict).__name__}"
+                    f"--tool_configs must have same length as --tools. "
+                    f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
                 )
 
-            # Validate keys
-            all_config_fields = {f.name for f in fields(config_cls)}
-            for key in config_dict:
-                if key not in all_config_fields:
+        # Parse and validate JSON configs
+        parsed_configs: list[dict[str, Any]] = []
+        if self.tools and self.tool_configs:
+            for i, (tool_name, config_str) in enumerate(zip(self.tools, self.tool_configs)):
+                tool_name_lower = tool_name.lower()
+                config_cls = TOOL_REGISTRY[tool_name_lower]
+
+                try:
+                    config_dict = json.loads(config_str)
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Invalid JSON in tool_configs[{i}] for '{tool_name}': {e}") from e
+
+                if not isinstance(config_dict, dict):
                     raise ValueError(
-                        f"Unknown key '{key}' in tool_configs[{i}] for '{tool_name}'. "
-                        f"Valid keys: {list(all_config_fields)}"
+                        f"tool_configs[{i}] for '{tool_name}' must be a JSON object, got {type(config_dict).__name__}"
                     )
 
-            parsed_configs.append(config_dict)
+                # Validate keys
+                all_config_fields = {f.name for f in fields(config_cls)}
+                for key in config_dict:
+                    if key not in all_config_fields:
+                        raise ValueError(
+                            f"Unknown key '{key}' in tool_configs[{i}] for '{tool_name}'. "
+                            f"Valid keys: {list(all_config_fields)}"
+                        )
 
-    # Store parsed configs for use in to_tool_config()
-    object.__setattr__(self, "_parsed_configs", parsed_configs)
+                parsed_configs.append(config_dict)
 
-    if self.tool_parser not in get_available_parsers():
-        raise ValueError(f"Unknown parser: {self.tool_parser}. Available: {get_available_parsers()}")
+        # Store parsed configs for use in to_tool_config()
+        object.__setattr__(self, "_parsed_configs", parsed_configs)
 
-    if self.tool_override_names is not None:
-        if not self.tools:
-            raise ValueError("--tool_override_names requires --tools to be specified")
-        if len(self.tool_override_names) != len(self.tools):
-            raise ValueError(
-                f"--tool_override_names must have same length as --tools. "
-                f"Got {len(self.tool_override_names)} for {len(self.tools)} tools."
-            )
+        if self.tool_parser not in get_available_parsers():
+            raise ValueError(f"Unknown parser: {self.tool_parser}. Available: {get_available_parsers()}")
 
+    def to_tool_config(self) -> "ToolConfig":
+        """Convert ToolArgs to internal ToolConfig structure."""
+        parsed_configs = self._parsed_configs
 
-def _tool_args_to_tool_config(self: Any) -> "ToolConfig":
-    """Convert ToolArgs to internal ToolConfig structure."""
-    parsed_configs = getattr(self, "_parsed_configs", [])
+        # Build tool configs list - one config per tool instance (supports duplicates)
+        tool_configs_list: list[BaseToolConfig] = []
+        if self.tools:
+            for i, tool_name in enumerate(self.tools):
+                tool_name_lower = tool_name.lower()
+                config_cls = TOOL_REGISTRY[tool_name_lower]
+                config_kwargs = parsed_configs[i] if i < len(parsed_configs) else {}
+                tool_configs_list.append(config_cls(**config_kwargs))
 
-    # Build tool configs list - one config per tool instance (supports duplicates)
-    tool_configs_list: list[BaseToolConfig] = []
-    if self.tools:
-        for i, tool_name in enumerate(self.tools):
-            tool_name_lower = tool_name.lower()
-            config_cls = TOOL_REGISTRY[tool_name_lower]
-            config_kwargs = parsed_configs[i] if i < len(parsed_configs) else {}
-            tool_configs_list.append(config_cls(**config_kwargs))
-
-    return ToolConfig(
-        tools=self.tools,
-        max_tool_calls=self.max_tool_calls,
-        mask_tool_use=self.mask_tool_use,
-        parser=self.tool_parser,
-        tool_override_names=self.tool_override_names,
-        tool_configs_list=tool_configs_list,
-    )
-
-
-# Build ToolArgs at module load time
-ToolArgs = _build_tool_args()
+        return ToolConfig(
+            tools=self.tools,
+            max_tool_calls=self.max_tool_calls,
+            mask_tool_use=self.mask_tool_use,
+            parser=self.tool_parser,
+            tool_configs_list=tool_configs_list,
+        )
 
 
 @dataclass
@@ -265,12 +230,27 @@ class ToolConfig:
     max_tool_calls: int = 5
     mask_tool_use: bool = True
     parser: str = "legacy"
-    tool_override_names: list[str] | None = None
     tool_configs_list: list[BaseToolConfig] = field(default_factory=list)
 
     def get_tool_config(self, index: int) -> BaseToolConfig:
         """Get the config for a tool by index."""
         return self.tool_configs_list[index]
+
+    def create_parser(self, tokenizer=None, tools: dict[str, Tool] | None = None) -> ToolParser | None:
+        """Create the configured tool parser.
+
+        This is a convenience method that wraps create_tool_parser().
+        Call this lazily (e.g., inside a Ray actor) to avoid serialization
+        issues with parsers that contain non-serializable components.
+
+        Args:
+            tokenizer: Required for vllm_* parsers. The tokenizer for the model.
+            tools: Dict of tool name -> Tool. Required for "legacy" and "dr_tulu" parsers.
+
+        Returns:
+            The created ToolParser, or None if no parser is configured.
+        """
+        return create_tool_parser(self.parser, tokenizer, tools)
 
 
 def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] | None = None) -> ToolParser | None:
@@ -335,10 +315,6 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
     tools inside Ray actors. This provides a uniform pattern and avoids
     serialization issues with tools that have heavy dependencies.
 
-    Each tool name returned by get_tool_names() is registered as a separate
-    entry in the tools dict. For tools that expose multiple names (like
-    GenericMCPTool), each name gets a bound proxy pointing to the same actor.
-
     Note: This function does NOT create the parser. Use create_tool_parser()
     to create the parser lazily when needed (e.g., inside a Ray actor where
     the tokenizer is available).
@@ -353,13 +329,10 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
         return {}, []
 
     proxies: dict[str, ToolProxy] = {}
-    proxy_list: list[ToolProxy] = []
+    stop_strings: list[str] = []
 
     for i, tool_name in enumerate(config.tools):
         tool_config = config.get_tool_config(i)
-
-        if config.tool_override_names and hasattr(tool_config, "override_name"):
-            tool_config.override_name = config.tool_override_names[i]
 
         # Step 1: Create ToolActor from config (config.build() called inside Ray actor)
         actor = create_tool_actor_from_config(config=tool_config)
@@ -367,29 +340,16 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
         # Step 2: Wrap ToolActor with ToolProxy
         proxy = ToolProxy.from_actor(actor)
 
-        # Step 3: Register a proxy for each tool name
-        tool_names = proxy.get_tool_names()
-        for name in tool_names:
-            # Check for name collisions
-            if name in proxies:
-                raise ValueError(
-                    f"Tool name collision: '{name}' is already registered. "
-                    f"This can happen when multiple tools expose the same function name. "
-                    f"Consider using tool_override_names or configuring tools to use different names."
-                )
-            # If the tool exposes multiple names, bind each to route correctly
-            if len(tool_names) > 1:
-                proxies[name] = proxy.bind_to_tool(name)
-            else:
-                proxies[name] = proxy
-
-        proxy_list.append(proxy)
-
-    logger.info(f"Configured {len(proxy_list)} tool instance(s), {len(proxies)} tool name(s): {list(proxies.keys())}")
-
-    # Get stop strings from proxies (fetched from actors)
-    stop_strings: list[str] = []
-    for proxy in proxy_list:
+        # Step 3: Register proxy by its tool name
+        name = proxy.tool_function_name
+        if name in proxies:
+            raise ValueError(
+                f"Tool name collision: '{name}' is already registered. "
+                f"Consider using override_name in tool_configs to use different names."
+            )
+        proxies[name] = proxy
         stop_strings.extend(proxy.get_stop_strings())
+
+    logger.info(f"Configured {len(proxies)} tool(s): {list(proxies.keys())}")
 
     return proxies, list(set(stop_strings))

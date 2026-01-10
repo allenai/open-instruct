@@ -15,11 +15,16 @@ from open_instruct.tools.parsers import (
     get_available_vllm_parsers,
 )
 from open_instruct.tools.proxy import DEFAULT_MAX_CONCURRENCY, ToolActor, ToolProxy, create_tool_actor_from_config
-from open_instruct.tools.utils import BaseToolConfig, Tool, ToolCall, ToolOutput
+from open_instruct.tools.tools import MCPToolFactory, MCPToolWrapper, MCPTransport
+from open_instruct.tools.utils import BaseToolConfig, RetryConfig, Tool, ToolCall, ToolOutput
 
 __all__ = [
     "BaseToolConfig",
     "DEFAULT_MAX_CONCURRENCY",
+    "MCPToolFactory",
+    "MCPToolWrapper",
+    "MCPTransport",
+    "RetryConfig",
     "TOOL_REGISTRY",
     "Tool",
     "ToolActor",

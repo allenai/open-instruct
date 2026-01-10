@@ -1,11 +1,34 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, get_type_hints
 
 from pydantic import create_model
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Retry Utilities
+# =============================================================================
+
+
+@dataclass
+class RetryConfig:
+    """Configuration for retry behavior."""
+
+    max_retries: int = 3
+    """Maximum number of retry attempts."""
+    backoff_factor: float = 0.5
+    """Backoff factor for exponential backoff (sleep = backoff_factor * 2^attempt)."""
+    retryable_exceptions: tuple[type[Exception], ...] = field(
+        default_factory=lambda: (ConnectionError, TimeoutError)
+    )
+    """Tuple of exception types that should trigger a retry."""
+
 
 # =============================================================================
 # Parameter Inference
@@ -172,8 +195,23 @@ class Tool(ABC):
         return [self.tool_function_name]
 
     @abstractmethod
-    def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
+    async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
+        """Execute the tool asynchronously.
+
+        All tools are async by default. For tools that perform blocking I/O,
+        use asyncio.to_thread() or run_in_executor() internally.
+        """
         pass
+
+    def call_sync(self, *args: Any, **kwargs: Any) -> ToolOutput:
+        """Synchronous wrapper for __call__.
+
+        Use this when you need to call a tool from sync code.
+        Prefer using __call__ directly in async contexts.
+        """
+        import asyncio
+
+        return asyncio.run(self(*args, **kwargs))
 
 
 @dataclass

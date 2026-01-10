@@ -1,3 +1,4 @@
+import asyncio
 import subprocess
 import time
 import unittest
@@ -7,6 +8,9 @@ from open_instruct.tools.tools import (
     GENERIC_MCP_AVAILABLE,
     GenericMCPTool,
     GenericMCPToolConfig,
+    MCPToolFactory,
+    MCPToolWrapper,
+    MCPTransport,
     MaxCallsExceededTool,
     PythonCodeTool,
     PythonCodeToolConfig,
@@ -15,7 +19,12 @@ from open_instruct.tools.tools import (
     SerperSearchTool,
     SerperSearchToolConfig,
 )
-from open_instruct.tools.utils import ToolOutput, infer_tool_parameters
+from open_instruct.tools.utils import RetryConfig, ToolOutput, infer_tool_parameters
+
+
+def run_async(coro):
+    """Helper to run async code in tests."""
+    return asyncio.run(coro)
 
 
 class TestToolOutput(unittest.TestCase):
@@ -128,7 +137,7 @@ class TestToolParameterSchemas(unittest.TestCase):
 class TestMaxCallsExceededTool(unittest.TestCase):
     def test_max_calls_exceeded_output(self):
         tool = MaxCallsExceededTool()
-        result = tool()
+        result = run_async(tool())
 
         self.assertIsInstance(result, ToolOutput)
         self.assertEqual(result.output, "Max tool calls exceeded.")
@@ -189,7 +198,7 @@ class TestPythonCodeTool(unittest.TestCase):
         self.assertEqual(tool.timeout, 5)
 
     def test_successful_code_execution(self):
-        result = self.tool(code='print("Hello, World!")')
+        result = run_async(self.tool(code='print("Hello, World!")'))
 
         self.assertTrue(result.called)
         self.assertIn("Hello, World!", result.output)
@@ -198,21 +207,21 @@ class TestPythonCodeTool(unittest.TestCase):
         self.assertGreater(result.runtime, 0)
 
     def test_code_execution_with_error(self):
-        result = self.tool(code='print("unclosed string')
+        result = run_async(self.tool(code='print("unclosed string'))
 
         self.assertTrue(result.called)
         self.assertTrue("SyntaxError" in result.output or len(result.error) > 0)
         self.assertFalse(result.timeout)
 
     def test_timeout_handling(self):
-        result = self.tool(code="import time\ntime.sleep(10)")
+        result = run_async(self.tool(code="import time\ntime.sleep(10)"))
 
         self.assertTrue(result.called)
         self.assertTrue(result.timeout or "Timeout" in result.output or "timeout" in result.error)
         self.assertLess(result.runtime, 10)  # Should timeout before 10 seconds
 
     def test_computation(self):
-        result = self.tool(code='result = 5 * 7 + 3\nprint(f"The result is {result}")')
+        result = run_async(self.tool(code='result = 5 * 7 + 3\nprint(f"The result is {result}")'))
 
         self.assertTrue(result.called)
         self.assertIn("The result is 38", result.output)
@@ -254,49 +263,35 @@ class TestOverrideNameOverride(unittest.TestCase):
 class TestToolConfigOverrideName(unittest.TestCase):
     """Test override_name handling in ToolConfig and build_tools_from_config."""
 
-    def test_single_tool_override_name_override(self):
-        """Single tool with override_name override."""
-        config = ToolConfig(tools=["s2_search"], tool_override_names=["search"])
+    def test_single_tool_override_name_via_config(self):
+        """Single tool with override_name set via tool_configs."""
+        args = ToolArgs(tools=["s2_search"], tool_configs=['{"override_name": "search"}'])
+        config = args.to_tool_config()
         tools, stop_strings = build_tools_from_config(config)
         # The tool should be keyed by the overridden tag name
         self.assertIn("search", tools)
         self.assertEqual(tools["search"].tool_function_name, "search")
 
-    def test_multiple_tools_with_override_names(self):
-        """Multiple tools with corresponding override names."""
-        config = ToolConfig(
-            tools=["s2_search", "serper_search"], tool_override_names=["academic_search", "web_search"]
+    def test_multiple_tools_with_override_names_via_config(self):
+        """Multiple tools with override names set via tool_configs."""
+        args = ToolArgs(
+            tools=["s2_search", "serper_search"],
+            tool_configs=['{"override_name": "academic_search"}', '{"override_name": "web_search"}'],
         )
+        config = args.to_tool_config()
         tools, stop_strings = build_tools_from_config(config)
         self.assertIn("academic_search", tools)
         self.assertIn("web_search", tools)
         self.assertEqual(tools["academic_search"].tool_function_name, "academic_search")
         self.assertEqual(tools["web_search"].tool_function_name, "web_search")
 
-    def test_tool_args_to_config_override_names(self):
-        """ToolArgs.to_tool_config() passes through override_names list."""
-        args = ToolArgs(tools=["serper_search", "s2_search"], tool_override_names=["search", "papers"])
-        config = args.to_tool_config()
-        self.assertEqual(config.tool_override_names, ["search", "papers"])
-
-    def test_tool_args_validation_mismatched_lengths(self):
-        """ToolArgs raises error when tool_override_names length doesn't match tools."""
-        with self.assertRaises(ValueError) as context:
-            ToolArgs(tools=["serper_search", "s2_search"], tool_override_names=["search"])
-        self.assertIn("same length", str(context.exception))
-
-    def test_tool_args_validation_override_names_without_tools(self):
-        """ToolArgs raises error when tool_override_names provided without tools."""
-        with self.assertRaises(ValueError) as context:
-            ToolArgs(tool_override_names=["search"])
-        self.assertIn("requires --tools", str(context.exception))
-
     def test_no_override_names_uses_defaults(self):
-        """When tool_override_names is not provided, tools use their defaults."""
-        config = ToolConfig(tools=["s2_search", "serper_search"])
+        """When override_name is not provided, tools use their defaults."""
+        args = ToolArgs(tools=["s2_search", "serper_search"], tool_configs=["{}", "{}"])
+        config = args.to_tool_config()
         tools, stop_strings = build_tools_from_config(config)
         self.assertIn("s2_search", tools)
-        self.assertIn("serper_search", tools)  # serper default is "serper_search"
+        self.assertIn("serper_search", tools)
 
 
 class TestToolConfigs(unittest.TestCase):
@@ -369,82 +364,32 @@ class TestToolConfigs(unittest.TestCase):
 
 
 class TestGenericMCPTool(unittest.TestCase):
-    """Test the GenericMCPTool class."""
+    """Test the GenericMCPTool class.
 
-    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
-    def test_http_transport_requires_server_url(self):
-        """Test that HTTP transport requires server_url."""
-        with self.assertRaises(ValueError) as context:
-            GenericMCPTool(transport="http")
-        self.assertIn("server_url is required", str(context.exception))
+    Note: Most GenericMCPTool tests require a running MCP server since the tool
+    discovers tools during initialization. Tests that don't require a server
+    are tested via MCPToolFactory tests instead.
+    """
 
-    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
-    def test_stdio_transport_requires_command(self):
-        """Test that stdio transport requires command."""
-        with self.assertRaises(ValueError) as context:
-            GenericMCPTool(transport="stdio")
-        self.assertIn("command is required", str(context.exception))
+    def test_config_defaults(self):
+        """Test GenericMCPToolConfig has correct defaults."""
+        config = GenericMCPToolConfig()
+        self.assertIsNone(config.server_url)
+        self.assertEqual(config.transport, "http")
+        self.assertEqual(config.timeout, 60)
+        self.assertEqual(config.max_retries, 3)
+        self.assertIsNone(config.tool_name)
 
-    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
-    def test_http_initialization(self):
-        """Test that GenericMCPTool initializes correctly with HTTP transport."""
-        tool = GenericMCPTool(server_url="http://localhost:8000/mcp")
-        self.assertEqual(tool.server_url, "http://localhost:8000/mcp")
-        self.assertEqual(tool.transport, "http")
-        self.assertEqual(tool.tool_function_name, "generic_mcp")
-
-    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
-    def test_stdio_initialization(self):
-        """Test that GenericMCPTool initializes correctly with stdio transport."""
-        tool = GenericMCPTool(transport="stdio", command="python", args=["server.py"], env={"MY_VAR": "value"})
-        self.assertEqual(tool.transport, "stdio")
-        self.assertEqual(tool.command, "python")
-        self.assertEqual(tool.args, ["server.py"])
-        self.assertEqual(tool.env, {"MY_VAR": "value"})
-
-    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
-    def test_override_name(self):
-        """Test that override_name works correctly."""
-        tool = GenericMCPTool(server_url="http://localhost:8000/mcp", override_name="my_mcp")
-        self.assertEqual(tool.tool_function_name, "my_mcp")
-
-    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
-    def test_tool_methods(self):
-        """Test that GenericMCPTool has the expected methods."""
-        tool = GenericMCPTool(server_url="http://localhost:8000/mcp")
-        self.assertTrue(hasattr(tool, "get_tool_names"))
-        self.assertTrue(hasattr(tool, "handles_tool"))
-        self.assertTrue(hasattr(tool, "get_openai_tool_definitions"))
-
-    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
-    def test_no_tool_name_error(self):
-        """Test that calling without _mcp_tool_name returns an error."""
-        tool = GenericMCPTool(server_url="http://localhost:8000/mcp")
-        result = tool(query="test")  # Missing _mcp_tool_name
-        self.assertIn("No tool name provided", result.error)
-        self.assertEqual(result.output, "")
-
-    def test_config_build_http(self):
-        """Test building GenericMCPTool from config (HTTP)."""
-        if not GENERIC_MCP_AVAILABLE:
-            self.skipTest("mcp package not installed")
-
-        config = GenericMCPToolConfig(server_url="http://localhost:8000/mcp", timeout=120, max_retries=5)
-        tool = config.build()
-        self.assertEqual(tool.server_url, "http://localhost:8000/mcp")
-        self.assertEqual(tool.timeout, 120)
-        self.assertEqual(tool.max_retries, 5)
-
-    def test_config_build_stdio(self):
-        """Test building GenericMCPTool from config (stdio)."""
-        if not GENERIC_MCP_AVAILABLE:
-            self.skipTest("mcp package not installed")
-
-        config = GenericMCPToolConfig(transport="stdio", command="python", args=["server.py"])
-        tool = config.build()
-        self.assertEqual(tool.transport, "stdio")
-        self.assertEqual(tool.command, "python")
-        self.assertEqual(tool.args, ["server.py"])
+    def test_config_with_tool_name(self):
+        """Test GenericMCPToolConfig with tool_name specified."""
+        config = GenericMCPToolConfig(
+            server_url="http://localhost:8000/mcp",
+            tool_name="search",
+            timeout=120,
+        )
+        self.assertEqual(config.server_url, "http://localhost:8000/mcp")
+        self.assertEqual(config.tool_name, "search")
+        self.assertEqual(config.timeout, 120)
 
 
 class TestGenericMCPToolConfig(unittest.TestCase):
@@ -453,23 +398,27 @@ class TestGenericMCPToolConfig(unittest.TestCase):
     def test_tool_args_generic_mcp_http(self):
         """Test tool_configs for generic_mcp tool with HTTP transport."""
         args = ToolArgs(
-            tools=["generic_mcp"], tool_configs=['{"server_url": "http://localhost:8000/mcp", "timeout": 120}']
+            tools=["generic_mcp"],
+            tool_configs=['{"server_url": "http://localhost:8000/mcp", "tool_name": "search", "timeout": 120}'],
         )
         config = args.to_tool_config()
         mcp_config = config.get_tool_config(0)
         self.assertEqual(mcp_config.server_url, "http://localhost:8000/mcp")
+        self.assertEqual(mcp_config.tool_name, "search")
         self.assertEqual(mcp_config.timeout, 120)
 
     def test_tool_args_generic_mcp_stdio(self):
         """Test tool_configs for generic_mcp tool with stdio transport."""
         args = ToolArgs(
-            tools=["generic_mcp"], tool_configs=['{"transport": "stdio", "command": "python", "args": ["server.py"]}']
+            tools=["generic_mcp"],
+            tool_configs=['{"transport": "stdio", "command": "python", "args": ["server.py"], "tool_name": "read_file"}'],
         )
         config = args.to_tool_config()
         mcp_config = config.get_tool_config(0)
         self.assertEqual(mcp_config.transport, "stdio")
         self.assertEqual(mcp_config.command, "python")
         self.assertEqual(mcp_config.args, ["server.py"])
+        self.assertEqual(mcp_config.tool_name, "read_file")
 
     def test_tool_args_generic_mcp_with_env(self):
         """Test tool_configs for generic_mcp tool with environment variables."""
@@ -481,18 +430,18 @@ class TestGenericMCPToolConfig(unittest.TestCase):
         mcp_config = config.get_tool_config(0)
         self.assertEqual(mcp_config.env, {"API_KEY": "secret"})
 
-    def test_multiple_mcp_servers(self):
-        """Test that multiple MCP servers can be configured."""
+    def test_multiple_mcp_tools_from_same_server(self):
+        """Test configuring multiple tools from the same MCP server."""
         args = ToolArgs(
             tools=["generic_mcp", "generic_mcp"],
             tool_configs=[
-                '{"server_url": "http://server1:8000/mcp"}',
-                '{"server_url": "http://server2:8000/mcp"}',
+                '{"server_url": "http://localhost:8000/mcp", "tool_name": "search"}',
+                '{"server_url": "http://localhost:8000/mcp", "tool_name": "read_file"}',
             ],
         )
         config = args.to_tool_config()
-        self.assertEqual(config.get_tool_config(0).server_url, "http://server1:8000/mcp")
-        self.assertEqual(config.get_tool_config(1).server_url, "http://server2:8000/mcp")
+        self.assertEqual(config.get_tool_config(0).tool_name, "search")
+        self.assertEqual(config.get_tool_config(1).tool_name, "read_file")
 
 
 class TestToolProxy(unittest.TestCase):
@@ -537,11 +486,112 @@ class TestToolProxy(unittest.TestCase):
         actor = create_tool_actor_from_config(config=config)
         proxy = ToolProxy.from_actor(actor)
 
-        # Test that we can call the proxy and get a result
-        result = proxy(query="test query")
+        # Test that we can call the proxy and get a result (async)
+        result = run_async(proxy(query="test query"))
         self.assertIsInstance(result, ToolOutput)
         # The result depends on the API, just check we got a response
         self.assertIsNotNone(result.output)
+
+
+class TestRetryConfig(unittest.TestCase):
+    """Test the RetryConfig dataclass."""
+
+    def test_retry_config_defaults(self):
+        """Test RetryConfig has sensible defaults."""
+        config = RetryConfig()
+        self.assertEqual(config.max_retries, 3)
+        self.assertEqual(config.backoff_factor, 0.5)
+        self.assertIn(ConnectionError, config.retryable_exceptions)
+        self.assertIn(TimeoutError, config.retryable_exceptions)
+
+    def test_retry_config_custom(self):
+        """Test RetryConfig with custom values."""
+        config = RetryConfig(
+            max_retries=5, backoff_factor=1.0, retryable_exceptions=(ValueError, KeyError)
+        )
+        self.assertEqual(config.max_retries, 5)
+        self.assertEqual(config.backoff_factor, 1.0)
+        self.assertIn(ValueError, config.retryable_exceptions)
+        self.assertIn(KeyError, config.retryable_exceptions)
+
+
+class TestMCPTransport(unittest.TestCase):
+    """Test the MCPTransport enum."""
+
+    def test_transport_values(self):
+        """Test MCPTransport enum values."""
+        self.assertEqual(MCPTransport.HTTP.value, "http")
+        self.assertEqual(MCPTransport.SSE.value, "sse")
+        self.assertEqual(MCPTransport.STDIO.value, "stdio")
+
+    def test_transport_from_string(self):
+        """Test MCPTransport can be created from string."""
+        self.assertEqual(MCPTransport("http"), MCPTransport.HTTP)
+        self.assertEqual(MCPTransport("sse"), MCPTransport.SSE)
+        self.assertEqual(MCPTransport("stdio"), MCPTransport.STDIO)
+
+
+class TestMCPToolFactory(unittest.TestCase):
+    """Test the MCPToolFactory class."""
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_http_transport_requires_server_url(self):
+        """Test that HTTP transport requires server_url."""
+        with self.assertRaises(ValueError) as context:
+            MCPToolFactory(transport=MCPTransport.HTTP)
+        self.assertIn("server_url is required", str(context.exception))
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_stdio_transport_requires_command(self):
+        """Test that stdio transport requires command."""
+        with self.assertRaises(ValueError) as context:
+            MCPToolFactory(transport=MCPTransport.STDIO)
+        self.assertIn("command is required", str(context.exception))
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_http_initialization(self):
+        """Test MCPToolFactory initializes correctly with HTTP transport."""
+        factory = MCPToolFactory(server_url="http://localhost:8000/mcp")
+        self.assertEqual(factory.server_url, "http://localhost:8000/mcp")
+        self.assertEqual(factory.transport, MCPTransport.HTTP)
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_stdio_initialization(self):
+        """Test MCPToolFactory initializes correctly with stdio transport."""
+        factory = MCPToolFactory(
+            transport=MCPTransport.STDIO, command="python", args=["server.py"], env={"MY_VAR": "value"}
+        )
+        self.assertEqual(factory.transport, MCPTransport.STDIO)
+        self.assertEqual(factory.command, "python")
+        self.assertEqual(factory.args, ["server.py"])
+        self.assertEqual(factory.env, {"MY_VAR": "value"})
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_transport_string_conversion(self):
+        """Test that string transport values are converted to enum."""
+        factory = MCPToolFactory(server_url="http://localhost:8000/mcp", transport="http")
+        self.assertEqual(factory.transport, MCPTransport.HTTP)
+
+
+class TestMCPToolWrapper(unittest.TestCase):
+    """Test the MCPToolWrapper class."""
+
+    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
+    def test_wrapper_properties(self):
+        """Test MCPToolWrapper has correct properties."""
+        # Create a mock factory
+        factory = MCPToolFactory(server_url="http://localhost:8000/mcp")
+
+        wrapper = MCPToolWrapper(
+            name="test_tool",
+            description="A test tool",
+            input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+            factory=factory,
+        )
+
+        self.assertEqual(wrapper.tool_function_name, "test_tool")
+        self.assertEqual(wrapper.tool_description, "A test tool")
+        self.assertEqual(wrapper.tool_parameters["properties"]["query"]["type"], "string")
 
 
 if __name__ == "__main__":

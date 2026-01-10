@@ -891,15 +891,12 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         if not triggered_tools:
             break
 
-        assert actor.executor is not None, f"executor is None for request {sub_request_id}"
-
-        # Execute all triggered tools and add each output separately
-        loop = asyncio.get_running_loop()
+        # Execute all triggered tools (tools are async by default)
         should_break = False
 
         for triggered_tool, tool_args in triggered_tools:
             try:
-                tool_result = await loop.run_in_executor(actor.executor, lambda t=triggered_tool, a=tool_args: t(**a))
+                tool_result = await triggered_tool(**tool_args)
             except Exception as e:
                 # If the tool errors for whatever reason, tell the model that it called the tool.
                 tool_result = ToolOutput(
