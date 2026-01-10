@@ -306,14 +306,14 @@ class TestToolConfigs(unittest.TestCase):
         """Test that tool_configs works for simple values."""
         args = ToolArgs(tools=["serper_search"], tool_configs=['{"num_results": 10}'])
         config = args.to_tool_config()
-        self.assertEqual(config.get_tool_config("serper_search").num_results, 10)
+        self.assertEqual(config.get_tool_config(0).num_results, 10)
 
     def test_tool_configs_multiple_fields(self):
         """Test that tool_configs works with multiple fields."""
         args = ToolArgs(tools=["s2_search"], tool_configs=['{"num_results": 20, "override_name": "papers"}'])
         config = args.to_tool_config()
-        self.assertEqual(config.get_tool_config("s2_search").num_results, 20)
-        self.assertEqual(config.get_tool_config("s2_search").override_name, "papers")
+        self.assertEqual(config.get_tool_config(0).num_results, 20)
+        self.assertEqual(config.get_tool_config(0).override_name, "papers")
 
     def test_tool_configs_multiple_tools(self):
         """Test tool_configs with multiple tools."""
@@ -321,14 +321,14 @@ class TestToolConfigs(unittest.TestCase):
             tools=["serper_search", "s2_search"], tool_configs=['{"num_results": 5}', '{"num_results": 15}']
         )
         config = args.to_tool_config()
-        self.assertEqual(config.get_tool_config("serper_search").num_results, 5)
-        self.assertEqual(config.get_tool_config("s2_search").num_results, 15)
+        self.assertEqual(config.get_tool_config(0).num_results, 5)
+        self.assertEqual(config.get_tool_config(1).num_results, 15)
 
     def test_tool_configs_empty_dict_uses_defaults(self):
         """Test that empty dict {} uses default values."""
         args = ToolArgs(tools=["serper_search"], tool_configs=["{}"])
         config = args.to_tool_config()
-        self.assertEqual(config.get_tool_config("serper_search").num_results, 5)  # default
+        self.assertEqual(config.get_tool_config(0).num_results, 5)  # default
 
     def test_tool_configs_invalid_json(self):
         """Test that invalid JSON raises an error."""
@@ -364,8 +364,8 @@ class TestToolConfigs(unittest.TestCase):
         """Test tool_configs for MCP tool."""
         args = ToolArgs(tools=["mcp"], tool_configs=['{"tool_names": "snippet_search,google_search", "timeout": 120}'])
         config = args.to_tool_config()
-        self.assertEqual(config.get_tool_config("mcp").tool_names, "snippet_search,google_search")
-        self.assertEqual(config.get_tool_config("mcp").timeout, 120)
+        self.assertEqual(config.get_tool_config(0).tool_names, "snippet_search,google_search")
+        self.assertEqual(config.get_tool_config(0).timeout, 120)
 
 
 class TestGenericMCPTool(unittest.TestCase):
@@ -456,7 +456,7 @@ class TestGenericMCPToolConfig(unittest.TestCase):
             tools=["generic_mcp"], tool_configs=['{"server_url": "http://localhost:8000/mcp", "timeout": 120}']
         )
         config = args.to_tool_config()
-        mcp_config = config.get_tool_config("generic_mcp")
+        mcp_config = config.get_tool_config(0)
         self.assertEqual(mcp_config.server_url, "http://localhost:8000/mcp")
         self.assertEqual(mcp_config.timeout, 120)
 
@@ -466,7 +466,7 @@ class TestGenericMCPToolConfig(unittest.TestCase):
             tools=["generic_mcp"], tool_configs=['{"transport": "stdio", "command": "python", "args": ["server.py"]}']
         )
         config = args.to_tool_config()
-        mcp_config = config.get_tool_config("generic_mcp")
+        mcp_config = config.get_tool_config(0)
         self.assertEqual(mcp_config.transport, "stdio")
         self.assertEqual(mcp_config.command, "python")
         self.assertEqual(mcp_config.args, ["server.py"])
@@ -478,8 +478,21 @@ class TestGenericMCPToolConfig(unittest.TestCase):
             tool_configs=['{"transport": "stdio", "command": "python", "env": {"API_KEY": "secret"}}'],
         )
         config = args.to_tool_config()
-        mcp_config = config.get_tool_config("generic_mcp")
+        mcp_config = config.get_tool_config(0)
         self.assertEqual(mcp_config.env, {"API_KEY": "secret"})
+
+    def test_multiple_mcp_servers(self):
+        """Test that multiple MCP servers can be configured."""
+        args = ToolArgs(
+            tools=["generic_mcp", "generic_mcp"],
+            tool_configs=[
+                '{"server_url": "http://server1:8000/mcp"}',
+                '{"server_url": "http://server2:8000/mcp"}',
+            ],
+        )
+        config = args.to_tool_config()
+        self.assertEqual(config.get_tool_config(0).server_url, "http://server1:8000/mcp")
+        self.assertEqual(config.get_tool_config(1).server_url, "http://server2:8000/mcp")
 
 
 class TestToolProxy(unittest.TestCase):

@@ -113,7 +113,7 @@ def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any
         if tool_name_lower not in TOOL_REGISTRY:
             raise ValueError(f"Unknown tool: {tool_name}. Available: {get_available_tools()}")
 
-        tool_config = config.get_tool_config(tool_name_lower)
+        tool_config = config.get_tool_config(i)
 
         # Apply override name if specified
         if config.tool_override_names and i < len(config.tool_override_names):
@@ -234,16 +234,14 @@ def _tool_args_to_tool_config(self: Any) -> "ToolConfig":
     """Convert ToolArgs to internal ToolConfig structure."""
     parsed_configs = getattr(self, "_parsed_configs", [])
 
-    # Build tool configs dict - start with defaults
-    tool_configs_dict = {name: config_cls() for name, config_cls in TOOL_REGISTRY.items()}
-
-    # Override with parsed configs for specified tools
+    # Build tool configs list - one config per tool instance (supports duplicates)
+    tool_configs_list: list[BaseToolConfig] = []
     if self.tools:
         for i, tool_name in enumerate(self.tools):
             tool_name_lower = tool_name.lower()
             config_cls = TOOL_REGISTRY[tool_name_lower]
             config_kwargs = parsed_configs[i] if i < len(parsed_configs) else {}
-            tool_configs_dict[tool_name_lower] = config_cls(**config_kwargs)
+            tool_configs_list.append(config_cls(**config_kwargs))
 
     return ToolConfig(
         tools=self.tools,
@@ -251,17 +249,12 @@ def _tool_args_to_tool_config(self: Any) -> "ToolConfig":
         mask_tool_use=self.mask_tool_use,
         parser=self.tool_parser,
         tool_override_names=self.tool_override_names,
-        tool_configs=tool_configs_dict,
+        tool_configs_list=tool_configs_list,
     )
 
 
 # Build ToolArgs at module load time
 ToolArgs = _build_tool_args()
-
-
-def _default_tool_configs() -> dict[str, BaseToolConfig]:
-    """Create default configs for all registered tools."""
-    return {name: config_cls() for name, config_cls in TOOL_REGISTRY.items()}
 
 
 @dataclass
@@ -273,11 +266,11 @@ class ToolConfig:
     mask_tool_use: bool = True
     parser: str = "legacy"
     tool_override_names: list[str] | None = None
-    tool_configs: dict[str, BaseToolConfig] = field(default_factory=_default_tool_configs)
+    tool_configs_list: list[BaseToolConfig] = field(default_factory=list)
 
-    def get_tool_config(self, tool_name: str) -> BaseToolConfig:
-        """Get the config for a specific tool."""
-        return self.tool_configs[tool_name.lower()]
+    def get_tool_config(self, index: int) -> BaseToolConfig:
+        """Get the config for a tool by index."""
+        return self.tool_configs_list[index]
 
 
 def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] | None = None) -> ToolParser | None:
@@ -363,8 +356,7 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
     proxy_list: list[ToolProxy] = []
 
     for i, tool_name in enumerate(config.tools):
-        tool_name_lower = tool_name.lower()
-        tool_config = config.get_tool_config(tool_name_lower)
+        tool_config = config.get_tool_config(i)
 
         if config.tool_override_names and hasattr(tool_config, "override_name"):
             tool_config.override_name = config.tool_override_names[i]
@@ -378,6 +370,13 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
         # Step 3: Register a proxy for each tool name
         tool_names = proxy.get_tool_names()
         for name in tool_names:
+            # Check for name collisions
+            if name in proxies:
+                raise ValueError(
+                    f"Tool name collision: '{name}' is already registered. "
+                    f"This can happen when multiple tools expose the same function name. "
+                    f"Consider using tool_override_names or configuring tools to use different names."
+                )
             # If the tool exposes multiple names, bind each to route correctly
             if len(tool_names) > 1:
                 proxies[name] = proxy.bind_to_tool(name)
