@@ -804,6 +804,9 @@ class GenericMCPTool(Tool):
 
                 tools = {}
                 for tool in tools_response.tools:
+                    # Debug: log the raw tool object attributes
+                    logger.info(f"MCP tool raw: name={tool.name}, desc={tool.description}, "
+                               f"inputSchema={tool.inputSchema}, attrs={dir(tool)}")
                     input_schema = tool.inputSchema or {"type": "object", "properties": {}}
                     logger.info(f"Discovered MCP tool: {tool.name}, schema: {input_schema}")
                     tools[tool.name] = {
