@@ -759,7 +759,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
             )
 
     if args.push_to_hub and is_main_process:
-        push_folder_to_hub(None, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
     train.teardown_training_environment()
 
