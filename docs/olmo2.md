@@ -32,7 +32,7 @@ python mason.py \
     --mixed_precision bf16 \
     --num_processes 8 \
     --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage0_no_offloading_accelerate.conf \
+    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
     --exp_name olmo2_1b_sft \
@@ -102,7 +102,7 @@ accelerate launch \
     --mixed_precision bf16 \
     --num_processes 8 \
     --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage0_no_offloading_accelerate.conf \
+    --deepspeed_config_file configs/ds_configs/stage2_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/dpo_tune_cache.py \
     --exp_name 0424_1B_dpo_onpol_lr_2.5e-6_seed_111 \
@@ -114,8 +114,8 @@ accelerate launch \
     --tokenizer_name_or_path allenai/OLMo-2-0425-1B-SFT \
     --tokenizer_revision main \
     --max_seq_length 2048 \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 4 \
+    --per_device_train_batch_size 8 \
+    --gradient_accumulation_steps 2 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
@@ -124,6 +124,7 @@ accelerate launch \
     --with_tracking \
     --report_to wandb \
     --logging_steps 1 \
+    --gradient_checkpointing \
     --dataset_mixer_list allenai/olmo-2-0425-1b-preference-mix 1.0 \
     --use_slow_tokenizer False \
     --add_bos \
@@ -172,6 +173,7 @@ python mason.py \
     --with_tracking \
     --report_to wandb \
     --logging_steps 1 \
+    --gradient_checkpointing \
     --dataset_mixer_list \
         allenai/olmo-2-1b-pref-mix-v0 1.0 \
     --use_slow_tokenizer False \
@@ -217,6 +219,7 @@ python mason.py \
     --with_tracking \
     --report_to wandb \
     --logging_steps 1 \
+    --gradient_checkpointing \
     --dataset_mixer_list \
         allenai/olmo-2-32b-pref-mix-v0-filter-datecutoff 1.0 \
     --use_slow_tokenizer False \
@@ -245,9 +248,10 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list_splits train \
     --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
     --dataset_mixer_list_splits train \
-    --deepspeed_stage 0 \
-    --deepspeed_zpg 1 \
+    --deepspeed_stage 2 \
+    --deepspeed_zpg 12 \
     --exp_name 0423_grpo_seed_1_lr_5e-7 \
+    --gradient_checkpointing  \
     --kl_estimator 3 \
     --learning_rate 5e-7 \
     --local_eval_every 5 \
@@ -273,8 +277,8 @@ python open_instruct/grpo_fast.py \
     --tokenizer_name_or_path allenai/OLMo-2-0425-1B-DPO \
     --tokenizer_revision main \
     --total_episodes 2000000 \
-    --vllm_num_engines 4 \
-    --vllm_tensor_parallel_size 1 \
+    --vllm_num_engines 1 \
+    --vllm_tensor_parallel_size 4 \
     --with_tracking
 ```
 For those internal to Ai2, see the [wandb logs](https://wandb.ai/ai2-llm/open_instruct_internal/runs/80rvltbs/overview) or the [beaker job](https://beaker.allen.ai/orgs/ai2/workspaces/olmo-instruct/work/01JSPEYF1PGPNYGQ4NBEZPJA4W?taskId=01JSPEYF1S9EJHBG1ZS6ZXMPRA&jobId=01JSPEYF6JFZHCZRBCZSZSEM8T).
@@ -294,6 +298,7 @@ python open_instruct/grpo_fast.py \
     --deepspeed_stage 2 \
     --deepspeed_zpg 12 \
     --exp_name 0427_grpo_seed_1_lr_5e-7 \
+    --gradient_checkpointing  \
     --kl_estimator 3 \
     --learning_rate 5e-7 \
     --local_eval_every 5 \
@@ -319,8 +324,8 @@ python open_instruct/grpo_fast.py \
     --tokenizer_name_or_path allenai/OLMo-2-0425-1B-RLVR1 \
     --tokenizer_revision main \
     --total_episodes 2000000 \
-    --vllm_num_engines 4 \
-    --vllm_tensor_parallel_size 1 \
+    --vllm_num_engines 1 \
+    --vllm_tensor_parallel_size 4 \
     --with_tracking
 ```
 For those internal to Ai2, see the [wandb logs](https://wandb.ai/ai2-llm/open_instruct_internal/runs/25yfin0f?nw=nwusernatolambert) or the [beaker job](https://beaker.allen.ai/orgs/ai2/workspaces/olmo-instruct/work/01JSWFCG62FC4NEDEW8YZDECXV?taskId=01JSWFCG64DSXNJDV7N23A92HG&jobId=01JSWFCGBFAQ288RSMAQF0TYS7).
