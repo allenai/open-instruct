@@ -183,8 +183,16 @@ class ToolProxy(Tool):
         return self._tool_names
 
     def get_openai_tool_definitions(self) -> list[dict]:
-        """Get tool definitions in OpenAI format."""
-        return ray.get(self._actor.get_openai_tool_definitions.remote())
+        """Get tool definitions in OpenAI format.
+
+        If this proxy is bound to a specific tool, only returns that tool's definition.
+        Otherwise returns all definitions from the underlying tool.
+        """
+        all_definitions = ray.get(self._actor.get_openai_tool_definitions.remote())
+        if self._bound_tool_name:
+            # Filter to only the bound tool's definition
+            return [d for d in all_definitions if d.get("function", {}).get("name") == self._bound_tool_name]
+        return all_definitions
 
     @classmethod
     def from_actor(cls, actor_handle: ray.actor.ActorHandle) -> ToolProxy:
