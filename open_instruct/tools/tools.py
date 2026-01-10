@@ -686,6 +686,7 @@ class DrAgentMCPToolConfig(BaseToolConfig):
 # Optional imports for generic MCP tools (official MCP SDK)
 try:
     from mcp import ClientSession
+    from mcp.client.sse import sse_client
     from mcp.client.stdio import StdioServerParameters, stdio_client
     from mcp.client.streamable_http import streamablehttp_client
 
@@ -780,13 +781,15 @@ class GenericMCPTool(Tool):
         """Get the appropriate client context manager based on transport type."""
         if self.transport == "http":
             return streamablehttp_client(self.server_url)
+        elif self.transport == "sse":
+            return sse_client(self.server_url)
         elif self.transport == "stdio":
             server_params = StdioServerParameters(
                 command=self.command, args=self.args, env=self.env if self.env else None
             )
             return stdio_client(server_params)
         else:
-            raise ValueError(f"Unknown transport type: {self.transport}")
+            raise ValueError(f"Unknown transport type: {self.transport}. Supported: http, sse, stdio")
 
     async def _discover_tools(self) -> dict[str, dict[str, Any]]:
         """Discover available tools from the MCP server.

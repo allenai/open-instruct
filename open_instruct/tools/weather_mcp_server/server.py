@@ -2,14 +2,14 @@
 Simple Weather MCP Server for testing the generic MCP tool.
 
 This server provides mock weather data for testing purposes.
-Run with: uvicorn server:app --host 0.0.0.0 --port 8765
-Or use: python server.py (runs on port 8765 by default)
+Run with: uv run python server.py [port]
+Default port is 8765, endpoint will be at http://localhost:8765/mcp
 """
 
 import random
 from typing import Annotated
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 # Create the MCP server
 mcp = FastMCP("Weather API Server")
@@ -119,10 +119,8 @@ def compare_weather(
     )
 
 
-# Create the ASGI app for uvicorn
-app = mcp.http_app()
-
 if __name__ == "__main__":
-    import uvicorn
+    import sys
 
-    uvicorn.run(app, host="0.0.0.0", port=8765)
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
+    mcp.run(transport="http", host="0.0.0.0", port=port)

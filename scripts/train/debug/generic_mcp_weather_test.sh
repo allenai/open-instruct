@@ -20,7 +20,7 @@ WEATHER_SERVER_HOST="0.0.0.0"
 # Start the weather MCP server in the background
 echo "Starting weather MCP server on port $WEATHER_SERVER_PORT..."
 cd open_instruct/tools/weather_mcp_server
-uv run uvicorn server:app --host $WEATHER_SERVER_HOST --port $WEATHER_SERVER_PORT &
+uv run python server.py $WEATHER_SERVER_PORT &
 WEATHER_SERVER_PID=$!
 cd - > /dev/null
 
