@@ -133,25 +133,19 @@ class OpenInstructLegacyToolParser(ToolParser):
         self.tool_stop_strings = [f"</{tool_name}>" for tool_name in self.tool_names]
         self.tool_start_strings = [f"<{tool_name}>" for tool_name in self.tool_names]
 
-        # Build mapping of tool_name -> first required parameter name
-        # This allows tools to use semantic parameter names (query, code, etc.)
         self.tool_param_names: dict[str, str] = {}
         for tool in tool_list:
             params = tool.tool_parameters
             required = params.get("required", [])
             if required:
-                # Use the first required parameter
                 self.tool_param_names[tool.tool_function_name] = required[0]
             else:
-                # Fallback: use first property if no required params
                 properties = params.get("properties", {})
                 if properties:
                     self.tool_param_names[tool.tool_function_name] = next(iter(properties))
                 else:
-                    # Last resort fallback
                     self.tool_param_names[tool.tool_function_name] = "text"
 
-        # Build regex per tool to extract content
         self.tool_regexes = {
             tool_name: re.compile(re.escape(f"<{tool_name}>") + r"(.*?)" + re.escape(f"</{tool_name}>"), re.DOTALL)
             for tool_name in self.tool_names
@@ -159,11 +153,9 @@ class OpenInstructLegacyToolParser(ToolParser):
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
         tool_calls: list[ToolCall] = []
-        # Check each tool's regex
         for tool_name, tool_regex in self.tool_regexes.items():
             match = tool_regex.search(text)
             if match:
-                # The content between tags is passed as the tool's first parameter
                 tool_content = match.group(1)
                 param_name = self.tool_param_names.get(tool_name, "text")
                 tool_calls.append(ToolCall(name=tool_name, args={param_name: tool_content}))
@@ -188,7 +180,6 @@ class DRTuluToolParser(ToolParser):
     def __init__(self, tool_list: list[Tool]):
         self.tools = tool_list
 
-        # Build mapping of tool_name -> first required parameter name
         self.tool_param_names: dict[str, str] = {}
         for tool in tool_list:
             params = tool.tool_parameters
@@ -202,13 +193,11 @@ class DRTuluToolParser(ToolParser):
                 else:
                     self.tool_param_names[tool.tool_function_name] = "text"
 
-        # Collect stop strings from tools (e.g., "</tool>")
         self._stop_strings: list[str] = []
         for tool in tool_list:
             if hasattr(tool, "get_stop_strings"):
                 self._stop_strings.extend(tool.get_stop_strings())
 
-        # Remove duplicates while preserving order
         seen: set[str] = set()
         unique_stops: list[str] = []
         for s in self._stop_strings:
@@ -220,15 +209,8 @@ class DRTuluToolParser(ToolParser):
         logger.info(f"DRTuluToolParser: Initialized with {len(tool_list)} tools, stop_strings={self._stop_strings}")
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
-        """Detect tool calls by checking for stop string patterns.
-
-        Since MCP tools handle their own internal routing, we just need to detect
-        if ANY tool was called and route the full text to that tool.
-        """
-        # Check if any stop string appears in text (indicates a tool call)
         for stop_str in self._stop_strings:
             if stop_str in text:
-                # Route to the first tool (MCP tool handles internal routing)
                 for tool in self.tools:
                     param_name = self.tool_param_names.get(tool.tool_function_name, "text")
                     return [ToolCall(name=tool.tool_function_name, args={param_name: text})]
@@ -239,11 +221,6 @@ class DRTuluToolParser(ToolParser):
 
     def stop_sequences(self) -> list[str]:
         return self._stop_strings
-
-
-# =============================================================================
-# vLLM Parser Registry & Factory
-# =============================================================================
 
 
 @dataclass

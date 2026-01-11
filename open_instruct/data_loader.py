@@ -1026,7 +1026,6 @@ class DataPreparationActor:
                     **batch_metrics_prefixed,
                 }
 
-                # Compute per-tool metrics from tool_call_counts
                 if result.request_info.tool_call_counts:
                     tool_call_counts_list = result.request_info.tool_call_counts
                     tool_error_counts_list = result.request_info.tool_error_counts or [
@@ -1036,28 +1035,21 @@ class DataPreparationActor:
                         {} for _ in tool_call_counts_list
                     ]
 
-                    # Aggregate all tool names across samples
                     all_tool_names: set[str] = set()
                     for counts in tool_call_counts_list:
                         all_tool_names.update(counts.keys())
 
                     for tool_name in all_tool_names:
-                        # called_rate: % of samples that called this tool at least once
                         samples_that_called = sum(
                             1 for counts in tool_call_counts_list if counts.get(tool_name, 0) > 0
                         )
                         called_rate = samples_that_called / len(tool_call_counts_list)
-                        # total_calls: total number of calls to this tool across all samples
                         total_calls = sum(counts.get(tool_name, 0) for counts in tool_call_counts_list)
-                        # calls_per_sample: average calls per sample
                         calls_per_sample = total_calls / len(tool_call_counts_list)
-                        # error_rate: total errors / total calls for this tool
                         total_errors = sum(counts.get(tool_name, 0) for counts in tool_error_counts_list)
                         error_rate = total_errors / total_calls if total_calls > 0 else 0.0
-                        # timeout_rate: total timeouts / total calls for this tool
                         total_timeouts = sum(counts.get(tool_name, 0) for counts in tool_timeout_counts_list)
                         timeout_rate = total_timeouts / total_calls if total_calls > 0 else 0.0
-                        # good_rate: (total_calls - errors - timeouts) / total_calls
                         good_calls = total_calls - total_errors - total_timeouts
                         good_rate = good_calls / total_calls if total_calls > 0 else 0.0
 

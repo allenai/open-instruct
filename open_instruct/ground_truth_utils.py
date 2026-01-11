@@ -1019,7 +1019,6 @@ async def apply_verifiable_reward(
     ):
         ground_truth_list = [ground_truth] if isinstance(ground_truth, str) else ground_truth
         dataset_list = [dataset] if isinstance(dataset, str) else dataset
-        # Handle length mismatch by broadcasting the single dataset to all ground truths
         if len(dataset_list) == 1 and len(ground_truth_list) > 1:
             dataset_list = dataset_list * len(ground_truth_list)
         elif len(ground_truth_list) != len(dataset_list):
@@ -1050,7 +1049,6 @@ async def apply_verifiable_reward(
             )
 
     if async_tasks:
-        # Use return_exceptions=True to prevent one failure from killing all tasks
         reward_results = await asyncio.gather(*async_tasks, return_exceptions=True)
     else:
         reward_results = []
@@ -1059,7 +1057,6 @@ async def apply_verifiable_reward(
     response_per_func_rewards = [{} for _ in range(len(responses))]
 
     for result, metadata in zip(reward_results, task_metadata):
-        # Handle exceptions from individual reward tasks
         if isinstance(result, Exception):
             logger.error(
                 f"Reward computation failed for response {metadata['response_idx']} "

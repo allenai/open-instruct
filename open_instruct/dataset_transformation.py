@@ -1292,13 +1292,11 @@ def rlvr_tokenize_v1(
     else:
         prompt = row[sft_messages_key][:-1]
 
-    # Override system prompt if provided
     if system_prompt_override:
         if prompt and prompt[0]["role"] == "system":
             prompt = prompt[1:]
         prompt = [{"role": "system", "content": system_prompt_override}] + list(prompt)
 
-    # Build kwargs for apply_chat_template
     chat_template_kwargs: Dict[str, Any] = {"add_generation_prompt": True}
     if tools:
         chat_template_kwargs["tools"] = tools
@@ -1375,7 +1373,6 @@ def rlvr_tokenize_v3(
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
-    # Build kwargs for apply_chat_template
     chat_template_kwargs: Dict[str, Any] = {"add_generation_prompt": True}
     if tools:
         chat_template_kwargs["tools"] = tools

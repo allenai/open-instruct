@@ -39,34 +39,6 @@ from open_instruct.tools.utils import BaseToolConfig, Tool
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Tool Registry
-# =============================================================================
-
-# Maps tool name -> config_cls
-# The config class must have `tool_class` as a ClassVar pointing to the Tool class.
-# The dict key is used as both the tool name and the config attribute name.
-#
-# To add a new tool:
-#   1. Create YourTool and YourToolConfig in tools.py
-#      - YourToolConfig should inherit from BaseToolConfig
-#      - Set tool_class as a ClassVar on the config
-#   2. Add an entry here: "mytool": MyToolConfig
-#
-# Example:
-#     # In tools.py
-#     @dataclass
-#     class MyToolConfig(BaseToolConfig):
-#         tool_class: ClassVar[type[Tool]] = MyTool
-#         some_option: int = 10
-#         # override_name inherited from BaseToolConfig
-#
-#     # In config.py, add to TOOL_REGISTRY:
-#     "mytool": MyToolConfig,
-#
-#     # Now you can use:
-#     #   --tools mytool --tool_configs '{"some_option": 20}'
-
 TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     "python": PythonCodeToolConfig,
     "serper_search": SerperSearchToolConfig,
@@ -76,8 +48,6 @@ TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     "generic_mcp": GenericMCPToolConfig,
 }
 
-
-# Built-in parsers that don't use vLLM
 _BUILTIN_PARSERS = ("legacy", "dr_tulu")
 
 
@@ -144,19 +114,15 @@ class ToolArgs:
     mask_tool_use: bool = True
     tool_parser: str = "legacy"
 
-    # Internal: parsed configs stored after validation
     _parsed_configs: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
-        """Validate tool arguments and parse JSON configs."""
-        # Validate tools
         if self.tools:
             available = get_available_tools()
             for tool in self.tools:
                 if tool.lower() not in available:
                     raise ValueError(f"Unknown tool: {tool}. Available tools: {available}")
 
-        # Validate tool_configs length matches tools
         if self.tool_configs is not None:
             if not self.tools:
                 raise ValueError("--tool_configs requires --tools to be specified")
@@ -166,7 +132,6 @@ class ToolArgs:
                     f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
                 )
 
-        # Parse and validate JSON configs
         parsed_configs: list[dict[str, Any]] = []
         if self.tools and self.tool_configs:
             for i, (tool_name, config_str) in enumerate(zip(self.tools, self.tool_configs)):
@@ -183,7 +148,6 @@ class ToolArgs:
                         f"tool_configs[{i}] for '{tool_name}' must be a JSON object, got {type(config_dict).__name__}"
                     )
 
-                # Validate keys
                 all_config_fields = {f.name for f in fields(config_cls)}
                 for key in config_dict:
                     if key not in all_config_fields:
@@ -194,7 +158,6 @@ class ToolArgs:
 
                 parsed_configs.append(config_dict)
 
-        # Store parsed configs for use in to_tool_config()
         object.__setattr__(self, "_parsed_configs", parsed_configs)
 
         if self.tool_parser not in get_available_parsers():
@@ -203,8 +166,6 @@ class ToolArgs:
     def to_tool_config(self) -> "ToolConfig":
         """Convert ToolArgs to internal ToolConfig structure."""
         parsed_configs = self._parsed_configs
-
-        # Build tool configs list - one config per tool instance (supports duplicates)
         tool_configs_list: list[BaseToolConfig] = []
         if self.tools:
             for i, tool_name in enumerate(self.tools):
@@ -282,7 +243,6 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
             raise ValueError(f"parser='{parser_name}' requires a tokenizer")
         from open_instruct.tools.parsers import create_vllm_parser
 
-        # Extract tool definitions for vLLM parsers
         tool_definitions = None
         if tools:
             tool_definitions = []
@@ -295,7 +255,6 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
     elif parser_name == "dr_tulu":
         if not tools:
             raise ValueError("parser='dr_tulu' requires tools to be provided")
-        # DR Tulu parser requires MCP tools - check that at least one MCP tool is configured
         if "mcp" not in tools:
             raise ValueError(
                 "parser='dr_tulu' requires the 'mcp' tool to be configured. "
@@ -333,14 +292,8 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
 
     for i, _tool_name in enumerate(config.tools):
         tool_config = config.get_tool_config(i)
-
-        # Step 1: Create ToolActor from config (config.build() called inside Ray actor)
         actor = create_tool_actor_from_config(config=tool_config)
-
-        # Step 2: Wrap ToolActor with ToolProxy
         proxy = ToolProxy.from_actor(actor)
-
-        # Step 3: Register proxy by its tool name
         name = proxy.tool_function_name
         if name in proxies:
             raise ValueError(

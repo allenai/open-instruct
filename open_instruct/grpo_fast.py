@@ -2287,16 +2287,13 @@ def main(
 
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
-    # Initialize Ray early so we can create tools before dataset processing
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
-    # Create tools here so we can use them for dataset setup
     tool_config = tool_args.to_tool_config()
     tool_objects, tool_stop_strings = build_tools_from_config(tool_config)
 
     pprint([args, model_config, tool_config])
 
-    # Get tool definitions for dataset transformation (chat template needs them)
     tool_definitions = None
     if tool_objects:
         tool_definitions = []
@@ -2304,7 +2301,6 @@ def main(
             tool_definitions.extend(tool.get_openai_tool_definitions())
         logger.info(f"Tool definitions for chat template: {[t['function']['name'] for t in tool_definitions]}")
 
-    # Add tool stop strings to streaming_config.stop_strings
     for stop_string in tool_stop_strings:
         if stop_string not in streaming_config.stop_strings:
             streaming_config.stop_strings.append(stop_string)

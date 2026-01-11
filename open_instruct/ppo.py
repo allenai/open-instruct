@@ -1375,28 +1375,20 @@ def data_preparation_thread(
             **reward_metrics,
         }
 
-        # Compute per-tool metrics from tool_call_counts
         if tool_call_counts:
-            # Aggregate all tool names across samples
             all_tool_names: set[str] = set()
             for counts in tool_call_counts:
                 all_tool_names.update(counts.keys())
 
             for tool_name in all_tool_names:
-                # called_rate: % of samples that called this tool at least once
                 samples_that_called = sum(1 for counts in tool_call_counts if counts.get(tool_name, 0) > 0)
                 called_rate = samples_that_called / len(tool_call_counts)
-                # total_calls: total number of calls to this tool across all samples
                 total_calls = sum(counts.get(tool_name, 0) for counts in tool_call_counts)
-                # calls_per_sample: average calls per sample
                 calls_per_sample = total_calls / len(tool_call_counts)
-                # error_rate: total errors / total calls for this tool
                 total_errors = sum(counts.get(tool_name, 0) for counts in tool_error_counts)
                 error_rate = total_errors / total_calls if total_calls > 0 else 0.0
-                # timeout_rate: total timeouts / total calls for this tool
                 total_timeouts = sum(counts.get(tool_name, 0) for counts in tool_timeout_counts)
                 timeout_rate = total_timeouts / total_calls if total_calls > 0 else 0.0
-                # good_rate: (total_calls - errors - timeouts) / total_calls
                 good_calls = total_calls - total_errors - total_timeouts
                 good_rate = good_calls / total_calls if total_calls > 0 else 0.0
 
