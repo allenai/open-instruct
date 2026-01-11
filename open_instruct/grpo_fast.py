@@ -1913,8 +1913,8 @@ def maybe_evaluate(
 
     try:
         # timeout 0.01 if this is not the last training step
-        # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if training_step < args.num_training_steps else 100
+        # otherwise, wait to get the last evaluation generations (5 min timeout just in case)
+        timeout = 0.01 if training_step < args.num_training_steps else 600
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
