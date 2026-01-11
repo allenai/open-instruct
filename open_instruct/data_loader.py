@@ -530,7 +530,7 @@ def accumulate_inference_batches(
                 result.masks[i].append(1)
                 result.logprobs[i].append(float("nan"))
 
-        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
 
         k_queries = repeat_each([query], generation_config.n)
         k_ground_truths = repeat_each([ground_truth], generation_config.n)
