@@ -39,7 +39,16 @@ class ToolParser(ABC):
 
     @abstractmethod
     def format_tool_calls(self, tool_output: str) -> str:
+        """Format a single tool output."""
         pass
+
+    def format_tool_outputs(self, tool_outputs: list[str]) -> str:
+        """Format multiple tool outputs with any necessary prefix/postfix.
+
+        By default, just concatenates individually formatted outputs.
+        Subclasses can override to add prefix/postfix for continuation prompts.
+        """
+        return "".join(self.format_tool_calls(output) for output in tool_outputs)
 
     @abstractmethod
     def stop_sequences(self) -> list[str]:

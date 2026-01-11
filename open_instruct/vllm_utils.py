@@ -909,8 +909,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         if not triggered_tools:
             break
 
-        # Execute all triggered tools (tools are async by default)
-        should_break = False
+        # Execute all triggered tools and collect their outputs
+        tool_outputs_this_round: list[str] = []
 
         for triggered_tool, tool_args in triggered_tools:
             try:
@@ -940,29 +940,27 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             if tool_result.timeout:
                 tool_timeout_counts[tool_name] = tool_timeout_counts.get(tool_name, 0) + 1
 
-            # Format and tokenize this tool's output
-            formatted_output = actor.tool_parser.format_tool_calls(tool_result.output)
-            tool_tokens = actor.llm_engine.tokenizer.encode(formatted_output, add_special_tokens=False)
+            tool_outputs_this_round.append(tool_result.output)
 
-            tool_tokens, excess = truncate_tool_output_tokens(
-                tool_tokens,
-                current_prompt_len=len(current_prompt),
-                current_response_len=len(response_masks),
-                max_model_len=max_model_len,
-                max_tokens=sampling_params.max_tokens,
-            )
+        # Format all tool outputs together (includes prefix/postfix for continuation)
+        formatted_output = actor.tool_parser.format_tool_outputs(tool_outputs_this_round)
+        tool_tokens = actor.llm_engine.tokenizer.encode(formatted_output, add_special_tokens=False)
 
-            response_tokens.extend(tool_tokens)
-            response_logprobs.extend([0.0] * len(tool_tokens))
-            response_masks.extend([0 if actor.mask_tool_use else 1] * len(tool_tokens))
-            current_prompt.extend(tool_tokens)
+        tool_tokens, excess = truncate_tool_output_tokens(
+            tool_tokens,
+            current_prompt_len=len(current_prompt),
+            current_response_len=len(response_masks),
+            max_model_len=max_model_len,
+            max_tokens=sampling_params.max_tokens,
+        )
 
-            current_max_tokens = sampling_params.max_tokens - len(response_masks)
-            if excess > 0 or current_max_tokens <= 0:
-                should_break = True
-                break
+        response_tokens.extend(tool_tokens)
+        response_logprobs.extend([0.0] * len(tool_tokens))
+        response_masks.extend([0 if actor.mask_tool_use else 1] * len(tool_tokens))
+        current_prompt.extend(tool_tokens)
 
-        if should_break:
+        current_max_tokens = sampling_params.max_tokens - len(response_masks)
+        if excess > 0 or current_max_tokens <= 0:
             break
     else:
         # Loop exhausted without breaking - this indicates a potential infinite loop bug
