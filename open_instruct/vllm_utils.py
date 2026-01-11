@@ -510,7 +510,7 @@ async def compute_rewards(
 ) -> tuple[list[float], dict]:
     index_map = actor._eval_index_map if is_eval else actor._train_index_map
     example = dataset[index_map[result.index]]
-    decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+    decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=False)
 
     k = len(result.responses)
     k_ground_truths = [example[GROUND_TRUTHS_KEY]] * k
