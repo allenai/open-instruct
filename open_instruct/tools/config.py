@@ -23,6 +23,7 @@ from open_instruct.tools.parsers import (
     DRTuluToolParser,
     OpenInstructLegacyToolParser,
     ToolParser,
+    create_vllm_parser,
     get_vllm_parser_mapping,
 )
 from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
@@ -209,7 +210,6 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
     elif parser_name in get_vllm_parser_mapping():
         if tokenizer is None:
             raise ValueError(f"parser='{parser_name}' requires a tokenizer")
-        from open_instruct.tools.parsers import create_vllm_parser
 
         tool_definitions = None
         if tools:

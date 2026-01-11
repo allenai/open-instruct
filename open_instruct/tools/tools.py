@@ -7,6 +7,7 @@ generic build() from ToolConfig; override only when custom logic is needed.
 """
 
 import asyncio
+import concurrent.futures
 import inspect
 import logging
 import os
@@ -54,7 +55,7 @@ try:
     )
 
     MCP_AVAILABLE = True
-    MCP_TOOL_REGISTRY: dict[str, type] = {
+    DR_AGENT_MCP_TOOLS: dict[str, type] = {
         "snippet_search": SemanticScholarSnippetSearchTool,
         "google_search": SerperSearchTool,
         "massive_serve": MassiveServeSearchTool,
@@ -62,7 +63,7 @@ try:
     }
 except ImportError:
     MCP_AVAILABLE = False
-    MCP_TOOL_REGISTRY = {}
+    DR_AGENT_MCP_TOOLS: dict[str, type] = {}
 
 
 # =============================================================================
@@ -499,10 +500,10 @@ class DrAgentMCPTool(Tool):
             tool_names = [n.strip() for n in tool_names.split(",") if n.strip()]
 
         for mcp_tool_name in tool_names:
-            if mcp_tool_name not in MCP_TOOL_REGISTRY:
-                raise ValueError(f"Unknown MCP tool: {mcp_tool_name}. Available: {list(MCP_TOOL_REGISTRY.keys())}")
+            if mcp_tool_name not in DR_AGENT_MCP_TOOLS:
+                raise ValueError(f"Unknown MCP tool: {mcp_tool_name}. Available: {list(DR_AGENT_MCP_TOOLS.keys())}")
 
-            mcp_tool_cls = MCP_TOOL_REGISTRY[mcp_tool_name]
+            mcp_tool_cls = DR_AGENT_MCP_TOOLS[mcp_tool_name]
             sig = inspect.signature(mcp_tool_cls.__init__)
             valid_params = set(sig.parameters.keys())
 
@@ -764,8 +765,6 @@ class MCPToolFactory:
         if self._discovered_tools is None:
             # Always use a thread for discovery to avoid event loop conflicts
             # (e.g., Ray actors may have async infrastructure that interferes with asyncio.run())
-            import concurrent.futures
-
             logger.info(f"Discovering tools from MCP server: {self.server_url or self.command}")
             try:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -801,13 +800,6 @@ class MCPToolFactory:
                     return "\n".join(text_parts)
                 return str(result)
 
-    def _call_tool_sync(self, tool_name: str, arguments: dict[str, Any]) -> str:
-        """Synchronous wrapper for MCP tool call (runs in thread)."""
-        logger.debug(f"MCP tool call (in thread): {tool_name} with {arguments}")
-        result = asyncio.run(self._call_tool_async(tool_name, arguments))
-        logger.debug(f"MCP tool call completed: {tool_name}")
-        return result
-
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolOutput:
         """Call an MCP tool with retry logic (async).
 
@@ -818,8 +810,6 @@ class MCPToolFactory:
         Returns:
             ToolOutput with the result.
         """
-        import concurrent.futures
-
         start_time = time.time()
 
         # Check if tool exists
@@ -838,13 +828,7 @@ class MCPToolFactory:
         last_error: str | None = None
         for attempt in range(self._retry_config.max_retries):
             try:
-                # Run MCP call in a thread to avoid event loop conflicts in Ray
-                loop = asyncio.get_running_loop()
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    output = await asyncio.wait_for(
-                        loop.run_in_executor(executor, self._call_tool_sync, tool_name, arguments),
-                        timeout=self.timeout,
-                    )
+                output = await asyncio.wait_for(self._call_tool_async(tool_name, arguments), timeout=self.timeout)
                 result = ToolOutput(
                     output=output, called=True, error="", timeout=False, runtime=time.time() - start_time
                 )
