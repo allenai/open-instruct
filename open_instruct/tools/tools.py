@@ -78,7 +78,7 @@ class MaxCallsExceededTool(Tool):
     # No parameters needed - explicit empty schema
     _default_tool_parameters: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
 
-    async def __call__(self) -> ToolOutput:
+    async def __call__(self, **kwargs: Any) -> ToolOutput:
         """Return an error message indicating max tool calls exceeded."""
         return ToolOutput(output="Max tool calls exceeded.", called=False, error="", timeout=False, runtime=0)
 
@@ -126,9 +126,7 @@ class PythonCodeTool(Tool):
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    self.api_endpoint,
-                    json={"code": code, "timeout": self.timeout},
-                    timeout=self.timeout,
+                    self.api_endpoint, json={"code": code, "timeout": self.timeout}, timeout=self.timeout
                 )
                 res = response.json()
                 output = res["output"]
@@ -204,11 +202,7 @@ class MassiveDSSearchTool(Tool):
         url = self.api_endpoint or os.environ.get("MASSIVE_DS_URL")
         if not url:
             result = ToolOutput(
-                output="",
-                error="Missing MASSIVE_DS_URL environment variable.",
-                called=True,
-                timeout=False,
-                runtime=0,
+                output="", error="Missing MASSIVE_DS_URL environment variable.", called=True, timeout=False, runtime=0
             )
             _log_tool_call(self.tool_function_name, query, result)
             return result
@@ -284,11 +278,7 @@ class S2SearchTool(Tool):
         api_key = os.environ.get("S2_API_KEY")
         if not api_key:
             result = ToolOutput(
-                output="",
-                error="Missing S2_API_KEY environment variable.",
-                called=True,
-                timeout=False,
-                runtime=0,
+                output="", error="Missing S2_API_KEY environment variable.", called=True, timeout=False, runtime=0
             )
             _log_tool_call(self.tool_function_name, query, result)
             return result
@@ -372,11 +362,7 @@ class SerperSearchTool(Tool):
         api_key = os.environ.get("SERPER_API_KEY")
         if not api_key:
             result = ToolOutput(
-                output="",
-                error="Missing SERPER_API_KEY environment variable.",
-                called=True,
-                timeout=False,
-                runtime=0,
+                output="", error="Missing SERPER_API_KEY environment variable.", called=True, timeout=False, runtime=0
             )
             _log_tool_call(self.tool_function_name, query, result)
             return result
@@ -682,13 +668,7 @@ class MCPToolWrapper(Tool):
     Each discovered MCP tool gets its own wrapper instance.
     """
 
-    def __init__(
-        self,
-        name: str,
-        description: str,
-        input_schema: dict[str, Any],
-        factory: "MCPToolFactory",
-    ) -> None:
+    def __init__(self, name: str, description: str, input_schema: dict[str, Any], factory: "MCPToolFactory") -> None:
         """Initialize an MCPToolWrapper.
 
         Args:
@@ -845,11 +825,10 @@ class MCPToolFactory:
                     future = executor.submit(asyncio.run, self._discover_tools_async())
                     self._discovered_tools = future.result(timeout=self.timeout)
                 logger.info(f"Discovered {len(self._discovered_tools)} tools: {list(self._discovered_tools.keys())}")
-            except concurrent.futures.TimeoutError:
+            except concurrent.futures.TimeoutError as err:
                 raise TimeoutError(
-                    f"MCP tool discovery timed out after {self.timeout}s. "
-                    f"Server: {self.server_url or self.command}"
-                )
+                    f"MCP tool discovery timed out after {self.timeout}s. Server: {self.server_url or self.command}"
+                ) from err
             except Exception as e:
                 raise RuntimeError(f"MCP tool discovery failed: {e}") from e
 
@@ -968,11 +947,7 @@ class MCPToolFactory:
             except Exception as e:
                 # Non-retryable error
                 result = ToolOutput(
-                    output="",
-                    error=str(e),
-                    called=True,
-                    timeout=False,
-                    runtime=time.time() - start_time,
+                    output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time
                 )
                 _log_tool_call(tool_name, str(arguments), result)
                 return result
@@ -1081,9 +1056,7 @@ class GenericMCPTool(Tool):
 
         if self._requested_tool_name:
             if self._requested_tool_name not in discovered:
-                raise ValueError(
-                    f"Tool '{self._requested_tool_name}' not found. Available: {list(discovered.keys())}"
-                )
+                raise ValueError(f"Tool '{self._requested_tool_name}' not found. Available: {list(discovered.keys())}")
             self._tool_name = self._requested_tool_name
         else:
             # Use first discovered tool

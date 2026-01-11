@@ -1019,12 +1019,21 @@ async def apply_verifiable_reward(
     ):
         ground_truth_list = [ground_truth] if isinstance(ground_truth, str) else ground_truth
         dataset_list = [dataset] if isinstance(dataset, str) else dataset
-        assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
+        # Handle length mismatch by broadcasting the single dataset to all ground truths
+        if len(dataset_list) == 1 and len(ground_truth_list) > 1:
+            dataset_list = dataset_list * len(ground_truth_list)
+        elif len(ground_truth_list) != len(dataset_list):
+            logger.error(
+                f"Length mismatch in apply_verifiable_reward: gt_list={len(ground_truth_list)}, ds_list={len(dataset_list)}, skipping"
+            )
+            continue
 
         for gt, ds in zip(ground_truth_list, dataset_list):
             reward_func = reward_fn_mapping.get(ds.lower())
             if reward_func is None:
-                logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
+                logger.warning(
+                    "No reward function found for dataset %s. Available: %s", ds, list(reward_fn_mapping.keys())[:5]
+                )
                 continue
 
             task = reward_func.async_call(
@@ -1041,8 +1050,8 @@ async def apply_verifiable_reward(
             )
 
     if async_tasks:
-        reward_results = await asyncio.gather(*async_tasks)
-        logger.debug(f"Applied {len(reward_results)} ground truth rewards in parallel")
+        # Use return_exceptions=True to prevent one failure from killing all tasks
+        reward_results = await asyncio.gather(*async_tasks, return_exceptions=True)
     else:
         reward_results = []
 
@@ -1050,6 +1059,14 @@ async def apply_verifiable_reward(
     response_per_func_rewards = [{} for _ in range(len(responses))]
 
     for result, metadata in zip(reward_results, task_metadata):
+        # Handle exceptions from individual reward tasks
+        if isinstance(result, Exception):
+            logger.error(
+                f"Reward computation failed for response {metadata['response_idx']} "
+                f"(dataset={metadata['dataset']}): {type(result).__name__}: {result}"
+            )
+            continue
+
         response_idx = metadata["response_idx"]
         dataset = metadata["dataset"]
         reward_weight = metadata["reward_weight"]

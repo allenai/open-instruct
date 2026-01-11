@@ -331,7 +331,7 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
     proxies: dict[str, ToolProxy] = {}
     stop_strings: list[str] = []
 
-    for i, tool_name in enumerate(config.tools):
+    for i, _tool_name in enumerate(config.tools):
         tool_config = config.get_tool_config(i)
 
         # Step 1: Create ToolActor from config (config.build() called inside Ray actor)

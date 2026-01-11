@@ -223,6 +223,11 @@ def get_triggered_tools(
     if not tool_parser:
         return []
 
+    # If max calls already reached, return empty list to break the loop
+    if num_calls >= max_calls:
+        logger.info(f"[get_triggered_tools] Max calls reached ({num_calls} >= {max_calls}), returning empty list")
+        return []
+
     # Tool definitions are stored in the parser at init time (for vLLM parsers)
     tool_calls = tool_parser.get_tool_calls(output_text)
     if not tool_calls:
@@ -734,7 +739,13 @@ class LLMRayActor:
                 finalize_futures.append(completion_future)
 
             done, not_done = futures.wait(finalize_futures, timeout=0)
-            [future.result() for future in done]
+            for future in done:
+                try:
+                    future.result()
+                except Exception:
+                    logger.exception(
+                        "Error in finalize_completed_request future - this may cause results to be missing"
+                    )
             finalize_futures = list(not_done)
 
     def init_process_group(
@@ -834,6 +845,9 @@ class LLMRayActor:
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool support, awaiting tools inline."""
+    # Maximum iterations to prevent infinite loops in tool calling
+    MAX_TOOL_ITERATIONS = 100
+
     await _check_health(actor.server_port)
     response_tokens = []
     response_logprobs = []
@@ -855,7 +869,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
 
-    while True:
+    for _iteration in range(MAX_TOOL_ITERATIONS):
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
         api_response = await actor.client.completions.create(
             model=actor.model_name,
@@ -875,7 +889,11 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         response_tokens.extend(model_tokens)
         current_prompt.extend(model_tokens)
 
-        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
+        if not output.logprobs or not output.logprobs.token_logprobs:
+            raise RuntimeError(
+                f"logprobs must be available for request {sub_request_id}. "
+                f"Got logprobs={output.logprobs}. Ensure logprobs=True in sampling params."
+            )
         for logprob in output.logprobs.token_logprobs:
             response_logprobs.append(logprob)
             cumulative_logprob += logprob
@@ -946,6 +964,12 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
         if should_break:
             break
+    else:
+        # Loop exhausted without breaking - this indicates a potential infinite loop bug
+        logger.error(
+            f"Tool loop exceeded {MAX_TOOL_ITERATIONS} iterations for request {sub_request_id}. "
+            f"num_calls={num_calls}, max_tool_calls={actor.max_tool_calls}. This may indicate a bug."
+        )
 
     if output.finish_reason == "stop" and len(response_tokens) == 0:
         eos_token_id = actor.llm_engine.tokenizer.eos_token_id

@@ -3,15 +3,14 @@ import subprocess
 import time
 import unittest
 
-from open_instruct.tools.config import ToolArgs, ToolConfig, build_tools_from_config
+from open_instruct.tools.config import ToolArgs, build_tools_from_config
 from open_instruct.tools.tools import (
     GENERIC_MCP_AVAILABLE,
-    GenericMCPTool,
     GenericMCPToolConfig,
+    MaxCallsExceededTool,
     MCPToolFactory,
     MCPToolWrapper,
     MCPTransport,
-    MaxCallsExceededTool,
     PythonCodeTool,
     PythonCodeToolConfig,
     S2SearchTool,
@@ -382,11 +381,7 @@ class TestGenericMCPTool(unittest.TestCase):
 
     def test_config_with_tool_name(self):
         """Test GenericMCPToolConfig with tool_name specified."""
-        config = GenericMCPToolConfig(
-            server_url="http://localhost:8000/mcp",
-            tool_name="search",
-            timeout=120,
-        )
+        config = GenericMCPToolConfig(server_url="http://localhost:8000/mcp", tool_name="search", timeout=120)
         self.assertEqual(config.server_url, "http://localhost:8000/mcp")
         self.assertEqual(config.tool_name, "search")
         self.assertEqual(config.timeout, 120)
@@ -411,7 +406,9 @@ class TestGenericMCPToolConfig(unittest.TestCase):
         """Test tool_configs for generic_mcp tool with stdio transport."""
         args = ToolArgs(
             tools=["generic_mcp"],
-            tool_configs=['{"transport": "stdio", "command": "python", "args": ["server.py"], "tool_name": "read_file"}'],
+            tool_configs=[
+                '{"transport": "stdio", "command": "python", "args": ["server.py"], "tool_name": "read_file"}'
+            ],
         )
         config = args.to_tool_config()
         mcp_config = config.get_tool_config(0)
@@ -506,9 +503,7 @@ class TestRetryConfig(unittest.TestCase):
 
     def test_retry_config_custom(self):
         """Test RetryConfig with custom values."""
-        config = RetryConfig(
-            max_retries=5, backoff_factor=1.0, retryable_exceptions=(ValueError, KeyError)
-        )
+        config = RetryConfig(max_retries=5, backoff_factor=1.0, retryable_exceptions=(ValueError, KeyError))
         self.assertEqual(config.max_retries, 5)
         self.assertEqual(config.backoff_factor, 1.0)
         self.assertIn(ValueError, config.retryable_exceptions)

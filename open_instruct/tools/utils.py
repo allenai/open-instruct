@@ -24,9 +24,7 @@ class RetryConfig:
     """Maximum number of retry attempts."""
     backoff_factor: float = 0.5
     """Backoff factor for exponential backoff (sleep = backoff_factor * 2^attempt)."""
-    retryable_exceptions: tuple[type[Exception], ...] = field(
-        default_factory=lambda: (ConnectionError, TimeoutError)
-    )
+    retryable_exceptions: tuple[type[Exception], ...] = field(default_factory=lambda: (ConnectionError, TimeoutError))
     """Tuple of exception types that should trigger a retry."""
 
 

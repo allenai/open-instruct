@@ -49,7 +49,7 @@ def _get_city_weather(city: str) -> dict:
 
 @mcp.tool
 def get_current_weather(
-    city: Annotated[str, Field(description="The name of the city to get weather for (e.g., 'New York', 'London')")]
+    city: Annotated[str, Field(description="The name of the city to get weather for (e.g., 'New York', 'London')")],
 ) -> str:
     """Get the current weather for a city."""
     weather = _get_city_weather(city)

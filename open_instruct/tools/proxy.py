@@ -115,11 +115,7 @@ class ToolProxy(Tool):
     All actual tool execution happens in the remote ToolActor.
     """
 
-    def __init__(
-        self,
-        actor_handle: ray.actor.ActorHandle,
-        tool_function_name: str,
-    ):
+    def __init__(self, actor_handle: ray.actor.ActorHandle, tool_function_name: str):
         """Initialize the proxy with an actor handle.
 
         Prefer using ToolProxy.from_actor() instead of calling this directly.
