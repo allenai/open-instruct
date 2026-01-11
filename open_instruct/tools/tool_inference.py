@@ -53,7 +53,6 @@ from open_instruct.tools.config import (
     create_tool_parser,
     get_available_parsers,
     get_available_tools,
-    get_tool_definitions_from_config,
 )
 from open_instruct.tools.parsers import ToolParser
 from open_instruct.tools.utils import Tool
@@ -494,7 +493,10 @@ async def main_async(args: Args):
     if tool_config.tools:
         logger.info(f"Building tools: {tool_config.tools}")
         tools, stop_strings = build_tools_from_config(tool_config)
-        tool_definitions = get_tool_definitions_from_config(tool_config)
+        # Get tool definitions from built tools
+        tool_definitions = []
+        for tool in tools.values():
+            tool_definitions.extend(tool.get_openai_tool_definitions())
         logger.info(f"Tools ready: {list(tools.keys())}")
         logger.info(f"Stop strings: {stop_strings}")
 

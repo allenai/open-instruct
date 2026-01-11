@@ -660,63 +660,11 @@ class MCPTransport(str, Enum):
     STDIO = "stdio"
 
 
-class MCPToolWrapper(Tool):
-    """
-    A thin wrapper around a single MCP tool discovered from a server.
-
-    This is a lightweight tool that delegates calls to an MCPToolFactory.
-    Each discovered MCP tool gets its own wrapper instance.
-    """
-
-    def __init__(self, name: str, description: str, input_schema: dict[str, Any], factory: "MCPToolFactory") -> None:
-        """Initialize an MCPToolWrapper.
-
-        Args:
-            name: The tool's name (used as tool_function_name).
-            description: The tool's description.
-            input_schema: JSON Schema for the tool's parameters.
-            factory: The parent factory that handles the actual calls.
-        """
-        self._name = name
-        self._description = description
-        self._input_schema = input_schema
-        self._factory = factory
-
-    @property
-    def tool_function_name(self) -> str:
-        return self._name
-
-    @property
-    def tool_description(self) -> str:
-        return self._description
-
-    @property
-    def tool_parameters(self) -> dict[str, Any]:
-        return self._input_schema
-
-    async def __call__(self, **kwargs: Any) -> ToolOutput:
-        """Call the MCP tool via the factory."""
-        return await self._factory.call_tool(self._name, kwargs)
-
-
 class MCPToolFactory:
     """
-    Factory that discovers tools from an MCP server and creates individual wrappers.
+    Handles MCP server connections, tool discovery, and tool calls.
 
-    This replaces the old GenericMCPTool pattern. Instead of a single tool that
-    handles multiple names via _mcp_tool_name, this factory creates separate
-    MCPToolWrapper instances for each discovered tool.
-
-    Example usage:
-        # Create factory
-        factory = MCPToolFactory(server_url="http://localhost:8000/mcp")
-
-        # Discover and create tool wrappers
-        tools = factory.create_tools()  # dict[str, MCPToolWrapper]
-
-        # Each tool is independent
-        result = tools["search"](query="test")
-
+    Used internally by GenericMCPTool and MCPServerConfig.
     Requires the mcp package: uv sync --extra mcp
     """
 
@@ -771,7 +719,6 @@ class MCPToolFactory:
 
         # Cache for discovered tools
         self._discovered_tools: dict[str, dict[str, Any]] | None = None
-        self._tool_wrappers: dict[str, MCPToolWrapper] | None = None
 
     async def _get_client_context(self):
         """Get the appropriate client context manager based on transport type."""
@@ -833,24 +780,6 @@ class MCPToolFactory:
                 raise RuntimeError(f"MCP tool discovery failed: {e}") from e
 
         return self._discovered_tools
-
-    def create_tools(self) -> dict[str, MCPToolWrapper]:
-        """Create MCPToolWrapper instances for each discovered tool.
-
-        Returns:
-            Dict mapping tool names to their wrapper instances.
-        """
-        if self._tool_wrappers is None:
-            discovered = self.discover_tools()
-            self._tool_wrappers = {}
-            for name, info in discovered.items():
-                self._tool_wrappers[name] = MCPToolWrapper(
-                    name=name,
-                    description=info.get("description", ""),
-                    input_schema=info.get("input_schema", {"type": "object", "properties": {}}),
-                    factory=self,
-                )
-        return self._tool_wrappers
 
     async def _call_tool_async(self, tool_name: str, arguments: dict[str, Any]) -> str:
         """Call a tool on the MCP server asynchronously."""
@@ -1093,23 +1022,23 @@ class GenericMCPTool(Tool):
 
 @dataclass
 class GenericMCPToolConfig(BaseToolConfig):
-    """Configuration for the generic MCP tool.
+    """Configuration for MCP tools.
 
-    This tool connects to any MCP server and exposes a single tool from it.
-    Use the `tool_name` field to specify which tool to expose. If not specified,
-    the first discovered tool is used.
-
-    For multiple tools from the same server, create multiple config entries
-    with different `tool_name` values.
+    Connects to an MCP server and exposes its tools. If `tool_name` is not
+    specified, ALL tools from the server are automatically discovered and
+    registered at startup.
 
     Example CLI usage:
-        # Expose a specific tool
+        # Auto-discover all tools from MCP server
+        --tools generic_mcp --tool_configs '{"server_url": "http://localhost:8000/mcp"}'
+
+        # Expose a specific tool only
         --tools generic_mcp --tool_configs '{"server_url": "http://localhost:8000/mcp", "tool_name": "search"}'
 
-        # Expose multiple tools from same server
+        # Multiple MCP servers (all tools from each)
         --tools generic_mcp generic_mcp --tool_configs \\
-            '{"server_url": "http://localhost:8000/mcp", "tool_name": "search"}' \\
-            '{"server_url": "http://localhost:8000/mcp", "tool_name": "read_file"}'
+            '{"server_url": "http://server1:8000/mcp"}' \\
+            '{"server_url": "http://server2:8000/mcp"}'
 
         # Stdio transport
         --tools generic_mcp --tool_configs '{"transport": "stdio", "command": "python", "args": ["server.py"]}'
@@ -1134,4 +1063,4 @@ class GenericMCPToolConfig(BaseToolConfig):
     retry_backoff: float = 0.5
     """Backoff factor for retries."""
     tool_name: str | None = None
-    """Name of the MCP tool to expose. If None, uses first discovered tool."""
+    """Name of a specific MCP tool to expose. If None, all tools are discovered and registered."""

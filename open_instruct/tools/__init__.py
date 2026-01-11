@@ -1,46 +1,33 @@
-from open_instruct.tools.config import (
-    TOOL_REGISTRY,
-    ToolArgs,
-    ToolConfig,
-    build_tools_from_config,
-    create_tool_parser,
-    get_available_tools,
-    get_tool_definitions_from_config,
-)
-from open_instruct.tools.parsers import (
-    VLLM_PARSERS,
-    ToolParser,
-    VllmToolParser,
-    create_vllm_parser,
-    get_available_vllm_parsers,
-)
-from open_instruct.tools.proxy import DEFAULT_MAX_CONCURRENCY, ToolActor, ToolProxy, create_tool_actor_from_config
-from open_instruct.tools.tools import MCPToolFactory, MCPToolWrapper, MCPTransport
-from open_instruct.tools.utils import BaseToolConfig, RetryConfig, Tool, ToolCall, ToolOutput
+"""Tools module for open-instruct.
+
+Main API:
+- ToolArgs, ToolConfig: Configuration dataclasses
+- build_tools_from_config: Build tools from config
+- create_tool_parser: Create a tool parser
+
+For direct imports of specific tools/parsers, import from submodules:
+- open_instruct.tools.tools (PythonCodeTool, SerperSearchTool, etc.)
+- open_instruct.tools.parsers (VllmToolParser, etc.)
+- open_instruct.tools.proxy (ToolProxy, ToolActor, etc.)
+- open_instruct.tools.utils (Tool base class, ToolOutput, etc.)
+"""
+
+from open_instruct.tools.config import ToolArgs, ToolConfig, build_tools_from_config, create_tool_parser
+from open_instruct.tools.parsers import ToolParser
+from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
+from open_instruct.tools.utils import Tool, ToolOutput
 
 __all__ = [
-    "BaseToolConfig",
-    "DEFAULT_MAX_CONCURRENCY",
-    "MCPToolFactory",
-    "MCPToolWrapper",
-    "MCPTransport",
-    "RetryConfig",
-    "TOOL_REGISTRY",
-    "Tool",
-    "ToolActor",
+    # Config
     "ToolArgs",
-    "ToolCall",
     "ToolConfig",
+    "build_tools_from_config",
+    "create_tool_parser",
+    # Types
+    "Tool",
     "ToolOutput",
     "ToolParser",
+    # Proxy
     "ToolProxy",
-    "VLLM_PARSERS",
-    "VllmToolParser",
-    "build_tools_from_config",
     "create_tool_actor_from_config",
-    "create_tool_parser",
-    "create_vllm_parser",
-    "get_available_tools",
-    "get_available_vllm_parsers",
-    "get_tool_definitions_from_config",
 ]

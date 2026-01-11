@@ -30,6 +30,7 @@ from open_instruct.tools.tools import (
     DrAgentMCPToolConfig,
     GenericMCPToolConfig,
     MassiveDSSearchToolConfig,
+    MCPToolFactory,
     PythonCodeToolConfig,
     S2SearchToolConfig,
     SerperSearchToolConfig,
@@ -59,39 +60,6 @@ def get_available_tools() -> list[str]:
 def get_available_parsers() -> list[str]:
     """Return list of available parser types."""
     return list(_BUILTIN_PARSERS) + list(get_vllm_parser_mapping().keys())
-
-
-def get_tool_definitions_from_config(config: "ToolConfig") -> list[dict[str, Any]]:
-    """Get OpenAI-format tool definitions from ToolConfig.
-
-    This instantiates each tool to get its definitions, which allows tools
-    to dynamically discover their schemas (e.g., GenericMCPTool discovers
-    tools from an MCP server).
-
-    Args:
-        config: The tool configuration.
-
-    Returns:
-        List of tool definitions in OpenAI function calling format.
-    """
-    if not config.tools:
-        return []
-
-    definitions = []
-    for i, tool_name in enumerate(config.tools):
-        tool_name_lower = tool_name.lower()
-        if tool_name_lower not in TOOL_REGISTRY:
-            raise ValueError(f"Unknown tool: {tool_name}. Available: {get_available_tools()}")
-
-        tool_config = config.get_tool_config(i)
-
-        try:
-            tool_instance = tool_config.build()
-            definitions.extend(tool_instance.get_openai_tool_definitions())
-        except Exception as e:
-            logger.warning(f"Failed to instantiate tool {tool_name} for definitions: {e}")
-
-    return definitions
 
 
 @dataclass
@@ -267,6 +235,49 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
         return None
 
 
+def _expand_mcp_config(tool_config: GenericMCPToolConfig) -> list[GenericMCPToolConfig]:
+    """Expand an MCP config to discover all tools from the server.
+
+    If tool_name is specified, returns [tool_config] unchanged.
+    If tool_name is None, discovers all tools and returns a config for each.
+    """
+    if tool_config.tool_name is not None:
+        return [tool_config]
+
+    # Discover all tools from the MCP server
+    factory = MCPToolFactory(
+        server_url=tool_config.server_url,
+        transport=tool_config.transport,
+        command=tool_config.command,
+        args=tool_config.args,
+        env=tool_config.env,
+        timeout=tool_config.timeout,
+        max_retries=tool_config.max_retries,
+        retry_backoff=tool_config.retry_backoff,
+    )
+    discovered = factory.discover_tools()
+    tool_names = list(discovered.keys())
+    logger.info(f"MCP server discovered {len(tool_names)} tools: {tool_names}")
+
+    # Create a config for each discovered tool
+    configs = []
+    for name in tool_names:
+        configs.append(
+            GenericMCPToolConfig(
+                server_url=tool_config.server_url,
+                transport=tool_config.transport,
+                command=tool_config.command,
+                args=tool_config.args,
+                env=tool_config.env,
+                timeout=tool_config.timeout,
+                max_retries=tool_config.max_retries,
+                retry_backoff=tool_config.retry_backoff,
+                tool_name=name,
+            )
+        )
+    return configs
+
+
 def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[str]]:
     """Build tools from ToolConfig.
 
@@ -274,9 +285,8 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
     tools inside Ray actors. This provides a uniform pattern and avoids
     serialization issues with tools that have heavy dependencies.
 
-    Note: This function does NOT create the parser. Use create_tool_parser()
-    to create the parser lazily when needed (e.g., inside a Ray actor where
-    the tokenizer is available).
+    For MCP tools (generic_mcp) with no tool_name specified, all tools from
+    the MCP server are automatically discovered and registered.
 
     Args:
         config: The tool configuration.
@@ -292,16 +302,21 @@ def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[s
 
     for i, _tool_name in enumerate(config.tools):
         tool_config = config.get_tool_config(i)
-        actor = create_tool_actor_from_config(config=tool_config)
-        proxy = ToolProxy.from_actor(actor)
-        name = proxy.tool_function_name
-        if name in proxies:
-            raise ValueError(
-                f"Tool name collision: '{name}' is already registered. "
-                f"Consider using override_name in tool_configs to use different names."
-            )
-        proxies[name] = proxy
-        stop_strings.extend(proxy.get_stop_strings())
+
+        # Handle MCP auto-discovery (when tool_name is None, discovers all tools)
+        expanded = _expand_mcp_config(tool_config) if isinstance(tool_config, GenericMCPToolConfig) else [tool_config]
+
+        for cfg in expanded:
+            actor = create_tool_actor_from_config(config=cfg)
+            proxy = ToolProxy.from_actor(actor)
+            name = proxy.tool_function_name
+            if name in proxies:
+                raise ValueError(
+                    f"Tool name collision: '{name}' is already registered. "
+                    f"Consider using override_name in tool_configs to use different names."
+                )
+            proxies[name] = proxy
+            stop_strings.extend(proxy.get_stop_strings())
 
     logger.info(f"Configured {len(proxies)} tool(s): {list(proxies.keys())}")
 

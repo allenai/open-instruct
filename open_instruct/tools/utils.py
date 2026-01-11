@@ -201,16 +201,6 @@ class Tool(ABC):
         """
         pass
 
-    def call_sync(self, *args: Any, **kwargs: Any) -> ToolOutput:
-        """Synchronous wrapper for __call__.
-
-        Use this when you need to call a tool from sync code.
-        Prefer using __call__ directly in async contexts.
-        """
-        import asyncio
-
-        return asyncio.run(self(*args, **kwargs))
-
 
 @dataclass
 class BaseToolConfig:

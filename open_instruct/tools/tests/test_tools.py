@@ -9,7 +9,6 @@ from open_instruct.tools.tools import (
     GenericMCPToolConfig,
     MaxCallsExceededTool,
     MCPToolFactory,
-    MCPToolWrapper,
     MCPTransport,
     PythonCodeTool,
     PythonCodeToolConfig,
@@ -366,8 +365,7 @@ class TestGenericMCPTool(unittest.TestCase):
     """Test the GenericMCPTool class.
 
     Note: Most GenericMCPTool tests require a running MCP server since the tool
-    discovers tools during initialization. Tests that don't require a server
-    are tested via MCPToolFactory tests instead.
+    discovers tools during initialization.
     """
 
     def test_config_defaults(self):
@@ -566,27 +564,6 @@ class TestMCPToolFactory(unittest.TestCase):
         """Test that string transport values are converted to enum."""
         factory = MCPToolFactory(server_url="http://localhost:8000/mcp", transport="http")
         self.assertEqual(factory.transport, MCPTransport.HTTP)
-
-
-class TestMCPToolWrapper(unittest.TestCase):
-    """Test the MCPToolWrapper class."""
-
-    @unittest.skipUnless(GENERIC_MCP_AVAILABLE, "mcp package not installed")
-    def test_wrapper_properties(self):
-        """Test MCPToolWrapper has correct properties."""
-        # Create a mock factory
-        factory = MCPToolFactory(server_url="http://localhost:8000/mcp")
-
-        wrapper = MCPToolWrapper(
-            name="test_tool",
-            description="A test tool",
-            input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
-            factory=factory,
-        )
-
-        self.assertEqual(wrapper.tool_function_name, "test_tool")
-        self.assertEqual(wrapper.tool_description, "A test tool")
-        self.assertEqual(wrapper.tool_parameters["properties"]["query"]["type"], "string")
 
 
 if __name__ == "__main__":
