@@ -73,9 +73,6 @@ class MaxCallsExceededToolConfig(BaseToolConfig):
 class PythonCodeTool(Tool):
     """
     Executes Python code via a FastAPI endpoint.
-
-    @vwxyzjn: I recommend using something like a FastAPI for this kind of stuff; 1) you
-    won't accidentally block the main vLLM process and 2) way easier to parallelize via load balancing.
     """
 
     _default_tool_function_name = "python"
@@ -151,81 +148,6 @@ class PythonCodeToolConfig(BaseToolConfig):
         if not self.api_endpoint:
             raise ValueError("api_endpoint must be set to use the Python code tool")
         return PythonCodeTool(**asdict(self))
-
-
-# =============================================================================
-# MassiveDSSearchTool + Config
-# =============================================================================
-
-
-class MassiveDSSearchTool(Tool):
-    """Search tool using the massive_ds API."""
-
-    _default_tool_function_name = "massive_ds_search"  # Distinct from SerperSearchTool's "search"
-    _default_tool_description = "Searches Wikipedia/documents using the massive_ds retrieval system"
-    # Parameters inferred from __call__ signature
-
-    def __init__(
-        self, api_endpoint: str | None = None, num_results: int = 3, override_name: str | None = None
-    ) -> None:
-        self.api_endpoint = api_endpoint
-        self.num_results = num_results
-        self._override_name = override_name
-
-    async def __call__(self, query: Annotated[str, Field(description="The search query")]) -> ToolOutput:
-        """Search for documents matching the query."""
-        if not query or not query.strip():
-            result = ToolOutput(
-                output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
-            )
-            _log_tool_call(self.tool_function_name, query or "", result)
-            return result
-
-        url = self.api_endpoint or os.environ.get("MASSIVE_DS_URL")
-        if not url:
-            result = ToolOutput(
-                output="", error="Missing MASSIVE_DS_URL environment variable.", called=True, timeout=False, runtime=0
-            )
-            _log_tool_call(self.tool_function_name, query, result)
-            return result
-
-        start_time = time.time()
-        try:
-            async with httpx.AsyncClient() as client:
-                res = await client.post(
-                    url,
-                    json={"query": query, "n_docs": self.num_results, "domains": "dpr_wiki_contriever"},
-                    headers={"Content-Type": "application/json"},
-                    timeout=15,
-                )
-                res.raise_for_status()
-                data = res.json()
-                passages = data.get("results", {}).get("passages", [[]])[0]
-                passages = passages[: self.num_results]
-                passages = ["\n" + passage for passage in passages]
-                all_snippets = "\n".join(passages).strip()
-
-                result = ToolOutput(
-                    output=all_snippets, called=True, error="", timeout=False, runtime=time.time() - start_time
-                )
-        except httpx.HTTPError as e:
-            result = ToolOutput(output="", error=str(e), called=True, timeout=False, runtime=time.time() - start_time)
-
-        _log_tool_call(self.tool_function_name, query, result)
-        return result
-
-
-@dataclass
-class MassiveDSSearchToolConfig(BaseToolConfig):
-    """Configuration for the massive_ds search tool."""
-
-    tool_class: ClassVar[type[Tool]] = MassiveDSSearchTool
-
-    api_endpoint: str | None = None
-    """The API endpoint for the search engine."""
-    num_results: int = 3
-    """The maximum number of documents to retrieve for each query."""
-
 
 # =============================================================================
 # S2SearchTool + Config
@@ -324,7 +246,7 @@ class SerperSearchTool(Tool):
     Serper provides fast Google Search results via API. Sign up at https://serper.dev
     """
 
-    _default_tool_function_name = "serper_search"  # Use "search" to match model training format
+    _default_tool_function_name = "serper_search" 
     _default_tool_description = "Google search via the Serper API"
     # Parameters inferred from __call__ signature
 

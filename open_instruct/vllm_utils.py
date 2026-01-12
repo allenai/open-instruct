@@ -208,9 +208,6 @@ def get_triggered_tools(
     output_text: str,
     tools: dict[str, ray.actor.ActorHandle],
     tool_parser: ToolParser | None,
-    max_calls: int,
-    num_calls: int,
-    max_calls_exceeded_actor: ray.actor.ActorHandle | None = None,
 ) -> list[tuple[ray.actor.ActorHandle, dict]]:
     """Extract all triggered tool calls from the output text.
 
@@ -230,30 +227,19 @@ def get_triggered_tools(
     if not tool_parser:
         return []
 
-    # If max calls already reached, return empty list to break the loop
-    if num_calls >= max_calls:
-        logger.info(f"[get_triggered_tools] Max calls reached ({num_calls} >= {max_calls}), returning empty list")
-        return []
-
-    # Tool definitions are stored in the parser at init time (for vLLM parsers)
     tool_calls = tool_parser.get_tool_calls(output_text)
     if not tool_calls:
         return []
 
-    result: list[tuple[ray.actor.ActorHandle, dict]] = []
+    results: list[tuple[ray.actor.ActorHandle, dict]] = []
     for tool_call in tool_calls:
+        # sometimes the model might hallucinate a tool in a valid format,
+        # but we don't actually have that tool around.
         if tool_call.name not in tools:
             continue
+        results.append((tools[tool_call.name], tool_call.args))
 
-        if num_calls + len(result) >= max_calls:
-            # Max calls exceeded - return special tool and stop processing
-            if max_calls_exceeded_actor:
-                result.append((max_calls_exceeded_actor, {"text": output_text}))
-            break
-
-        result.append((tools[tool_call.name], tool_call.args))
-
-    return result
+    return results
 
 
 def process_completed_request(request_id, outs, current_time, tools, request_metadata):
@@ -598,7 +584,7 @@ class LLMRayActor:
     ) -> None:
         self.tools = tools or {}
         self.tool_parser_name = tool_parser_name
-        self.tool_parser: ToolParser | None = None  # Created lazily in _init_tool_parser
+        self.tool_parser: ToolParser | None = None
         self.max_tool_calls = max_tool_calls
         self.mask_tool_use = mask_tool_use
         # Create max_calls_exceeded actor if tools are configured
@@ -610,7 +596,6 @@ class LLMRayActor:
         self.active_tasks = {}
         self.request_outputs = {}
         self.reward_config = reward_config
-        self.reward_fn = reward_config.build() if reward_config else None
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
         self._train_index_map: dict[int, int] = (
@@ -751,13 +736,7 @@ class LLMRayActor:
                 finalize_futures.append(completion_future)
 
             done, not_done = futures.wait(finalize_futures, timeout=0)
-            for future in done:
-                try:
-                    future.result()
-                except Exception:
-                    logger.exception(
-                        "Error in finalize_completed_request future - this may cause results to be missing"
-                    )
+            [future.result() for future in done]
             finalize_futures = list(not_done)
 
     def init_process_group(
@@ -857,9 +836,6 @@ class LLMRayActor:
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool support, awaiting tools inline."""
-    # Maximum iterations to prevent infinite loops in tool calling
-    MAX_TOOL_ITERATIONS = 100
-
     await _check_health(actor.server_port)
     response_tokens = []
     response_logprobs = []
@@ -881,7 +857,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
 
-    for _iteration in range(MAX_TOOL_ITERATIONS):
+    while True:
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
         api_response = await actor.client.completions.create(
             model=actor.model_name,
@@ -901,11 +877,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         response_tokens.extend(model_tokens)
         current_prompt.extend(model_tokens)
 
-        if not output.logprobs or not output.logprobs.token_logprobs:
-            raise RuntimeError(
-                f"logprobs must be available for request {sub_request_id}. "
-                f"Got logprobs={output.logprobs}. Ensure logprobs=True in sampling params."
-            )
+        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
         for logprob in output.logprobs.token_logprobs:
             response_logprobs.append(logprob)
             cumulative_logprob += logprob
@@ -919,12 +891,12 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             output.text,
             actor.tools,
             actor.tool_parser,
-            actor.max_tool_calls,
-            num_calls,
-            actor.max_calls_exceeded_actor,
         )
         if not triggered_tools:
             break
+        # if we have hit max tool calls, replace tools with max calls exceeded tool
+        if num_calls >= actor.max_tool_calls:
+            triggered_tools = [(actor.max_calls_exceeded_tool, {"text": output.text})]
 
         # Execute all triggered tools and collect their outputs
         tool_outputs_this_round: list[str] = []
@@ -979,12 +951,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         current_max_tokens = sampling_params.max_tokens - len(response_masks)
         if excess > 0 or current_max_tokens <= 0:
             break
-    else:
-        # Loop exhausted without breaking - this indicates a potential infinite loop bug
-        logger.error(
-            f"Tool loop exceeded {MAX_TOOL_ITERATIONS} iterations for request {sub_request_id}. "
-            f"num_calls={num_calls}, max_tool_calls={actor.max_tool_calls}. This may indicate a bug."
-        )
 
     if output.finish_reason == "stop" and len(response_tokens) == 0:
         eos_token_id = actor.llm_engine.tokenizer.eos_token_id
