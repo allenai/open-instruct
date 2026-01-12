@@ -32,10 +32,13 @@ import contextlib
 import os
 import pathlib
 from concurrent import futures
+from datetime import timedelta
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
+    from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
+    from deepspeed.utils import groups
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, utils
@@ -52,7 +55,6 @@ import socket
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import timedelta
 from queue import Empty, Full, Queue
 from typing import Any, Literal
 
@@ -99,11 +101,13 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, masked_mean
-from open_instruct.tool_utils import tools
+from open_instruct.tools import tools
 from open_instruct.utils import (
+    INVALID_LOGPROB,
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
+    UlyssesSPSplitter,
     _z3_params_to_fetch,
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
@@ -125,7 +129,6 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 
-INVALID_LOGPROB = 1.0
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 
 
@@ -215,6 +218,9 @@ class Args:
     num_learners_per_node: list[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
+    sequence_parallel_size: int = 1
+    """sequence parallel size - how many GPUs we will parallelize sequences across during training.
+    Useful for super-long context lengths."""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     deepspeed_zpg: int = 8
@@ -306,6 +312,8 @@ class Args:
             raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
         if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
+        if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:
+            raise ValueError("`sequence_parallel_size` > 1 requires `deepspeed_stage` to be 3!")
 
         if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
             if self.checkpoint_state_dir is None:
@@ -331,9 +339,6 @@ class Args:
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
-        assert self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout >= sum(
-            self.num_learners_per_node
-        ), "You must have at least as many samples as training GPUs (DP ranks) for distributed training!"
 
 
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
@@ -363,16 +368,10 @@ class PolicyTrainerRayProcess(RayProcess):
         self._args = args
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
-        self._streaming_dataloader = streaming_config.build_dataloader(
-            data_prep_actor_name=data_prep_actor_name,
-            tokenizer=tokenizer,
-            dp_rank=rank,
-            fs_local_rank=local_rank,
-            num_training_steps=args.num_training_steps,
-            work_dir=args.output_dir,
-            dp_world_size=world_size,
-        )
-        self.dataloader = iter(self._streaming_dataloader)
+        self.world_size = world_size
+        self.local_rank = local_rank
+        self.dp_world_size = world_size // args.sequence_parallel_size
+        self._data_prep_actor_name = data_prep_actor_name
 
     def get_dataloader_state(self) -> dict[str, Any]:
         return self._streaming_dataloader.state_dict()
@@ -433,6 +432,7 @@ class PolicyTrainerRayProcess(RayProcess):
             stage=args.deepspeed_stage,
             bf16=True,
             zpg=args.deepspeed_zpg,
+            sequence_parallel_size=args.sequence_parallel_size,
         )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
@@ -445,6 +445,16 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
+
+        # set sequence parallel
+        # note this returns None if sequence_parallel_size == 1
+        self.mpu = UlyssesSPAttentionHF.register_with_transformers(
+            model_name_or_path=model_config.model_name_or_path,
+            core_attn_implementation="flash_attention_2",
+            sequence_parallel_size=args.sequence_parallel_size,
+            micro_batch_size=args.per_device_train_batch_size,
+            seq_length_is_variable=True,
+        )
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -476,7 +486,8 @@ class PolicyTrainerRayProcess(RayProcess):
             optimizer=self.optimizer,
             config=ds_config,
             lr_scheduler=scheduler,
-            dist_init_required=True,
+            dist_init_required=False,
+            mpu=self.mpu,
         )
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
@@ -486,6 +497,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
                 )
             else:
+                # remove mpu for loading checkpoints, add it back after loading
+                old_mpu = self.mpu
+                self.model.mpu = None
                 path, states = self.model.load_checkpoint(
                     args.checkpoint_state_dir,
                     load_module_strict=True,
@@ -493,6 +507,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     load_lr_scheduler_states=True,
                     load_module_only=False,
                 )
+                self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 optimization_steps_done = states["training_step"]
@@ -547,10 +562,47 @@ class PolicyTrainerRayProcess(RayProcess):
                 checkpoint_path=self.ref_policy_checkpoint_path
                 if hasattr(self, "ref_policy_checkpoint_path")
                 else None,
+                mpu=self.mpu,
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
             )
         self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
+
+        if self.mpu is not None:
+            self.splitter = UlyssesSPSplitter(
+                sp_rank=groups._get_sequence_parallel_rank(),
+                sp_group=groups._get_sequence_parallel_group(),
+                sp_world_size=groups._get_sequence_parallel_world_size(),
+                device=self.device,
+                pad_token_id=self.tokenizer.pad_token_id,
+            )
+        else:
+            self.splitter = None
+
+        # dp_rank = which data-parallel group this worker belongs to
+        # With SP, workers in the same SP group share the same dp_rank
+        dp_rank = self.rank // args.sequence_parallel_size
+        assert dp_rank < self.dp_world_size
+
+        # Verify SP groups are consecutive as we assume for above logic (e.g., [0,1,2,3], [4,5,6,7], ...)
+        # getting the dp_rank directly does not work right now with the mpus :/
+        if self.mpu is not None:
+            sp_group = groups._get_sequence_parallel_group()
+            sp_ranks = sorted(torch.distributed.get_process_group_ranks(sp_group))
+            expected = list(range(dp_rank * args.sequence_parallel_size, (dp_rank + 1) * args.sequence_parallel_size))
+            assert sp_ranks == expected, f"SP group {sp_ranks} != expected {expected}"
+
+        self._streaming_dataloader = streaming_config.build_dataloader(
+            data_prep_actor_name=self._data_prep_actor_name,
+            tokenizer=tokenizer,
+            dp_rank=dp_rank,
+            fs_local_rank=self.local_rank,
+            num_training_steps=args.num_training_steps,
+            work_dir=args.output_dir,
+            dp_world_size=self.dp_world_size,
+        )
+        self.dataloader = iter(self._streaming_dataloader)
+
         return optimization_steps_done
 
     def forward(
@@ -725,6 +777,31 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return accumulation_counts
 
+    def _compute_loss_metrics(
+        self, loss_stats_B: dict[str, torch.Tensor], total_valid_tokens: int
+    ) -> dict[str, float]:
+        """Compute weighted average metrics from per-batch loss statistics."""
+        token_counts = loss_stats_B["token_count"]
+        total_tokens = token_counts.sum()
+        # Zero weights when no tokens - all weighted sums become 0
+        weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
+
+        if self.args.load_ref_policy:
+            for j in range(4):
+                self.local_metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum()
+            self.local_metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum()
+        self.local_metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum()
+        self.local_metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum()
+        self.local_metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum()
+        self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
+        weighted_mean_ratio = self.local_metrics["val/ratio"]
+        self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
+        if self.args.record_entropy:
+            self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
+
+        self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
+        self.local_metrics["_token_count"] = total_valid_tokens
+
     def step(self):
         """Execute one training step: fetch data from the dataloader and train on it.
 
@@ -736,6 +813,12 @@ class PolicyTrainerRayProcess(RayProcess):
         if len(data_BT) == 0:
             logger.warning("[Training] Empty batch received, skipping training step")
             return [], {}
+
+        # split batch for sequence parallelism. Do before moving data to GPU.
+        if self.splitter is not None:
+            with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
+                data_BT = self.splitter.split_collated_batch(data_BT)
+
         for f in dataclasses.fields(data_BT):
             to_device_inplace(getattr(data_BT, f.name), self.device)
         data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
@@ -782,16 +865,22 @@ class PolicyTrainerRayProcess(RayProcess):
 
         local_step = 0
         num_samples = len(data_BT.query_responses)
+        # Pre-compute token counts per sample (for weighted averaging across SP ranks)
+        # This only needs to be done once since response_masks don't change across epochs
+        token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
+        total_valid_tokens = token_counts_per_sample.sum().item()
+        device = token_counts_per_sample.device
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B: dict[str, torch.Tensor] = {
-                "kl": torch.zeros(4, num_samples),
-                "kl_loss": torch.zeros(num_samples),
-                "pg_clipfrac": torch.zeros(num_samples),
-                "pg_loss": torch.zeros(num_samples),
-                "loss": torch.zeros(num_samples),
-                "ratio": torch.zeros(num_samples),
-                "entropy": torch.zeros(num_samples),
+                "kl": torch.zeros(4, num_samples, device=device),
+                "kl_loss": torch.zeros(num_samples, device=device),
+                "pg_clipfrac": torch.zeros(num_samples, device=device),
+                "pg_loss": torch.zeros(num_samples, device=device),
+                "loss": torch.zeros(num_samples, device=device),
+                "ratio": torch.zeros(num_samples, device=device),
+                "entropy": torch.zeros(num_samples, device=device),
+                "token_count": token_counts_per_sample,
             }
             for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
@@ -832,16 +921,16 @@ class PolicyTrainerRayProcess(RayProcess):
                         max_diff = masked_diff_BT.max()
                         std_diff = masked_diff_BT[valid_mask_BT].std() if valid_mask_BT.sum() > 1 else 0.0
 
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = mean_diff.item()
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = max_diff.item()
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = std_diff.item()
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = float(mean_diff)
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = float(max_diff)
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = float(std_diff)
 
                         reverse_kl_BT = torch.exp(vllm_logprobs_BT) * (vllm_logprobs_BT - local_logprobs_BT)
                         masked_reverse_kl_BT = torch.masked_fill(reverse_kl_BT, ~valid_mask_BT, 0.0)
                         mean_reverse_kl = (
                             masked_reverse_kl_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
                         )
-                        self.local_metrics["debug/vllm_local_reverse_kl"] = mean_reverse_kl.item()
+                        self.local_metrics["debug/vllm_local_reverse_kl"] = float(mean_reverse_kl)
 
                     new_logprobs_BT = local_logprobs_BT
 
@@ -947,8 +1036,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         loss = masked_mean(pg_loss_max_BT, response_mask_BT, None, loss_denominator)
 
                     # we already took world size into account via the tokens
-                    if dist.is_available() and dist.is_initialized():
-                        loss *= dist.get_world_size()
+                    # but deepspeed will try to average over ranks, so multiply back
+                    # up, adjusting for the sequence parallel size (adjust by dp world size).
+                    loss *= self.args.world_size // self.args.sequence_parallel_size
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
@@ -972,18 +1062,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
-                if self.args.load_ref_policy:
-                    for j in range(4):
-                        self.local_metrics[f"objective/kl{j}_avg"] = loss_stats_B["kl"][j].mean()
-                    self.local_metrics["loss/kl_avg"] = loss_stats_B["kl_loss"].mean()
-                self.local_metrics["loss/policy_avg"] = loss_stats_B["pg_loss"].mean()
-                self.local_metrics["loss/total_avg"] = loss_stats_B["loss"].mean()
-                self.local_metrics["policy/clipfrac_avg"] = loss_stats_B["pg_clipfrac"].mean()
-                self.local_metrics["val/ratio"] = loss_stats_B["ratio"].mean()
-                self.local_metrics["val/ratio_var"] = loss_stats_B["ratio"].var()
-                if self.args.record_entropy:
-                    self.local_metrics["policy/entropy_avg"] = loss_stats_B["entropy"].mean()
-                self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
+                self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
                     if value is None:
@@ -1033,6 +1112,11 @@ class PolicyTrainerRayProcess(RayProcess):
             client_state["ref_policy_saved"] = True
 
         # Save the main model checkpoint with enhanced client state
+        # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
+        old_mpu = None
+        if self.model.mpu is not None:
+            old_mpu = self.mpu
+            self.model.mpu = None
         self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
 
         # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
@@ -1045,6 +1129,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
                     checkpoint_state_dir, args.gs_checkpoint_state_dir
                 )
+        # add back the mpu
+        if old_mpu is not None:
+            self.model.mpu = old_mpu
 
     def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
         output_path = pathlib.Path(output_dir)
@@ -1202,6 +1289,22 @@ class ModelGroup:
             self.models.append(worker_policy)
 
 
+def compute_token_weights(metrics_list: list[dict[str, float]]) -> list[float]:
+    """Compute token-weighted weights for averaging metrics across ranks.
+
+    Important for sequence parallel where different ranks may have different token counts.
+    """
+    token_counts = []
+    total_tokens = 0.0
+    for m in metrics_list:
+        tc = m.get("_token_count", 1.0)
+        token_counts.append(tc)
+        total_tokens += tc
+    if total_tokens > 0:
+        return [tc / total_tokens for tc in token_counts]
+    return [1.0 / len(metrics_list)] * len(metrics_list)
+
+
 def calculate_utilization_metrics(
     model_dims: utils.ModelDims,
     prompt_lengths: list[int],
@@ -1263,6 +1366,7 @@ def validate_configs(
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
     num_learners_per_node: tuple[int, ...],
+    sequence_parallel_size: int,
 ) -> None:
     """Validate cross-cutting config constraints."""
     if streaming_config.num_unique_prompts_rollout < vllm_config.vllm_num_engines:
@@ -1271,9 +1375,12 @@ def validate_configs(
             f"vllm_num_engines={vllm_config.vllm_num_engines}, vllm will be generating data for multiple "
             "batches simultaneously. This is fine but might be unexpected behaviour."
         )
-    assert streaming_config.num_samples_per_prompt_rollout * streaming_config.num_unique_prompts_rollout >= sum(
-        num_learners_per_node
-    ), "You must have at least as many samples as training GPUs (DP ranks) for distributed training!"
+    assert (
+        streaming_config.num_samples_per_prompt_rollout * streaming_config.num_unique_prompts_rollout
+        >= sum(num_learners_per_node) // sequence_parallel_size
+    ), (
+        "num_samples_per_prompt_rollout * num_unique_prompts_rollout must be greater than or equal to world_size // sequence_parallel_size to ensure we have a batch for each rank in distributed training."
+    )
 
 
 def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig) -> Args:
@@ -1411,7 +1518,7 @@ def load_tools(args: Args) -> dict[str, tools.Tool]:
 
     for tool in args.tools:
         if tool.lower() == "search":
-            from open_instruct.search_utils.search_tool import SearchTool
+            from open_instruct.tools.search_tool import SearchTool
 
             tool_instance = SearchTool(
                 start_str="<query>",
@@ -1460,7 +1567,7 @@ def create_model_and_optimizer(
     if streaming_config.tools:
         for tool in streaming_config.tools:
             if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
+                from open_instruct.tools.search_tool import SearchTool
 
                 tool = SearchTool(
                     start_str="<query>",
@@ -1472,7 +1579,7 @@ def create_model_and_optimizer(
                 # Add tool end string to stop_strings
                 streaming_config.stop_strings.append(tool.end_str)
             elif tool.lower() == "code":
-                from open_instruct.tool_utils.tools import PythonCodeTool
+                from open_instruct.tools.tools import PythonCodeTool
 
                 tool = PythonCodeTool(
                     start_str="<code>", end_str="</code>", api_endpoint=streaming_config.code_tool_api_endpoint
@@ -1506,14 +1613,13 @@ def create_model_and_optimizer(
         seed=args.seed,
         per_device_train_batch_size=args.per_device_train_batch_size,
         global_batch_size=streaming_config.num_unique_prompts_rollout,
-        dp_world_size=args.world_size,
+        dp_world_size=args.world_size // args.sequence_parallel_size,
         max_possible_score=streaming_config.max_possible_score,
         actor_manager=actor_manager,
         model_dims=model_dims,
         verbose=args.verbose,
         work_dir=args.output_dir,
         initial_state=data_prep_actor_state,
-        allow_world_padding=args.allow_world_padding,
     )
 
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
@@ -1734,9 +1840,38 @@ def one_training_step(
 
     ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
 
-    average_metrics = {k: np.mean([m[k] for m in metrics if k in m]) for k in set().union(*metrics)}
-    for key, value in array_metrics[0].items():
-        average_metrics[key] = value
+    # Note: metrics contains scalar metrics from each worker, array_metrics contains list/array metrics
+    weights = compute_token_weights(metrics)
+
+    # Metrics that should be token-weighted (averages over tokens)
+    token_weighted_metrics = {
+        "objective/kl0_avg",
+        "objective/kl1_avg",
+        "objective/kl2_avg",
+        "objective/kl3_avg",
+        "loss/kl_avg",
+        "loss/policy_avg",
+        "loss/total_avg",
+        "policy/clipfrac_avg",
+        "policy/entropy_avg",
+        "val/ratio",
+        "val/ratio_var",
+    }
+    average_metrics = {}
+    # Average scalar metrics from each worker
+    for k in metrics[0]:
+        if k == "_token_count":
+            # Don't include internal token count in final metrics
+            continue
+        if k in token_weighted_metrics:
+            # Token-weighted average
+            average_metrics[k] = sum(m[k] * w for m, w in zip(metrics, weights))
+        else:
+            # Simple average for other metrics
+            average_metrics[k] = sum(m[k] for m in metrics) / len(metrics)
+    # Pass through array metrics from the first worker (these are the same across workers)
+    for k, v in array_metrics[0].items():
+        average_metrics[k] = v
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
@@ -2201,7 +2336,7 @@ def main(
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config)
-    validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node))
+    validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
