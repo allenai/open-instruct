@@ -56,7 +56,7 @@ uv run python mason.py \
     --gradient_checkpointing \
     --output_dir /output \
     --tools serper_search python \
-    --tool_configs '{"override_name": "search"}' '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "override_name": "code"}' \
+    --tool_configs '{"override_name":"search"}' '{"api_endpoint":"https://open-instruct-tool-server-10554368204.us-central1.run.app/execute","override_name":"code"}' \
     --system_prompt_override_file scripts/train/debug/code_search_legacy_prompt.txt \
     --tool_parser legacy \
     --pass_tools_to_chat_template false \
