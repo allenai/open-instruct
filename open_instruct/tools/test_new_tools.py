@@ -1,12 +1,13 @@
 """Tests for new tools (PythonCodeTool from new_tools.py)."""
 
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import aiohttp
 
 from open_instruct.tools.new_tools import PythonCodeTool, PythonCodeToolConfig, _truncate
-from open_instruct.tools.utils import Tool, ToolOutput
+from open_instruct.tools.utils import ToolOutput
 
 
 class TestPythonCodeToolInit(unittest.TestCase):
@@ -18,40 +19,35 @@ class TestPythonCodeToolInit(unittest.TestCase):
 
         self.assertEqual(tool.api_endpoint, "http://localhost:1212/execute")
         self.assertEqual(tool.timeout, 3)
-        self.assertIsNone(tool.override_name)
+        self.assertEqual(tool.name, "python")
+        self.assertEqual(tool.config_name, "python")
 
     def test_initialization_with_custom_values(self):
         """Test tool initializes with custom values."""
-        tool = PythonCodeTool(api_endpoint="http://example.com/run", timeout=10, override_name="custom_python")
+        tool = PythonCodeTool(api_endpoint="http://example.com/run", timeout=10)
 
         self.assertEqual(tool.api_endpoint, "http://example.com/run")
         self.assertEqual(tool.timeout, 10)
-        self.assertEqual(tool.override_name, "custom_python")
+        self.assertEqual(tool.name, "python")
 
-    def test_default_tool_function_name(self):
-        """Test default tool function name is 'python'."""
+    def test_tool_name(self):
+        """Test tool name is 'python'."""
         tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
-        self.assertEqual(tool.tool_function_name, "python")
-
-    def test_override_tool_function_name(self):
-        """Test overriding tool function name."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute", override_name="code")
-        self.assertEqual(tool.tool_function_name, "code")
+        self.assertEqual(tool.name, "python")
 
     def test_tool_description(self):
         """Test tool description is set correctly."""
         tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
-        self.assertEqual(tool.tool_description, "Executes Python code and returns printed output.")
+        self.assertEqual(tool.description, "Executes Python code and returns printed output.")
 
     def test_tool_parameters_schema(self):
-        """Test tool parameters schema is correctly inferred."""
+        """Test tool parameters schema is correct."""
         tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
-        params = tool.tool_parameters
+        params = tool.parameters
 
         self.assertEqual(params["type"], "object")
         self.assertIn("code", params["properties"])
         self.assertIn("code", params["required"])
-        # Check description from Annotated Field
         self.assertEqual(params["properties"]["code"]["description"], "Python code to execute")
 
     def test_get_openai_tool_definitions(self):
@@ -71,13 +67,6 @@ class TestPythonCodeToolInit(unittest.TestCase):
         names = tool.get_tool_names()
 
         self.assertEqual(names, ["python"])
-
-    def test_get_tool_names_with_override(self):
-        """Test get_tool_names returns overridden name."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute", override_name="execute")
-        names = tool.get_tool_names()
-
-        self.assertEqual(names, ["execute"])
 
 
 class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
@@ -115,18 +104,21 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, ToolOutput)
         self.assertEqual(result.error, "Empty code. Please provide some code to execute.")
 
-    @patch("open_instruct.tools.new_tools.httpx.AsyncClient")
-    async def test_successful_execution(self, mock_client_class):
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_successful_execution(self, mock_session_class):
         """Test successful code execution."""
         # Set up mock response
-        mock_response = MagicMock()
+        mock_response = AsyncMock()
         mock_response.json.return_value = {"output": "Hello, World!\n", "error": None}
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
 
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client_class.return_value = mock_client
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
 
         result = await self.tool("print('Hello, World!')")
 
@@ -138,21 +130,24 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(result.runtime, 0)
 
         # Verify API was called with correct parameters
-        mock_client.post.assert_called_once_with(
-            "http://localhost:1212/execute", json={"code": "print('Hello, World!')", "timeout": 3}, timeout=3
+        mock_session.post.assert_called_once_with(
+            "http://localhost:1212/execute", json={"code": "print('Hello, World!')", "timeout": 3}
         )
 
-    @patch("open_instruct.tools.new_tools.httpx.AsyncClient")
-    async def test_execution_with_error_response(self, mock_client_class):
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_execution_with_error_response(self, mock_session_class):
         """Test code execution that returns an error from the API."""
-        mock_response = MagicMock()
+        mock_response = AsyncMock()
         mock_response.json.return_value = {"output": "", "error": "NameError: name 'undefined_var' is not defined"}
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
 
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client_class.return_value = mock_client
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
 
         result = await self.tool("print(undefined_var)")
 
@@ -161,14 +156,14 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.error, "NameError: name 'undefined_var' is not defined")
         self.assertFalse(result.timeout)
 
-    @patch("open_instruct.tools.new_tools.httpx.AsyncClient")
-    async def test_timeout_handling(self, mock_client_class):
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_timeout_handling(self, mock_session_class):
         """Test timeout is handled correctly."""
-        mock_client = AsyncMock()
-        mock_client.post.side_effect = httpx.TimeoutException("Connection timed out")
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client_class.return_value = mock_client
+        mock_session = MagicMock()
+        mock_session.post.side_effect = asyncio.TimeoutError("Connection timed out")
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
 
         result = await self.tool("import time; time.sleep(100)")
 
@@ -176,33 +171,36 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.timeout)
         self.assertIn("Timeout after 3 seconds", result.output)
 
-    @patch("open_instruct.tools.new_tools.httpx.AsyncClient")
-    async def test_api_connection_error(self, mock_client_class):
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_api_connection_error(self, mock_session_class):
         """Test handling of API connection errors."""
-        mock_client = AsyncMock()
-        mock_client.post.side_effect = httpx.ConnectError("Connection refused")
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client_class.return_value = mock_client
+        mock_session = MagicMock()
+        mock_session.post.side_effect = aiohttp.ClientError("Connection refused")
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
 
         result = await self.tool("print('test')")
 
         self.assertTrue(result.called)
         self.assertFalse(result.timeout)
-        self.assertIn("Error calling API", result.output)
+        self.assertIn("Connection error", result.output)
         self.assertIn("Connection refused", result.output)
 
-    @patch("open_instruct.tools.new_tools.httpx.AsyncClient")
-    async def test_execution_with_output_and_error(self, mock_client_class):
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_execution_with_output_and_error(self, mock_session_class):
         """Test execution that produces both output and an error."""
-        mock_response = MagicMock()
+        mock_response = AsyncMock()
         mock_response.json.return_value = {"output": "Partial output\n", "error": "Some warning or error"}
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
 
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client_class.return_value = mock_client
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
 
         result = await self.tool("print('Partial output'); raise Exception()")
 
@@ -211,54 +209,51 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Some warning or error", result.output)
         self.assertEqual(result.error, "Some warning or error")
 
-    @patch("open_instruct.tools.new_tools.httpx.AsyncClient")
-    async def test_custom_timeout(self, mock_client_class):
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_custom_timeout(self, mock_session_class):
         """Test that custom timeout is passed to API."""
         tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute", timeout=10)
 
-        mock_response = MagicMock()
+        mock_response = AsyncMock()
         mock_response.json.return_value = {"output": "OK", "error": None}
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
 
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client_class.return_value = mock_client
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
 
         await tool("print('test')")
 
-        mock_client.post.assert_called_once_with(
-            "http://localhost:1212/execute", json={"code": "print('test')", "timeout": 10}, timeout=10
+        mock_session.post.assert_called_once_with(
+            "http://localhost:1212/execute", json={"code": "print('test')", "timeout": 10}
         )
 
 
 class TestPythonCodeToolConfig(unittest.TestCase):
     """Tests for PythonCodeToolConfig."""
 
-    def test_config_defaults(self):
-        """Test config has correct default values."""
-        config = PythonCodeToolConfig()
+    def test_config_requires_api_endpoint(self):
+        """Test config requires api_endpoint."""
+        # api_endpoint is now required, so we can't create a config without it
+        # This test verifies the field is required by the dataclass
+        import dataclasses
 
-        self.assertIsNone(config.api_endpoint)
-        self.assertEqual(config.timeout, 3)
-        self.assertIsNone(config.override_name)
+        fields = {f.name: f for f in dataclasses.fields(PythonCodeToolConfig)}
+        self.assertIn("api_endpoint", fields)
+        # Check it has no default (required field)
+        self.assertEqual(fields["api_endpoint"].default, dataclasses.MISSING)
+        self.assertEqual(fields["api_endpoint"].default_factory, dataclasses.MISSING)
 
     def test_config_custom_values(self):
         """Test config accepts custom values."""
-        config = PythonCodeToolConfig(api_endpoint="http://example.com/execute", timeout=5, override_name="code_exec")
+        config = PythonCodeToolConfig(api_endpoint="http://example.com/execute", timeout=5)
 
         self.assertEqual(config.api_endpoint, "http://example.com/execute")
         self.assertEqual(config.timeout, 5)
-        self.assertEqual(config.override_name, "code_exec")
-
-    def test_build_without_endpoint_raises(self):
-        """Test building without api_endpoint raises ValueError."""
-        config = PythonCodeToolConfig()
-
-        with self.assertRaises(ValueError) as context:
-            config.build()
-
-        self.assertIn("api_endpoint must be set", str(context.exception))
 
     def test_build_with_endpoint(self):
         """Test building with api_endpoint creates tool correctly."""
@@ -270,59 +265,9 @@ class TestPythonCodeToolConfig(unittest.TestCase):
         self.assertEqual(tool.api_endpoint, "http://localhost:1212/execute")
         self.assertEqual(tool.timeout, 5)
 
-    def test_build_with_override_name(self):
-        """Test building with override_name sets it correctly."""
-        config = PythonCodeToolConfig(api_endpoint="http://localhost:1212/execute", override_name="execute_code")
-
-        tool = config.build()
-
-        self.assertEqual(tool.tool_function_name, "execute_code")
-
     def test_tool_class_attribute(self):
         """Test tool_class is set to PythonCodeTool."""
         self.assertEqual(PythonCodeToolConfig.tool_class, PythonCodeTool)
-
-
-class TestToolSubclassRequirements(unittest.TestCase):
-    """Tests for Tool subclass requirements."""
-
-    def test_missing_default_tool_name_raises(self):
-        """Test that subclass without default_tool_name raises TypeError."""
-        with self.assertRaises(TypeError) as context:
-
-            class BadTool(Tool):
-                default_description = "A tool"
-
-                async def __call__(self):
-                    pass
-
-        self.assertIn("default_tool_name", str(context.exception))
-
-    def test_missing_default_description_raises(self):
-        """Test that subclass without default_description raises TypeError."""
-        with self.assertRaises(TypeError) as context:
-
-            class BadTool(Tool):
-                default_tool_name = "bad"
-
-                async def __call__(self):
-                    pass
-
-        self.assertIn("default_description", str(context.exception))
-
-    def test_valid_subclass_works(self):
-        """Test that properly defined subclass works."""
-
-        class GoodTool(Tool):
-            default_tool_name = "good"
-            default_description = "A good tool"
-
-            async def __call__(self):
-                pass
-
-        tool = GoodTool()
-        self.assertEqual(tool.tool_function_name, "good")
-        self.assertEqual(tool.tool_description, "A good tool")
 
 
 class TestHelperFunctions(unittest.TestCase):

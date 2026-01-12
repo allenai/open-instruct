@@ -2,18 +2,17 @@
 Basic tools that are built-in to open-instruct.
 """
 
+import asyncio
 import time
-import traceback
-from dataclasses import asdict, dataclass
-from typing import Annotated, ClassVar
+from dataclasses import dataclass
+from typing import ClassVar
 
-import httpx
-from pydantic import Field
+import aiohttp
 
-from open_instruct.logger_utils import setup_logger
+from open_instruct import logger_utils
 from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput
 
-logger = setup_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 def _truncate(text: str, max_length: int = 500) -> str:
@@ -39,15 +38,21 @@ class PythonCodeTool(Tool):
     Executes Python code via a FastAPI endpoint.
     """
 
-    default_tool_name = "python"
-    default_description = "Executes Python code and returns printed output."
-
-    def __init__(self, api_endpoint: str, timeout: int = 3, override_name: str | None = None) -> None:
+    def __init__(self, api_endpoint: str, timeout: int = 3) -> None:
+        super().__init__(
+            config_name="python",
+            description="Executes Python code and returns printed output.",
+            name="python",
+            parameters={
+                "type": "object",
+                "properties": {"code": {"type": "string", "description": "Python code to execute"}},
+                "required": ["code"],
+            },
+        )
         self.api_endpoint = api_endpoint
         self.timeout = timeout
-        self.override_name = override_name
 
-    async def __call__(self, code: Annotated[str, Field(description="Python code to execute")]) -> ToolOutput:
+    async def __call__(self, code: str) -> ToolOutput:
         """Execute Python code via the API."""
         if not code or not code.strip():
             result = ToolOutput(
@@ -57,7 +62,7 @@ class PythonCodeTool(Tool):
                 timeout=False,
                 runtime=0,
             )
-            _log_tool_call(self.tool_function_name, code or "", result)
+            _log_tool_call(self.name, code or "", result)
             return result
 
         start_time = time.time()
@@ -66,24 +71,26 @@ class PythonCodeTool(Tool):
         error = ""
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    self.api_endpoint, json={"code": code, "timeout": self.timeout}, timeout=self.timeout
-                )
-                response.raise_for_status()
-                res = response.json()
-                output = res.get("output", "")
-                error = res.get("error") or ""
+            timeout = aiohttp.ClientTimeout(total=self.timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:  # noqa: SIM117
+                async with session.post(self.api_endpoint, json={"code": code, "timeout": self.timeout}) as response:
+                    response.raise_for_status()
+                    res = await response.json()
+                    output = res.get("output", "")
+                    error = res.get("error") or ""
 
-                all_outputs.append(output)
-                if error:
-                    all_outputs.append("\n" + error)
-        except httpx.TimeoutException:
+                    all_outputs.append(output)
+                    if error:
+                        all_outputs.append("\n" + error)
+        except asyncio.TimeoutError:
             error = f"Timeout after {self.timeout} seconds"
             all_outputs.append(error)
             timed_out = True
-        except Exception as e:
-            error = f"Error calling API: {e}\n{traceback.format_exc()}"
+        except aiohttp.ClientResponseError as e:
+            error = f"HTTP error: {e.status} {e.message}"
+            all_outputs.append(error)
+        except aiohttp.ClientError as e:
+            error = f"Connection error: {e}"
             all_outputs.append(error)
 
         result = ToolOutput(
@@ -93,7 +100,7 @@ class PythonCodeTool(Tool):
             timeout=timed_out,
             runtime=time.time() - start_time,
         )
-        _log_tool_call(self.tool_function_name, code, result)
+        _log_tool_call(self.name, code, result)
         return result
 
 
@@ -103,12 +110,7 @@ class PythonCodeToolConfig(BaseToolConfig):
 
     tool_class: ClassVar[type[Tool]] = PythonCodeTool
 
-    api_endpoint: str | None = None
+    api_endpoint: str
     """The API endpoint for the code execution server."""
     timeout: int = 3
     """Timeout in seconds for code execution."""
-
-    def build(self) -> PythonCodeTool:
-        if not self.api_endpoint:
-            raise ValueError("api_endpoint must be set to use the Python code tool")
-        return PythonCodeTool(**asdict(self))
