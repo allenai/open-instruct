@@ -2105,7 +2105,7 @@ def load_tools(args: Args) -> dict[str, tools.Tool]:
 
     for tool in args.tools:
         if tool.lower() == "search":
-            from open_instruct.search_utils.search_tool import SearchTool
+            from open_instruct.tools.search_tool import SearchTool
 
             tool_instance = SearchTool(
                 start_str="<query>",

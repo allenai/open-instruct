@@ -70,10 +70,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentPars
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import data_types, logger_utils
-
-WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
-GCP_CLUSTERS = ["ai2/augusta"]
-INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
+from open_instruct.launch_utils import GCP_CLUSTERS, gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -1121,70 +1118,6 @@ def maybe_update_beaker_description(
         )
 
 
-def live_subprocess_output(cmd: list[str]) -> str:
-    output_lines = []
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    # Display output in real-time and collect it
-    for line in iter(process.stdout.readline, ""):
-        if line.strip():
-            print(line.strip())
-            output_lines.append(line.strip())
-    process.wait()
-    if process.returncode != 0:
-        # Get the actual error message from the process
-        process_error = process.stderr.read() if process.stderr else "No error message available"
-        error_message = f"gsutil command failed with return code {process.returncode}: {process_error}"
-        print(error_message)
-        raise Exception(error_message)
-
-    return "\n".join(output_lines)
-
-
-def download_from_hf(model_name_or_path: str, revision: str) -> None:
-    cmd = ["huggingface-cli", "download", model_name_or_path, "--revision", revision]
-    print(f"Downloading from HF with command: {cmd}")
-    output = live_subprocess_output(cmd)
-    # for some reason, sometimes the output includes the line including some loading message.
-    # so do some minor cleaning.
-    if "\n" in output:
-        output = output.split("\n")[-1].strip()
-    return output
-
-
-def download_from_gs_bucket(src_paths: list[str], dest_path: str) -> None:
-    os.makedirs(dest_path, exist_ok=True)
-    cmd = [
-        "gsutil",
-        "-o",
-        "GSUtil:parallel_thread_count=1",
-        "-o",
-        "GSUtil:sliced_object_download_threshold=150",
-        "-m",
-        "cp",
-        "-r",
-    ]
-    cmd.extend(src_paths)
-    cmd.append(dest_path)
-    print(f"Downloading from GS bucket with command: {cmd}")
-    live_subprocess_output(cmd)
-
-
-def gs_folder_exists(path: str) -> bool:
-    cmd = ["gsutil", "ls", path]
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    # print(f"GS stat command: {cmd}")
-    # print(f"GS stat stdout: {stdout}")
-    # print(f"GS stat stderr: {stderr}")
-    return process.returncode == 0
-
-
-def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
-    cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-r", src_path, dest_path]
-    print(f"Copying model to GS bucket with command: {cmd}")
-    live_subprocess_output(cmd)
-
-
 def sync_gs_bucket(src_path: str, dest_path: str) -> None:
     cmd = [
         "gsutil",
@@ -1861,7 +1794,7 @@ class ModelDims:
         return embedding_params + layer_params + lm_head_params
 
     @classmethod
-    def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
+    def from_vllm_config(cls, vllm_config: "vllm.config.VllmConfig") -> "ModelDims":
         """Create ModelDims from a vLLM config object."""
         model_config = vllm_config.model_config
         hidden_size = model_config.get_hidden_size()

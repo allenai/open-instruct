@@ -54,14 +54,14 @@ from torch.distributed.distributed_c10d import (
 )
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
-from vllm.utils import FlexibleArgumentParser
+from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.tool_utils.tools import MaxCallsExceededTool, Tool
+from open_instruct.tools.tools import MaxCallsExceededTool, Tool
 from open_instruct.utils import ModelDims, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
@@ -618,7 +618,7 @@ class LLMRayActor:
 
             args = _create_server_args(engine_client.vllm_config.model_config.model)
             app = build_app(args)
-            await init_app_state(engine_client, engine_client.vllm_config, app.state, args)
+            await init_app_state(engine_client, app.state, args)
 
             # Create a socket and bind to port 0 to let the OS assign an available port.
             # We pass the socket to serve_http to avoid race conditions where another
@@ -783,7 +783,7 @@ class LLMRayActor:
         kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_specs[0])
 
         kv_cache_config = kv_cache_utils.get_kv_cache_config_from_groups(
-            vllm_config, kv_cache_groups, kv_cache_specs[0], available_memory
+            vllm_config, kv_cache_groups, available_memory
         )
 
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_config)

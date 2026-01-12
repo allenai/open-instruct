@@ -28,7 +28,7 @@ import torch
 from dateutil import parser
 from parameterized import parameterized
 
-from open_instruct import data_types, grpo_fast, utils
+from open_instruct import data_types, grpo_fast, launch_utils, utils
 from open_instruct.finetune import FlatArguments
 
 
@@ -381,8 +381,8 @@ class TestDownloadFromGsBucket(unittest.TestCase):
             def mock_live_subprocess_output(cmd):
                 captured_cmd["cmd"] = cmd
 
-            with mock.patch.object(utils, "live_subprocess_output", side_effect=mock_live_subprocess_output):
-                utils.download_from_gs_bucket(src_paths=src_paths, dest_path=str(dest_path))
+            with mock.patch.object(launch_utils, "live_subprocess_output", side_effect=mock_live_subprocess_output):
+                launch_utils.download_from_gs_bucket(src_paths=src_paths, dest_path=str(dest_path))
 
             expected_cmd = [
                 "gsutil",
