@@ -116,7 +116,7 @@ class BaseToolConfig:
         """
         return self.tool_class(**self._get_init_kwargs())
 
-    def build_remote(self, max_concurrency: int = 512) -> Any:
+    def build_remote(self, max_concurrency: int = 512) -> ray.actor.ActorHandle:
         """Build the tool as a Ray remote actor.
 
         Allows for passing to vllm actors without needing to serialize tool itself,
@@ -126,6 +126,6 @@ class BaseToolConfig:
             max_concurrency: Maximum number of concurrent calls the actor can handle.
 
         Returns:
-            A Ray actor handle for the tool.
+            A Ray actor handle for the Tool.
         """
         return ray.remote(self.tool_class).options(max_concurrency=max_concurrency).remote(**self._get_init_kwargs())
