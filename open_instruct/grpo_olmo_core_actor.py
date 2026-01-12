@@ -13,6 +13,7 @@ from typing import Any
 
 import ray
 import torch
+import transformers
 from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
@@ -23,7 +24,6 @@ from olmo_core.train.train_module.transformer import (
     TransformerDataParallelConfig,
     TransformerDataParallelWrappingStrategy,
 )
-from transformers import PreTrainedTokenizer
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import vllm_utils
@@ -72,7 +72,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
-        tokenizer: PreTrainedTokenizer,
+        tokenizer: transformers.PreTrainedTokenizer,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
         self.num_nodes = num_nodes
@@ -142,8 +142,13 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             ]
             raise ValueError(f"No TransformerConfig.{config_name}() found. Available: {available}")
 
-        logger.info(f"[Rank {self.rank}] Building OLMo-core model with TransformerConfig.{config_name}()")
-        model_config_olmo = getattr(TransformerConfig, config_name)()
+        hf_config = transformers.AutoConfig.from_pretrained(self.model_name_or_path)
+        vocab_size = hf_config.vocab_size
+
+        logger.info(
+            f"[Rank {self.rank}] Building OLMo-core model with TransformerConfig.{config_name}(vocab_size={vocab_size})"
+        )
+        model_config_olmo = getattr(TransformerConfig, config_name)(vocab_size=vocab_size)
         self.model = model_config_olmo.build(init_device="cpu")
 
         logger.info(f"[Rank {self.rank}] Loading HuggingFace weights from {self.model_name_or_path}")
@@ -353,7 +358,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             for param, ref_param in zip(self.train_module.model.parameters(), self.ref_policy.parameters()):
                 ref_param.data.mul_(1 - alpha).add_(param.data, alpha=alpha)
 
-    def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
+    def save_model(
+        self, output_dir: str, chat_template_name: str, tokenizer: transformers.PreTrainedTokenizer
+    ) -> None:
         """Save model checkpoint."""
         if self.rank != 0:
             return
@@ -411,7 +418,7 @@ class OLMoCoreModelGroup:
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
-        tokenizer: PreTrainedTokenizer,
+        tokenizer: transformers.PreTrainedTokenizer,
     ):
         from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
