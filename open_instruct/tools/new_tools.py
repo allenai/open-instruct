@@ -70,20 +70,21 @@ class PythonCodeTool(Tool):
                 response = await client.post(
                     self.api_endpoint, json={"code": code, "timeout": self.timeout}, timeout=self.timeout
                 )
+                response.raise_for_status()
                 res = response.json()
-                output = res["output"]
+                output = res.get("output", "")
                 error = res.get("error") or ""
 
                 all_outputs.append(output)
                 if error:
                     all_outputs.append("\n" + error)
-
         except httpx.TimeoutException:
-            all_outputs.append(f"Timeout after {self.timeout} seconds")
+            error = f"Timeout after {self.timeout} seconds"
+            all_outputs.append(error)
             timed_out = True
-
         except Exception as e:
-            all_outputs.append(f"Error calling API: {e}\n{traceback.format_exc()}")
+            error = f"Error calling API: {e}\n{traceback.format_exc()}"
+            all_outputs.append(error)
 
         result = ToolOutput(
             output="\n".join(all_outputs),

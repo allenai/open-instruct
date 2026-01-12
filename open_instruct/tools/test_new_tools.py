@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 
-from open_instruct.tools.new_tools import PythonCodeTool, PythonCodeToolConfig
+from open_instruct.tools.new_tools import PythonCodeTool, PythonCodeToolConfig, _truncate
 from open_instruct.tools.utils import Tool, ToolOutput
 
 
@@ -330,16 +330,12 @@ class TestHelperFunctions(unittest.TestCase):
 
     def test_truncate_short_text(self):
         """Test _truncate doesn't modify short text."""
-        from open_instruct.tools.new_tools import _truncate
-
         short_text = "Hello, World!"
         result = _truncate(short_text, max_length=500)
         self.assertEqual(result, short_text)
 
     def test_truncate_long_text(self):
         """Test _truncate truncates long text with ellipsis."""
-        from open_instruct.tools.new_tools import _truncate
-
         long_text = "a" * 600
         result = _truncate(long_text, max_length=500)
 
@@ -349,16 +345,12 @@ class TestHelperFunctions(unittest.TestCase):
 
     def test_truncate_exact_length(self):
         """Test _truncate at exact max_length boundary."""
-        from open_instruct.tools.new_tools import _truncate
-
         text = "a" * 500
         result = _truncate(text, max_length=500)
         self.assertEqual(result, text)
 
     def test_truncate_custom_max_length(self):
         """Test _truncate with custom max_length."""
-        from open_instruct.tools.new_tools import _truncate
-
         text = "Hello, World! This is a test."
         result = _truncate(text, max_length=10)
 
