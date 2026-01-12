@@ -42,7 +42,9 @@ def infer_tool_parameters(call_method: Any) -> dict[str, Any]:
     try:
         hints = get_type_hints(call_method, include_extras=True)
     except Exception as e:
-        logger.warning(f"Could not get type hints for {getattr(call_method, '__name__', 'unknown_method')}: {e}. Proceeding without them.")
+        logger.warning(
+            f"Could not get type hints for {getattr(call_method, '__name__', 'unknown_method')}: {e}. Proceeding without them."
+        )
         hints = {}
 
     # Build field definitions for Pydantic model
