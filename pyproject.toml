@@ -33,7 +33,6 @@ dependencies = [
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
-    "multiprocess<0.70.18",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
 ]

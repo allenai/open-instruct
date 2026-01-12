@@ -22,9 +22,6 @@ def setup_logger(name: str | None = None, rank: int = 0) -> logging.Logger:
     that includes timestamp, level, filename, line number, and message.
     It only configures basicConfig once to avoid overwriting existing config.
 
-    For distributed training, only rank 0 logs at INFO level; other ranks
-    log at WARNING level to reduce log noise.
-
     Args:
         name: Logger name (typically __name__). If None, returns root logger.
         rank: Process rank in distributed training. Only rank 0 logs INFO.

@@ -950,11 +950,7 @@ def get_beaker_dataset_ids(experiment_id: str, sort=False) -> list[str] | None:
     experiment = get_beaker_experiment_info(experiment_id)
     if not experiment:
         return None
-    result_ids = [
-        job["result"]["beaker"] for job in experiment["jobs"] if job.get("result") and job["result"].get("beaker")
-    ]
-    if not result_ids:
-        return None
+    result_ids = [job["result"]["beaker"] for job in experiment["jobs"]]
     dataset_infos = []
     for result_id in result_ids:
         get_dataset_command = f"beaker dataset get {result_id} --format json"
