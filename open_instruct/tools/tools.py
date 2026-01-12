@@ -148,6 +148,7 @@ class PythonCodeToolConfig(BaseToolConfig):
             raise ValueError("api_endpoint must be set to use the Python code tool")
         return PythonCodeTool(**asdict(self))
 
+
 # =============================================================================
 # S2SearchTool + Config
 # =============================================================================
@@ -244,7 +245,7 @@ class SerperSearchTool(Tool):
     Serper provides fast Google Search results via API. Sign up at https://serper.dev
     """
 
-    _default_tool_function_name = "serper_search" 
+    _default_tool_function_name = "serper_search"
     _default_tool_description = "Google search via the Serper API"
 
     def __init__(self, num_results: int = 5, override_name: str | None = None) -> None:

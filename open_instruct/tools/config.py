@@ -23,11 +23,7 @@ import ray
 
 from open_instruct.tools.parsers import OpenInstructLegacyToolParser, ToolParser, get_available_parsers
 from open_instruct.tools.proxy import create_tool_actor_from_config
-from open_instruct.tools.tools import (
-    PythonCodeToolConfig,
-    S2SearchToolConfig,
-    SerperSearchToolConfig,
-)
+from open_instruct.tools.tools import PythonCodeToolConfig, S2SearchToolConfig, SerperSearchToolConfig
 from open_instruct.tools.utils import BaseToolConfig, Tool
 
 logger = logging.getLogger(__name__)
