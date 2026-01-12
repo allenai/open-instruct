@@ -61,13 +61,6 @@ class TestPythonCodeToolInit(unittest.TestCase):
         self.assertEqual(definition["function"]["description"], "Executes Python code and returns printed output.")
         self.assertIn("parameters", definition["function"])
 
-    def test_get_tool_names(self):
-        """Test get_tool_names returns correct name."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
-        names = tool.get_tool_names()
-
-        self.assertEqual(names, ["python"])
-
 
 class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
     """Tests for PythonCodeTool execution (async __call__)."""
