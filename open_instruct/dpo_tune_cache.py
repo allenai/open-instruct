@@ -795,7 +795,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
     else:
         optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
-    logger.info("=============optimizer loaded")
+    logger.info("Optimizer loaded.")
     print_gpu_stats(init_gpu_memory)
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
