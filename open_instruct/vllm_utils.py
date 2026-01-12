@@ -890,15 +890,15 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             break
         # if we have hit max tool calls, replace tools with max calls exceeded tool
         if num_calls >= actor.max_tool_calls:
-            triggered_tools = [(actor.max_calls_exceeded_tool, {"text": output.text})]
+            triggered_tools = [(actor.max_calls_exceeded_actor, {"text": output.text})]
 
         # Execute all triggered tools and collect their outputs
         tool_outputs_this_round: list[str] = []
 
         for tool_actor, tool_args in triggered_tools:
+            tool_name = ray.get(tool_actor.get_tool_function_name.remote())
             try:
                 tool_result = await tool_actor.call.remote(**tool_args)
-                tool_name = ray.get(tool_actor.get_tool_function_name.remote())
             except Exception as e:
                 # If the tool errors for whatever reason, tell the model that it called the tool.
                 tool_result = ToolOutput(
