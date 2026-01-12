@@ -66,7 +66,6 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
-    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
@@ -263,10 +262,6 @@ def main(
     using Ray actors for both training and inference. The same code path is used for
     single GPU mode and multi-node training.
     """
-    import time
-
-    import numpy as np
-    import wandb
 
     from open_instruct.grpo_olmo_core_actor import OLMoCoreModelGroup
 
@@ -423,98 +418,24 @@ def main(
     )
     logger.info("======== Model update group setup successfully =========")
 
-    wandb_url = None
-    if args.with_tracking:
-        all_configs = dataclasses.asdict(args)
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            config=all_configs,
-            name=args.run_name or args.exp_name,
-            save_code=True,
-        )
-        wandb_url = wandb.run.get_url()
-        maybe_update_beaker_description(wandb_url=wandb_url)
-
-    logger.info("Starting OLMo-core GRPO training with Ray actors...")
-    training_start_time = time.perf_counter()
-    maybe_update_beaker_description(
-        current_step=0, total_steps=args.num_training_steps, start_time=training_start_time, wandb_url=wandb_url
+    json_config = dataclasses.asdict(args)
+    ray_get_with_progress(
+        [
+            m.setup_callbacks.remote(
+                actor_manager=actor_manager,
+                with_tracking=args.with_tracking,
+                wandb_project=args.wandb_project_name,
+                wandb_entity=args.wandb_entity,
+                run_name=args.run_name or args.exp_name,
+                json_config=json_config,
+            )
+            for m in policy_group.models
+        ],
+        desc="Setting up callbacks",
     )
 
-    for training_step in range(1, args.num_training_steps + 1):
-        step_start_time = time.perf_counter()
-
-        results, _ = ray_get_with_progress(
-            [policy_group.models[i].step.remote() for i in range(args.world_size)],
-            desc=f"Running training step {training_step}",
-        )
-        scalar_metrics_list, array_metrics_list = zip(*results)
-
-        if all(len(m) == 0 for m in scalar_metrics_list):
-            logger.warning("After packing, there is not enough data to train")
-            continue
-
-        ray.get(actor_manager.set_should_stop.remote(True))
-        weight_broadcast_futures = [m.broadcast_to_vllm.remote() for m in policy_group.models]
-        nested_refs, sync_times = ray_get_with_progress(weight_broadcast_futures, desc="Broadcasting weights to vLLM")
-        all_update_refs = [ref for refs in nested_refs for ref in refs]
-        if all_update_refs:
-            ray.get(all_update_refs)
-
-        ray.get(actor_manager.set_should_stop.remote(False))
-
-        if (
-            args.load_ref_policy
-            and args.ref_policy_update_freq is not None
-            and training_step % args.ref_policy_update_freq == 0
-            and args.alpha > 0
-        ):
-            ray_get_with_progress(
-                [m.update_ref_policy.remote() for m in policy_group.models],
-                desc=f"Updating reference policy at step {training_step}",
-            )
-
-        if args.save_freq > 0 and training_step % args.save_freq == 0:
-            checkpoint_dir = f"{args.output_dir}_checkpoints"
-            step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-            logger.info(f"Saving model at step {training_step} to {step_dir}")
-            ray_get_with_progress(
-                [m.save_model.remote(step_dir, tc.chat_template_name, tokenizer) for m in policy_group.models],
-                desc=f"Saving model at step {training_step}",
-            )
-
-        step_time = time.perf_counter() - step_start_time
-        total_training_time = time.perf_counter() - training_start_time
-
-        average_metrics = {}
-        for metrics in scalar_metrics_list:
-            for k, v in metrics.items():
-                if k not in average_metrics:
-                    average_metrics[k] = []
-                average_metrics[k].append(v)
-        average_metrics = {k: np.mean(v) for k, v in average_metrics.items()}
-
-        metrics = {
-            "training_step": training_step,
-            "time/total": step_time,
-            "time/weight_sync": np.mean(sync_times) if sync_times else 0,
-            "time/total_training": total_training_time,
-            **average_metrics,
-        }
-
-        logger.info(f"Step {training_step}: {metrics}")
-
-        if args.with_tracking:
-            wandb.log(metrics, step=training_step)
-
-        maybe_update_beaker_description(
-            current_step=training_step,
-            total_steps=args.num_training_steps,
-            start_time=training_start_time,
-            wandb_url=wandb_url,
-        )
-
+    logger.info("Starting OLMo-core GRPO training with Ray actors...")
+    ray_get_with_progress([m.fit.remote() for m in policy_group.models], desc="Running OLMo-core GRPO training")
     logger.info("Training complete.")
 
     final_output_dir = args.output_dir
@@ -544,7 +465,7 @@ def main(
             path=eval_path,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=wandb_url,
+            wandb_url=None,
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
             eval_workspace=args.eval_workspace,

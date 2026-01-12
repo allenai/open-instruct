@@ -27,9 +27,9 @@ from olmo_core.train.train_module.transformer import (
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import vllm_utils
-from open_instruct.grpo_callbacks import olmo_core_to_hf_name
+from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
 from open_instruct.grpo_train_module import GRPOConfig, GRPOTrainModule
-from open_instruct.utils import RayProcess
+from open_instruct.utils import RayProcess, is_beaker_job
 
 logger = logging.getLogger(__name__)
 
@@ -327,6 +327,78 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         with torch.no_grad():
             for param, ref_param in zip(self.train_module.model.parameters(), self.ref_policy.parameters()):
                 ref_param.data.mul_(1 - alpha).add_(param.data, alpha=alpha)
+
+    def setup_callbacks(
+        self,
+        actor_manager: Any,
+        with_tracking: bool,
+        wandb_project: str | None,
+        wandb_entity: str | None,
+        run_name: str | None,
+        json_config: dict,
+    ) -> None:
+        """Store callback configuration for use in fit()."""
+        self.actor_manager = actor_manager
+        self.with_tracking = with_tracking
+        self.wandb_project = wandb_project
+        self.wandb_entity = wandb_entity
+        self.run_name = run_name
+        self.json_config = json_config
+
+    def fit(self) -> dict:
+        """Run training using OLMo-core Trainer with callbacks.
+
+        This method sets up callbacks for weight sync, ref policy updates,
+        Beaker progress tracking, and wandb logging, then calls trainer.fit().
+        """
+        from olmo_core.train import callbacks
+
+        from open_instruct.beaker_callback import BeakerCallbackV2
+
+        trainer_callbacks: dict[str, callbacks.Callback] = {}
+
+        if hasattr(self, "vllm_engines") and self.vllm_engines:
+            trainer_callbacks["vllm_sync"] = VLLMWeightSyncCallback(
+                vllm_engines=self.vllm_engines,
+                model_update_group=getattr(self, "model_update_group", None),
+                actor_manager=getattr(self, "actor_manager", None),
+                name_mapper=olmo_core_to_hf_name,
+            )
+
+        if (
+            self.ref_policy is not None
+            and self.grpo_config.beta > 0
+            and self.grpo_config.ref_policy_update_freq is not None
+        ):
+            trainer_callbacks["ref_policy"] = RefPolicyUpdateCallback(
+                ref_policy=self.ref_policy,
+                alpha=self.grpo_config.alpha,
+                update_interval=self.grpo_config.ref_policy_update_freq,
+            )
+
+        if is_beaker_job() and hasattr(self, "json_config"):
+            trainer_callbacks["beaker"] = BeakerCallbackV2(config=self.json_config)
+
+        if hasattr(self, "with_tracking") and self.with_tracking:
+            trainer_callbacks["wandb"] = callbacks.WandBCallback(
+                name=self.run_name,
+                project=self.wandb_project,
+                entity=self.wandb_entity,
+                config=getattr(self, "json_config", None),
+            )
+
+        self.trainer = train.TrainerConfig(
+            save_folder=self.output_dir,
+            max_duration=train.Duration.steps(self.num_training_steps),
+            metrics_collect_interval=10,
+            callbacks=trainer_callbacks,
+        ).build(self.train_module, self.dataloader)
+
+        logger.info(f"[Rank {self.rank}] Starting trainer.fit() with callbacks: {list(trainer_callbacks.keys())}")
+        self.trainer.fit()
+        logger.info(f"[Rank {self.rank}] Training complete")
+
+        return {}
 
     def save_model(
         self, output_dir: str, chat_template_name: str, tokenizer: transformers.PreTrainedTokenizer
