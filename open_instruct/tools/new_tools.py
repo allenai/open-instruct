@@ -38,11 +38,13 @@ class PythonCodeTool(Tool):
     Executes Python code via a FastAPI endpoint.
     """
 
-    def __init__(self, api_endpoint: str, timeout: int = 3) -> None:
+    DEFAULT_CALL_NAME = "python"
+
+    def __init__(self, call_name: str, api_endpoint: str, timeout: int = 3) -> None:
         super().__init__(
             config_name="python",
             description="Executes Python code and returns printed output.",
-            call_name="python",
+            call_name=call_name,
             parameters={
                 "type": "object",
                 "properties": {"code": {"type": "string", "description": "Python code to execute"}},
@@ -114,3 +116,7 @@ class PythonCodeToolConfig(BaseToolConfig):
     """The API endpoint for the code execution server."""
     timeout: int = 3
     """Timeout in seconds for code execution."""
+
+
+# Tool Registry: Maps tool names to their config classes
+TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {"code": PythonCodeToolConfig}

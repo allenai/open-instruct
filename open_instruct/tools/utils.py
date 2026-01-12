@@ -108,24 +108,40 @@ class BaseToolConfig:
         """
         return asdict(self)
 
-    def build(self) -> Tool:
+    def build(self, call_name: str | None = None) -> Tool:
         """Build the tool instance from this config.
+
+        Args:
+            call_name: Name used to identify in function calls. If not provided, uses tool's DEFAULT_CALL_NAME.
 
         Returns:
             A Tool instance.
         """
-        return self.tool_class(**self._get_init_kwargs())
+        args = self._get_init_kwargs()
+        if call_name:
+            args["call_name"] = call_name
+        else:
+            # Use tool class's default call name
+            args["call_name"] = getattr(self.tool_class, "DEFAULT_CALL_NAME", "tool")
+        return self.tool_class(**args)
 
-    def build_remote(self, max_concurrency: int = 512) -> ray.actor.ActorHandle:
+    def build_remote(self, call_name: str | None = None, max_concurrency: int = 512) -> ray.actor.ActorHandle:
         """Build the tool as a Ray remote actor.
 
         Allows for passing to vllm actors without needing to serialize tool itself,
         and to centralize control over tool concurrency.
 
         Args:
+            call_name: Name used to identify in function calls. If not provided, uses tool's DEFAULT_CALL_NAME.
             max_concurrency: Maximum number of concurrent calls the actor can handle.
 
         Returns:
             A Ray actor handle for the Tool.
         """
-        return ray.remote(self.tool_class).options(max_concurrency=max_concurrency).remote(**self._get_init_kwargs())
+        args = self._get_init_kwargs()
+        if call_name:
+            args["call_name"] = call_name
+        else:
+            # Use tool class's default call name
+            args["call_name"] = getattr(self.tool_class, "DEFAULT_CALL_NAME", "tool")
+        return ray.remote(self.tool_class).options(max_concurrency=max_concurrency).remote(**args)

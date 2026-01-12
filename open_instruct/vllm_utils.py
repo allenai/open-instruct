@@ -68,7 +68,6 @@ from open_instruct.utils import ModelDims, ray_get_with_progress
 logger = logger_utils.setup_logger(__name__)
 
 NUM_PREFETCH_WORKERS = 2
-NUM_TOOL_WORKERS = 20
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
@@ -565,7 +564,7 @@ class LLMRayActor:
         self._should_stop_value = False
 
     def _init_executor(self) -> None:
-        max_workers = NUM_PREFETCH_WORKERS + (NUM_TOOL_WORKERS if self.tool_actors else 0)
+        max_workers = NUM_PREFETCH_WORKERS
         self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
         self._prefetch_future = self.executor.submit(_prefetch_worker, self)
         self._process_future = self.executor.submit(self.process_from_queue)
@@ -845,13 +844,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 logger.warning(f"Tool {tool_call.name} not found in actor map")
                 continue
 
-            # Call the tool actor with extracted args (Ray remote call)
-            try:
-                # Ray actors: call with .remote() and await the result
-                tool_result: ToolOutput = await tool_actor.__call__.remote(**tool_call.args)
-            except Exception as e:
-                logger.error(f"Error calling tool {tool_call.name}: {e}")
-                tool_result = ToolOutput(output="", error=str(e), called=False, timeout=False, runtime=0.0)
+            tool_result: ToolOutput = await tool_actor.__call__.remote(**tool_call.args)
 
             # Track tool call info
             tool_called = True

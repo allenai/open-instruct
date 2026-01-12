@@ -47,6 +47,7 @@ from open_instruct.data_loader import DataPreparationActor, accumulate_inference
 # isort: on
 import asyncio
 import dataclasses
+import json
 import logging
 import math
 import random
@@ -101,7 +102,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, masked_mean
-from open_instruct.tools.new_tools import PythonCodeToolConfig
+from open_instruct.tools.new_tools import TOOL_REGISTRY
 from open_instruct.tools.parsers import OpenInstructLegacyToolParser, ToolParser
 from open_instruct.utils import (
     INVALID_LOGPROB,
@@ -1506,9 +1507,6 @@ def create_tool_parser(
 ) -> ToolParser:
     """Create a tool parser based on configuration.
 
-    This is a helper function that can be called inside Ray actors to construct
-    the parser without serialization issues.
-
     Args:
         parser_type: Type of parser to use ('legacy', 'vllm_hermes', etc.).
         tool_actors: List of Ray actor handles for tools.
@@ -1528,44 +1526,67 @@ def create_tool_parser(
 
 
 def create_tools(
-    tools: list[str] | None,
-    code_tool_api_endpoint: str | None = None,
-    search_api_endpoint: str | None = None,
-    number_documents_to_search: int = 3,
+    tools: list[str] | None, tool_call_names: list[str] | None = None, tool_configs: list[str] | None = None
 ) -> list[ray.actor.ActorHandle]:
-    """Create tool actors based on tool configuration.
+    """Create tool actors based on tool configuration using the TOOL_REGISTRY.
 
     Args:
         tools: List of tool names to enable (e.g., ["code", "search"]).
-        code_tool_api_endpoint: API endpoint for code execution tool.
-        search_api_endpoint: API endpoint for search tool.
-        number_documents_to_search: Number of documents to retrieve for search.
+        tool_call_names: Optional list of names to use in model output (e.g., ["python", "search"]).
+                        Must match length of tools. Defaults to tools if not specified.
+        tool_configs: List of JSON dictionaries for configuring each tool. Must match length of tools.
+                     Use '{}' for defaults. Example: ['{"api_endpoint": "http://..."}', '{}']
 
     Returns:
         A list of Ray actor handles for the requested tools.
 
     Raises:
-        ValueError: If an unknown tool is requested or required configuration is missing.
+        ValueError: If an unknown tool is requested, configs are invalid, or required fields are missing.
     """
     tool_actors = []
 
     if tools:
-        for tool in tools:
-            if tool.lower() == "code":
-                if not code_tool_api_endpoint:
-                    raise ValueError("code_tool_api_endpoint must be specified when using 'code' tool")
+        assert tool_call_names is not None, "tool_call_names must be specified when using tools"
+        assert tool_configs is not None, "tool_configs must be specified when using tools"
+        assert len(tool_call_names) == len(tools), "tool_call_names must have same length as tools"
+        assert len(tool_configs) == len(tools), "tool_configs must have same length as tools"
 
-                config = PythonCodeToolConfig(api_endpoint=code_tool_api_endpoint, timeout=3)
-                tool_actor = config.build_remote(max_concurrency=512)
-                tool_actors.append(tool_actor)
-            elif tool.lower() == "search":
-                if not search_api_endpoint:
-                    raise ValueError("search_api_endpoint must be specified when using 'search' tool")
+        for tool, call_name, config_str in zip(tools, tool_call_names, tool_configs):
+            tool_lower = tool.lower()
 
-                # TODO: Implement search tool using new_tools pattern
-                raise ValueError("Search tool not yet implemented with new tools system. Use 'code' for now.")
-            else:
-                raise ValueError(f"Unknown tool: {tool}. Supported tools: 'code'")
+            # Look up tool in registry
+            if tool_lower not in TOOL_REGISTRY:
+                available_tools = ", ".join(TOOL_REGISTRY.keys())
+                raise ValueError(f"Unknown tool: {tool}. Available tools: {available_tools}")
+
+            tool_config_class = TOOL_REGISTRY[tool_lower]
+
+            # Parse config JSON
+            try:
+                config_dict = json.loads(config_str)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in tool_configs for tool '{tool}': {e}") from e
+
+            # Validate config dict matches expected fields
+            expected_fields = {f.name for f in dataclasses.fields(tool_config_class) if f.name != "tool_class"}
+            provided_fields = set(config_dict.keys())
+
+            # Check for unknown fields
+            unknown_fields = provided_fields - expected_fields
+            if unknown_fields:
+                raise ValueError(
+                    f"Unknown config fields for tool '{tool}': {unknown_fields}. Expected fields: {expected_fields}"
+                )
+
+            # Build config from dictionary
+            try:
+                config = tool_config_class(**config_dict)
+            except TypeError as e:
+                raise ValueError(f"Invalid config for tool '{tool}': {e}. Expected fields: {expected_fields}") from e
+
+            # Build remote actor with custom call_name
+            tool_actor = config.build_remote(call_name=call_name, max_concurrency=512)
+            tool_actors.append(tool_actor)
 
     return tool_actors
 
@@ -1597,8 +1618,6 @@ def create_model_and_optimizer(
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
-
-    # Tools are now passed in from caller (created in main() before this function)
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -2393,9 +2412,8 @@ def main(
     # Parser will be created inside vLLM actors to avoid serialization issues
     tool_actors = create_tools(
         tools=streaming_config.tools,
-        code_tool_api_endpoint=streaming_config.code_tool_api_endpoint,
-        search_api_endpoint=streaming_config.search_api_endpoint,
-        number_documents_to_search=streaming_config.number_documents_to_search,
+        tool_call_names=streaming_config.tool_call_names,
+        tool_configs=streaming_config.tool_configs,
     )
 
     # Create parser temporarily to get stop sequences for generation config

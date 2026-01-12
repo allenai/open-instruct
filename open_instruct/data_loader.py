@@ -270,16 +270,18 @@ class StreamingDataLoaderConfig:
 
     # Tools
     tools: list[str] | None = None
+    tool_call_names: list[str] | None = None
+    """Override names used in tool calls (e.g., '<name>...</name>'). Must match length of --tools if set. Defaults to --tools if not specified."""
+    tool_configs: list[str] | None = None
+    """JSON dictionaries for configuring each tool. Must match length of --tools. Use '{}' for defaults."""
     tool_parser_type: str = "legacy"
-    """Type of tool parser to use: 'legacy', 'vllm_hermes', 'vllm_llama3_json', 'vllm_qwen3_coder'"""
+    """Type of tool parser to use: 'legacy' is the only option for now.'"""
     max_tool_calls: tuple[int, ...] = (5,)
     only_reward_good_outputs: bool = False
 
-    # RAG
+    # Legacy tool args (deprecated - use tool_configs instead)
     number_documents_to_search: int = 3
     search_api_endpoint: str | None = None
-
-    # Code tool
     code_tool_api_endpoint: str | None = None
 
     # Computed at post_init
@@ -319,6 +321,28 @@ class StreamingDataLoaderConfig:
             self.stop_strings = []
 
         self.max_tool_calls = tuple(int(x) for x in self.max_tool_calls)
+
+        # Validate and set default tool_call_names
+        if self.tools and self.tool_call_names:
+            if len(self.tool_call_names) != len(self.tools):
+                raise ValueError(
+                    f"tool_call_names must have same length as tools. "
+                    f"Got {len(self.tool_call_names)} names for {len(self.tools)} tools."
+                )
+        elif self.tools and not self.tool_call_names:
+            # default to using the tool config names as call names
+            self.tool_call_names = self.tools
+
+        # Validate tool_configs
+        if self.tools and self.tool_configs:
+            if len(self.tool_configs) != len(self.tools):
+                raise ValueError(
+                    f"tool_configs must have same length as tools. "
+                    f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
+                )
+        elif self.tools and not self.tool_configs:
+            # Default to empty configs
+            self.tool_configs = ["{}"] * len(self.tools)
 
         if self.tools is not None and len(self.tools) > 0:
             for tool in self.tools:

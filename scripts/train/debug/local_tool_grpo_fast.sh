@@ -35,7 +35,8 @@ uv run open_instruct/grpo_fast.py \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --tools code \
+    --tool_call_names python \
+    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "timeout": 3}' \
     --tool_parser_type legacy \
-    --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
     --max_tool_calls 5 \
     --push_to_hub false

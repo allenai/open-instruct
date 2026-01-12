@@ -16,7 +16,7 @@ class TestPythonCodeToolInit(unittest.TestCase):
 
     def test_initialization_with_defaults(self):
         """Test tool initializes with correct default values."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute")
 
         self.assertEqual(tool.api_endpoint, "http://localhost:1212/execute")
         self.assertEqual(tool.timeout, 3)
@@ -25,25 +25,28 @@ class TestPythonCodeToolInit(unittest.TestCase):
 
     def test_initialization_with_custom_values(self):
         """Test tool initializes with custom values."""
-        tool = PythonCodeTool(api_endpoint="http://example.com/run", timeout=10)
+        tool = PythonCodeTool(call_name="code", api_endpoint="http://example.com/run", timeout=10)
 
         self.assertEqual(tool.api_endpoint, "http://example.com/run")
         self.assertEqual(tool.timeout, 10)
-        self.assertEqual(tool.call_name, "python")
+        self.assertEqual(tool.call_name, "code")
 
     def test_tool_call_name(self):
-        """Test tool call_name is 'python'."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
+        """Test tool call_name can be customized."""
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute")
         self.assertEqual(tool.call_name, "python")
+
+        tool2 = PythonCodeTool(call_name="code", api_endpoint="http://localhost:1212/execute")
+        self.assertEqual(tool2.call_name, "code")
 
     def test_tool_description(self):
         """Test tool description is set correctly."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute")
         self.assertEqual(tool.description, "Executes Python code and returns printed output.")
 
     def test_tool_parameters_schema(self):
         """Test tool parameters schema is correct."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute")
         params = tool.parameters
 
         self.assertEqual(params["type"], "object")
@@ -53,7 +56,7 @@ class TestPythonCodeToolInit(unittest.TestCase):
 
     def test_get_openai_tool_definitions(self):
         """Test OpenAI tool definition format."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute")
         definition = get_openai_tool_definitions(tool)
 
         self.assertEqual(definition["type"], "function")
@@ -61,13 +64,28 @@ class TestPythonCodeToolInit(unittest.TestCase):
         self.assertEqual(definition["function"]["description"], "Executes Python code and returns printed output.")
         self.assertIn("parameters", definition["function"])
 
+    def test_call_name_via_config(self):
+        """Test that call_name can be set via config build methods."""
+        # Via config with custom call_name
+        config = PythonCodeToolConfig(api_endpoint="http://example.com/execute")
+        tool1 = config.build(call_name="code")
+        self.assertEqual(tool1.call_name, "code")
+
+        # Via config with default (uses config_name)
+        tool2 = config.build()
+        self.assertEqual(tool2.call_name, "python")
+
+        # Verify OpenAI definition uses custom name
+        definition = get_openai_tool_definitions(tool1)
+        self.assertEqual(definition["function"]["name"], "code")
+
 
 class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
     """Tests for PythonCodeTool execution (async __call__)."""
 
     def setUp(self):
         """Set up test fixtures."""
-        self.tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute", timeout=3)
+        self.tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute", timeout=3)
 
     async def test_empty_code_returns_error(self):
         """Test that empty code returns an error without calling API."""
@@ -202,7 +220,7 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
     @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
     async def test_custom_timeout(self, mock_session_class):
         """Test that custom timeout is passed to API."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute", timeout=10)
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute", timeout=10)
 
         mock_response = AsyncMock()
         mock_response.json.return_value = {"output": "OK", "error": None}
