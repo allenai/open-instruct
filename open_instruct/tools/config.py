@@ -145,22 +145,6 @@ class ToolConfig:
         """Get the config for a tool by index."""
         return self.tool_configs_list[index]
 
-    def create_parser(self, tokenizer=None, tools: dict[str, Tool] | None = None) -> ToolParser | None:
-        """Create the configured tool parser.
-
-        This is a convenience method that wraps create_tool_parser().
-        Call this lazily (e.g., inside a Ray actor) to avoid serialization
-        issues with parsers that contain non-serializable components.
-
-        Args:
-            tokenizer: Required for vllm_* parsers. The tokenizer for the model.
-            tools: Dict of tool name -> Tool. Required for "legacy" parser.
-
-        Returns:
-            The created ToolParser, or None if no parser is configured.
-        """
-        return create_tool_parser(self.parser, tokenizer, tools)
-
 
 def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] | None = None) -> ToolParser | None:
     """Create a tool parser by name.
