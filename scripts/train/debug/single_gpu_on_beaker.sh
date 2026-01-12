@@ -13,6 +13,7 @@ uv run python mason.py \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU on Beaker test script." \
        --pure_docker_mode \
+       --no-host-networking \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
        --num_nodes 1 \
@@ -21,6 +22,7 @@ uv run python mason.py \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --budget ai2/oe-adapt \
        --gpus 1 \
+       --no_auto_dataset_cache \
 	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \

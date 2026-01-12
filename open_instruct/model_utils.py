@@ -16,6 +16,8 @@
 
 import asyncio
 import itertools
+import pathlib
+import tempfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -40,6 +42,37 @@ from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
+
+
+@dataclass
+class TensorCache:
+    """A cache for tensors indexed by dataset indices."""
+
+    tensors: dict[str, torch.Tensor]
+
+    def __getitem__(self, indices: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Get cached tensors for the given indices."""
+        return {k: v[indices.long()] for k, v in self.tensors.items()}
+
+    def to(self, device: torch.device | str) -> "TensorCache":
+        """Move all tensors to the specified device."""
+        return TensorCache(tensors={k: v.to(device) for k, v in self.tensors.items()})
+
+    def to_disk(self, path: str | pathlib.Path) -> None:
+        """Save the cache to disk atomically using temp file and rename."""
+        path = pathlib.Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        cpu_tensors = {k: v.cpu() for k, v in self.tensors.items()}
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False, suffix=".tmp") as tmp:
+            tmp_path = pathlib.Path(tmp.name)
+            torch.save(cpu_tensors, tmp_path)
+        tmp_path.rename(path)
+
+    @classmethod
+    def from_disk(cls, path: str | pathlib.Path, device: torch.device | str | None = None) -> "TensorCache":
+        """Load a cache from disk."""
+        data = torch.load(path, weights_only=True, map_location=device)
+        return cls(tensors=data)
 
 
 @dataclass
@@ -192,6 +225,7 @@ def load_ref_policy(
     device: torch.device,
     rank: int,
     checkpoint_path: str | None = None,
+    mpu: torch.distributed.distributed_c10d.ProcessGroup | None = None,
     ref_policy_update_freq: int | None = None,
     alpha: float = 0.0,
 ) -> transformers.PreTrainedModel:
@@ -205,6 +239,7 @@ def load_ref_policy(
         device: Target device for loading checkpoint.
         rank: Global process rank for logging.
         checkpoint_path: Optional path to model checkpoint to load.
+        mpu: Optional model parallel unit for sequence parallelism.
         ref_policy_update_freq: Frequency of reference policy updates. If None, no updates occur.
         alpha: Alpha value for polyak updates. If 0, no updates occur.
 
@@ -222,7 +257,7 @@ def load_ref_policy(
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
     disable_dropout_in_model(ref_policy)
-    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config)
+    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
     ref_policy.eval()
 
     if checkpoint_path:

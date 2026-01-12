@@ -24,10 +24,11 @@ from unittest import mock
 import pytest
 import ray
 import responses
+import torch
 from dateutil import parser
 from parameterized import parameterized
 
-from open_instruct import grpo_fast, utils
+from open_instruct import data_types, grpo_fast, launch_utils, utils
 from open_instruct.finetune import FlatArguments
 
 
@@ -380,8 +381,8 @@ class TestDownloadFromGsBucket(unittest.TestCase):
             def mock_live_subprocess_output(cmd):
                 captured_cmd["cmd"] = cmd
 
-            with mock.patch.object(utils, "live_subprocess_output", side_effect=mock_live_subprocess_output):
-                utils.download_from_gs_bucket(src_paths=src_paths, dest_path=str(dest_path))
+            with mock.patch.object(launch_utils, "live_subprocess_output", side_effect=mock_live_subprocess_output):
+                launch_utils.download_from_gs_bucket(src_paths=src_paths, dest_path=str(dest_path))
 
             expected_cmd = [
                 "gsutil",
@@ -794,3 +795,189 @@ class TestRayGetWithProgress(unittest.TestCase):
 
         with pytest.raises(TimeoutError, match=desc):
             utils.ray_get_with_progress(refs, desc=desc, enable=False, timeout=0.1)
+
+
+class TestUlyssesSPSplitter(unittest.TestCase):
+    """Test the UlyssesSPSplitter for sequence parallelism splitting."""
+
+    def _create_mock_splitter(self, sp_rank: int, sp_world_size: int, pad_token_id: int = 0):
+        """Create a UlyssesSPSplitter with mocked process group."""
+        mock_group = mock.MagicMock()
+        return utils.UlyssesSPSplitter(
+            sp_rank=sp_rank,
+            sp_group=mock_group,
+            sp_world_size=sp_world_size,
+            device=torch.device("cpu"),
+            pad_token_id=pad_token_id,
+        )
+
+    def _create_test_batch(self, seq_lengths: list[int]) -> data_types.CollatedBatchData:
+        """Create a CollatedBatchData with tensors of given sequence lengths."""
+        query_responses = [torch.arange(length).unsqueeze(0) for length in seq_lengths]
+        attention_masks = [torch.ones(1, length, dtype=torch.long) for length in seq_lengths]
+        position_ids = [torch.arange(length).unsqueeze(0) for length in seq_lengths]
+        advantages = [torch.ones(1, length) * (i + 1) for i, length in enumerate(seq_lengths)]
+        response_masks = [torch.ones(1, length, dtype=torch.long) for length in seq_lengths]
+        vllm_logprobs = [torch.zeros(1, length) - 0.5 for length in seq_lengths]
+
+        return data_types.CollatedBatchData(
+            query_responses=query_responses,
+            attention_masks=attention_masks,
+            position_ids=position_ids,
+            advantages=advantages,
+            response_masks=response_masks,
+            vllm_logprobs=vllm_logprobs,
+        )
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_basic_split_rank0(self, mock_all_gather):
+        """Test that rank 0 gets the first chunk of the sequence."""
+        sp_world_size = 2
+        splitter = self._create_mock_splitter(sp_rank=0, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([8])  # 8 tokens, splits into 4 per rank
+
+        # Mock all_gather to return the local max length
+        def fill_seqlens(seqlens, local_seqlen, group):
+            for s in seqlens:
+                s.copy_(local_seqlen)
+
+        mock_all_gather.side_effect = fill_seqlens
+
+        result = splitter.split_collated_batch(batch)
+
+        # Rank 0 should get first half: tokens 0-3
+        self.assertEqual(result.query_responses[0].shape[-1], 4)
+        torch.testing.assert_close(result.query_responses[0], torch.tensor([[0, 1, 2, 3]]))
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_basic_split_rank1(self, mock_all_gather):
+        """Test that rank 1 gets the second chunk of the sequence."""
+        sp_world_size = 2
+        splitter = self._create_mock_splitter(sp_rank=1, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([8])
+
+        def fill_seqlens(seqlens, local_seqlen, group):
+            for s in seqlens:
+                s.copy_(local_seqlen)
+
+        mock_all_gather.side_effect = fill_seqlens
+
+        result = splitter.split_collated_batch(batch)
+
+        # Rank 1 should get second half: tokens 4-7
+        self.assertEqual(result.query_responses[0].shape[-1], 4)
+        torch.testing.assert_close(result.query_responses[0], torch.tensor([[4, 5, 6, 7]]))
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_padding_to_divisible_length(self, mock_all_gather):
+        """Test that sequences are padded to be divisible by sp_world_size."""
+        sp_world_size = 4
+        splitter = self._create_mock_splitter(sp_rank=0, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([6])  # 6 is not divisible by 4, should pad to 8
+
+        def fill_seqlens(seqlens, local_seqlen, group):
+            for s in seqlens:
+                s.copy_(local_seqlen)
+
+        mock_all_gather.side_effect = fill_seqlens
+
+        result = splitter.split_collated_batch(batch)
+
+        # After padding to 8, rank 0 gets tokens 0-1
+        self.assertEqual(result.query_responses[0].shape[-1], 2)
+        torch.testing.assert_close(result.query_responses[0], torch.tensor([[0, 1]]))
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_pad_values_for_different_fields(self, mock_all_gather):
+        """Test that different fields use correct padding values."""
+        sp_world_size = 2
+        pad_token_id = 99
+        splitter = self._create_mock_splitter(sp_rank=1, sp_world_size=sp_world_size, pad_token_id=pad_token_id)
+        batch = self._create_test_batch([3])  # Will pad to 4
+
+        def fill_seqlens(seqlens, local_seqlen, group):
+            for s in seqlens:
+                s.copy_(local_seqlen)
+
+        mock_all_gather.side_effect = fill_seqlens
+
+        result = splitter.split_collated_batch(batch)
+
+        # Rank 1 gets second chunk (indices 2-3), where index 3 is padded
+        # query_responses should pad with pad_token_id (99)
+        self.assertEqual(result.query_responses[0][0, -1].item(), pad_token_id)
+        # vllm_logprobs should pad with INVALID_LOGPROB (1.0)
+        self.assertEqual(result.vllm_logprobs[0][0, -1].item(), utils.INVALID_LOGPROB)
+        # attention_masks should pad with 0
+        self.assertEqual(result.attention_masks[0][0, -1].item(), 0)
+        # response_masks should pad with 0
+        self.assertEqual(result.response_masks[0][0, -1].item(), 0)
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_multiple_sequences_in_batch(self, mock_all_gather):
+        """Test splitting with multiple sequences of different lengths."""
+        sp_world_size = 2
+        splitter = self._create_mock_splitter(sp_rank=0, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([4, 6])  # Two sequences, different lengths
+
+        def fill_seqlens(seqlens, local_seqlen, group):
+            for s in seqlens:
+                s.copy_(local_seqlen)
+
+        mock_all_gather.side_effect = fill_seqlens
+
+        result = splitter.split_collated_batch(batch)
+
+        # Both sequences should be in result, both padded to max_seqlen=6 (rounded to 6)
+        self.assertEqual(len(result.query_responses), 2)
+        # First sequence (original length 4): rank 0 gets first 3 tokens
+        self.assertEqual(result.query_responses[0].shape[-1], 3)
+        # Second sequence (original length 6): rank 0 gets first 3 tokens
+        self.assertEqual(result.query_responses[1].shape[-1], 3)
+        torch.testing.assert_close(result.query_responses[1], torch.tensor([[0, 1, 2]]))
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_all_fields_are_split(self, mock_all_gather):
+        """Test that all fields in CollatedBatchData are properly split."""
+        sp_world_size = 2
+        splitter = self._create_mock_splitter(sp_rank=0, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([8])
+
+        def fill_seqlens(seqlens, local_seqlen, group):
+            for s in seqlens:
+                s.copy_(local_seqlen)
+
+        mock_all_gather.side_effect = fill_seqlens
+
+        result = splitter.split_collated_batch(batch)
+
+        # Verify all fields have same chunk length
+        chunk_len = 4
+        self.assertEqual(result.query_responses[0].shape[-1], chunk_len)
+        self.assertEqual(result.attention_masks[0].shape[-1], chunk_len)
+        self.assertEqual(result.position_ids[0].shape[-1], chunk_len)
+        self.assertEqual(result.advantages[0].shape[-1], chunk_len)
+        self.assertEqual(result.response_masks[0].shape[-1], chunk_len)
+        self.assertEqual(result.vllm_logprobs[0].shape[-1], chunk_len)
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_global_max_seqlen_respected(self, mock_all_gather):
+        """Test that global max sequence length from all_gather is respected."""
+        sp_world_size = 2
+        splitter = self._create_mock_splitter(sp_rank=0, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([4])  # Local max is 4
+
+        # Simulate another rank having a longer sequence (length 8)
+        def fill_with_global_max(seqlens, local_seqlen, group):
+            seqlens[0].copy_(local_seqlen)  # This rank: 4
+            seqlens[1].fill_(8)  # Other rank: 8
+
+        mock_all_gather.side_effect = fill_with_global_max
+
+        result = splitter.split_collated_batch(batch)
+
+        # Should pad to global max (8), so each rank gets 4 tokens
+        # Rank 0 gets first 4 tokens, with original data [0,1,2,3] + padding handled
+        self.assertEqual(result.query_responses[0].shape[-1], 4)
+        # Original sequence was [0,1,2,3], which fits exactly in rank 0's chunk
+        torch.testing.assert_close(result.query_responses[0], torch.tensor([[0, 1, 2, 3]]))

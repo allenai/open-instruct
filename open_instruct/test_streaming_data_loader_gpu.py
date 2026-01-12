@@ -28,7 +28,7 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
-from open_instruct.tool_utils.tools import PythonCodeTool
+from open_instruct.tools.tools import PythonCodeTool
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
@@ -48,7 +48,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         super().setUpClass()
         cls.server_process = subprocess.Popen(
             ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1213"],
-            cwd="open_instruct/tool_utils",
+            cwd="open_instruct/tools/code_server",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
@@ -73,12 +73,13 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             GROUND_TRUTHS_KEY: ground_truths,
             VERIFIER_SOURCE_KEY: ["test"] * len(prompts),
             RAW_PROMPT_KEY: prompts,
+            "index": list(range(len(prompts))),
         }
         return datasets.Dataset.from_dict(data)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_streaming_dataloader_iteration_without_tools(self):
-        tokenizer_name = "EleutherAI/pythia-14m"
+        tokenizer_name = "Qwen/Qwen3-0.6B"
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
         prompts = ["What is 2+2?", "What is 3+3?", "What is 4+4?", "What is 5+5?"]
