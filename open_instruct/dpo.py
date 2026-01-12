@@ -103,15 +103,36 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
 }
 
 
-def get_transformer_config(model_name_or_path: str, vocab_size: int) -> TransformerConfig:
-    """Get the appropriate TransformerConfig for a given model name."""
-    config_name = OLMO_MODEL_CONFIG_MAP.get(model_name_or_path)
+def get_transformer_config(
+    model_name_or_path: str, vocab_size: int, config_name_override: str | None = None
+) -> TransformerConfig:
+    """Get the appropriate TransformerConfig for a given model name.
+
+    Args:
+        model_name_or_path: HuggingFace model name or path.
+        vocab_size: Vocabulary size for the model.
+        config_name_override: Optional override for the config name. If provided, this
+            takes precedence over the automatic lookup in OLMO_MODEL_CONFIG_MAP.
+            Must be a valid TransformerConfig method name (e.g., 'olmo2_7B').
+
+    Returns:
+        TransformerConfig for the specified model.
+
+    Raises:
+        ValueError: If model not in OLMO_MODEL_CONFIG_MAP and no override provided.
+        AttributeError: If config_name_override is not a valid TransformerConfig method.
+    """
+    config_name = config_name_override or OLMO_MODEL_CONFIG_MAP.get(model_name_or_path)
     if config_name is None:
-        available = ", ".join(OLMO_MODEL_CONFIG_MAP.keys())
+        available_models = ", ".join(OLMO_MODEL_CONFIG_MAP.keys())
+        available_configs = [
+            name for name in dir(TransformerConfig) if name.startswith("olmo") and not name.startswith("_")
+        ]
         raise ValueError(
             f"Model '{model_name_or_path}' not found in OLMO_MODEL_CONFIG_MAP. "
-            f"Available models: {available}. "
-            f"Add your model to OLMO_MODEL_CONFIG_MAP in dpo.py."
+            f"Available models: {available_models}. "
+            f"You can also use --olmo_config_name to specify a config directly. "
+            f"Available config names: {', '.join(available_configs)}"
         )
     config_fn = getattr(TransformerConfig, config_name)
     return config_fn(vocab_size=vocab_size)
@@ -262,7 +283,7 @@ class DPOTrainModule(TrainModule):
     def eval_batch_spec(self) -> EvalBatchSpec:
         return EvalBatchSpec(rank_batch_size=1)
 
-    def eval_batch(self, batch: dict[str, Any], labels: Any | None = None) -> Any:
+    def eval_batch(self, batch: dict[str, Any], labels: Any | None = None) -> torch.Tensor:
         self.model.eval()
         with torch.no_grad():
             return self.model(**batch)
@@ -351,6 +372,8 @@ class DPOExperimentConfig(
     """Configuration for a DPO training experiment."""
 
     dpo_loss_type: DPOLossType = DPOLossType.dpo
+    olmo_config_name: str | None = None
+    """Override for OLMo-core TransformerConfig name (e.g., 'olmo2_7B'). If not set, auto-detected from model_name_or_path."""
 
     @property
     def dpo_config(self) -> DPOConfig:
@@ -386,6 +409,9 @@ class DPOExperimentConfig(
 
 def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     """Main entry point for DPO training with OLMo-core."""
+    if args.model_name_or_path is None:
+        raise ValueError("--model_name_or_path is required. Specify a HuggingFace model name or path.")
+
     tc.tokenizer_name_or_path = (
         args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
     )
@@ -514,11 +540,9 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         dist.barrier()  # type: ignore[attr-defined]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if args.model_name_or_path is None:
-        raise ValueError("model_name_or_path must be specified")
 
     logger.info(f"Building OLMo-core model with vocab_size={tokenizer.vocab_size}")
-    model_config = get_transformer_config(args.model_name_or_path, tokenizer.vocab_size)
+    model_config = get_transformer_config(args.model_name_or_path, tokenizer.vocab_size, args.olmo_config_name)
     model = model_config.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
@@ -662,14 +686,18 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     logger.info("Training complete.")
 
     distributed_utils.barrier()
+    output_path = pathlib.Path(args.output_dir).resolve()
+    beaker_output_path = pathlib.Path("/output").resolve()
     if (
         args.try_auto_save_to_beaker
         and is_main_process
         and is_beaker_job()
         and beaker_config is not None
         and len(beaker_config.beaker_dataset_id_urls) > 0
-        and args.output_dir.rstrip("/") != "/output"
+        and output_path != beaker_output_path
     ):
+        if distributed_utils.is_distributed():
+            dist.barrier()
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
     if is_beaker_job() and is_main_process and args.try_launch_beaker_eval_jobs:

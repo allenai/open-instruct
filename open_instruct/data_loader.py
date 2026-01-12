@@ -22,7 +22,9 @@ def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, A
     Returns:
         Dictionary with the same keys, but tensor values moved to the target device.
     """
-    return {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+    if device is None:
+        return batch
+    return {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
 
 class HFDataLoader(data_loader.DataLoaderBase):
@@ -48,7 +50,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Initialize the HFDataLoader.
 
         Args:
-            dataset: The HuggingFace Dataset to load data from.
+            dataset: The HuggingFace Dataset to load data from. Must have an 'index' column.
             batch_size: The global batch size.
             seed: Random seed for shuffling.
             rank: The rank of the current process in the distributed setup.
@@ -57,6 +59,11 @@ class HFDataLoader(data_loader.DataLoaderBase):
             automatic_reshuffle: If True, automatically reshuffle at epoch boundaries.
             collator: Optional collation function for batching examples.
             device: Device to move tensors to.
+
+        Note:
+            The dataset must have an 'index' column for tracking samples across epochs.
+            This is automatically added by get_cached_dataset_tulu(). For custom datasets,
+            add it with: dataset.add_column('index', range(len(dataset)))
         """
         super().__init__(
             work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=rank

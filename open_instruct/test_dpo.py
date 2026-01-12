@@ -79,5 +79,83 @@ class TestDPOTrainModuleInit(unittest.TestCase):
         self.assertFalse(average_log_prob)
 
 
+class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
+    """Tests for compute_reference_logprobs_cache_hash function."""
+
+    def test_deterministic_hash(self):
+        hash1 = dpo.compute_reference_logprobs_cache_hash(
+            model_name_or_path="allenai/OLMo-2-1124-7B",
+            model_revision="main",
+            dpo_loss_type=dpo.DPOLossType.dpo,
+            concatenated_forward=True,
+            packing=False,
+            use_lora=False,
+            dataset_config_hash="abc123",
+        )
+        hash2 = dpo.compute_reference_logprobs_cache_hash(
+            model_name_or_path="allenai/OLMo-2-1124-7B",
+            model_revision="main",
+            dpo_loss_type=dpo.DPOLossType.dpo,
+            concatenated_forward=True,
+            packing=False,
+            use_lora=False,
+            dataset_config_hash="abc123",
+        )
+        self.assertEqual(hash1, hash2)
+
+    def test_different_inputs_different_hash(self):
+        hash1 = dpo.compute_reference_logprobs_cache_hash(
+            model_name_or_path="allenai/OLMo-2-1124-7B",
+            model_revision="main",
+            dpo_loss_type=dpo.DPOLossType.dpo,
+            concatenated_forward=True,
+            packing=False,
+            use_lora=False,
+            dataset_config_hash="abc123",
+        )
+        hash2 = dpo.compute_reference_logprobs_cache_hash(
+            model_name_or_path="allenai/OLMo-2-1124-7B",
+            model_revision="main",
+            dpo_loss_type=dpo.DPOLossType.simpo,
+            concatenated_forward=True,
+            packing=False,
+            use_lora=False,
+            dataset_config_hash="abc123",
+        )
+        self.assertNotEqual(hash1, hash2)
+
+    def test_hash_length(self):
+        hash_value = dpo.compute_reference_logprobs_cache_hash(
+            model_name_or_path="allenai/OLMo-2-1124-7B",
+            model_revision=None,
+            dpo_loss_type=dpo.DPOLossType.dpo,
+            concatenated_forward=True,
+            packing=False,
+            use_lora=False,
+            dataset_config_hash="test",
+        )
+        self.assertEqual(len(hash_value), 16)
+
+
+class TestConfigToJsonSerializable(unittest.TestCase):
+    """Tests for config_to_json_serializable function."""
+
+    def test_enum_conversion(self):
+        result = dpo.config_to_json_serializable({"loss_type": dpo.DPOLossType.dpo})
+        self.assertEqual(result, {"loss_type": "dpo"})
+
+    def test_nested_dict(self):
+        result = dpo.config_to_json_serializable({"outer": {"inner": dpo.DPOLossType.simpo}})
+        self.assertEqual(result, {"outer": {"inner": "simpo"}})
+
+    def test_list_conversion(self):
+        result = dpo.config_to_json_serializable([dpo.DPOLossType.dpo, dpo.DPOLossType.wpo])
+        self.assertEqual(result, ["dpo", "wpo"])
+
+    def test_primitive_passthrough(self):
+        result = dpo.config_to_json_serializable({"str": "hello", "int": 42, "float": 3.14})
+        self.assertEqual(result, {"str": "hello", "int": 42, "float": 3.14})
+
+
 if __name__ == "__main__":
     unittest.main()
