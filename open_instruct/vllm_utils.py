@@ -205,9 +205,7 @@ def split_request_id(full_request_id: str) -> dict:
 
 
 def get_triggered_tools(
-    output_text: str,
-    tools: dict[str, ray.actor.ActorHandle],
-    tool_parser: ToolParser | None,
+    output_text: str, tools: dict[str, ray.actor.ActorHandle], tool_parser: ToolParser | None
 ) -> list[tuple[ray.actor.ActorHandle, dict]]:
     """Extract all triggered tool calls from the output text.
 
@@ -887,11 +885,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         if not actor.tools or not actor.tool_parser:
             break
 
-        triggered_tools = get_triggered_tools(
-            output.text,
-            actor.tools,
-            actor.tool_parser,
-        )
+        triggered_tools = get_triggered_tools(output.text, actor.tools, actor.tool_parser)
         if not triggered_tools:
             break
         # if we have hit max tool calls, replace tools with max calls exceeded tool

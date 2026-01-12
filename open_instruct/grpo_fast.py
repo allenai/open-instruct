@@ -1388,7 +1388,9 @@ def setup_runtime_variables(
 ) -> Args:
     """Set up runtime variables for the experiment."""
     if tool_args.tools and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
-        assert streaming_config.mask_tool_use, "Must mask tool use when using vLLM logprobs or truncated importance sampling."
+        assert streaming_config.mask_tool_use, (
+            "Must mask tool use when using vLLM logprobs or truncated importance sampling."
+        )
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
