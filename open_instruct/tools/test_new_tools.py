@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 
 from open_instruct.tools.new_tools import PythonCodeTool, PythonCodeToolConfig, _truncate
-from open_instruct.tools.utils import ToolOutput
+from open_instruct.tools.utils import ToolOutput, get_openai_tool_definitions
 
 
 class TestPythonCodeToolInit(unittest.TestCase):
@@ -53,13 +53,12 @@ class TestPythonCodeToolInit(unittest.TestCase):
     def test_get_openai_tool_definitions(self):
         """Test OpenAI tool definition format."""
         tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
-        definitions = tool.get_openai_tool_definitions()
+        definition = get_openai_tool_definitions(tool)
 
-        self.assertEqual(len(definitions), 1)
-        self.assertEqual(definitions[0]["type"], "function")
-        self.assertEqual(definitions[0]["function"]["name"], "python")
-        self.assertEqual(definitions[0]["function"]["description"], "Executes Python code and returns printed output.")
-        self.assertIn("parameters", definitions[0]["function"])
+        self.assertEqual(definition["type"], "function")
+        self.assertEqual(definition["function"]["name"], "python")
+        self.assertEqual(definition["function"]["description"], "Executes Python code and returns printed output.")
+        self.assertIn("parameters", definition["function"])
 
     def test_get_tool_names(self):
         """Test get_tool_names returns correct name."""

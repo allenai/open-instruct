@@ -23,6 +23,25 @@ class ToolCall:
     args: dict[str, Any]
 
 
+def get_openai_tool_definitions(tool: "Tool") -> dict[str, Any]:
+    """Helper function to export tool definition in OpenAI function calling format.
+    Note that we rely on parameters being correctly set in the tool class.
+
+    This format is compatible with vLLM's tool calling and chat templates.
+    See: https://docs.vllm.ai/en/latest/features/tool_calling/
+
+    Args:
+        tool: The tool instance to export definition for.
+
+    Returns:
+        Tool definition in OpenAI format.
+    """
+    return {
+        "type": "function",
+        "function": {"name": tool.call_name, "description": tool.description, "parameters": tool.parameters},
+    }
+
+
 class Tool(ABC):
     config_name: str
     """Name used to specify the tool in the CLI."""
@@ -43,24 +62,6 @@ class Tool(ABC):
             json.loads(json.dumps(parameters))
         except Exception as e:
             raise ValueError(f"Invalid parameters: {e}") from e
-
-    def get_openai_tool_definitions(self) -> list[dict[str, Any]]:
-        """Export tool definitions in OpenAI function calling format.
-
-        This format is compatible with vLLM's tool calling and chat templates.
-        See: https://docs.vllm.ai/en/latest/features/tool_calling/
-
-        For most tools, this returns a single-item list. In some cases, we may want a tool to expose multiple functions, in which case we return the list of all functions attached to the tool.
-
-        Returns:
-            List of tool definitions in OpenAI format.
-        """
-        return [
-            {
-                "type": "function",
-                "function": {"name": self.call_name, "description": self.description, "parameters": self.parameters},
-            }
-        ]
 
     def get_tool_names(self) -> list[str]:
         """Get the tool names this tool exposes.
