@@ -42,7 +42,7 @@ class PythonCodeTool(Tool):
         super().__init__(
             config_name="python",
             description="Executes Python code and returns printed output.",
-            name="python",
+            call_name="python",
             parameters={
                 "type": "object",
                 "properties": {"code": {"type": "string", "description": "Python code to execute"}},
@@ -62,7 +62,7 @@ class PythonCodeTool(Tool):
                 timeout=False,
                 runtime=0,
             )
-            _log_tool_call(self.name, code or "", result)
+            _log_tool_call(self.call_name, code or "", result)
             return result
 
         start_time = time.time()
@@ -100,7 +100,7 @@ class PythonCodeTool(Tool):
             timeout=timed_out,
             runtime=time.time() - start_time,
         )
-        _log_tool_call(self.name, code, result)
+        _log_tool_call(self.call_name, code, result)
         return result
 
 

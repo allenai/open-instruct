@@ -19,7 +19,7 @@ class TestPythonCodeToolInit(unittest.TestCase):
 
         self.assertEqual(tool.api_endpoint, "http://localhost:1212/execute")
         self.assertEqual(tool.timeout, 3)
-        self.assertEqual(tool.name, "python")
+        self.assertEqual(tool.call_name, "python")
         self.assertEqual(tool.config_name, "python")
 
     def test_initialization_with_custom_values(self):
@@ -28,12 +28,12 @@ class TestPythonCodeToolInit(unittest.TestCase):
 
         self.assertEqual(tool.api_endpoint, "http://example.com/run")
         self.assertEqual(tool.timeout, 10)
-        self.assertEqual(tool.name, "python")
+        self.assertEqual(tool.call_name, "python")
 
-    def test_tool_name(self):
-        """Test tool name is 'python'."""
+    def test_tool_call_name(self):
+        """Test tool call_name is 'python'."""
         tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
-        self.assertEqual(tool.name, "python")
+        self.assertEqual(tool.call_name, "python")
 
     def test_tool_description(self):
         """Test tool description is set correctly."""

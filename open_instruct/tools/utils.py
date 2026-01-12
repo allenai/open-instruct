@@ -28,15 +28,15 @@ class Tool(ABC):
     """Name used to specify the tool in the CLI."""
     description: str
     """Default description used for e.g. system prompts."""
-    name: str
+    call_name: str
     """Name used to identify the tool when function calling."""
     parameters: dict[str, Any]
     """JSON schema for tool parameters. Exposed to the model when calling the tool."""
 
-    def __init__(self, config_name: str, description: str, name: str, parameters: dict[str, Any]) -> None:
+    def __init__(self, config_name: str, description: str, call_name: str, parameters: dict[str, Any]) -> None:
         self.config_name = config_name
         self.description = description
-        self.name = name
+        self.call_name = call_name
         self.parameters = parameters
         # validate parameters are valid JSON
         try:
@@ -58,7 +58,7 @@ class Tool(ABC):
         return [
             {
                 "type": "function",
-                "function": {"name": self.name, "description": self.description, "parameters": self.parameters},
+                "function": {"name": self.call_name, "description": self.description, "parameters": self.parameters},
             }
         ]
 
@@ -68,7 +68,7 @@ class Tool(ABC):
         Returns:
             List of tool names.
         """
-        return [self.name]
+        return [self.call_name]
 
     @abstractmethod
     async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
