@@ -584,11 +584,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
 
     if accelerator.is_main_process:
-        wandb_url = None
-        if args.with_tracking:
-            wandb_tracker = accelerator.get_tracker("wandb")
-            wandb_url = wandb_tracker.run.get_url() if hasattr(wandb_tracker, "run") else None
-        maybe_update_beaker_description(wandb_url=wandb_url)
+        wandb_tracker = accelerator.get_tracker("wandb")
+        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None)
         pprint([args, tc])
 
     init_gpu_memory = None
