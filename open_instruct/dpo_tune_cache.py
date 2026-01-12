@@ -539,7 +539,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         args.exp_name = args.exp_name
     if not args.do_not_randomize_output_dir:
         args.output_dir = os.path.join(args.output_dir, args.exp_name)
-    logger.info("using the output directory: %s", args.output_dir)
+    logger.info(f"using the output directory: {args.output_dir}")
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
     if is_beaker_job():
         args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
@@ -596,6 +596,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         init_gpu_memory = torch.cuda.mem_get_info()[0]
 
     logger_utils.setup_logger()
+    # Make one log on every process with the configuration for debugging.
     logger.info(accelerator.state, main_process_only=False)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
@@ -880,7 +881,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             completed_steps = resume_step // args.gradient_accumulation_steps
             resume_step -= starting_epoch * len(train_dataloader)
 
-    logger.info("Starting from epoch %s and step %s.", starting_epoch, completed_steps)
+    logger.info(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
 
     logger.info("=============before cache logprobs")
     print_gpu_stats(init_gpu_memory)
@@ -1152,9 +1153,9 @@ def print_gpu_stats(init_gpu_memory: int | None):
     if torch.cuda.is_available():
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
         peak_memory = init_gpu_memory - free_gpu_memory
-        logger.info("Peak memory usage: %.2f GB", peak_memory / 1024**3)
-        logger.info("Total memory usage: %.2f GB", total_gpu_memory / 1024**3)
-        logger.info("Free memory: %.2f GB", free_gpu_memory / 1024**3)
+        logger.info(f"Peak memory usage: {peak_memory / 1024**3:.2f} GB")
+        logger.info(f"Total memory usage: {total_gpu_memory / 1024**3:.2f} GB")
+        logger.info(f"Free memory: {free_gpu_memory / 1024**3:.2f} GB")
 
 
 if __name__ == "__main__":
