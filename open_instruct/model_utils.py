@@ -52,8 +52,7 @@ class TensorCache:
 
     def __getitem__(self, indices: torch.Tensor) -> dict[str, torch.Tensor]:
         """Get cached tensors for the given indices."""
-        device = indices.device
-        return {k: v.to(device)[indices.long()] for k, v in self.tensors.items()}
+        return {k: v.to(indices.device)[indices.long()] for k, v in self.tensors.items()}
 
     def to_disk(self, path: str | pathlib.Path) -> None:
         """Save the cache to disk atomically using temp file and rename."""
@@ -68,8 +67,7 @@ class TensorCache:
     @classmethod
     def from_disk(cls, path: str | pathlib.Path) -> "TensorCache":
         """Load a cache from disk."""
-        data = torch.load(path, weights_only=True)
-        return cls(tensors=data)
+        return cls(tensors=torch.load(path, weights_only=True))
 
 
 @dataclass
