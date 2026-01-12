@@ -46,7 +46,6 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
-    --chat_template_name r1_simple_chat_postpend_think_tool_vllm \
     --learning_rate 3e-7 \
     --total_episodes 200 \
     --deepspeed_stage 2 \
@@ -65,6 +64,3 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --tools serper_search python \
     --tool_configs '{"override_name": "search"}' '{"api_endpoint": "'"$CODE_SERVER_ENDPOINT"'", "override_name": "code"}' \
     --push_to_hub false
-    # To swap search backend while keeping same tags, change to:
-    # --tools s2_search python \
-    # --tool_configs '{"override_name": "search"}' '{"api_endpoint": "'"$CODE_SERVER_ENDPOINT"'", "override_name": "code"}' \
