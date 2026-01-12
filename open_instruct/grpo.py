@@ -440,8 +440,6 @@ def main(
     for training_step in range(1, args.num_training_steps + 1):
         step_start_time = time.perf_counter()
 
-        ray.get(actor_manager.set_should_stop.remote(True))
-
         results, _ = ray_get_with_progress(
             [policy_group.models[i].step.remote() for i in range(args.world_size)],
             desc=f"Running training step {training_step}",
@@ -452,6 +450,7 @@ def main(
             logger.warning("After packing, there is not enough data to train")
             continue
 
+        ray.get(actor_manager.set_should_stop.remote(True))
         weight_broadcast_futures = [m.broadcast_to_vllm.remote() for m in policy_group.models]
         nested_refs, sync_times = ray_get_with_progress(weight_broadcast_futures, desc="Broadcasting weights to vLLM")
         all_update_refs = [ref for refs in nested_refs for ref in refs]
