@@ -24,7 +24,6 @@ import ray
 from open_instruct.tools.parsers import OpenInstructLegacyToolParser, ToolParser, get_available_parsers
 from open_instruct.tools.proxy import create_tool_actor_from_config
 from open_instruct.tools.tools import (
-    MassiveDSSearchToolConfig,
     PythonCodeToolConfig,
     S2SearchToolConfig,
     SerperSearchToolConfig,
@@ -37,7 +36,6 @@ logger = logging.getLogger(__name__)
 TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     "python": PythonCodeToolConfig,
     "serper_search": SerperSearchToolConfig,
-    "massive_ds_search": MassiveDSSearchToolConfig,
     "s2_search": S2SearchToolConfig,
 }
 
