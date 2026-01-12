@@ -28,7 +28,8 @@ from transformers import AutoTokenizer
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
-from open_instruct.tools.tools import PythonCodeTool
+from open_instruct.tools.proxy import create_tool_actor_from_config
+from open_instruct.tools.tools import PythonCodeToolConfig
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
@@ -67,7 +68,9 @@ class TestGeneration(TestGrpoFastBase):
                 cls.server_process.wait()
         super().tearDownClass()
 
-    def _setup_engine_and_generate(self, tokenizer_name, prompt, tools=None, max_tool_calls=None, max_tokens=50):
+    def _setup_engine_and_generate(
+        self, tokenizer_name, prompt, tools=None, tool_parser_name=None, max_tool_calls=None, max_tokens=50
+    ):
         """Helper to create vLLM engine and run generation."""
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
@@ -77,7 +80,8 @@ class TestGeneration(TestGrpoFastBase):
         self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
 
         prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
-        stop = list(tools.keys()) if tools else None
+        # For legacy parser, stop strings are </tool_name> tags
+        stop = [f"</{name}>" for name in tools] if tools else None
         generation_config = SamplingConfig(
             temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, stop=stop, logprobs=1
         )
@@ -110,6 +114,7 @@ class TestGeneration(TestGrpoFastBase):
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
             tools=tools,
+            tool_parser_name=tool_parser_name,
             max_tool_calls=max_tool_calls,
             reward_config=reward_config,
             train_dataset=train_dataset,
@@ -133,17 +138,22 @@ class TestGeneration(TestGrpoFastBase):
         test_data_path = TEST_DATA_DIR / test_data_filename
 
         tokenizer_name = "Qwen/Qwen3-1.7B"
-        tools = (
-            {"</code>": PythonCodeTool(api_endpoint=self.tool_api_endpoint, start_str="<code>", end_str="</code>")}
-            if use_tools
-            else None
-        )
-        max_tool_calls = (5,) if use_tools else None
+        tools = None
+        tool_parser_name = None
+        if use_tools:
+            # Create tool actor with override_name="code" so legacy parser matches <code>content</code>
+            config = PythonCodeToolConfig(api_endpoint=self.tool_api_endpoint, override_name="code")
+            actor = create_tool_actor_from_config(config=config)
+            tool_name = ray.get(actor.get_tool_function_name.remote())
+            tools = {tool_name: actor}
+            tool_parser_name = "legacy"
+        max_tool_calls = 5 if use_tools else None
 
         result = self._setup_engine_and_generate(
             tokenizer_name=tokenizer_name,
             prompt=prompt,
             tools=tools,
+            tool_parser_name=tool_parser_name,
             max_tool_calls=max_tool_calls,
             max_tokens=max_tokens,
         )
