@@ -189,17 +189,35 @@ hello()"""
         self.assertEqual(len(tool_calls), 1)
         self.assertEqual(tool_calls[0].args["query"], "test query")
 
-    def test_only_first_match_per_tool_extracted(self):
-        """Test that only the first occurrence of each tool type is extracted."""
+    def test_multiple_calls_same_tool_extracted(self):
+        """Test that all occurrences of the same tool type are extracted."""
         mock_actor = create_mock_actor("search", param_name="query")
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         text = "<search>first query</search> then <search>second query</search>"
         tool_calls = parser.get_tool_calls(text)
 
-        # The regex uses search() which returns first match only
-        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(len(tool_calls), 2)
         self.assertEqual(tool_calls[0].args["query"], "first query")
+        self.assertEqual(tool_calls[1].args["query"], "second query")
+
+    def test_tool_calls_preserve_text_order(self):
+        """Test that tool calls are returned in the order they appear in text."""
+        mock_search = create_mock_actor("search", param_name="query")
+        mock_code = create_mock_actor("code", param_name="script")
+        parser = OpenInstructLegacyToolParser([mock_search, mock_code])
+
+        # Interleaved tool calls: code, search, code
+        text = "<code>first code</code> then <search>query</search> then <code>second code</code>"
+        tool_calls = parser.get_tool_calls(text)
+
+        self.assertEqual(len(tool_calls), 3)
+        self.assertEqual(tool_calls[0].name, "code")
+        self.assertEqual(tool_calls[0].args["script"], "first code")
+        self.assertEqual(tool_calls[1].name, "search")
+        self.assertEqual(tool_calls[1].args["query"], "query")
+        self.assertEqual(tool_calls[2].name, "code")
+        self.assertEqual(tool_calls[2].args["script"], "second code")
 
     def test_special_regex_characters_in_tool_name(self):
         """Test that tool names with regex special chars are properly escaped."""

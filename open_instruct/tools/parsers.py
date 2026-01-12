@@ -24,13 +24,10 @@ class ToolParser(ABC):
         """Extract tool calls from model outputs."""
         pass
 
+    @abstractmethod
     def format_tool_outputs(self, tool_outputs: list[str]) -> str:
-        """Format multiple tool outputs with any necessary prefix/postfix.
-
-        By default, just concatenates individually formatted outputs.
-        Subclasses can override to add prefix/postfix for continuation prompts.
-        """
-        return "".join(self.format_tool_calls(output) for output in tool_outputs)
+        """Format multiple tool outputs with any necessary prefixes/postfixes."""
+        pass
 
     @abstractmethod
     def stop_sequences(self) -> list[str]:
@@ -81,13 +78,19 @@ class OpenInstructLegacyToolParser(ToolParser):
         }
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
-        tool_calls: list[ToolCall] = []
+        # Collect all matches with their positions for proper ordering
+        matches: list[tuple[int, str, str]] = []  # (position, tool_name, content)
         for tool_name, tool_regex in self.tool_regexes.items():
-            match = tool_regex.search(text)
-            if match:
-                tool_content = match.group(1)
-                param_name = self.tool_param_names.get(tool_name, "text")
-                tool_calls.append(ToolCall(name=tool_name, args={param_name: tool_content}))
+            for match in tool_regex.finditer(text):
+                matches.append((match.start(), tool_name, match.group(1)))
+
+        # Sort by position in text to preserve order of tool calls
+        matches.sort(key=lambda x: x[0])
+
+        tool_calls: list[ToolCall] = []
+        for _, tool_name, tool_content in matches:
+            param_name = self.tool_param_names.get(tool_name, "text")
+            tool_calls.append(ToolCall(name=tool_name, args={param_name: tool_content}))
         return tool_calls
 
     def _format_tool_output(self, tool_output: str) -> str:
