@@ -62,7 +62,6 @@ class ToolArgs:
     tools: list[str] | None = None
     tool_configs: list[str] | None = None
     max_tool_calls: int = 5
-    mask_tool_use: bool = True
     tool_parser: str = "legacy"
 
     _parsed_configs: list[dict[str, Any]] = field(default_factory=list, repr=False)
@@ -128,7 +127,6 @@ class ToolArgs:
         return ToolConfig(
             tools=self.tools,
             max_tool_calls=self.max_tool_calls,
-            mask_tool_use=self.mask_tool_use,
             parser=self.tool_parser,
             tool_configs_list=tool_configs_list,
         )
@@ -140,7 +138,6 @@ class ToolConfig:
 
     tools: list[str] | None = None
     max_tool_calls: int = 5
-    mask_tool_use: bool = True
     parser: str = "legacy"
     tool_configs_list: list[BaseToolConfig] = field(default_factory=list)
 

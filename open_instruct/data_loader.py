@@ -270,6 +270,8 @@ class StreamingDataLoaderConfig:
     # Reward behavior for tool use
     only_reward_good_outputs: bool = False
     """Whether to only reward outputs where tool calls succeeded. Useful to force the model to use tool(s)."""
+    mask_tool_use: bool = True
+    """Whether to mask the tool output tokens when computing loss. Default True."""
 
     # Computed at post_init
     max_possible_score: float = 1.0

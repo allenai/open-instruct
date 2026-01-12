@@ -1389,7 +1389,7 @@ def setup_runtime_variables(
 ) -> Args:
     """Set up runtime variables for the experiment."""
     if tool_args.tools and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
-        assert tool_args.mask_tool_use, "Must mask tool use when using vLLM logprobs or truncated importance sampling."
+        assert streaming_config.mask_tool_use, "Must mask tool use when using vLLM logprobs or truncated importance sampling."
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
@@ -1558,7 +1558,7 @@ def create_model_and_optimizer(
         verbose=args.verbose,
         work_dir=args.output_dir,
         initial_state=data_prep_actor_state,
-        mask_tool_use=tool_config.mask_tool_use,
+        mask_tool_use=streaming_config.mask_tool_use,
     )
 
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
@@ -1598,7 +1598,7 @@ def create_model_and_optimizer(
         tools=tool_objects,
         tool_parser_name=tool_config.parser if tool_config.tools else None,
         max_tool_calls=tool_config.max_tool_calls,
-        mask_tool_use=tool_config.mask_tool_use,
+        mask_tool_use=streaming_config.mask_tool_use,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
