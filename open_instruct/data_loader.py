@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+import numpy as np
 import torch
 from datasets import Dataset
 from olmo_core.data import data_loader
@@ -61,7 +62,12 @@ class HFDataLoader(data_loader.DataLoaderBase):
             work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=rank
         )
 
-        self._full_dataset = dataset.map(lambda example, idx: example | {"dataset_index": idx}, with_indices=True)
+        if "index" not in dataset.column_names:
+            raise ValueError(
+                "Dataset must have an 'index' column. This is typically added by get_cached_dataset_tulu(). "
+                "If using a custom dataset, add it with: dataset.add_column('index', range(len(dataset)))"
+            )
+        self._full_dataset = dataset
         self.seed = seed
         self._batch_size = batch_size
         self._per_rank_batch_size = batch_size // world_size
@@ -97,7 +103,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         batch_examples: list[dict[str, Any]] = []
         for i in range(start_example, self.effective_size):
             example = self.dataset[i]
-            batch_examples.append(example | {"prompt_id": f"{self._epoch}_{example['dataset_index']}"})
+            batch_examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
             if len(batch_examples) == self._per_rank_batch_size:
                 yield to_device(self._collator(batch_examples), self._device)
                 batch_examples = []
@@ -129,7 +135,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Exclude a dataset index from future iterations.
 
         Args:
-            index: The dataset_index to exclude.
+            index: The index to exclude.
         """
         self._excluded_indices.add(index)
 
@@ -145,13 +151,26 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._reshard(self._epoch)
 
     def _reshard(self, epoch: int) -> None:
-        """Reshard the dataset for a given epoch."""
-        shuffled = self._full_dataset.shuffle(seed=self.seed + epoch)
-        filtered = shuffled.filter(lambda x: x["dataset_index"] not in self._excluded_indices)
-        global_size = len(filtered)
+        """Reshard the dataset for a given epoch.
+
+        Uses index-based shuffling to avoid copying the dataset.
+        """
+        rng = np.random.default_rng(self.seed + epoch)
+        all_indices = np.arange(len(self._full_dataset))
+        if self._excluded_indices:
+            mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
+            all_indices = all_indices[mask]
+        rng.shuffle(all_indices)
+
+        global_size = len(all_indices)
         total_batches = global_size // self._batch_size
-        self.effective_size = total_batches * self._per_rank_batch_size
-        self.dataset = filtered.shard(num_shards=self.dp_world_size, index=self.dp_rank)
+        usable_size = total_batches * self._batch_size
+
+        rank_indices = all_indices[:usable_size].reshape(total_batches, self._batch_size)
+        rank_indices = rank_indices[:, self.dp_rank :: self.dp_world_size].flatten()
+
+        self.effective_size = len(rank_indices)
+        self.dataset = self._full_dataset.select(rank_indices.tolist())
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.

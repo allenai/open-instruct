@@ -14,10 +14,16 @@ def single_example_collator(examples: list[dict]) -> dict:
     return examples[0]
 
 
+def make_test_dataset(num_examples: int) -> datasets.Dataset:
+    """Create a test dataset with the required 'index' column."""
+    data = {"text": [f"example_{i}" for i in range(num_examples)], "label": list(range(num_examples))}
+    dataset = datasets.Dataset.from_dict(data)
+    return dataset.add_column("index", range(num_examples))
+
+
 class TestHFDataLoader(unittest.TestCase):
     def test_smoke(self):
-        data = {"text": [f"example_{i}" for i in range(20)], "label": list(range(20))}
-        dataset = datasets.Dataset.from_dict(data)
+        dataset = make_test_dataset(20)
 
         loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset,
@@ -32,21 +38,20 @@ class TestHFDataLoader(unittest.TestCase):
         batches = list(loader)
         self.assertEqual(len(batches), 20)
         for batch in batches:
-            self.assertIn("dataset_index", batch)
+            self.assertIn("index", batch)
             self.assertIn("text", batch)
             self.assertIn("label", batch)
 
         self.assertEqual(loader.total_batches, 20)
 
         mock_batch = loader.get_mock_batch()
-        self.assertIn("dataset_index", mock_batch)
+        self.assertIn("index", mock_batch)
 
     @parameterized.parameterized.expand([("world_size_2", 2), ("world_size_4", 4), ("world_size_8", 8)])
     def test_multi_rank_sampling(self, name, world_size):
         num_examples = 100
         batch_size = world_size
-        data = {"text": [f"example_{i}" for i in range(num_examples)], "label": list(range(num_examples))}
-        dataset = datasets.Dataset.from_dict(data)
+        dataset = make_test_dataset(num_examples)
 
         loaders = [
             open_instruct.data_loader.HFDataLoader(
@@ -65,7 +70,7 @@ class TestHFDataLoader(unittest.TestCase):
         for _rank, loader in enumerate(loaders):
             rank_indices = []
             for batch in loader:
-                rank_indices.append(batch["dataset_index"])
+                rank_indices.append(batch["index"])
             all_indices.append(set(rank_indices))
 
         for i in range(world_size):
@@ -81,8 +86,7 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(len(union), expected_num_samples)
 
     def test_reshuffle(self):
-        data = {"text": [f"example_{i}" for i in range(20)], "label": list(range(20))}
-        dataset = datasets.Dataset.from_dict(data)
+        dataset = make_test_dataset(20)
 
         loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset,
@@ -94,17 +98,16 @@ class TestHFDataLoader(unittest.TestCase):
             collator=single_example_collator,
         )
 
-        first_pass = [batch["dataset_index"] for batch in loader]
+        first_pass = [batch["index"] for batch in loader]
 
         loader.reshuffle()
-        second_pass = [batch["dataset_index"] for batch in loader]
+        second_pass = [batch["index"] for batch in loader]
 
         self.assertNotEqual(first_pass, second_pass)
         self.assertEqual(set(first_pass), set(second_pass))
 
     def test_state_dict_load_state_dict(self):
-        data = {"text": [f"example_{i}" for i in range(20)], "label": list(range(20))}
-        dataset = datasets.Dataset.from_dict(data)
+        dataset = make_test_dataset(20)
 
         loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset,
@@ -140,8 +143,7 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(new_loader.batches_processed, loader.batches_processed)
 
     def test_reproducibility_across_runs(self):
-        data = {"text": [f"example_{i}" for i in range(50)], "label": list(range(50))}
-        dataset = datasets.Dataset.from_dict(data)
+        dataset = make_test_dataset(50)
 
         loader1 = open_instruct.data_loader.HFDataLoader(
             dataset=dataset,
@@ -162,21 +164,20 @@ class TestHFDataLoader(unittest.TestCase):
             collator=single_example_collator,
         )
 
-        indices1 = [batch["dataset_index"] for batch in loader1]
-        indices2 = [batch["dataset_index"] for batch in loader2]
+        indices1 = [batch["index"] for batch in loader1]
+        indices2 = [batch["index"] for batch in loader2]
         self.assertEqual(indices1, indices2)
 
         loader1.reshuffle(epoch=1)
         loader2.reshuffle(epoch=1)
-        indices1_epoch1 = [batch["dataset_index"] for batch in loader1]
-        indices2_epoch1 = [batch["dataset_index"] for batch in loader2]
+        indices1_epoch1 = [batch["index"] for batch in loader1]
+        indices2_epoch1 = [batch["index"] for batch in loader2]
         self.assertEqual(indices1_epoch1, indices2_epoch1)
 
         self.assertNotEqual(indices1, indices1_epoch1)
 
     def test_checkpoint_resumption_exact_position(self):
-        data = {"text": [f"example_{i}" for i in range(50)], "label": list(range(50))}
-        dataset = datasets.Dataset.from_dict(data)
+        dataset = make_test_dataset(50)
 
         loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset,
@@ -192,13 +193,13 @@ class TestHFDataLoader(unittest.TestCase):
         loader_iter = iter(loader)
         first_10 = []
         for _ in range(10):
-            first_10.append(next(loader_iter)["dataset_index"])
+            first_10.append(next(loader_iter)["index"])
 
         state = loader.state_dict()
 
         remaining_original = []
         for _ in range(40):
-            remaining_original.append(next(loader_iter)["dataset_index"])
+            remaining_original.append(next(loader_iter)["index"])
 
         new_loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset,
@@ -214,13 +215,12 @@ class TestHFDataLoader(unittest.TestCase):
         new_loader_iter = iter(new_loader)
         remaining_restored = []
         for _ in range(40):
-            remaining_restored.append(next(new_loader_iter)["dataset_index"])
+            remaining_restored.append(next(new_loader_iter)["index"])
 
         self.assertEqual(remaining_original, remaining_restored)
 
     def test_batches_processed_increments_during_iteration(self):
-        data = {"text": [f"example_{i}" for i in range(20)], "label": list(range(20))}
-        dataset = datasets.Dataset.from_dict(data)
+        dataset = make_test_dataset(20)
 
         loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset,
@@ -243,8 +243,7 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(state["batches_processed"], 20)
 
     def test_checkpoint_mid_epoch_restores_position(self):
-        data = {"text": [f"example_{i}" for i in range(20)], "label": list(range(20))}
-        dataset = datasets.Dataset.from_dict(data)
+        dataset = make_test_dataset(20)
 
         loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset,
@@ -259,7 +258,7 @@ class TestHFDataLoader(unittest.TestCase):
         loader.reshuffle(epoch=1)
         first_half = []
         for _ in range(10):
-            first_half.append(next(loader)["dataset_index"])
+            first_half.append(next(loader)["index"])
 
         state = loader.state_dict()
         self.assertEqual(state["batches_processed"], 10)
@@ -275,12 +274,11 @@ class TestHFDataLoader(unittest.TestCase):
         )
         new_loader.load_state_dict(state)
 
-        remaining = [batch["dataset_index"] for batch in new_loader]
+        remaining = [batch["index"] for batch in new_loader]
         self.assertEqual(len(remaining), 10)
 
     def test_infinite_loop_all_excluded(self):
-        data = {"text": [f"example_{i}" for i in range(10)], "label": list(range(10))}
-        dataset = datasets.Dataset.from_dict(data)
+        dataset = make_test_dataset(10)
 
         loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset,
@@ -294,7 +292,7 @@ class TestHFDataLoader(unittest.TestCase):
         )
 
         for batch in loader:
-            loader.exclude_index(batch["dataset_index"])
+            loader.exclude_index(batch["index"])
 
         with self.assertRaises(RuntimeError) as context:
             next(loader)
@@ -302,8 +300,7 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertIn("All dataset examples have been excluded", str(context.exception))
 
     def test_unique_prompt_ids_across_iterations(self):
-        data = {"text": [f"example_{i}" for i in range(10)], "label": list(range(10))}
-        dataset = datasets.Dataset.from_dict(data)
+        dataset = make_test_dataset(10)
 
         loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset,
@@ -330,8 +327,7 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(len(all_prompt_ids), len(set(all_prompt_ids)))
 
     def test_global_num_tokens_in_batch(self):
-        data = {"text": [f"example_{i}" for i in range(10)], "label": list(range(10))}
-        dataset = datasets.Dataset.from_dict(data)
+        dataset = make_test_dataset(10)
 
         loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset, batch_size=2, seed=42, rank=0, world_size=2, work_dir=tempfile.gettempdir()

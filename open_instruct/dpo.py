@@ -181,12 +181,13 @@ def build_reference_logprobs_cache(
             else:
                 chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
 
-            dataset_indices = batch["dataset_index"]
-            chosen_tensor[dataset_indices] = chosen_logps
-            rejected_tensor[dataset_indices] = rejected_logps
+            indices = batch["index"]
+            chosen_tensor[indices] = chosen_logps
+            rejected_tensor[indices] = rejected_logps
 
-    dist.all_reduce(chosen_tensor, op=dist.ReduceOp.SUM)  # type: ignore[attr-defined]
-    dist.all_reduce(rejected_tensor, op=dist.ReduceOp.SUM)  # type: ignore[attr-defined]
+    if distributed_utils.is_distributed():
+        dist.all_reduce(chosen_tensor, op=dist.ReduceOp.SUM)  # type: ignore[attr-defined]
+        dist.all_reduce(rejected_tensor, op=dist.ReduceOp.SUM)  # type: ignore[attr-defined]
 
     model.train()
     cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
@@ -288,7 +289,7 @@ class DPOTrainModule(TrainModule):
         )
 
         if self.dpo_config.dpo_loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm):
-            ref_logps = self.reference_cache[batch["dataset_index"]]
+            ref_logps = self.reference_cache[batch["index"]]
             losses, chosen_rewards, rejected_rewards = dpo_loss(
                 policy_chosen_logps,
                 policy_rejected_logps,
@@ -306,7 +307,7 @@ class DPOTrainModule(TrainModule):
                 label_smoothing=self.dpo_config.dpo_label_smoothing,
             )
         elif self.dpo_config.dpo_loss_type == DPOLossType.wpo:
-            ref_logps = self.reference_cache[batch["dataset_index"]]
+            ref_logps = self.reference_cache[batch["index"]]
             losses, chosen_rewards, rejected_rewards = wpo_loss(
                 policy_chosen_logps,
                 policy_rejected_logps,
