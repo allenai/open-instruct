@@ -212,6 +212,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             device=device,
         )
 
+        os.environ["FS_LOCAL_RANK"] = str(self.rank)
         self.trainer = train.TrainerConfig(
             save_folder=self.output_dir,
             max_duration=train.Duration.steps(self.num_training_steps),
@@ -383,6 +384,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 config=getattr(self, "json_config", None),
             )
 
+        os.environ["FS_LOCAL_RANK"] = str(self.rank)
         self.trainer = train.TrainerConfig(
             save_folder=self.output_dir,
             max_duration=train.Duration.steps(self.num_training_steps),
