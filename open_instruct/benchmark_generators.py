@@ -278,7 +278,7 @@ def setup_vllm_engines(
         single_gpu_mode=args.single_gpu_mode,
         pg=None,
         tool_actors=[],
-        tool_parser=None,
+        tool_parser_type="legacy",
         max_tool_calls=streaming_config.max_tool_calls[0] if streaming_config.max_tool_calls else 5,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,

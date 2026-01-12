@@ -270,6 +270,8 @@ class StreamingDataLoaderConfig:
 
     # Tools
     tools: list[str] | None = None
+    tool_parser_type: str = "legacy"
+    """Type of tool parser to use: 'legacy', 'vllm_hermes', 'vllm_llama3_json', 'vllm_qwen3_coder'"""
     max_tool_calls: tuple[int, ...] = (5,)
     only_reward_good_outputs: bool = False
 

@@ -515,7 +515,7 @@ class LLMRayActor:
     def _init_config(
         self,
         tool_actors: list[ray.actor.ActorHandle] | None,
-        tool_parser: ToolParser | None,
+        tool_parser_type: str,
         max_tool_calls: int,
         mask_tool_use: bool,
         inflight_updates: bool,
@@ -524,7 +524,6 @@ class LLMRayActor:
         eval_dataset,
     ) -> None:
         self.tool_actors = tool_actors or []
-        self.tool_parser = tool_parser
         self.max_tool_calls = max_tool_calls
         self.mask_tool_use = mask_tool_use
         self.inflight_updates = inflight_updates
@@ -546,8 +545,13 @@ class LLMRayActor:
         self.tool_actor_map = {}
         if self.tool_actors:
             self.tool_actor_map = {ray.get(actor.get_call_name.remote()): actor for actor in self.tool_actors}
-        else:
-            self.tool_actor_map = {}
+
+        # Create tool parser inside the actor (avoids serialization issues)
+        self.tool_parser = None
+        if self.tool_actors:
+            from open_instruct.grpo_fast import create_tool_parser
+
+            self.tool_parser = create_tool_parser(parser_type=tool_parser_type, tool_actors=self.tool_actors)
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
@@ -955,7 +959,7 @@ def create_vllm_engines(
     single_gpu_mode: bool = False,
     pg: PlacementGroup | None = None,
     tool_actors: list[ray.actor.ActorHandle] | None = None,
-    tool_parser: ToolParser | None = None,
+    tool_parser_type: str = "legacy",
     max_tool_calls: int = 5,
     mask_tool_use: bool = True,
     prompt_queue=None,
@@ -1030,7 +1034,7 @@ def create_vllm_engines(
                 eval_results_queue=eval_results_queue,
                 actor_manager=actor_manager,
                 tool_actors=tool_actors,
-                tool_parser=tool_parser,
+                tool_parser_type=tool_parser_type,
                 max_tool_calls=max_tool_calls,
                 mask_tool_use=mask_tool_use,
                 inflight_updates=inflight_updates,
