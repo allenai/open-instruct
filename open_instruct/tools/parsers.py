@@ -48,7 +48,7 @@ class OpenInstructLegacyToolParser(ToolParser):
         """Initialize the parser.
 
         Args:
-            tool_actors: List of ToolActor handles.
+            tool_actors: List of Ray actor handles for Tools.
             output_wrap_name: Name to wrap tool outputs with.
         """
         # Fetch metadata from actors

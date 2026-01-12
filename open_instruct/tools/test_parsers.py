@@ -6,27 +6,27 @@ from unittest.mock import MagicMock, patch
 from open_instruct.tools.parsers import OpenInstructLegacyToolParser, get_available_parsers
 
 
-class MockToolActor:
-    """Mock tool actor for testing without ray."""
+class MockTool:
+    """Mock tool for testing without ray."""
 
     def __init__(self, name: str, param_name: str = "text", required: list[str] | None = None):
-        self.name = name
+        self.call_name = name
         self.param_name = param_name
         self.required = required if required is not None else [param_name]
 
     def get_call_name(self):
-        return self.name
+        return self.call_name
 
     def get_parameters(self):
         return {"required": self.required, "properties": {self.param_name: {"type": "string"}}}
 
 
-def create_mock_actor(name: str, param_name: str = "text", required: list[str] | None = None) -> MagicMock:
-    """Create a mock actor handle that works with ray.get()."""
-    mock_actor = MockToolActor(name, param_name, required)
+def create_mock_tool_actor(name: str, param_name: str = "text", required: list[str] | None = None) -> MagicMock:
+    """Create a mock tool actor handle that works with ray.get()."""
+    mock_tool = MockTool(name, param_name, required)
     actor_handle = MagicMock()
-    actor_handle.get_call_name.remote.return_value = mock_actor.get_call_name()
-    actor_handle.get_parameters.remote.return_value = mock_actor.get_parameters()
+    actor_handle.get_call_name.remote.return_value = mock_tool.get_call_name()
+    actor_handle.get_parameters.remote.return_value = mock_tool.get_parameters()
     return actor_handle
 
 
@@ -46,7 +46,7 @@ class TestOpenInstructLegacyToolParser(unittest.TestCase):
 
     def test_single_tool_extraction(self):
         """Test extracting a single tool call."""
-        mock_actor = create_mock_actor("search", param_name="query")
+        mock_actor = create_mock_tool_actor("search", param_name="query")
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         text = "I need to search for something. <search>python tutorials</search>"
@@ -58,8 +58,8 @@ class TestOpenInstructLegacyToolParser(unittest.TestCase):
 
     def test_multiple_tools_extraction(self):
         """Test extracting multiple different tool calls."""
-        mock_search = create_mock_actor("search", param_name="query")
-        mock_code = create_mock_actor("code", param_name="script")
+        mock_search = create_mock_tool_actor("search", param_name="query")
+        mock_code = create_mock_tool_actor("code", param_name="script")
         parser = OpenInstructLegacyToolParser([mock_search, mock_code])
 
         text = "First search <search>python</search> then run <code>print('hello')</code>"
@@ -71,7 +71,7 @@ class TestOpenInstructLegacyToolParser(unittest.TestCase):
 
     def test_no_tool_calls(self):
         """Test that no tool calls are returned when none exist."""
-        mock_actor = create_mock_actor("search")
+        mock_actor = create_mock_tool_actor("search")
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         text = "This is just regular text without any tool calls."
@@ -81,7 +81,7 @@ class TestOpenInstructLegacyToolParser(unittest.TestCase):
 
     def test_multiline_content(self):
         """Test extracting tool calls with multiline content."""
-        mock_actor = create_mock_actor("code", param_name="script")
+        mock_actor = create_mock_tool_actor("code", param_name="script")
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         code_content = """def hello():
@@ -97,7 +97,7 @@ hello()"""
 
     def test_partial_tag_not_matched(self):
         """Test that incomplete tags are not matched."""
-        mock_actor = create_mock_actor("search")
+        mock_actor = create_mock_tool_actor("search")
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         # Missing closing tag
@@ -108,7 +108,7 @@ hello()"""
 
     def test_nested_content_with_angle_brackets(self):
         """Test content containing angle brackets."""
-        mock_actor = create_mock_actor("code", param_name="script")
+        mock_actor = create_mock_tool_actor("code", param_name="script")
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         text = "<code>if x > 5 and y < 10: print('yes')</code>"
@@ -119,7 +119,7 @@ hello()"""
 
     def test_format_tool_outputs_single(self):
         """Test formatting a single tool output."""
-        mock_actor = create_mock_actor("search")
+        mock_actor = create_mock_tool_actor("search")
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         result = parser.format_tool_outputs(["Search result: Found 5 items"])
@@ -128,7 +128,7 @@ hello()"""
 
     def test_format_tool_outputs_multiple(self):
         """Test formatting multiple tool outputs."""
-        mock_actor = create_mock_actor("search")
+        mock_actor = create_mock_tool_actor("search")
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         result = parser.format_tool_outputs(["Result 1", "Result 2"])
@@ -137,7 +137,7 @@ hello()"""
 
     def test_format_tool_outputs_custom_wrap_name(self):
         """Test formatting with custom output wrap name."""
-        mock_actor = create_mock_actor("search")
+        mock_actor = create_mock_tool_actor("search")
         parser = OpenInstructLegacyToolParser([mock_actor], output_wrap_name="result")
 
         result = parser.format_tool_outputs(["Some output"])
@@ -146,8 +146,8 @@ hello()"""
 
     def test_stop_sequences(self):
         """Test that stop sequences are correctly generated."""
-        mock_search = create_mock_actor("search")
-        mock_code = create_mock_actor("code")
+        mock_search = create_mock_tool_actor("search")
+        mock_code = create_mock_tool_actor("code")
         parser = OpenInstructLegacyToolParser([mock_search, mock_code])
 
         stop_seqs = parser.stop_sequences()
@@ -158,7 +158,7 @@ hello()"""
 
     def test_empty_content(self):
         """Test tool call with empty content between tags."""
-        mock_actor = create_mock_actor("search", param_name="query")
+        mock_actor = create_mock_tool_actor("search", param_name="query")
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         text = "Empty search: <search></search>"
@@ -169,7 +169,7 @@ hello()"""
 
     def test_whitespace_only_content(self):
         """Test tool call with whitespace-only content."""
-        mock_actor = create_mock_actor("search", param_name="query")
+        mock_actor = create_mock_tool_actor("search", param_name="query")
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         text = "Whitespace: <search>   \n\t  </search>"
@@ -180,7 +180,7 @@ hello()"""
 
     def test_tool_without_required_params_uses_first_property(self):
         """Test that tools without required params use first property name."""
-        mock_actor = create_mock_actor("search", param_name="query", required=[])
+        mock_actor = create_mock_tool_actor("search", param_name="query", required=[])
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         text = "<search>test query</search>"
@@ -191,7 +191,7 @@ hello()"""
 
     def test_multiple_calls_same_tool_extracted(self):
         """Test that all occurrences of the same tool type are extracted."""
-        mock_actor = create_mock_actor("search", param_name="query")
+        mock_actor = create_mock_tool_actor("search", param_name="query")
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         text = "<search>first query</search> then <search>second query</search>"
@@ -203,8 +203,8 @@ hello()"""
 
     def test_tool_calls_preserve_text_order(self):
         """Test that tool calls are returned in the order they appear in text."""
-        mock_search = create_mock_actor("search", param_name="query")
-        mock_code = create_mock_actor("code", param_name="script")
+        mock_search = create_mock_tool_actor("search", param_name="query")
+        mock_code = create_mock_tool_actor("code", param_name="script")
         parser = OpenInstructLegacyToolParser([mock_search, mock_code])
 
         # Interleaved tool calls: code, search, code
@@ -222,7 +222,7 @@ hello()"""
     def test_special_regex_characters_in_tool_name(self):
         """Test that tool names with regex special chars are properly escaped."""
         # Tool name with characters that have meaning in regex
-        mock_actor = create_mock_actor("tool.name", param_name="input")
+        mock_actor = create_mock_tool_actor("tool.name", param_name="input")
         parser = OpenInstructLegacyToolParser([mock_actor])
 
         # Should match literal <tool.name> not <toolXname>

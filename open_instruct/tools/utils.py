@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
+import ray
+
 from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
@@ -63,6 +65,22 @@ class Tool(ABC):
         except Exception as e:
             raise ValueError(f"Invalid parameters: {e}") from e
 
+    def get_call_name(self) -> str:
+        """Get the tool's call name (used when function calling)."""
+        return self.call_name
+
+    def get_description(self) -> str:
+        """Get the tool's description."""
+        return self.description
+
+    def get_parameters(self) -> dict[str, Any]:
+        """Get the tool's parameter schema."""
+        return self.parameters
+
+    def get_openai_tool_definitions(self) -> dict[str, Any]:
+        """Get tool definition in OpenAI format."""
+        return get_openai_tool_definitions(self)
+
     @abstractmethod
     async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
         """Execute the tool, must be implemented by subclasses."""
@@ -79,10 +97,35 @@ class BaseToolConfig:
     tool_class: ClassVar[type[Tool]]
     """Related tool class for this config."""
 
+    def _get_init_kwargs(self) -> dict[str, Any]:
+        """Get kwargs for initializing the tool.
+
+        Passes all dataclass instance fields as kwargs.
+        Override this method for tools with validation or non-standard initialization.
+
+        Returns:
+            Dictionary of kwargs to pass to tool_class.__init__
+        """
+        return asdict(self)
+
     def build(self) -> Tool:
         """Build the tool instance from this config.
 
-        Passes all dataclass instance fields as kwargs to tool_class.
-        Override this method for tools with validation or non-standard initialization.
+        Returns:
+            A Tool instance.
         """
-        return self.tool_class(**asdict(self))
+        return self.tool_class(**self._get_init_kwargs())
+
+    def build_remote(self, max_concurrency: int = 512) -> Any:
+        """Build the tool as a Ray remote actor.
+
+        Allows for passing to vllm actors without needing to serialize tool itself,
+        and to centralize control over tool concurrency.
+
+        Args:
+            max_concurrency: Maximum number of concurrent calls the actor can handle.
+
+        Returns:
+            A Ray actor handle for the tool.
+        """
+        return ray.remote(self.tool_class).options(max_concurrency=max_concurrency).remote(**self._get_init_kwargs())
