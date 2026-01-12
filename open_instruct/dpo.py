@@ -25,8 +25,8 @@ import torch.nn as nn
 from huggingface_hub import HfApi
 from olmo_core import config, train
 from olmo_core.config import DType
+from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
-from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.transformer import TransformerConfig
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
@@ -447,7 +447,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
 
     train.prepare_training_environment(seed=args.seed)
 
-    rank = get_rank() if is_distributed() else 0
+    rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
     is_main_process = rank == 0
 
     if is_main_process:
@@ -465,7 +465,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
             dataset_skip_cache=args.dataset_skip_cache,
         )
 
-    if is_distributed():
+    if distributed_utils.is_distributed():
         dist.barrier()  # type: ignore[attr-defined]
 
     if not is_main_process:
@@ -486,7 +486,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     dataset = dataset.shuffle(seed=args.seed)
     dataset.set_format(type="pt")
 
-    world_size = get_world_size() if is_distributed() else 1
+    world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
 
     logger_utils.setup_logger(rank=rank)
 
@@ -494,7 +494,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.exp_name)
 
-    if is_distributed():
+    if distributed_utils.is_distributed():
         path_list = [args.output_dir]
         dist.broadcast_object_list(path_list, src=0)  # type: ignore[attr-defined]
         args.output_dir = path_list[0]
@@ -520,7 +520,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
 
     if is_main_process:
         os.makedirs(args.output_dir, exist_ok=True)
-    if is_distributed():
+    if distributed_utils.is_distributed():
         dist.barrier()  # type: ignore[attr-defined]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -671,6 +671,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     trainer.fit()
     logger.info("Training complete.")
 
+    distributed_utils.barrier()
     if (
         args.try_auto_save_to_beaker
         and is_main_process
