@@ -267,7 +267,7 @@ class StreamingDataLoaderConfig:
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
-    # Reward behavior for tool use
+    # Training behavior with tool use
     only_reward_good_outputs: bool = False
     """Whether to only reward outputs where tool calls succeeded. Useful to force the model to use tool(s)."""
     mask_tool_use: bool = True
