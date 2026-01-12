@@ -1074,9 +1074,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                             current_step=completed_steps,
                             total_steps=args.max_train_steps,
                             start_time=start_time,
-                            wandb_url=wandb_tracker.run.get_url()
-                            if wandb_tracker and hasattr(wandb_tracker, "run")
-                            else None,
+                            wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
                         )
                     # Reset the local metrics
                     local_metrics.metrics.zero_()
@@ -1132,7 +1130,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=wandb_tracker.run.get_url() if wandb_tracker and hasattr(wandb_tracker, "run") else None,
+            wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
             eval_workspace=args.eval_workspace,
