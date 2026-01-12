@@ -24,7 +24,7 @@ import ray
 from open_instruct.tools.parsers import OpenInstructLegacyToolParser, ToolParser, get_available_parsers
 from open_instruct.tools.proxy import create_tool_actor_from_config
 from open_instruct.tools.tools import PythonCodeToolConfig, S2SearchToolConfig, SerperSearchToolConfig
-from open_instruct.tools.utils import BaseToolConfig, Tool
+from open_instruct.tools.utils import BaseToolConfig
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +144,9 @@ class ToolConfig:
         return self.tool_configs_list[index]
 
 
-def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] | None = None) -> ToolParser | None:
+def create_tool_parser(
+    parser_name: str, tokenizer=None, tools: dict[str, ray.actor.ActorHandle] | None = None
+) -> ToolParser | None:
     """Create a tool parser by name.
 
     This function creates the appropriate parser based on the parser name.
@@ -154,7 +156,7 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
     Args:
         parser_name: The parser type (currently only "legacy" is supported).
         tokenizer: Reserved for future parser types.
-        tools: Dict of tool name -> Tool. Required for "legacy" parser.
+        tools: Dict of tool name -> ActorHandle. Required for "legacy" parser.
 
     Returns:
         The created ToolParser, or None if parser_name is None/empty.
@@ -165,7 +167,7 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
     if parser_name == "legacy":
         if not tools:
             raise ValueError("parser='legacy' requires tools to be provided")
-        return OpenInstructLegacyToolParser(tool_list=list(tools.values()))
+        return OpenInstructLegacyToolParser(tool_actors=list(tools.values()))
 
     else:
         logger.warning(f"Unknown tool parser: {parser_name}")

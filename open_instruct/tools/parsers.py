@@ -12,7 +12,9 @@ import logging
 import re
 from abc import ABC, abstractmethod
 
-from open_instruct.tools.utils import Tool, ToolCall
+import ray
+
+from open_instruct.tools.utils import ToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -48,25 +50,32 @@ class OpenInstructLegacyToolParser(ToolParser):
     Only works for tools that take a single string parameter.
     """
 
-    def __init__(self, tool_list: list[Tool], output_wrap_name: str = "output"):
-        self.tool_names = [tool.tool_function_name for tool in tool_list]
+    def __init__(self, tool_actors: list[ray.actor.ActorHandle], output_wrap_name: str = "output"):
+        """Initialize the parser.
+
+        Args:
+            tool_actors: List of ToolActor handles.
+            output_wrap_name: Name to wrap tool outputs with.
+        """
+        # Fetch metadata from actors
+        self.tool_names = [ray.get(actor.get_tool_function_name.remote()) for actor in tool_actors]
         self.output_wrap_name = output_wrap_name
         assert len(self.tool_names) == len(set(self.tool_names)), "Tool names must be unique"
         self.tool_stop_strings = [f"</{tool_name}>" for tool_name in self.tool_names]
         self.tool_start_strings = [f"<{tool_name}>" for tool_name in self.tool_names]
 
         self.tool_param_names: dict[str, str] = {}
-        for tool in tool_list:
-            params = tool.tool_parameters
+        for actor, tool_name in zip(tool_actors, self.tool_names):
+            params = ray.get(actor.get_tool_parameters.remote())
             required = params.get("required", [])
             if required:
-                self.tool_param_names[tool.tool_function_name] = required[0]
+                self.tool_param_names[tool_name] = required[0]
             else:
                 properties = params.get("properties", {})
                 if properties:
-                    self.tool_param_names[tool.tool_function_name] = next(iter(properties))
+                    self.tool_param_names[tool_name] = next(iter(properties))
                 else:
-                    self.tool_param_names[tool.tool_function_name] = "text"
+                    self.tool_param_names[tool_name] = "text"
 
         self.tool_regexes = {
             tool_name: re.compile(re.escape(f"<{tool_name}>") + r"(.*?)" + re.escape(f"</{tool_name}>"), re.DOTALL)
