@@ -434,7 +434,7 @@ class DPOExperimentConfig(config.Config):
     dataset_config_hash: str | None = None
     reference_logprobs_cache_path: str = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
 
-    push_to_hub: bool = True
+    push_to_hub: bool = False
     hf_entity: str | None = None
     hf_repo_id: str | None = None
     hf_repo_revision: str | None = None
