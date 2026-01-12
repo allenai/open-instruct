@@ -54,7 +54,7 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import utils
+from open_instruct import logger_utils, utils
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     TOKENIZED_PREFERENCE_DATASET_KEYS,
@@ -582,23 +582,21 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 }
             },
         )
-        if accelerator.is_main_process:
-            wandb_tracker = accelerator.get_tracker("wandb")
-            wandb_url = wandb_tracker.run.get_url() if hasattr(wandb_tracker, "run") else None
-            maybe_update_beaker_description(wandb_url=wandb_url)
-        else:
-            wandb_tracker = None
-    else:
-        wandb_tracker = None
 
     if accelerator.is_main_process:
+        wandb_url = None
+        if args.with_tracking:
+            wandb_tracker = accelerator.get_tracker("wandb")
+            wandb_url = wandb_tracker.run.get_url() if hasattr(wandb_tracker, "run") else None
+        maybe_update_beaker_description(wandb_url=wandb_url)
         pprint([args, tc])
 
     init_gpu_memory = None
     if torch.cuda.is_available():
         init_gpu_memory = torch.cuda.mem_get_info()[0]
 
-    logger.info(accelerator.state)
+    logger_utils.setup_logger()
+    logger.info(accelerator.state, main_process_only=False)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
         transformers.utils.logging.set_verbosity_info()
