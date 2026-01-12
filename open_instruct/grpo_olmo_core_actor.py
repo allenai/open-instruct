@@ -291,49 +291,17 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         Returns:
             List of Ray ObjectRefs for the weight update calls.
         """
-        import sys
-
-        print(f"[DEBUG] broadcast_to_vllm starting on rank {self.rank}", file=sys.stderr, flush=True)
         torch.cuda.empty_cache()
-        print(f"[DEBUG] after cuda.empty_cache on rank {self.rank}", file=sys.stderr, flush=True)
         torch.cuda.set_device(self.local_rank)
-        print(f"[DEBUG] after cuda.set_device on rank {self.rank}", file=sys.stderr, flush=True)
 
-        print(f"[DEBUG] getting train_module.model on rank {self.rank}", file=sys.stderr, flush=True)
         model = self.train_module.model
-        print(f"[DEBUG] got model on rank {self.rank}", file=sys.stderr, flush=True)
         params_list = list(model.named_parameters())
-        print(
-            f"[DEBUG] got params_list with {len(params_list)} params on rank {self.rank}", file=sys.stderr, flush=True
-        )
         num_params = len(params_list)
         refss = []
 
-        print(
-            f"[DEBUG] starting broadcast loop for {num_params} params on rank {self.rank}", file=sys.stderr, flush=True
-        )
-
-        if torch.distributed.get_rank() == 0 and self.vllm_engines:
-            print("[DEBUG] checking vllm engines are ready", file=sys.stderr, flush=True)
-            ready_refs = [engine.ready.remote() for engine in self.vllm_engines]
-            ray.get(ready_refs)
-            print("[DEBUG] vllm engines are ready", file=sys.stderr, flush=True)
-
-        import time
-
         for count, (name, param) in enumerate(params_list, start=1):
             hf_name = olmo_core_to_hf_name(name)
-            if count == 1:
-                print(
-                    f"[DEBUG] first param: {hf_name}, rank={torch.distributed.get_rank()}", file=sys.stderr, flush=True
-                )
             if torch.distributed.get_rank() == 0:
-                if count <= 3:
-                    print(
-                        f"[DEBUG] Param {count}/{num_params}: calling update_weight.remote()",
-                        file=sys.stderr,
-                        flush=True,
-                    )
                 refs = [
                     engine.update_weight.remote(
                         hf_name, dtype=str(param.dtype), shape=tuple(param.shape), empty_cache=count == num_params
@@ -341,26 +309,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                     for engine in self.vllm_engines
                 ]
                 refss.extend(refs)
-                if count == 1:
-                    print(
-                        "[DEBUG] First param: sleeping 0.1s to let vLLM receive update_weight",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                    time.sleep(0.1)
-                if count <= 3:
-                    print(f"[DEBUG] Param {count}/{num_params}: calling broadcast()", file=sys.stderr, flush=True)
             if torch.distributed.get_rank() == 0:
-                if count <= 3:
-                    print(
-                        f"[DEBUG] Param {count}/{num_params}: about to broadcast, "
-                        f"shape={param.data.shape}, device={param.data.device}, dtype={param.data.dtype}",
-                        file=sys.stderr,
-                        flush=True,
-                    )
                 torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-                if count <= 3:
-                    print(f"[DEBUG] Param {count}/{num_params}: broadcast complete", file=sys.stderr, flush=True)
 
         logger.info(f"[Rank {self.rank}] All broadcasts complete, returning {len(refss)} refs")
         all_refs = []
