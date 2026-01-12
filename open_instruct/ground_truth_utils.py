@@ -432,14 +432,17 @@ class F1Verifier(VerifierFunction):
         super().__init__("string_f1", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self, tokenized_prediction: list[int], prediction: str, label: str | list[str], query: str | None = None
     ) -> VerificationResult:
         # remove thinking section from the prediction
         prediction = prediction.split("</think>")[-1]
         # remove answer tags from the prediction
         prediction = prediction.replace("<answer>", "").replace("</answer>", "")
         # return f1 score
-        score = f1_score(prediction, label)["f1"]
+        if isinstance(label, list):
+            score = max(f1_score(prediction, str(lab))["f1"] for lab in label)
+        else:
+            score = f1_score(prediction, label)["f1"]
         return VerificationResult(score=score)
 
 
@@ -1016,12 +1019,20 @@ async def apply_verifiable_reward(
     ):
         ground_truth_list = [ground_truth] if isinstance(ground_truth, str) else ground_truth
         dataset_list = [dataset] if isinstance(dataset, str) else dataset
-        assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
+        if len(dataset_list) == 1 and len(ground_truth_list) > 1:
+            dataset_list = dataset_list * len(ground_truth_list)
+        elif len(ground_truth_list) != len(dataset_list):
+            logger.error(
+                f"Length mismatch in apply_verifiable_reward: gt_list={len(ground_truth_list)}, ds_list={len(dataset_list)}, skipping"
+            )
+            continue
 
         for gt, ds in zip(ground_truth_list, dataset_list):
             reward_func = reward_fn_mapping.get(ds.lower())
             if reward_func is None:
-                logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
+                logger.warning(
+                    "No reward function found for dataset %s. Available: %s", ds, list(reward_fn_mapping.keys())[:5]
+                )
                 continue
 
             task = reward_func.async_call(
@@ -1038,8 +1049,7 @@ async def apply_verifiable_reward(
             )
 
     if async_tasks:
-        reward_results = await asyncio.gather(*async_tasks)
-        logger.debug(f"Applied {len(reward_results)} ground truth rewards in parallel")
+        reward_results = await asyncio.gather(*async_tasks, return_exceptions=True)
     else:
         reward_results = []
 
@@ -1047,6 +1057,13 @@ async def apply_verifiable_reward(
     response_per_func_rewards = [{} for _ in range(len(responses))]
 
     for result, metadata in zip(reward_results, task_metadata):
+        if isinstance(result, Exception):
+            logger.error(
+                f"Reward computation failed for response {metadata['response_idx']} "
+                f"(dataset={metadata['dataset']}): {type(result).__name__}: {result}"
+            )
+            continue
+
         response_idx = metadata["response_idx"]
         dataset = metadata["dataset"]
         reward_weight = metadata["reward_weight"]

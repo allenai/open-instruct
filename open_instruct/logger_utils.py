@@ -36,4 +36,10 @@ def setup_logger(name: str | None = None, rank: int = 0) -> logging.Logger:
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
+    # Suppress vLLM tool parser JSON decode errors (common with bad model outputs)
+    logging.getLogger("vllm.entrypoints.openai.tool_parsers.hermes_tool_parser").setLevel(logging.CRITICAL)
+    logging.getLogger("vllm.entrypoints.openai.tool_parsers.llama_tool_parser").setLevel(logging.CRITICAL)
+    logging.getLogger("vllm.entrypoints.openai.tool_parsers.qwen3xml_tool_parser").setLevel(logging.CRITICAL)
+    logging.getLogger("vllm.entrypoints.openai.tool_parsers.qwen3coder_tool_parser").setLevel(logging.CRITICAL)
+
     return logging.getLogger(name)

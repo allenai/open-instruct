@@ -215,7 +215,6 @@ class StreamingDataLoaderConfig:
     no_resampling_pass_rate: float | None = None
     advantage_normalization_type: str = "standard"
     mask_truncated_completions: bool = False
-    mask_tool_use: bool = True
 
     # Dataset
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
@@ -268,17 +267,9 @@ class StreamingDataLoaderConfig:
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
-    # Tools
-    tools: list[str] | None = None
-    max_tool_calls: tuple[int, ...] = (5,)
+    # Reward behavior for tool use
     only_reward_good_outputs: bool = False
-
-    # RAG
-    number_documents_to_search: int = 3
-    search_api_endpoint: str | None = None
-
-    # Code tool
-    code_tool_api_endpoint: str | None = None
+    """Whether to only reward outputs where tool calls succeeded. Useful to force the model to use tool(s)."""
 
     # Computed at post_init
     max_possible_score: float = 1.0
@@ -315,14 +306,6 @@ class StreamingDataLoaderConfig:
 
         if self.stop_strings is None:
             self.stop_strings = []
-
-        self.max_tool_calls = tuple(int(x) for x in self.max_tool_calls)
-
-        if self.tools is not None and len(self.tools) > 0:
-            for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
 
         self.max_possible_score = 0.0
         if self.apply_verifiable_reward:
@@ -547,7 +530,7 @@ def accumulate_inference_batches(
                 result.masks[i].append(1)
                 result.logprobs[i].append(float("nan"))
 
-        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
 
         k_queries = repeat_each([query], generation_config.n)
         k_ground_truths = repeat_each([ground_truth], generation_config.n)
@@ -610,6 +593,9 @@ def accumulate_inference_batches(
     combined_tool_outputs = []
     combined_tool_runtimes = []
     combined_tool_calleds = []
+    combined_tool_call_counts = []
+    combined_tool_error_counts = []
+    combined_tool_timeout_counts = []
     combined_logprobs = []
 
     earliest_start_time = float("inf")
@@ -630,6 +616,12 @@ def accumulate_inference_batches(
         combined_tool_outputs.extend(result.request_info.tool_outputs)
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
+        if result.request_info.tool_call_counts is not None:
+            combined_tool_call_counts.extend(result.request_info.tool_call_counts)
+        if result.request_info.tool_error_counts is not None:
+            combined_tool_error_counts.extend(result.request_info.tool_error_counts)
+        if result.request_info.tool_timeout_counts is not None:
+            combined_tool_timeout_counts.extend(result.request_info.tool_timeout_counts)
 
         combined_logprobs.extend(result.logprobs)
 
@@ -658,6 +650,9 @@ def accumulate_inference_batches(
         tool_outputs=combined_tool_outputs,
         tool_runtimes=combined_tool_runtimes,
         tool_calleds=combined_tool_calleds,
+        tool_call_counts=combined_tool_call_counts if combined_tool_call_counts else None,
+        tool_error_counts=combined_tool_error_counts if combined_tool_error_counts else None,
+        tool_timeout_counts=combined_tool_timeout_counts if combined_tool_timeout_counts else None,
     )
 
     combined_result = data_types.GenerationResult(
@@ -817,7 +812,9 @@ class DataPreparationActor:
         verbose: bool,
         work_dir: str,
         initial_state: dict | None = None,
+        mask_tool_use: bool = True,
     ):
+        self.mask_tool_use = mask_tool_use
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
         self.tokenizer = tokenizer
@@ -958,7 +955,7 @@ class DataPreparationActor:
                 pack_length=self.config.pack_length,
                 pad_token_id=self.tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
-                mask_tool_use=self.config.mask_tool_use,
+                mask_tool_use=self.mask_tool_use,
                 min_num_batches=self.dp_world_size,
             )
             lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
@@ -1018,16 +1015,49 @@ class DataPreparationActor:
                     "val/advantages_min": advantages.min(),
                     "val/advantages_max": advantages.max(),
                     "val/advantages_hist": advantages,
-                    "val/num_calls_rate": np.array(result.request_info.num_calls).mean(),
-                    "val/timeouts_rate": np.array(result.request_info.timeouts).mean(),
-                    "val/tool_errors_rate": np.array(
+                    "tool/all_num_calls_rate": np.array(result.request_info.num_calls).mean(),
+                    "tool/all_timeouts_rate": np.array(result.request_info.timeouts).mean(),
+                    "tool/all_errors_rate": np.array(
                         [len(item) > 0 for item in result.request_info.tool_errors]
                     ).mean(),
-                    "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
-                    "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
+                    "tool/all_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
+                    "tool/all_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
                     **reward_metrics,
                     **batch_metrics_prefixed,
                 }
+
+                if result.request_info.tool_call_counts:
+                    tool_call_counts_list = result.request_info.tool_call_counts
+                    tool_error_counts_list = result.request_info.tool_error_counts or [
+                        {} for _ in tool_call_counts_list
+                    ]
+                    tool_timeout_counts_list = result.request_info.tool_timeout_counts or [
+                        {} for _ in tool_call_counts_list
+                    ]
+
+                    all_tool_names: set[str] = set()
+                    for counts in tool_call_counts_list:
+                        all_tool_names.update(counts.keys())
+
+                    for tool_name in all_tool_names:
+                        samples_that_called = sum(
+                            1 for counts in tool_call_counts_list if counts.get(tool_name, 0) > 0
+                        )
+                        called_rate = samples_that_called / len(tool_call_counts_list)
+                        total_calls = sum(counts.get(tool_name, 0) for counts in tool_call_counts_list)
+                        calls_per_sample = total_calls / len(tool_call_counts_list)
+                        total_errors = sum(counts.get(tool_name, 0) for counts in tool_error_counts_list)
+                        error_rate = total_errors / total_calls if total_calls > 0 else 0.0
+                        total_timeouts = sum(counts.get(tool_name, 0) for counts in tool_timeout_counts_list)
+                        timeout_rate = total_timeouts / total_calls if total_calls > 0 else 0.0
+                        good_calls = total_calls - total_errors - total_timeouts
+                        good_rate = good_calls / total_calls if total_calls > 0 else 0.0
+
+                        step_metrics[f"tool/{tool_name}_called_rate"] = called_rate
+                        step_metrics[f"tool/{tool_name}_calls_per_sample"] = calls_per_sample
+                        step_metrics[f"tool/{tool_name}_error_rate"] = error_rate
+                        step_metrics[f"tool/{tool_name}_timeout_rate"] = timeout_rate
+                        step_metrics[f"tool/{tool_name}_good_rate"] = good_rate
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
