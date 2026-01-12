@@ -156,8 +156,8 @@ include = [
     "open_instruct/mix_data_preferences.py",
     "open_instruct/padding_free_collator.py",
     "open_instruct/rejection_sampling/prompt_templates.py",
-    "open_instruct/search_utils/",
-    "open_instruct/tool_utils/tools.py",
+    "open_instruct/tools/massive_ds.py",
+    "open_instruct/tools/tools.py",
     "open_instruct/rl_utils.py",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]
