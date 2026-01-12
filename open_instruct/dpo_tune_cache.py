@@ -880,7 +880,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     logger.info(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
 
-    logger.info("=============before cache logprobs")
+    logger.info("Starting to cache logprobs.")
     print_gpu_stats(init_gpu_memory)
 
     # Cache the logprobs
