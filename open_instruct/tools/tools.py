@@ -77,7 +77,6 @@ class PythonCodeTool(Tool):
 
     _default_tool_function_name = "python"
     _default_tool_description = "Executes Python code and returns printed output."
-    # Parameters inferred from __call__ signature
 
     def __init__(self, api_endpoint: str, timeout: int = 3, override_name: str | None = None) -> None:
         self.api_endpoint = api_endpoint
@@ -149,7 +148,6 @@ class PythonCodeToolConfig(BaseToolConfig):
             raise ValueError("api_endpoint must be set to use the Python code tool")
         return PythonCodeTool(**asdict(self))
 
-
 # =============================================================================
 # S2SearchTool + Config
 # =============================================================================
@@ -163,7 +161,6 @@ class S2SearchTool(Tool):
 
     _default_tool_function_name = "s2_search"
     _default_tool_description = "Searches Semantic Scholar for academic papers and citations"
-    # Parameters inferred from __call__ signature
 
     def __init__(self, num_results: int = 10, override_name: str | None = None) -> None:
         self.num_results = num_results
@@ -247,9 +244,8 @@ class SerperSearchTool(Tool):
     Serper provides fast Google Search results via API. Sign up at https://serper.dev
     """
 
-    _default_tool_function_name = "serper_search"
+    _default_tool_function_name = "serper_search" 
     _default_tool_description = "Google search via the Serper API"
-    # Parameters inferred from __call__ signature
 
     def __init__(self, num_results: int = 5, override_name: str | None = None) -> None:
         self.num_results = num_results
