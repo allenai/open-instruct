@@ -1605,7 +1605,7 @@ def accumulate_inference_batches(
         # Don't resample prompt that was solved at more than no_resample_positive_rate
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
             total_no_resampled += 1
-            data_loader.exclude_index(result.dataset_index)
+            data_loader.exclude_index(result.index)
             logging.debug(
                 f"[Data Preparation Thread] Prompt solved at {percent_solved}, total no resampled: {total_no_resampled}"
             )
@@ -1633,7 +1633,7 @@ def accumulate_inference_batches(
             progress_bar.update(1)
 
         results.append(result)
-        prompt_data = prompt_dataset[result.dataset_index]
+        prompt_data = prompt_dataset[result.index]
         all_queries.extend(repeat_each([prompt_data[INPUT_IDS_PROMPT_KEY]], generation_config.n))
         all_ground_truths.extend(repeat_each([prompt_data[GROUND_TRUTHS_KEY]], generation_config.n))
         all_datasets.extend(repeat_each([prompt_data[VERIFIER_SOURCE_KEY]], generation_config.n))
@@ -1722,7 +1722,7 @@ def accumulate_inference_batches(
         finish_reasons=combined_finish_reasons,
         masks=combined_masks,
         request_info=combined_request_info,
-        dataset_index=None,
+        index=None,
         prompt_id=None,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
@@ -1731,7 +1731,7 @@ def accumulate_inference_batches(
     if actor_manager is not None:
         ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
 
-    # Note: We don't have dataset_indices here, but they're not needed for the returned batch
+    # Note: We don't have indices here, but they're not needed for the returned batch
     batch = Batch(
         queries=all_queries,
         ground_truths=all_ground_truths,
@@ -2241,7 +2241,7 @@ def add_prompt_to_generator(
         PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
             generation_config=generation_config,
-            dataset_index=example["dataset_index"],
+            index=example["index"],
             prompt_id=example["prompt_id"],
             is_eval=is_eval,
         )

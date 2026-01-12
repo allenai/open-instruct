@@ -173,9 +173,9 @@ class TestGrpoFastBase(unittest.TestCase):
 
     def create_mock_result_from_request(self, request: PromptRequest, num_samples_per_prompt=1):
         """Create a mock GenerationResult from a PromptRequest."""
-        return self.create_mock_result(request.dataset_index, request.prompt_id, num_samples_per_prompt)
+        return self.create_mock_result(request.index, request.prompt_id, num_samples_per_prompt)
 
-    def create_mock_result(self, dataset_index: int, prompt_id: str, num_samples_per_prompt=1, reward_scores=None):
+    def create_mock_result(self, index: int, prompt_id: str, num_samples_per_prompt=1, reward_scores=None):
         """Create a mock GenerationResult."""
         total_responses = num_samples_per_prompt
         if reward_scores is None:
@@ -193,7 +193,7 @@ class TestGrpoFastBase(unittest.TestCase):
                 tool_runtimes=[0.0] * total_responses,
                 tool_calleds=[False] * total_responses,
             ),
-            dataset_index=dataset_index,
+            index=index,
             prompt_id=prompt_id,
             start_time=time.perf_counter(),
             token_statistics=TokenStatistics(
@@ -281,7 +281,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
         while not prompt_Q.empty():
             request = prompt_Q.get()
             self.assertIsInstance(request, PromptRequest)
-            self.assertIsInstance(request.dataset_index, int)
+            self.assertIsInstance(request.index, int)
             self.assertIsInstance(request.prompt_id, str)
 
             mock_result = self.create_mock_result_from_request(request)
@@ -297,10 +297,10 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 
         for _ in range(num_unique_prompts_rollout):
             result = inference_results_Q.get()
-            dataset_index = result.dataset_index
+            index = result.index
 
             # Get query from dataset using index
-            example = mock_dataset[dataset_index]
+            example = mock_dataset[index]
             q = example[INPUT_IDS_PROMPT_KEY]
             gt = example[GROUND_TRUTHS_KEY]
             d = example[VERIFIER_SOURCE_KEY]
@@ -324,7 +324,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
                 tool_runtimes=[0.0] * len(combined_responses),
                 tool_calleds=[False] * len(combined_responses),
             ),
-            dataset_index=0,
+            index=0,
             prompt_id="combined",
         )
 
@@ -373,9 +373,9 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 
         for _ in range(num_unique_prompts_rollout):
             result = inference_results_Q.get()
-            dataset_index = result.dataset_index
+            index = result.index
 
-            example = mock_dataset[dataset_index]
+            example = mock_dataset[index]
             q = example[INPUT_IDS_PROMPT_KEY]
             gt = example[GROUND_TRUTHS_KEY]
             d = example[VERIFIER_SOURCE_KEY]
@@ -422,10 +422,10 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
 
         for _ in range(num_unique_prompts_rollout):
             result = inference_results_Q.get()
-            dataset_index = result.dataset_index
+            index = result.index
 
             # Look up from dataset
-            example = mock_dataset[dataset_index]
+            example = mock_dataset[index]
             q = example[INPUT_IDS_PROMPT_KEY]
             gt = example[GROUND_TRUTHS_KEY]
             d = example[VERIFIER_SOURCE_KEY]
@@ -449,7 +449,7 @@ class TestGrpoFastVLLM(TestGrpoFastBase):
                 tool_runtimes=[0.0] * len(combined_responses),
                 tool_calleds=[False] * len(combined_responses),
             ),
-            dataset_index=0,
+            index=0,
             prompt_id="combined",
         )
 
@@ -652,8 +652,8 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
             results_list.append(result)
 
-            dataset_index = result.dataset_index
-            example = mock_dataset[dataset_index]
+            index = result.index
+            example = mock_dataset[index]
             q = example[INPUT_IDS_PROMPT_KEY]
             gt = example[GROUND_TRUTHS_KEY]
             d = example[VERIFIER_SOURCE_KEY]
@@ -694,7 +694,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
             self.assertEqual(len(result.responses), expected_responses)
             total_responses += len(result.responses)
 
-            idx = result.dataset_index
+            idx = result.index
             example = mock_dataset[idx]
             self.assertEqual(example[INPUT_IDS_PROMPT_KEY], queries[idx])
 
