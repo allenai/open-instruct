@@ -906,7 +906,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         print_gpu_stats(init_gpu_memory)
         torch.cuda.empty_cache()  # clear cache
 
-    logger.info("=============after cache logprobs; clear cache")
+    logger.info("Finished caching logprobs and cleared cache.")
     print_gpu_stats(init_gpu_memory)
     # Only show the progress bar once on each machine.
     start_time = time.perf_counter()
