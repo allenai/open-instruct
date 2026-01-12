@@ -52,7 +52,7 @@ class OpenInstructLegacyToolParser(ToolParser):
             output_wrap_name: Name to wrap tool outputs with.
         """
         # Fetch metadata from actors
-        self.tool_names = [ray.get(actor.get_tool_function_name.remote()) for actor in tool_actors]
+        self.tool_names = [ray.get(actor.get_call_name.remote()) for actor in tool_actors]
         self.output_wrap_name = output_wrap_name
         assert len(self.tool_names) == len(set(self.tool_names)), "Tool names must be unique"
         self.tool_stop_strings = [f"</{tool_name}>" for tool_name in self.tool_names]
@@ -60,7 +60,7 @@ class OpenInstructLegacyToolParser(ToolParser):
 
         self.tool_param_names: dict[str, str] = {}
         for actor, tool_name in zip(tool_actors, self.tool_names):
-            params = ray.get(actor.get_tool_parameters.remote())
+            params = ray.get(actor.get_parameters.remote())
             required = params.get("required", [])
             if required:
                 self.tool_param_names[tool_name] = required[0]

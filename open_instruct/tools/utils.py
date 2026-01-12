@@ -63,14 +63,6 @@ class Tool(ABC):
         except Exception as e:
             raise ValueError(f"Invalid parameters: {e}") from e
 
-    def get_tool_names(self) -> list[str]:
-        """Get the tool names this tool exposes.
-
-        Returns:
-            List of tool names.
-        """
-        return [self.call_name]
-
     @abstractmethod
     async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
         """Execute the tool, must be implemented by subclasses."""

@@ -14,10 +14,10 @@ class MockToolActor:
         self.param_name = param_name
         self.required = required if required is not None else [param_name]
 
-    def get_tool_function_name(self):
+    def get_call_name(self):
         return self.name
 
-    def get_tool_parameters(self):
+    def get_parameters(self):
         return {"required": self.required, "properties": {self.param_name: {"type": "string"}}}
 
 
@@ -25,8 +25,8 @@ def create_mock_actor(name: str, param_name: str = "text", required: list[str] |
     """Create a mock actor handle that works with ray.get()."""
     mock_actor = MockToolActor(name, param_name, required)
     actor_handle = MagicMock()
-    actor_handle.get_tool_function_name.remote.return_value = mock_actor.get_tool_function_name()
-    actor_handle.get_tool_parameters.remote.return_value = mock_actor.get_tool_parameters()
+    actor_handle.get_call_name.remote.return_value = mock_actor.get_call_name()
+    actor_handle.get_parameters.remote.return_value = mock_actor.get_parameters()
     return actor_handle
 
 
