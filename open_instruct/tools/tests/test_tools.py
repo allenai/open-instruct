@@ -3,6 +3,8 @@ import subprocess
 import time
 import unittest
 
+import ray
+
 from open_instruct.tools.config import ToolArgs, build_tools_from_config
 from open_instruct.tools.tools import (
     MaxCallsExceededTool,
@@ -264,7 +266,7 @@ class TestToolConfigOverrideName(unittest.TestCase):
         tools, stop_strings = build_tools_from_config(config)
         # The tool should be keyed by the overridden tag name
         self.assertIn("search", tools)
-        self.assertEqual(tools["search"].tool_function_name, "search")
+        self.assertEqual(ray.get(tools["search"].get_tool_function_name.remote()), "search")
 
     def test_multiple_tools_with_override_names_via_config(self):
         """Multiple tools with override names set via tool_configs."""
@@ -276,8 +278,8 @@ class TestToolConfigOverrideName(unittest.TestCase):
         tools, stop_strings = build_tools_from_config(config)
         self.assertIn("academic_search", tools)
         self.assertIn("web_search", tools)
-        self.assertEqual(tools["academic_search"].tool_function_name, "academic_search")
-        self.assertEqual(tools["web_search"].tool_function_name, "web_search")
+        self.assertEqual(ray.get(tools["academic_search"].get_tool_function_name.remote()), "academic_search")
+        self.assertEqual(ray.get(tools["web_search"].get_tool_function_name.remote()), "web_search")
 
     def test_no_override_names_uses_defaults(self):
         """When override_name is not provided, tools use their defaults."""
@@ -350,12 +352,12 @@ class TestToolConfigs(unittest.TestCase):
         self.assertIn("requires --tools", str(context.exception))
 
 
-class TestToolProxy(unittest.TestCase):
-    """Test the ToolProxy and ToolActor classes."""
+class TestToolActor(unittest.TestCase):
+    """Test the ToolActor class."""
 
     @classmethod
     def setUpClass(cls):
-        """Initialize Ray for proxy tests."""
+        """Initialize Ray for actor tests."""
         import ray
 
         if not ray.is_initialized():
@@ -369,31 +371,27 @@ class TestToolProxy(unittest.TestCase):
         if ray.is_initialized():
             ray.shutdown()
 
-    def test_tool_proxy_creation(self):
-        """Test creating a ToolProxy from config using the two-step pattern."""
-        from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
+    def test_tool_actor_creation(self):
+        """Test creating a ToolActor from config."""
+        from open_instruct.tools.proxy import create_tool_actor_from_config
 
         config = SerperSearchToolConfig(num_results=5)
 
-        # Step 1: Create actor from config (config.build() called inside actor)
+        # Create actor from config (config.build() called inside actor)
         actor = create_tool_actor_from_config(config=config)
 
-        # Step 2: Wrap with proxy
-        proxy = ToolProxy.from_actor(actor)
+        # Check we can get metadata via remote calls
+        self.assertEqual(ray.get(actor.get_tool_function_name.remote()), "serper_search")
 
-        self.assertIsInstance(proxy, ToolProxy)
-        self.assertEqual(proxy.tool_function_name, "serper_search")
-
-    def test_tool_proxy_call(self):
-        """Test that ToolProxy correctly forwards calls to the ToolActor."""
-        from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
+    def test_tool_actor_call(self):
+        """Test that ToolActor correctly executes tool calls."""
+        from open_instruct.tools.proxy import create_tool_actor_from_config
 
         config = SerperSearchToolConfig(num_results=5)
         actor = create_tool_actor_from_config(config=config)
-        proxy = ToolProxy.from_actor(actor)
 
-        # Test that we can call the proxy and get a result (async)
-        result = run_async(proxy(query="test query"))
+        # Test that we can call the actor and get a result (async)
+        result = ray.get(actor.call.remote(query="test query"))
         self.assertIsInstance(result, ToolOutput)
         # The result depends on the API, just check we got a response
         self.assertIsNotNone(result.output)
