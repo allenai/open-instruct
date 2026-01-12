@@ -942,10 +942,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     timeout=False,
                     runtime=0,
                 )
-                try:
-                    tool_name = ray.get(tool_actor.get_tool_function_name.remote())
-                except Exception:
-                    tool_name = "unknown"
 
             tool_called = True
             num_calls += 1
