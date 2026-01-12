@@ -1668,7 +1668,6 @@ def create_model_and_optimizer(
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils.create_vllm_engines(
-        model_config.model_name_or_path,
         vllm_config.vllm_num_engines,
         vllm_config.vllm_tensor_parallel_size,
         vllm_config.vllm_enforce_eager,
