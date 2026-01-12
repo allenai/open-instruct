@@ -6,18 +6,17 @@ Includes:
 - OpenInstructLegacyToolParser: <tool_name>content</tool_name> style
 """
 
-import logging
 import re
 from abc import ABC, abstractmethod
 
 import ray
 
+from open_instruct.logger_utils import setup_logger
 from open_instruct.tools.utils import ToolCall
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
-# parser base class
 class ToolParser(ABC):
     @abstractmethod
     def get_tool_calls(self, text: str) -> list[ToolCall]:
