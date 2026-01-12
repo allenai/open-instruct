@@ -664,6 +664,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         max_duration=train.Duration.epochs(args.num_epochs),
         metrics_collect_interval=metrics_collect_interval,
         callbacks=trainer_callbacks,
+        save_overwrite=True,
     ).build(train_module, data_loader_instance)
 
     logger.info("Starting training...")
