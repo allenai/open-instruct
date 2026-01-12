@@ -2,8 +2,8 @@ import re
 import time
 from typing import Any
 
-from open_instruct.tools.search_utils.massive_ds import get_snippets_for_query
-from open_instruct.tools.tool_utils.tools import Tool, ToolOutput
+from open_instruct.tools.massive_ds import get_snippets_for_query
+from open_instruct.tools.tools import Tool, ToolOutput
 
 
 class SearchTool(Tool):

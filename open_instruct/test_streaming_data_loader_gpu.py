@@ -28,7 +28,7 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
-from open_instruct.tools.tool_utils.tools import PythonCodeTool
+from open_instruct.tools.tools import PythonCodeTool
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
@@ -48,7 +48,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         super().setUpClass()
         cls.server_process = subprocess.Popen(
             ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1213"],
-            cwd="open_instruct/tools/tool_utils",
+            cwd="open_instruct/tools/code_server",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,

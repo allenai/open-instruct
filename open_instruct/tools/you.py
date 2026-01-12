@@ -2,7 +2,7 @@ import os
 
 import requests
 
-from open_instruct.tools.search_utils.s2 import create_session_with_retries
+from open_instruct.tools.s2 import create_session_with_retries
 
 
 def get_snippets_for_query(query: str, number_of_results: int = 10) -> list[str]:
