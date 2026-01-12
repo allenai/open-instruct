@@ -829,7 +829,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
-    logger.info("=============accelerate prepared")
+    logger.info("Accelerator prepared.")
     print_gpu_stats(init_gpu_memory)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
