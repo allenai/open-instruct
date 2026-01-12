@@ -14,9 +14,9 @@ import pathlib
 import shutil
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import partial
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import peft
 import torch
@@ -41,11 +41,11 @@ from olmo_core.train.train_module.transformer import (
 )
 from tqdm.auto import tqdm
 
+from open_instruct import dpo_config as dpo_config_lib
 from open_instruct import logger_utils
 from open_instruct.beaker_callback import BeakerCallbackV2
 from open_instruct.data_loader import HFDataLoader
 from open_instruct.dataset_transformation import (
-    TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
     compute_config_hash,
     get_cached_dataset_tulu,
@@ -345,26 +345,22 @@ class DPOTrainModule(TrainModule):
 
 
 @dataclass
-class DPOExperimentConfig(config.Config):
+class DPOExperimentConfig(
+    dpo_config_lib.ExperimentConfig,
+    dpo_config_lib.ModelConfig,
+    dpo_config_lib.DPOHyperparamsConfig,
+    dpo_config_lib.TrainingConfig,
+    dpo_config_lib.DatasetConfig,
+    dpo_config_lib.LoRAConfig,
+    dpo_config_lib.LoggingConfig,
+    dpo_config_lib.HubConfig,
+    dpo_config_lib.CheckpointConfig,
+    dpo_config_lib.EvalConfig,
+    config.Config,
+):
     """Configuration for a DPO training experiment."""
 
-    exp_name: str = "dpo_experiment"
-    run_name: str | None = None
-    seed: int = 42
-    add_seed_and_date_to_exp_name: bool = True
-
-    model_name_or_path: str | None = None
-    use_flash_attn: bool = True
-    model_revision: str | None = None
-
-    dpo_beta: float = 0.1
     dpo_loss_type: DPOLossType = DPOLossType.dpo
-    dpo_gamma_beta_ratio: float = 0.3
-    dpo_label_smoothing: float = 0.0
-    load_balancing_loss: bool = False
-    load_balancing_weight: float = 1e-3
-    concatenated_forward: bool = True
-    packing: bool = False
 
     @property
     def dpo_config(self) -> DPOConfig:
@@ -379,68 +375,16 @@ class DPOExperimentConfig(config.Config):
             packing=self.packing,
         )
 
-    num_epochs: int = 2
-    per_device_train_batch_size: int = 8
-    gradient_accumulation_steps: int = 1
-    learning_rate: float = 2e-5
-    warmup_ratio: float = 0.03
-    weight_decay: float = 0.0
-    max_grad_norm: float = 1.0
-    max_seq_length: int = 2048
-
-    lr_scheduler_type: Literal["linear", "cosine", "constant"] = "linear"
-    max_train_steps: int | None = None
     checkpointing_steps: int = 250
     async_checkpointing: bool = False
-    clip_grad_norm: float = -1
 
-    use_8bit_optimizer: bool = False
-    dpo_use_paged_optimizer: bool = False
-    gradient_checkpointing: bool = False
-    fused_optimizer: bool = True
-    low_cpu_mem_usage: bool = False
-
-    dataset_mixer_list: list[str] = field(
-        default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
-    )
-    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
-    dataset_transform_fn: list[str] = field(
-        default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
-    )
-
-    use_lora: bool = False
-    lora_rank: int = 64
-    lora_alpha: float = 16
-    lora_dropout: float = 0.1
-
-    output_dir: str = "output/"
     save_folder: str | None = None
     checkpoint_every: int = 500
-    keep_last_n_checkpoints: int = 3
-    resume_from_checkpoint: str | None = None
 
     log_every: int = 10
-    logging_steps: int | None = None
-    with_tracking: bool = False
-    wandb_project: str = "open_instruct_internal"
-    wandb_entity: str | None = None
-    report_to: str | list[str] = "all"
 
-    dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
-    dataset_cache_mode: Literal["hf", "local"] = "local"
-    dataset_local_cache_dir: str = "local_dataset_cache"
-    dataset_skip_cache: bool = False
-    cache_dataset_only: bool = False
-    dataset_config_hash: str | None = None
     reference_logprobs_cache_path: str = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
 
-    push_to_hub: bool = True
-    hf_entity: str | None = None
-    hf_repo_id: str | None = None
-    hf_repo_revision: str | None = None
-    hf_repo_url: str | None = None
-
-    try_launch_beaker_eval_jobs: bool = True
     try_auto_save_to_beaker: bool = True
     oe_eval_tasks: list[str] | None = None
     oe_eval_max_length: int = 4096
