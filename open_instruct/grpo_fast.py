@@ -2296,7 +2296,7 @@ def main(
     pprint([args, model_config, tool_config])
 
     tool_definitions = None
-    if tool_objects:
+    if tool_objects and tool_args.pass_tools_to_chat_template:
         tool_definitions = []
         for tool_actor in tool_objects.values():
             tool_definitions.extend(ray.get(tool_actor.get_openai_tool_definitions.remote()))

@@ -65,4 +65,5 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --tool_configs '{"override_name": "search"}' '{"api_endpoint": "'"$CODE_SERVER_ENDPOINT"'", "override_name": "code"}' \
     --system_prompt_override_file scripts/train/debug/code_search_legacy_prompt.txt \
     --tool_parser legacy \
+    --pass_tools_to_chat_template false \
     --push_to_hub false

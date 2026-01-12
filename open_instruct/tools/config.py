@@ -59,6 +59,8 @@ class ToolArgs:
     tool_configs: list[str] | None = None
     max_tool_calls: int = 5
     tool_parser: str = "legacy"
+    pass_tools_to_chat_template: bool = True
+    """Whether to pass tool definitions to the chat template (for models with native function calling)."""
 
     _parsed_configs: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
