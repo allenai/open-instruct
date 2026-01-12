@@ -336,6 +336,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         wandb_entity: str | None,
         run_name: str | None,
         json_config: dict,
+        ref_policy_update_freq: int | None = None,
     ) -> None:
         """Store callback configuration for use in fit()."""
         self.actor_manager = actor_manager
@@ -344,6 +345,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.wandb_entity = wandb_entity
         self.run_name = run_name
         self.json_config = json_config
+        self.ref_policy_update_freq = ref_policy_update_freq
 
     def fit(self) -> dict:
         """Run training using OLMo-core Trainer with callbacks.
@@ -365,15 +367,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 name_mapper=olmo_core_to_hf_name,
             )
 
-        if (
-            self.ref_policy is not None
-            and self.grpo_config.beta > 0
-            and self.grpo_config.ref_policy_update_freq is not None
-        ):
+        if self.ref_policy is not None and self.grpo_config.beta > 0 and self.ref_policy_update_freq is not None:
             trainer_callbacks["ref_policy"] = RefPolicyUpdateCallback(
-                ref_policy=self.ref_policy,
-                alpha=self.grpo_config.alpha,
-                update_interval=self.grpo_config.ref_policy_update_freq,
+                ref_policy=self.ref_policy, alpha=self.grpo_config.alpha, update_interval=self.ref_policy_update_freq
             )
 
         if is_beaker_job() and hasattr(self, "json_config"):

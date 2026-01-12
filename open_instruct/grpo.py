@@ -428,6 +428,7 @@ def main(
                 wandb_entity=args.wandb_entity,
                 run_name=args.run_name or args.exp_name,
                 json_config=json_config,
+                ref_policy_update_freq=args.ref_policy_update_freq,
             )
             for m in policy_group.models
         ],
