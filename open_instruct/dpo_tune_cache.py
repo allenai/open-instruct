@@ -712,7 +712,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         return model
 
     model = load_model()
-    logger.info("=============model loaded")
+    logger.info("Model loaded.")
     print_gpu_stats(init_gpu_memory)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
