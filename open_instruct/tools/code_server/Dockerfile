@@ -23,4 +23,5 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 
 # Command to run the application
-CMD ["python", "tool_server.py"]
+CMD ["python", "server.py"]
+

@@ -101,7 +101,8 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, masked_mean
-from open_instruct.tool_utils import tools
+from open_instruct.tools.config import ToolArgs, ToolConfig, build_tools_from_config
+from open_instruct.tools.utils import Tool
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -566,7 +567,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
             )
-        self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
+        self.local_metrics = utils.MetricsTracker(max_metrics=128, device=self.device)
 
         if self.mpu is not None:
             self.splitter = UlyssesSPSplitter(
@@ -1383,12 +1384,12 @@ def validate_configs(
     )
 
 
-def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig) -> Args:
+def setup_runtime_variables(
+    args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig, tool_args: ToolArgs
+) -> Args:
     """Set up runtime variables for the experiment."""
-    if streaming_config.tools and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
-        assert streaming_config.mask_tool_use, (
-            "Must mask tool use when using vLLM logprobs or truncated importance sampling."
-        )
+    if tool_args.tools and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
+        assert tool_args.mask_tool_use, "Must mask tool use when using vLLM logprobs or truncated importance sampling."
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
@@ -1414,7 +1415,7 @@ def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.Stream
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = streaming_config.tools is not None and len(streaming_config.tools) > 0
+    args.tool_use = tool_args.tools is not None and len(tool_args.tools) > 0
     return args
 
 
@@ -1448,6 +1449,7 @@ def setup_datasets(
     tc: TokenizerConfig,
     tokenizer: PreTrainedTokenizer,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    tools: list[dict] | None = None,
 ):
     """Set up training and evaluation datasets."""
     system_prompt_override = None
@@ -1458,7 +1460,7 @@ def setup_datasets(
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
     transform_fn_args = [
-        {"system_prompt_override": system_prompt_override},
+        {"system_prompt_override": system_prompt_override, "tools": tools},
         {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
@@ -1500,44 +1502,6 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def load_tools(args: Args) -> dict[str, tools.Tool]:
-    """Load tool instances based on args.tools configuration.
-
-    Args:
-        args: Parsed training arguments with tool configuration.
-
-    Returns:
-        A mapping from tool end strings to tool instances.
-
-    Raises:
-        ValueError: If an unknown tool is requested.
-    """
-    tool_objects: dict[str, tools.Tool] = {}
-    if not args.tools:
-        return tool_objects
-
-    for tool in args.tools:
-        if tool.lower() == "search":
-            from open_instruct.search_utils.search_tool import SearchTool
-
-            tool_instance = SearchTool(
-                start_str="<query>",
-                end_str="</query>",
-                api_endpoint=args.search_api_endpoint,
-                number_documents_to_search=args.number_documents_to_search,
-            )
-        elif tool.lower() == "code":
-            tool_instance = tools.PythonCodeTool(
-                start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint
-            )
-        else:
-            raise ValueError(f"Unknown tool: {tool}")
-
-        tool_objects[tool_instance.end_str] = tool_instance
-
-    return tool_objects
-
-
 def create_model_and_optimizer(
     args: Args,
     tc: TokenizerConfig,
@@ -1552,43 +1516,17 @@ def create_model_and_optimizer(
     vllm_config: data_loader_lib.VLLMConfig,
     train_dataset: Dataset,
     eval_dataset,
+    tool_objects: dict[str, Tool],
+    tool_config: "ToolConfig",
     reward_config: RewardConfig,
     generation_config,
     data_prep_actor_state: dict | None = None,
-) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, tools.Tool], int, int]:
+) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, Tool], int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
-
-    # Set up tools
-    tool_objects: dict[str, tools.Tool] = {}
-    if streaming_config.tools:
-        for tool in streaming_config.tools:
-            if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
-
-                tool = SearchTool(
-                    start_str="<query>",
-                    end_str="</query>",
-                    api_endpoint=streaming_config.search_api_endpoint,
-                    number_documents_to_search=streaming_config.number_documents_to_search,
-                )
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                streaming_config.stop_strings.append(tool.end_str)
-            elif tool.lower() == "code":
-                from open_instruct.tool_utils.tools import PythonCodeTool
-
-                tool = PythonCodeTool(
-                    start_str="<code>", end_str="</code>", api_endpoint=streaming_config.code_tool_api_endpoint
-                )
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                streaming_config.stop_strings.append(tool.end_str)
-            else:
-                raise ValueError(f"Unknown tool: {tool}")
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -1620,6 +1558,7 @@ def create_model_and_optimizer(
         verbose=args.verbose,
         work_dir=args.output_dir,
         initial_state=data_prep_actor_state,
+        mask_tool_use=tool_config.mask_tool_use,
     )
 
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
@@ -1657,8 +1596,9 @@ def create_model_and_optimizer(
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
-        max_tool_calls=streaming_config.max_tool_calls,
-        mask_tool_use=streaming_config.mask_tool_use,
+        tool_parser_name=tool_config.parser if tool_config.tools else None,
+        max_tool_calls=tool_config.max_tool_calls,
+        mask_tool_use=tool_config.mask_tool_use,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
@@ -1667,6 +1607,7 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        tokenizer=tokenizer,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
@@ -1973,7 +1914,9 @@ def maybe_evaluate(
     try:
         # timeout 0.01 if this is not the last training step
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if training_step < args.num_training_steps else 100
+        # timeout 0.01 if this is not the last training step
+        # otherwise, wait to get the last evaluation generations (5 min timeout just in case)
+        timeout = 0.01 if training_step < args.num_training_steps else 600
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
@@ -2333,9 +2276,10 @@ def main(
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
+    tool_args: ToolArgs,
 ):
     tokenizer = make_tokenizer(tc, model_config)
-    args = setup_runtime_variables(args, streaming_config)
+    args = setup_runtime_variables(args, streaming_config, tool_args)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
 
     if args.verbose:
@@ -2345,7 +2289,25 @@ def main(
 
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config)
+    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
+
+    tool_config = tool_args.to_tool_config()
+    tool_objects, tool_stop_strings = build_tools_from_config(tool_config)
+
+    pprint([args, model_config, tool_config])
+
+    tool_definitions = None
+    if tool_objects:
+        tool_definitions = []
+        for tool in tool_objects.values():
+            tool_definitions.extend(tool.get_openai_tool_definitions())
+        logger.info(f"Tool definitions for chat template: {[t['function']['name'] for t in tool_definitions]}")
+
+    for stop_string in tool_stop_strings:
+        if stop_string not in streaming_config.stop_strings:
+            streaming_config.stop_strings.append(stop_string)
+
+    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config, tools=tool_definitions)
 
     if len(train_dataset) < (
         needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
@@ -2356,11 +2318,6 @@ def main(
 
     if args.cache_dataset_only:
         return
-
-    pprint([args, model_config])
-
-    # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
@@ -2422,6 +2379,8 @@ def main(
         vllm_config,
         train_dataset,
         eval_dataset,
+        tool_objects,
+        tool_config,
         reward_config,
         generation_configs["train"],
         data_prep_actor_state,
@@ -2493,15 +2452,24 @@ def main(
 
 if __name__ == "__main__":
     utils.check_oe_eval_internal()
-
     parser = ArgumentParserPlus(
-        (Args, TokenizerConfig, ModelConfig, data_loader_lib.StreamingDataLoaderConfig, data_loader_lib.VLLMConfig)
+        (
+            Args,
+            TokenizerConfig,
+            ModelConfig,
+            data_loader_lib.StreamingDataLoaderConfig,
+            data_loader_lib.VLLMConfig,
+            ToolArgs,
+        )
     )
-    args, tokenizer_config, model_config, streaming_config, vllm_config = parser.parse_args_into_dataclasses()
+    args, tokenizer_config, model_config, streaming_config, vllm_config, tool_args = (
+        parser.parse_args_into_dataclasses()
+    )
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
     assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
+    assert isinstance(tool_args, ToolArgs)
 
-    main(args, tokenizer_config, model_config, streaming_config, vllm_config)
+    main(args, tokenizer_config, model_config, streaming_config, vllm_config, tool_args)
