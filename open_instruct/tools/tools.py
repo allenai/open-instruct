@@ -57,6 +57,14 @@ class MaxCallsExceededTool(Tool):
         return ToolOutput(output="Max tool calls exceeded.", called=False, error="", timeout=False, runtime=0)
 
 
+@dataclass
+class MaxCallsExceededToolConfig(BaseToolConfig):
+    """Config for MaxCallsExceededTool."""
+
+    def build(self) -> MaxCallsExceededTool:
+        return MaxCallsExceededTool()
+
+
 # =============================================================================
 # PythonCodeTool + Config
 # =============================================================================

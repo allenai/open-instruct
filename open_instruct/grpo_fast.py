@@ -102,7 +102,6 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.tools.config import ToolArgs, ToolConfig, build_tools_from_config
-from open_instruct.tools.utils import Tool
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -1516,12 +1515,12 @@ def create_model_and_optimizer(
     vllm_config: data_loader_lib.VLLMConfig,
     train_dataset: Dataset,
     eval_dataset,
-    tool_objects: dict[str, Tool],
+    tool_objects: dict[str, ray.actor.ActorHandle],
     tool_config: "ToolConfig",
     reward_config: RewardConfig,
     generation_config,
     data_prep_actor_state: dict | None = None,
-) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, Tool], int, int]:
+) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, ray.actor.ActorHandle], int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -2299,8 +2298,8 @@ def main(
     tool_definitions = None
     if tool_objects:
         tool_definitions = []
-        for tool in tool_objects.values():
-            tool_definitions.extend(tool.get_openai_tool_definitions())
+        for tool_actor in tool_objects.values():
+            tool_definitions.extend(ray.get(tool_actor.get_openai_tool_definitions.remote()))
         logger.info(f"Tool definitions for chat template: {[t['function']['name'] for t in tool_definitions]}")
 
     for stop_string in tool_stop_strings:

@@ -62,8 +62,9 @@ from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_K
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.tools.config import create_tool_parser
 from open_instruct.tools.parsers import ToolParser
-from open_instruct.tools.tools import MaxCallsExceededTool
-from open_instruct.tools.utils import Tool, ToolOutput
+from open_instruct.tools.proxy import create_tool_actor_from_config
+from open_instruct.tools.tools import MaxCallsExceededToolConfig
+from open_instruct.tools.utils import ToolOutput
 from open_instruct.utils import ModelDims, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
@@ -204,21 +205,27 @@ def split_request_id(full_request_id: str) -> dict:
 
 
 def get_triggered_tools(
-    output_text: str, tools: dict[str, Tool], tool_parser: ToolParser | None, max_calls: int, num_calls: int
-) -> list[tuple[Tool, dict]]:
+    output_text: str,
+    tools: dict[str, ray.actor.ActorHandle],
+    tool_parser: ToolParser | None,
+    max_calls: int,
+    num_calls: int,
+    max_calls_exceeded_actor: ray.actor.ActorHandle | None = None,
+) -> list[tuple[ray.actor.ActorHandle, dict]]:
     """Extract all triggered tool calls from the output text.
 
     Args:
         output_text: The generated text to check for tool triggers
-        tools: Dictionary mapping tool function names to Tool instances
+        tools: Dictionary mapping tool function names to ToolActor handles
         tool_parser: The parser to use for extracting tool calls
         max_calls: Maximum number of tool calls allowed
         num_calls: Current number of tool calls already made
+        max_calls_exceeded_actor: Actor to return when max calls is exceeded
 
     Returns:
-        List of (tool, args) tuples for each valid tool call found.
+        List of (tool_actor, args) tuples for each valid tool call found.
         Returns empty list if no tools triggered.
-        Returns [(MaxCallsExceededTool, args)] if max calls exceeded.
+        Returns [(max_calls_exceeded_actor, args)] if max calls exceeded.
     """
     if not tool_parser:
         return []
@@ -233,14 +240,15 @@ def get_triggered_tools(
     if not tool_calls:
         return []
 
-    result: list[tuple[Tool, dict]] = []
+    result: list[tuple[ray.actor.ActorHandle, dict]] = []
     for tool_call in tool_calls:
         if tool_call.name not in tools:
             continue
 
         if num_calls + len(result) >= max_calls:
             # Max calls exceeded - return special tool and stop processing
-            result.append((MaxCallsExceededTool(), {"text": output_text}))
+            if max_calls_exceeded_actor:
+                result.append((max_calls_exceeded_actor, {"text": output_text}))
             break
 
         result.append((tools[tool_call.name], tool_call.args))
@@ -535,7 +543,7 @@ class LLMRayActor:
     def __init__(
         self,
         *args,
-        tools: dict[str, Tool] | None = None,
+        tools: dict[str, ray.actor.ActorHandle] | None = None,
         tool_parser_name: str | None = None,
         max_tool_calls: int = 5,
         mask_tool_use: bool = True,
@@ -579,7 +587,7 @@ class LLMRayActor:
 
     def _init_config(
         self,
-        tools: dict[str, Tool] | None,
+        tools: dict[str, ray.actor.ActorHandle] | None,
         tool_parser_name: str | None,
         max_tool_calls: int,
         mask_tool_use: bool,
@@ -593,6 +601,10 @@ class LLMRayActor:
         self.tool_parser: ToolParser | None = None  # Created lazily in _init_tool_parser
         self.max_tool_calls = max_tool_calls
         self.mask_tool_use = mask_tool_use
+        # Create max_calls_exceeded actor if tools are configured
+        self.max_calls_exceeded_actor: ray.actor.ActorHandle | None = (
+            create_tool_actor_from_config(MaxCallsExceededToolConfig()) if self.tools else None
+        )
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
         self.active_tasks = {}
@@ -904,7 +916,12 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             break
 
         triggered_tools = get_triggered_tools(
-            output.text, actor.tools, actor.tool_parser, actor.max_tool_calls, num_calls
+            output.text,
+            actor.tools,
+            actor.tool_parser,
+            actor.max_tool_calls,
+            num_calls,
+            actor.max_calls_exceeded_actor,
         )
         if not triggered_tools:
             break
@@ -912,9 +929,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         # Execute all triggered tools and collect their outputs
         tool_outputs_this_round: list[str] = []
 
-        for triggered_tool, tool_args in triggered_tools:
+        for tool_actor, tool_args in triggered_tools:
             try:
-                tool_result = await triggered_tool(**tool_args)
+                tool_result = await tool_actor.call.remote(**tool_args)
+                tool_name = ray.get(tool_actor.get_tool_function_name.remote())
             except Exception as e:
                 # If the tool errors for whatever reason, tell the model that it called the tool.
                 tool_result = ToolOutput(
@@ -924,6 +942,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     timeout=False,
                     runtime=0,
                 )
+                try:
+                    tool_name = ray.get(tool_actor.get_tool_function_name.remote())
+                except Exception:
+                    tool_name = "unknown"
 
             tool_called = True
             num_calls += 1
@@ -933,7 +955,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             tool_runtime += tool_result.runtime
 
             # Track per-tool call counts, errors, and timeouts
-            tool_name = triggered_tool.tool_function_name
             tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
             if tool_result.error:
                 tool_error_counts[tool_name] = tool_error_counts.get(tool_name, 0) + 1
@@ -1042,7 +1063,7 @@ def create_vllm_engines(
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
     pg: PlacementGroup | None = None,
-    tools: dict[str, Tool] | None = None,
+    tools: dict[str, ray.actor.ActorHandle] | None = None,
     tool_parser_name: str | None = None,
     max_tool_calls: int = 5,
     mask_tool_use: bool = True,

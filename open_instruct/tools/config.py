@@ -19,8 +19,10 @@ import logging
 from dataclasses import dataclass, field, fields
 from typing import Any
 
+import ray
+
 from open_instruct.tools.parsers import OpenInstructLegacyToolParser, ToolParser, get_available_parsers
-from open_instruct.tools.proxy import ToolProxy, create_tool_actor_from_config
+from open_instruct.tools.proxy import create_tool_actor_from_config
 from open_instruct.tools.tools import (
     MassiveDSSearchToolConfig,
     PythonCodeToolConfig,
@@ -134,7 +136,7 @@ class ToolArgs:
 
 @dataclass
 class ToolConfig:
-    """Internal structured tool configuration."""
+    """Master config for tools, containing the list of tool configs and higher-level configuration (e.g., what parser to use)."""
 
     tools: list[str] | None = None
     max_tool_calls: int = 5
@@ -174,39 +176,37 @@ def create_tool_parser(parser_name: str, tokenizer=None, tools: dict[str, Tool] 
         return None
 
 
-def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, Tool], list[str]]:
+def build_tools_from_config(config: ToolConfig) -> tuple[dict[str, ray.actor.ActorHandle], list[str]]:
     """Build tools from ToolConfig.
 
-    All tools are created as ToolProxy instances that instantiate the actual
-    tools inside Ray actors. This provides a uniform pattern and avoids
-    serialization issues with tools that have heavy dependencies.
+    All tools are created as ToolActor instances inside Ray actors.
+    This avoids serialization issues with tools that have heavy dependencies.
 
     Args:
         config: The tool configuration.
 
     Returns:
-        Tuple of (tools dict, stop_strings list)
+        Tuple of (tool_actors dict mapping name -> ActorHandle, stop_strings list)
     """
     if not config.tools:
         return {}, []
 
-    proxies: dict[str, ToolProxy] = {}
+    tool_actors: dict[str, ray.actor.ActorHandle] = {}
     stop_strings: list[str] = []
 
     for i, _tool_name in enumerate(config.tools):
         tool_config = config.get_tool_config(i)
 
         actor = create_tool_actor_from_config(config=tool_config)
-        proxy = ToolProxy.from_actor(actor)
-        name = proxy.tool_function_name
-        if name in proxies:
+        name = ray.get(actor.get_tool_function_name.remote())
+        if name in tool_actors:
             raise ValueError(
                 f"Tool name collision: '{name}' is already registered. "
                 f"Consider using override_name in tool_configs to use different names."
             )
-        proxies[name] = proxy
-        stop_strings.extend(proxy.get_stop_strings())
+        tool_actors[name] = actor
+        stop_strings.extend(ray.get(actor.get_stop_strings.remote()))
 
-    logger.info(f"Configured {len(proxies)} tool(s): {list(proxies.keys())}")
+    logger.info(f"Configured {len(tool_actors)} tool(s): {list(tool_actors.keys())}")
 
-    return proxies, list(set(stop_strings))
+    return tool_actors, list(set(stop_strings))

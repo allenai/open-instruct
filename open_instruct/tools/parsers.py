@@ -21,11 +21,7 @@ logger = logging.getLogger(__name__)
 class ToolParser(ABC):
     @abstractmethod
     def get_tool_calls(self, text: str) -> list[ToolCall]:
-        pass
-
-    @abstractmethod
-    def format_tool_calls(self, tool_output: str) -> str:
-        """Format a single tool output."""
+        """Extract tool calls from model outputs."""
         pass
 
     def format_tool_outputs(self, tool_outputs: list[str]) -> str:
@@ -38,6 +34,7 @@ class ToolParser(ABC):
 
     @abstractmethod
     def stop_sequences(self) -> list[str]:
+        """Get stop strings this parser relies on."""
         pass
 
 
@@ -48,6 +45,7 @@ class OpenInstructLegacyToolParser(ToolParser):
 
     Tools are invoked via <tool_name>content</tool_name> tags.
     The content between tags is passed to the tool's first required parameter.
+    Only works for tools that take a single string parameter.
     """
 
     def __init__(self, tool_list: list[Tool], output_wrap_name: str = "output"):
@@ -85,8 +83,11 @@ class OpenInstructLegacyToolParser(ToolParser):
                 tool_calls.append(ToolCall(name=tool_name, args={param_name: tool_content}))
         return tool_calls
 
-    def format_tool_calls(self, tool_output: str) -> str:
+    def _format_tool_output(self, tool_output: str) -> str:
         return f"<{self.output_wrap_name}>\n{tool_output}\n</{self.output_wrap_name}>\n"
+
+    def format_tool_outputs(self, tool_outputs: list[str]) -> str:
+        return "\n".join(self._format_tool_output(tool_output) for tool_output in tool_outputs)
 
     def stop_sequences(self) -> list[str]:
         return self.tool_stop_strings
