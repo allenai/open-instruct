@@ -154,6 +154,10 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         logger.info(f"[Rank {self.rank}] Loading HuggingFace weights from {self.model_name_or_path}")
         load_hf_model(self.model_name_or_path, self.model.state_dict(), work_dir=self.output_dir)
 
+        if self.single_gpu_mode:
+            logger.info(f"[Rank {self.rank}] Converting model to bfloat16 for single_gpu_mode")
+            self.model = self.model.to(dtype=torch.bfloat16)
+
         if self.load_ref_policy and self.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
             self.ref_policy = model_config_olmo.build(init_device="cpu")
