@@ -11,7 +11,7 @@ uv run python mason.py \
        --cluster ai2/saturn \
        --cluster ai2/ceres \
        --image "$BEAKER_IMAGE" \
-       --description "Single GPU grpo.py (OLMo-core Trainer) test script." \
+       --description "Single GPU OLMo-core GRPO test script." \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
@@ -20,7 +20,6 @@ uv run python mason.py \
        --timeout 15m \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --budget ai2/oe-adapt \
-       --no-host-networking \
        --gpus 1 \
        --no_auto_dataset_cache \
 	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
@@ -36,6 +35,7 @@ uv run python mason.py \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen3-1.7B \
     --stop_strings "</answer>" \
+    --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
     --temperature 0.7 \
     --inflight_updates True \
@@ -49,11 +49,13 @@ uv run python mason.py \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
-    --load_ref_policy false \
+    --load_ref_policy true \
     --seed 3 \
     --local_eval_every 1 \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
+    --save_traces \
+    --vllm_enforce_eager \
     --gradient_checkpointing \
     --push_to_hub false \
     --single_gpu_mode
