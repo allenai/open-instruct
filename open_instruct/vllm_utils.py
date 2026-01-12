@@ -61,7 +61,6 @@ from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.tools.parsers import ToolParser
 from open_instruct.tools.utils import ToolOutput
 from open_instruct.utils import ModelDims, ray_get_with_progress
 
@@ -476,7 +475,7 @@ class LLMRayActor:
         self,
         *args,
         tool_actors: list[ray.actor.ActorHandle] | None = None,
-        tool_parser: ToolParser | None = None,
+        tool_parser_type: str = "legacy",
         max_tool_calls: int = 5,
         mask_tool_use: bool = True,
         bundle_indices: list[int] | None = None,
@@ -493,7 +492,7 @@ class LLMRayActor:
         assert_threaded_actor(self)
         self._init_config(
             tool_actors,
-            tool_parser,
+            tool_parser_type,
             max_tool_calls,
             mask_tool_use,
             inflight_updates,

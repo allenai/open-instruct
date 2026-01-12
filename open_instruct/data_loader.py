@@ -279,11 +279,6 @@ class StreamingDataLoaderConfig:
     max_tool_calls: tuple[int, ...] = (5,)
     only_reward_good_outputs: bool = False
 
-    # Legacy tool args (deprecated - use tool_configs instead)
-    number_documents_to_search: int = 3
-    search_api_endpoint: str | None = None
-    code_tool_api_endpoint: str | None = None
-
     # Computed at post_init
     max_possible_score: float = 1.0
 
@@ -322,33 +317,25 @@ class StreamingDataLoaderConfig:
 
         self.max_tool_calls = tuple(int(x) for x in self.max_tool_calls)
 
-        # Validate and set default tool_call_names
-        if self.tools and self.tool_call_names:
-            if len(self.tool_call_names) != len(self.tools):
+        # Validate and set defaults for tool configuration
+        if self.tools:
+            # Set default tool_call_names if not provided
+            if not self.tool_call_names:
+                self.tool_call_names = self.tools
+            elif len(self.tool_call_names) != len(self.tools):
                 raise ValueError(
                     f"tool_call_names must have same length as tools. "
                     f"Got {len(self.tool_call_names)} names for {len(self.tools)} tools."
                 )
-        elif self.tools and not self.tool_call_names:
-            # default to using the tool config names as call names
-            self.tool_call_names = self.tools
 
-        # Validate tool_configs
-        if self.tools and self.tool_configs:
-            if len(self.tool_configs) != len(self.tools):
+            # Set default tool_configs if not provided
+            if not self.tool_configs:
+                self.tool_configs = ["{}"] * len(self.tools)
+            elif len(self.tool_configs) != len(self.tools):
                 raise ValueError(
                     f"tool_configs must have same length as tools. "
                     f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
                 )
-        elif self.tools and not self.tool_configs:
-            # Default to empty configs
-            self.tool_configs = ["{}"] * len(self.tools)
-
-        if self.tools is not None and len(self.tools) > 0:
-            for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
 
         self.max_possible_score = 0.0
         if self.apply_verifiable_reward:

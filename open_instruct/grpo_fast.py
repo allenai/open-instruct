@@ -1546,11 +1546,6 @@ def create_tools(
     tool_actors = []
 
     if tools:
-        assert tool_call_names is not None, "tool_call_names must be specified when using tools"
-        assert tool_configs is not None, "tool_configs must be specified when using tools"
-        assert len(tool_call_names) == len(tools), "tool_call_names must have same length as tools"
-        assert len(tool_configs) == len(tools), "tool_configs must have same length as tools"
-
         for tool, call_name, config_str in zip(tools, tool_call_names, tool_configs):
             tool_lower = tool.lower()
 
