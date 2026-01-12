@@ -12,6 +12,13 @@
 - Launch multi-node non-tool experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh`.
 - Launch the GPU tests with `./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_tests.sh`.
 
+# OLMo-core GRPO Training Scripts
+These scripts use `open_instruct/grpo.py` with OLMo-core's training infrastructure (FSDP instead of DeepSpeed):
+
+- `./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_grpo.sh`: Single GPU test with math reasoning (GSM8K).
+- `./scripts/train/build_image_and_launch.sh scripts/train/debug/tool_grpo.sh`: Single GPU test with tool use (code + search).
+- `./scripts/train/build_image_and_launch.sh scripts/train/debug/multi_node_grpo.sh`: Multi-node (2 nodes, 8 GPUs each) test with code reasoning.
+
 # Documentation
 To verify that documentation changes don't alter the generated output:
 1. Build docs on your branch: `uv run mkdocs build && cp -r site site-branch`

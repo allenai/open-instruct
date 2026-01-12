@@ -263,72 +263,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         ray.get(refs)
         logger.info(f"[Rank {self.rank}] vLLM model update group initialized")
 
-    def step(self) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Execute one training step.
-
-        Returns:
-            Tuple of (scalar_metrics, array_metrics).
-        """
-        try:
-            batch_data = next(self.dataloader_iter)
-        except StopIteration:
-            return {}, {}
-
-        batch = {"batch": batch_data["batch"]}
-        self.train_module.train_batch(batch, dry_run=False)
-
-        metrics = batch_data.get("metrics", {})
-        scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (int, float))}
-        array_metrics = {k: v for k, v in metrics.items() if not isinstance(v, (int, float))}
-
-        return scalar_metrics, array_metrics
-
-    def broadcast_to_vllm(self) -> list:
-        """Broadcast model weights to vLLM engines.
-
-        Follows the same pattern as grpo_fast.py - returns Ray ObjectRefs
-        for the caller to wait on, rather than blocking internally.
-
-        Returns:
-            List of Ray ObjectRefs for the weight update calls.
-        """
-        torch.cuda.empty_cache()
-        torch.cuda.set_device(self.local_rank)
-
-        model = self.train_module.model
-        params_list = list(model.named_parameters())
-        num_params = len(params_list)
-        refss = []
-
-        for count, (name, param) in enumerate(params_list, start=1):
-            hf_name = olmo_core_to_hf_name(name)
-            if torch.distributed.get_rank() == 0:
-                refs = [
-                    engine.update_weight.remote(
-                        hf_name, dtype=str(param.dtype), shape=tuple(param.shape), empty_cache=count == num_params
-                    )
-                    for engine in self.vllm_engines
-                ]
-                refss.extend(refs)
-            if torch.distributed.get_rank() == 0:
-                torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-
-        logger.info(f"[Rank {self.rank}] All broadcasts complete, returning {len(refss)} refs")
-        all_refs = []
-        if torch.distributed.get_rank() == 0:
-            all_refs.extend(refss)
-        return all_refs
-
-    def update_ref_policy(self) -> None:
-        """Update reference policy using Polyak averaging."""
-        if self.ref_policy is None:
-            return
-
-        alpha = self.grpo_config.alpha
-        with torch.no_grad():
-            for param, ref_param in zip(self.train_module.model.parameters(), self.ref_policy.parameters()):
-                ref_param.data.mul_(1 - alpha).add_(param.data, alpha=alpha)
-
     def setup_callbacks(
         self,
         actor_manager: Any,
@@ -416,15 +350,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         torch.save(state_dict, os.path.join(output_dir, "pytorch_model.bin"))
         tokenizer.save_pretrained(output_dir)
         logger.info(f"[Rank {self.rank}] Model saved to {output_dir}")
-
-    def get_dataloader_state(self) -> dict[str, Any]:
-        """Get dataloader state for checkpointing."""
-        return self.dataloader.state_dict() if hasattr(self.dataloader, "state_dict") else {}
-
-    def load_dataloader_state(self, state_dict: dict[str, Any]) -> None:
-        """Load dataloader state from checkpoint."""
-        if hasattr(self.dataloader, "load_state_dict"):
-            self.dataloader.load_state_dict(state_dict)
 
 
 class OLMoCoreModelGroup:
