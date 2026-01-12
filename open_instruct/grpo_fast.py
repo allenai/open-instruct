@@ -101,7 +101,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, masked_mean
-from open_instruct.tool_utils import tools
+from open_instruct.tools import tools
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -1518,7 +1518,7 @@ def load_tools(args: Args) -> dict[str, tools.Tool]:
 
     for tool in args.tools:
         if tool.lower() == "search":
-            from open_instruct.search_utils.search_tool import SearchTool
+            from open_instruct.tools.search_tool import SearchTool
 
             tool_instance = SearchTool(
                 start_str="<query>",
@@ -1567,7 +1567,7 @@ def create_model_and_optimizer(
     if streaming_config.tools:
         for tool in streaming_config.tools:
             if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
+                from open_instruct.tools.search_tool import SearchTool
 
                 tool = SearchTool(
                     start_str="<query>",
@@ -1579,7 +1579,7 @@ def create_model_and_optimizer(
                 # Add tool end string to stop_strings
                 streaming_config.stop_strings.append(tool.end_str)
             elif tool.lower() == "code":
-                from open_instruct.tool_utils.tools import PythonCodeTool
+                from open_instruct.tools.tools import PythonCodeTool
 
                 tool = PythonCodeTool(
                     start_str="<code>", end_str="</code>", api_endpoint=streaming_config.code_tool_api_endpoint
