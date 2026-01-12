@@ -53,7 +53,7 @@ class TensorCache:
     def __getitem__(self, indices: torch.Tensor) -> dict[str, torch.Tensor]:
         """Get cached tensors for the given indices."""
         return {k: v.to(indices.device)[indices.long()] for k, v in self.tensors.items()}
-        return {k: v[indices.cpu().long()].to(device, non_blocking=True) for k, v in self.tensors.items()}
+
     def to_disk(self, path: str | pathlib.Path) -> None:
         """Save the cache to disk atomically using temp file and rename."""
         path = pathlib.Path(path)
