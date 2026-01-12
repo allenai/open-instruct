@@ -1,4 +1,8 @@
 #!/bin/bash
+# Local debug script for testing GRPO with tool use
+# Note: Currently only 'code' tool is supported with new tools system
+# Search tool implementation is pending (see create_tools() in grpo_fast.py)
+
 uv run open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 64 \
     --dataset_mixer_list_splits train \
@@ -30,7 +34,7 @@ uv run open_instruct/grpo_fast.py \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
-    --tools search code \
-    --search_api_endpoint "http://saturn-cs-aus-232.reviz.ai2.in:44177/search" \
+    --tools code \
     --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
+    --max_tool_calls 5 \
     --push_to_hub false

@@ -101,7 +101,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, masked_mean
-from open_instruct.tools import tools
+from open_instruct.tools.parsers import ToolParser
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -1500,42 +1500,56 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def load_tools(args: Args) -> dict[str, tools.Tool]:
-    """Load tool instances based on args.tools configuration.
+def create_tools(
+    tools: list[str] | None,
+    code_tool_api_endpoint: str | None = None,
+    search_api_endpoint: str | None = None,
+    number_documents_to_search: int = 3,
+) -> tuple[list[ray.actor.ActorHandle], ToolParser | None]:
+    """Create tool actors and parser based on tool configuration.
 
     Args:
-        args: Parsed training arguments with tool configuration.
+        tools: List of tool names to enable (e.g., ["code", "search"]).
+        code_tool_api_endpoint: API endpoint for code execution tool.
+        search_api_endpoint: API endpoint for search tool.
+        number_documents_to_search: Number of documents to retrieve for search.
 
     Returns:
-        A mapping from tool end strings to tool instances.
+        A tuple of (tool_actors, tool_parser) where tool_actors is a list of Ray actor handles
+        and tool_parser is the parser for extracting/formatting tool calls.
 
     Raises:
-        ValueError: If an unknown tool is requested.
+        ValueError: If an unknown tool is requested or required configuration is missing.
     """
-    tool_objects: dict[str, tools.Tool] = {}
-    if not args.tools:
-        return tool_objects
+    from open_instruct.tools.parsers import OpenInstructLegacyToolParser
 
-    for tool in args.tools:
-        if tool.lower() == "search":
-            from open_instruct.tools.search_tool import SearchTool
+    if not tools:
+        return [], None
 
-            tool_instance = SearchTool(
-                start_str="<query>",
-                end_str="</query>",
-                api_endpoint=args.search_api_endpoint,
-                number_documents_to_search=args.number_documents_to_search,
-            )
-        elif tool.lower() == "code":
-            tool_instance = tools.PythonCodeTool(
-                start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint
-            )
+    tool_actors = []
+    for tool in tools:
+        if tool.lower() == "code":
+            if not code_tool_api_endpoint:
+                raise ValueError("code_tool_api_endpoint must be specified when using 'code' tool")
+
+            from open_instruct.tools.new_tools import PythonCodeToolConfig
+
+            config = PythonCodeToolConfig(api_endpoint=code_tool_api_endpoint, timeout=3)
+            tool_actor = config.build_remote(max_concurrency=512)
+            tool_actors.append(tool_actor)
+        elif tool.lower() == "search":
+            if not search_api_endpoint:
+                raise ValueError("search_api_endpoint must be specified when using 'search' tool")
+
+            # TODO: Implement search tool using new_tools pattern
+            raise ValueError("Search tool not yet implemented with new tools system. Use 'code' for now.")
         else:
-            raise ValueError(f"Unknown tool: {tool}")
+            raise ValueError(f"Unknown tool: {tool}. Supported tools: 'code'")
 
-        tool_objects[tool_instance.end_str] = tool_instance
+    # Create parser with the tool actors
+    tool_parser = OpenInstructLegacyToolParser(tool_actors, output_wrap_name="output")
 
-    return tool_objects
+    return tool_actors, tool_parser
 
 
 def create_model_and_optimizer(
@@ -1555,7 +1569,17 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     generation_config,
     data_prep_actor_state: dict | None = None,
-) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, tools.Tool], int, int]:
+) -> tuple[
+    ModelGroup,
+    list[vllm_utils.LLMRayActor],
+    list[ray.actor.ActorHandle],
+    ToolParser | None,
+    int,
+    int,
+    ray.actor.ActorHandle,
+    utils.ModelDims,
+    ray.actor.ActorHandle,
+]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -1563,32 +1587,16 @@ def create_model_and_optimizer(
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
     # Set up tools
-    tool_objects: dict[str, tools.Tool] = {}
-    if streaming_config.tools:
-        for tool in streaming_config.tools:
-            if tool.lower() == "search":
-                from open_instruct.tools.search_tool import SearchTool
+    tool_actors, tool_parser = create_tools(
+        tools=streaming_config.tools,
+        code_tool_api_endpoint=streaming_config.code_tool_api_endpoint,
+        search_api_endpoint=streaming_config.search_api_endpoint,
+        number_documents_to_search=streaming_config.number_documents_to_search,
+    )
 
-                tool = SearchTool(
-                    start_str="<query>",
-                    end_str="</query>",
-                    api_endpoint=streaming_config.search_api_endpoint,
-                    number_documents_to_search=streaming_config.number_documents_to_search,
-                )
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                streaming_config.stop_strings.append(tool.end_str)
-            elif tool.lower() == "code":
-                from open_instruct.tools.tools import PythonCodeTool
-
-                tool = PythonCodeTool(
-                    start_str="<code>", end_str="</code>", api_endpoint=streaming_config.code_tool_api_endpoint
-                )
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                streaming_config.stop_strings.append(tool.end_str)
-            else:
-                raise ValueError(f"Unknown tool: {tool}")
+    # Add parser's stop sequences to streaming config
+    if tool_parser:
+        streaming_config.stop_strings.extend(tool_parser.stop_sequences())
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -1644,6 +1652,7 @@ def create_model_and_optimizer(
 
     # Create vLLM engines with queues
     vllm_engines = vllm_utils.create_vllm_engines(
+        model_config.model_name_or_path,
         vllm_config.vllm_num_engines,
         vllm_config.vllm_tensor_parallel_size,
         vllm_config.vllm_enforce_eager,
@@ -1656,7 +1665,8 @@ def create_model_and_optimizer(
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        tools=tool_objects,
+        tool_actors=tool_actors,
+        tool_parser=tool_parser,
         max_tool_calls=streaming_config.max_tool_calls,
         mask_tool_use=streaming_config.mask_tool_use,
         prompt_queue=prompt_Q,
@@ -1712,7 +1722,8 @@ def create_model_and_optimizer(
     return (
         policy_group,
         vllm_engines,
-        tool_objects,
+        tool_actors,
+        tool_parser,
         resume_training_step,
         episode,
         actor_manager,
@@ -2402,7 +2413,8 @@ def main(
     (
         policy_group,
         vllm_engines,
-        tool_objects,
+        tool_actors,
+        tool_parser,
         resume_training_step,
         episode,
         actor_manager,
