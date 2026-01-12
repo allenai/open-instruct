@@ -902,7 +902,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             range(starting_epoch, args.num_train_epochs),
             forward_fn,
         )
-        logger.info("=============after cache logprobs")
+        logger.info("Finished caching logprobs.")
         print_gpu_stats(init_gpu_memory)
         torch.cuda.empty_cache()  # clear cache
 
