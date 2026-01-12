@@ -2236,17 +2236,7 @@ def create_generation_configs(args: Args):
 def add_prompt_to_generator(
     example: dict[str, Any], prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
 ) -> None:
-    """Add a prompt to the generation queue.
-
-    Args:
-        example: A dict containing:
-            - INPUT_IDS_PROMPT_KEY: The tokenized prompt
-            - dataset_index: Index into the original dataset
-            - prompt_id: Unique identifier for this prompt (epoch_datasetIndex)
-        param_prompt_Q: Queue to put the prompt request
-        generation_config: Generation configuration
-        is_eval: Whether this is an evaluation prompt
-    """
+    """Add a prompt to the generation queue."""
     prompt_Q.put(
         PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],

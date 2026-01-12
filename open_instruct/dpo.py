@@ -104,18 +104,7 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
 
 
 def get_transformer_config(model_name_or_path: str, vocab_size: int) -> TransformerConfig:
-    """Get the appropriate TransformerConfig for a given model name.
-
-    Args:
-        model_name_or_path: HuggingFace model name or path.
-        vocab_size: Vocabulary size for the model.
-
-    Returns:
-        TransformerConfig configured for the specified model.
-
-    Raises:
-        ValueError: If the model name is not recognized.
-    """
+    """Get the appropriate TransformerConfig for a given model name."""
     config_name = OLMO_MODEL_CONFIG_MAP.get(model_name_or_path)
     if config_name is None:
         available = ", ".join(OLMO_MODEL_CONFIG_MAP.keys())
