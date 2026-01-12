@@ -315,6 +315,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             ray.get(ready_refs)
             print("[DEBUG] vllm engines are ready", file=sys.stderr, flush=True)
 
+        import time
+
         for count, (name, param) in enumerate(params_list, start=1):
             hf_name = olmo_core_to_hf_name(name)
             if count == 1:
@@ -335,9 +337,23 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                     for engine in self.vllm_engines
                 ]
                 refss.extend(refs)
+                if count == 1:
+                    print(
+                        "[DEBUG] First param: sleeping 0.1s to let vLLM receive update_weight",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    time.sleep(0.1)
                 if count <= 3:
                     print(f"[DEBUG] Param {count}/{num_params}: calling broadcast()", file=sys.stderr, flush=True)
             if torch.distributed.get_rank() == 0:
+                if count <= 3:
+                    print(
+                        f"[DEBUG] Param {count}/{num_params}: about to broadcast, "
+                        f"shape={param.data.shape}, device={param.data.device}, dtype={param.data.dtype}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
                 if count <= 3:
                     print(f"[DEBUG] Param {count}/{num_params}: broadcast complete", file=sys.stderr, flush=True)
