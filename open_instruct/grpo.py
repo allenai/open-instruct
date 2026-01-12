@@ -66,6 +66,7 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
+    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
@@ -433,9 +434,13 @@ def main(
             save_code=True,
         )
         wandb_url = wandb.run.get_url()
+        maybe_update_beaker_description(wandb_url=wandb_url)
 
     logger.info("Starting OLMo-core GRPO training with Ray actors...")
     training_start_time = time.perf_counter()
+    maybe_update_beaker_description(
+        current_step=0, total_steps=args.num_training_steps, start_time=training_start_time, wandb_url=wandb_url
+    )
 
     for training_step in range(1, args.num_training_steps + 1):
         step_start_time = time.perf_counter()
@@ -502,6 +507,13 @@ def main(
 
         if args.with_tracking:
             wandb.log(metrics, step=training_step)
+
+        maybe_update_beaker_description(
+            current_step=training_step,
+            total_steps=args.num_training_steps,
+            start_time=training_start_time,
+            wandb_url=wandb_url,
+        )
 
     logger.info("Training complete.")
 
