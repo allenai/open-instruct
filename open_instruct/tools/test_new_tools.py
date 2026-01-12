@@ -1,6 +1,7 @@
 """Tests for new tools (PythonCodeTool from new_tools.py)."""
 
 import asyncio
+import dataclasses
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -97,7 +98,6 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
 
     async def test_none_code_returns_error(self):
         """Test that None code returns an error."""
-        # This shouldn't happen in practice due to type hints, but test defensively
         result = await self.tool(None)
 
         self.assertIsInstance(result, ToolOutput)
@@ -106,7 +106,6 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
     @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
     async def test_successful_execution(self, mock_session_class):
         """Test successful code execution."""
-        # Set up mock response
         mock_response = AsyncMock()
         mock_response.json.return_value = {"output": "Hello, World!\n", "error": None}
         mock_response.raise_for_status = MagicMock()
@@ -128,7 +127,6 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.timeout)
         self.assertGreater(result.runtime, 0)
 
-        # Verify API was called with correct parameters
         mock_session.post.assert_called_once_with(
             "http://localhost:1212/execute", json={"code": "print('Hello, World!')", "timeout": 3}
         )
@@ -237,13 +235,8 @@ class TestPythonCodeToolConfig(unittest.TestCase):
 
     def test_config_requires_api_endpoint(self):
         """Test config requires api_endpoint."""
-        # api_endpoint is now required, so we can't create a config without it
-        # This test verifies the field is required by the dataclass
-        import dataclasses
-
         fields = {f.name: f for f in dataclasses.fields(PythonCodeToolConfig)}
         self.assertIn("api_endpoint", fields)
-        # Check it has no default (required field)
         self.assertEqual(fields["api_endpoint"].default, dataclasses.MISSING)
         self.assertEqual(fields["api_endpoint"].default_factory, dataclasses.MISSING)
 
