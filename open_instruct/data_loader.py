@@ -881,7 +881,14 @@ class DataPreparationActor:
         self.dataset = dataset
 
         self.iter_dataloader = HFDataLoader(
-            dataset=dataset, batch_size=1, seed=seed, rank=0, world_size=1, work_dir=work_dir, automatic_reshuffle=True
+            dataset=dataset,
+            batch_size=1,
+            seed=seed,
+            rank=0,
+            world_size=1,
+            work_dir=work_dir,
+            automatic_reshuffle=True,
+            collator=lambda x: x[0],
         )
 
         self.prepared_data: dict[int, list[data_types.CollatedBatchData]] = {}
