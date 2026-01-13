@@ -3,9 +3,9 @@
 # Note: Currently only 'code' tool is supported with new tools system
 # Search tool implementation is pending (see create_tools() in grpo_fast.py)
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 64 \
+    --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 64 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 16 \
+    --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 4 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 512 \
     --response_length 512 \
