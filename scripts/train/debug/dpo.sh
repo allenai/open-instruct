@@ -12,6 +12,7 @@ uv run python mason.py \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
+    --no_auto_dataset_cache \
     --gpus 1 -- accelerate launch \
     --mixed_precision bf16 \
     --num_processes 1 \

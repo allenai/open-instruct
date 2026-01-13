@@ -1,6 +1,6 @@
 # Overview
 
-For our recent [Olmo3 paper](insert link), we used the following scripts to train our models:
+For our recent [Olmo3 paper](https://arxiv.org/abs/2512.13961), we used the following scripts to train our models:
 
 | Model           | Script name           | Beaker Link | Wandb URL | Commit |
 |-----------------|----------------------|---|---|--------|
