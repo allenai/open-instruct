@@ -627,11 +627,6 @@ class LLMRayActor:
             # Yield control to allow the server task to start before returning.
             await asyncio.sleep(0.1)
 
-            # Initialize OpenAI client in the event loop thread to avoid cross-thread issues
-            base_url = f"http://127.0.0.1:{self.server_port}/v1"
-            self.client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=3600)
-            self.model_name = engine_client.vllm_config.model_config.model
-
             return engine_client
 
         def _run_loop():
@@ -658,6 +653,8 @@ class LLMRayActor:
         # Client is now initialized in the event loop thread (_init_engine_and_server)
         # to avoid cross-thread async issues. Here we just verify it's ready.
         base_url = f"http://127.0.0.1:{self.server_port}/v1"
+        self.client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=3600)
+        self.model_name = self.llm_engine.vllm_config.model_config.model
         logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
 
         asyncio.run(_check_health(self.server_port))

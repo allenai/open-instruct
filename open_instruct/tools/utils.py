@@ -112,7 +112,7 @@ class BaseToolConfig:
         """Build the tool instance from this config.
 
         Args:
-            call_name: Name used to identify in function calls. If not provided, uses tool's DEFAULT_CALL_NAME.
+            call_name: Name used to identify in function calls. If not provided, uses tool's config name.
 
         Returns:
             A Tool instance.
@@ -122,7 +122,7 @@ class BaseToolConfig:
             args["call_name"] = call_name
         else:
             # Use tool class's default call name
-            args["call_name"] = getattr(self.tool_class, "DEFAULT_CALL_NAME", "tool")
+            args["call_name"] = self.tool_class.config_name
         return self.tool_class(**args)
 
     def build_remote(self, call_name: str | None = None, max_concurrency: int = 512) -> ray.actor.ActorHandle:
@@ -132,7 +132,7 @@ class BaseToolConfig:
         and to centralize control over tool concurrency.
 
         Args:
-            call_name: Name used to identify in function calls. If not provided, uses tool's DEFAULT_CALL_NAME.
+            call_name: Name used to identify in function calls. If not provided, uses tool's config name.
             max_concurrency: Maximum number of concurrent calls the actor can handle.
 
         Returns:
@@ -143,5 +143,5 @@ class BaseToolConfig:
             args["call_name"] = call_name
         else:
             # Use tool class's default call name
-            args["call_name"] = getattr(self.tool_class, "DEFAULT_CALL_NAME", "tool")
+            args["call_name"] = self.tool_class.config_name
         return ray.remote(self.tool_class).options(max_concurrency=max_concurrency).remote(**args)

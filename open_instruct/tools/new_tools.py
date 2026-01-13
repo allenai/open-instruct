@@ -38,8 +38,6 @@ class PythonCodeTool(Tool):
     Executes Python code via a FastAPI endpoint.
     """
 
-    DEFAULT_CALL_NAME = "python"
-
     def __init__(self, call_name: str, api_endpoint: str, timeout: int = 3) -> None:
         super().__init__(
             config_name="python",
