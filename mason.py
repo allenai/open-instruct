@@ -472,7 +472,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     filtered_command, args.auto_output_dir_path, whoami
                 )
                 # we use shlex.quote to ensure that args with special characters are properly quoted
-                # this is important for tool config, which is a json dict.
+                # this is important for tool_configs, which is are json dicts.
                 caching_command = (
                     "python " + " ".join(shlex.quote(arg) for arg in filtered_command) + " --cache_dataset_only"
                 )
