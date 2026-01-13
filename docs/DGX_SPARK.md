@@ -16,7 +16,6 @@ Support for NVIDIA DGX Spark (GB10 Blackwell, CUDA 13, aarch64) is experimental.
 1. **vLLM**: Uses cu130 wheel (v0.13.0) pinned to specific commit
 2. **Flash Attention**: Not available - uses PyTorch SDPA instead
 3. **PyTorch**: Shows sm_121 warning (safe to ignore - binary compatible with sm_120)
-4. **GRPO/RL**: Requires 2+ GPUs - NCCL weight sync doesn't support single-GPU mode
 
 ## Installation
 
@@ -38,23 +37,24 @@ uv run python -m accelerate.commands.launch \
     ...
 ```
 
-### GRPO/RL (Requires 2+ GPUs)
-
-> **Note**: GRPO requires at least 2 GPUs because it uses NCCL distributed weight sync between the policy model and vLLM inference engine. Single-GPU training causes "Duplicate GPU detected" NCCL errors.
-
+### GRPO/RL (Single GPU)
 ```bash
 uv run python open_instruct/grpo_fast.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --attn_implementation sdpa \
     --vllm_enforce_eager \
-    --vllm_gpu_memory_utilization 0.7 \
+    --vllm_sync_backend gloo \
+    --vllm_gpu_memory_utilization 0.3 \
+    --single_gpu_mode \
     ...
 ```
 
-**Required flags for DGX Spark:**
+**Required flags for DGX Spark single-GPU:**
 - `--attn_implementation sdpa` - Use PyTorch SDPA instead of flash-attn
 - `--vllm_enforce_eager` - Disable CUDA graphs (more compatible)
-- `--vllm_gpu_memory_utilization 0.7` - Leave headroom for unified memory
+- `--vllm_sync_backend gloo` - Use Gloo instead of NCCL (supports same-GPU ranks)
+- `--vllm_gpu_memory_utilization 0.3` - Lower memory since sharing GPU
+- `--single_gpu_mode` - Collocate vLLM and policy on same GPU
 
 ## Troubleshooting
 
