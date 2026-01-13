@@ -99,7 +99,7 @@ class TestTensorCache(unittest.TestCase):
 
             self.assertTrue(cache_path.exists())
 
-            loaded_cache = TensorCache.from_disk(cache_path)
+            loaded_cache = TensorCache.from_disk(cache_path, device="cpu")
 
             self.assertTrue(torch.allclose(loaded_cache.tensors["chosen_logps"], chosen_logps))
             self.assertTrue(torch.allclose(loaded_cache.tensors["rejected_logps"], rejected_logps))
@@ -113,7 +113,7 @@ class TestTensorCache(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = pathlib.Path(tmpdir) / "cache.pt"
             cache.to_disk(cache_path)
-            loaded_cache = TensorCache.from_disk(cache_path)
+            loaded_cache = TensorCache.from_disk(cache_path, device="cpu")
 
             result = loaded_cache[torch.tensor([1, 3])]
             self.assertTrue(torch.allclose(result["chosen_logps"], torch.tensor([2.0, 4.0])))
