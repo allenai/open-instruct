@@ -16,7 +16,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -46,9 +46,19 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 logger = logging.getLogger(__name__)
 
 
-def build_index_mapping(dataset: Dataset) -> dict[int, int]:
-    """Build a mapping from original row IDs to current positional indices."""
-    return {dataset[i]["index"]: i for i in range(len(dataset))}
+def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
+    """Move all tensors in a batch dictionary to the specified device.
+
+    Args:
+        batch: Dictionary potentially containing torch.Tensor values.
+        device: Target device. If None, tensors are not moved.
+
+    Returns:
+        Dictionary with the same keys, but tensor values moved to the target device.
+    """
+    if device is None:
+        return batch
+    return {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
 
 class HFDataLoader(data_loader.DataLoaderBase):
@@ -56,7 +66,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
 
     This class implements the DataLoaderBase interface, providing iteration over
     a HuggingFace Dataset with support for sharding across distributed workers,
-    shuffling, and checkpointing.
+    shuffling, checkpointing, and optional collation.
     """
 
     def __init__(
@@ -68,32 +78,48 @@ class HFDataLoader(data_loader.DataLoaderBase):
         world_size: int,
         work_dir: str,
         automatic_reshuffle: bool = False,
+        collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
+        device: torch.device | None = None,
     ) -> None:
         """Initialize the HFDataLoader.
 
         Args:
-            dataset: The HuggingFace Dataset to load data from.
+            dataset: The HuggingFace Dataset to load data from. Must have an 'index' column.
             batch_size: The global batch size.
             seed: Random seed for shuffling.
             rank: The rank of the current process in the distributed setup.
             world_size: Total number of processes in the distributed setup.
             work_dir: Working directory for the data loader (required by DataLoaderBase).
             automatic_reshuffle: If True, automatically reshuffle at epoch boundaries.
+            collator: Optional collation function for batching examples.
+            device: Device to move tensors to.
+
+        Note:
+            The dataset must have an 'index' column for tracking samples across epochs.
+            This is automatically added by get_cached_dataset_tulu(). For custom datasets,
+            add it with: dataset.add_column('index', range(len(dataset)))
         """
         super().__init__(
-            work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=0
+            work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=rank
         )
 
-        self._original_dataset = dataset.shard(num_shards=world_size, index=rank)
-        self.dataset = self._original_dataset.shuffle(seed=seed)
+        if "index" not in dataset.column_names:
+            raise ValueError(
+                "Dataset must have an 'index' column. This is typically added by get_cached_dataset_tulu(). "
+                "If using a custom dataset, add it with: dataset.add_column('index', range(len(dataset)))"
+            )
+        self._full_dataset = dataset
         self.seed = seed
         self._batch_size = batch_size
-        self.effective_size = len(self.dataset) - (len(self.dataset) % batch_size)
+        self._per_rank_batch_size = batch_size // world_size
+        self._collator = collator if collator is not None else (lambda x: {"examples": x})
         self._automatic_reshuffle = automatic_reshuffle
         self._excluded_indices: set[int] = set()
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
-        self._index_to_position: dict[int, int] = build_index_mapping(self.dataset)
+        self._device = device
+
+        self._reshard(epoch=0)
 
     def __next__(self) -> dict[str, Any]:
         if self._current_iter is None:
@@ -112,20 +138,21 @@ class HFDataLoader(data_loader.DataLoaderBase):
             self.batches_processed = 0
             raise
 
-    def __getitem__(self, index: int) -> dict[str, Any]:
-        """Look up an example by its original dataset index."""
-        return self.dataset[self._index_to_position[index]]
-
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         """Return an iterable over all batches in the epoch."""
-        for i in range(self.batches_processed, self.effective_size):
+        start_example = self.batches_processed * self._per_rank_batch_size
+        batch_examples: list[dict[str, Any]] = []
+        for i in range(start_example, self.effective_size):
             example = self.dataset[i]
-            yield example | {"prompt_id": f"{self._epoch}_{example['index']}"}
+            batch_examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
+            if len(batch_examples) == self._per_rank_batch_size:
+                yield to_device(self._collator(batch_examples), self._device)
+                batch_examples = []
 
     @property
     def total_batches(self) -> int:
         """Return the total number of batches in an epoch."""
-        return self.effective_size // self._batch_size
+        return self.effective_size // self._per_rank_batch_size
 
     def state_dict(self) -> dict[str, Any]:
         """Return a state dictionary for checkpointing."""
@@ -154,30 +181,66 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._excluded_indices.add(index)
 
     def reshuffle(self, epoch: int | None = None, **kwargs: Any) -> None:
-        """Reshuffle the dataset for a new epoch.
+        """Reshuffle and reshard the dataset for a new epoch.
 
         Args:
-            epoch: The epoch number (unused, for API compatibility).
+            epoch: The epoch number to use for shuffling seed. If None, increments internal counter.
             **kwargs: Additional keyword arguments (unused, for API compatibility).
         """
-        self._epoch += 1
+        self._epoch = self._epoch + 1 if epoch is None else epoch
         self.batches_processed = 0
-        shuffled = self._original_dataset.shuffle(seed=self.seed + self._epoch)
-        # If this is slow, we can speed it up by making this a boolean mask.
-        self.dataset = shuffled.filter(lambda x: x["index"] not in self._excluded_indices)
-        self.effective_size = len(self.dataset) - (len(self.dataset) % self._batch_size)
-        self._index_to_position = build_index_mapping(self.dataset)
+        self._reshard(self._epoch)
+
+    def _reshard(self, epoch: int) -> None:
+        """Reshard the dataset for a given epoch.
+
+        Uses index-based shuffling to avoid copying the dataset.
+        """
+        rng = np.random.default_rng(self.seed + epoch)
+        all_indices = np.arange(len(self._full_dataset))
+        if self._excluded_indices:
+            mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
+            all_indices = all_indices[mask]
+        rng.shuffle(all_indices)
+
+        global_size = len(all_indices)
+        total_batches = global_size // self._batch_size
+        usable_size = total_batches * self._batch_size
+
+        rank_indices = all_indices[:usable_size].reshape(total_batches, self._batch_size)
+        rank_indices = rank_indices[:, self.dp_rank :: self.dp_world_size].flatten()
+
+        self.effective_size = len(rank_indices)
+        self.dataset = self._full_dataset.select(rank_indices.tolist())
 
     def get_mock_batch(self) -> dict[str, Any]:
         """Return a batch with arbitrary data for dry-run testing.
 
         Used by the trainer to do a dry-run of the
         forward and backward pass before training officially starts.
+        """
+        num_examples = min(self._per_rank_batch_size, len(self.dataset))
+        examples = [self.dataset[i] for i in range(num_examples)]
+        return to_device(self._collator(examples), self._device)  # type: ignore[return-value]
+
+    def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int | None:
+        """Return the total number of tokens in the batch across all ranks.
+
+        Counts tokens from all keys containing 'input_ids' that are torch tensors.
+
+        Args:
+            batch: A batch dictionary containing input tensors.
 
         Returns:
-            The first item from the dataset.
+            Total number of tokens across all ranks, or None if no input_ids found.
         """
-        return self.dataset[0]
+        num_tokens = 0
+        for key, value in batch.items():
+            if "input_ids" in key and isinstance(value, torch.Tensor):
+                num_tokens += value.numel()
+        if num_tokens == 0:
+            return None
+        return num_tokens * self.dp_world_size
 
 
 @dataclass
@@ -199,17 +262,14 @@ class VLLMConfig:
 
 @dataclass
 class StreamingDataLoaderConfig:
-    # Data loading/packing
     max_prompt_token_length: int = 256
     response_length: int = 256
     pack_length: int = 512
 
-    # Batching
     async_steps: int = 1
     num_samples_per_prompt_rollout: int = 4
     num_unique_prompts_rollout: int = 16
 
-    # GRPO sampling/filtering
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     no_resampling_pass_rate: float | None = None
@@ -217,7 +277,6 @@ class StreamingDataLoaderConfig:
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
 
-    # Dataset
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     dataset_mixer_eval_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
@@ -231,29 +290,24 @@ class StreamingDataLoaderConfig:
     shuffle_eval_dataset: bool = False
     system_prompt_override_file: str | None = None
 
-    # Generation
     temperature: float = 0.7
     stop_strings: list[str] | None = None
     inflight_updates: bool = False
 
-    # Reward - R1 style format reward
     apply_r1_style_format_reward: bool = False
     r1_style_format_reward: float = 1.0
     additive_format_reward: bool = False
 
-    # Reward - Verifiable reward
     apply_verifiable_reward: bool = True
     verification_reward: float = 10.0
     remap_verifier: str | None = None
 
-    # LLM judge verifier
     llm_judge_model: str = "azure/gpt-4o-mini-standard"
     llm_judge_max_tokens: int = 2048
     llm_judge_max_context_length: int = 8192
     llm_judge_temperature: float = 1.0
     llm_judge_timeout: int = 60
 
-    # Code verifier
     code_api_url: str = field(
         default_factory=lambda: os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
     )
@@ -261,26 +315,20 @@ class StreamingDataLoaderConfig:
     code_pass_rate_reward_threshold: float = 0.0
     code_apply_perf_penalty: bool = False
 
-    # Max length verifier
     max_length_verifier_max_length: int = 32768
 
-    # Non stop penalty
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
-    # Tools
     tools: list[str] | None = None
     max_tool_calls: tuple[int, ...] = (5,)
     only_reward_good_outputs: bool = False
 
-    # RAG
     number_documents_to_search: int = 3
     search_api_endpoint: str | None = None
 
-    # Code tool
     code_tool_api_endpoint: str | None = None
 
-    # Computed at post_init
     max_possible_score: float = 1.0
 
     def __post_init__(self):
@@ -748,7 +796,6 @@ def prepare_collated_data_for_workers(
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
 
-        # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
         collated_query_responses = []
         collated_attention_masks = []
