@@ -268,17 +268,6 @@ class StreamingDataLoaderConfig:
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
-    # Tools
-    tools: list[str] | None = None
-    tool_call_names: list[str] | None = None
-    """Override names used in tool calls (e.g., '<name>...</name>'). Must match length of --tools if set. Defaults to --tools if not specified."""
-    tool_configs: list[str] | None = None
-    """JSON dictionaries for configuring each tool. Must match length of --tools. Use '{}' for defaults."""
-    tool_parser_type: str = "legacy"
-    """Type of tool parser to use: 'legacy' is the only option for now.'"""
-    max_tool_calls: int = 5
-    only_reward_good_outputs: bool = False
-
     # Computed at post_init
     max_possible_score: float = 1.0
 
@@ -314,28 +303,6 @@ class StreamingDataLoaderConfig:
 
         if self.stop_strings is None:
             self.stop_strings = []
-
-        self.max_tool_calls = int(self.max_tool_calls)
-
-        # Validate and set defaults for tool configuration
-        if self.tools:
-            # Set default tool_call_names if not provided
-            if not self.tool_call_names:
-                self.tool_call_names = self.tools
-            elif len(self.tool_call_names) != len(self.tools):
-                raise ValueError(
-                    f"tool_call_names must have same length as tools. "
-                    f"Got {len(self.tool_call_names)} names for {len(self.tools)} tools."
-                )
-
-            # Set default tool_configs if not provided
-            if not self.tool_configs:
-                self.tool_configs = ["{}"] * len(self.tools)
-            elif len(self.tool_configs) != len(self.tools):
-                raise ValueError(
-                    f"tool_configs must have same length as tools. "
-                    f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
-                )
 
         self.max_possible_score = 0.0
         if self.apply_verifiable_reward:

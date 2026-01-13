@@ -1,13 +1,74 @@
 import json
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, field
 from typing import Any, ClassVar
-
-import ray
 
 from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
+
+
+@dataclass
+class ToolsConfig:
+    """Configuration for tools used during generation.
+
+    This config is parsed separately from StreamingDataLoaderConfig and handles
+    all tool-related validation.
+    """
+
+    tools: list[str] | None = None
+    """List of tool names to enable (e.g., ["python", "search"])."""
+
+    tool_call_names: list[str] | None = None
+    """Override names used in tool calls (e.g., '<name>...</name>').
+    Must match length of tools if set. Defaults to tools if not specified."""
+
+    tool_configs: list[str] = field(default_factory=list)
+    """JSON dictionaries for configuring each tool. Must match length of tools. Use '{}' for defaults."""
+
+    tool_parser_type: str = "legacy"
+    """Type of tool parser to use: 'legacy' is the only option for now."""
+
+    max_tool_calls: int = 5
+    """Maximum number of tool calls allowed per generation."""
+
+    only_reward_good_outputs: bool = False
+    """Only apply rewards to outputs that are marked as good."""
+
+    def __post_init__(self):
+        self.max_tool_calls = int(self.max_tool_calls)
+
+        if self.tools:
+            # Set default tool_call_names if not provided
+            if not self.tool_call_names:
+                self.tool_call_names = self.tools
+            elif len(self.tool_call_names) != len(self.tools):
+                raise ValueError(
+                    f"tool_call_names must have same length as tools. "
+                    f"Got {len(self.tool_call_names)} names for {len(self.tools)} tools."
+                )
+
+            # Set default tool_configs if not provided
+            if not self.tool_configs:
+                self.tool_configs = ["{}"] * len(self.tools)
+            elif len(self.tool_configs) != len(self.tools):
+                raise ValueError(
+                    f"tool_configs must have same length as tools. "
+                    f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
+                )
+
+        # turn all the tool_configs into dicts
+        # using a simple loop to make the error message more informative
+        for i, (tool_name, config) in enumerate(zip(self.tools, self.tool_configs)):
+            try:
+                self.tool_configs[i] = json.loads(config)
+            except Exception as e:
+                raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
+
+    @property
+    def enabled(self) -> bool:
+        """Return True if any tools are configured."""
+        return bool(self.tools)
 
 
 @dataclass
@@ -96,52 +157,3 @@ class BaseToolConfig:
 
     tool_class: ClassVar[type[Tool]]
     """Related tool class for this config."""
-
-    def _get_init_kwargs(self) -> dict[str, Any]:
-        """Get kwargs for initializing the tool.
-
-        Passes all dataclass instance fields as kwargs.
-        Override this method for tools with validation or non-standard initialization.
-
-        Returns:
-            Dictionary of kwargs to pass to tool_class.__init__
-        """
-        return asdict(self)
-
-    def build(self, call_name: str | None = None) -> Tool:
-        """Build the tool instance from this config.
-
-        Args:
-            call_name: Name used to identify in function calls. If not provided, uses tool's config name.
-
-        Returns:
-            A Tool instance.
-        """
-        args = self._get_init_kwargs()
-        if call_name:
-            args["call_name"] = call_name
-        else:
-            # Use tool class's default call name
-            args["call_name"] = self.tool_class.config_name
-        return self.tool_class(**args)
-
-    def build_remote(self, call_name: str | None = None, max_concurrency: int = 512) -> ray.actor.ActorHandle:
-        """Build the tool as a Ray remote actor.
-
-        Allows for passing to vllm actors without needing to serialize tool itself,
-        and to centralize control over tool concurrency.
-
-        Args:
-            call_name: Name used to identify in function calls. If not provided, uses tool's config name.
-            max_concurrency: Maximum number of concurrent calls the actor can handle.
-
-        Returns:
-            A Ray actor handle for the Tool.
-        """
-        args = self._get_init_kwargs()
-        if call_name:
-            args["call_name"] = call_name
-        else:
-            # Use tool class's default call name
-            args["call_name"] = self.tool_class.config_name
-        return ray.remote(self.tool_class).options(max_concurrency=max_concurrency).remote(**args)

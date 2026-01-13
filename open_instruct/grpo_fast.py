@@ -47,7 +47,6 @@ from open_instruct.data_loader import DataPreparationActor, accumulate_inference
 # isort: on
 import asyncio
 import dataclasses
-import json
 import logging
 import math
 import random
@@ -103,7 +102,8 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.tools.new_tools import TOOL_REGISTRY
-from open_instruct.tools.parsers import OpenInstructLegacyToolParser, ToolParser
+from open_instruct.tools.parsers import create_tool_parser
+from open_instruct.tools.utils import ToolsConfig
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -1385,9 +1385,11 @@ def validate_configs(
     )
 
 
-def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig) -> Args:
+def setup_runtime_variables(
+    args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig, tools_config: ToolsConfig
+) -> Args:
     """Set up runtime variables for the experiment."""
-    if streaming_config.tools and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
+    if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )
@@ -1416,7 +1418,7 @@ def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.Stream
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = streaming_config.tools is not None and len(streaming_config.tools) > 0
+    args.tool_use = tools_config.enabled
     return args
 
 
@@ -1502,31 +1504,8 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def create_tool_parser(
-    parser_type: str, tool_actors: list[ray.actor.ActorHandle], output_wrap_name: str = "output"
-) -> ToolParser:
-    """Create a tool parser based on configuration.
-
-    Args:
-        parser_type: Type of parser to use ('legacy', 'vllm_hermes', etc.).
-        tool_actors: List of Ray actor handles for tools.
-        output_wrap_name: Name to wrap tool outputs with (for legacy parser).
-
-    Returns:
-        A ToolParser instance.
-
-    Raises:
-        ValueError: If parser type is not supported.
-    """
-    if parser_type == "legacy":
-        return OpenInstructLegacyToolParser(tool_actors, output_wrap_name=output_wrap_name)
-    else:
-        # TODO: Implement other parser types (vllm_hermes, vllm_llama3_json, etc.)
-        raise ValueError(f"Parser type '{parser_type}' not yet implemented. Use 'legacy' for now.")
-
-
 def create_tools(
-    tools: list[str] | None, tool_call_names: list[str] | None = None, tool_configs: list[str] | None = None
+    tools: list[str] | None, tool_call_names: list[str] | None = None, tool_configs: list[dict[str, Any]] | None = None
 ) -> list[ray.actor.ActorHandle]:
     """Create tool actors based on tool configuration using the TOOL_REGISTRY.
 
@@ -1545,43 +1524,24 @@ def create_tools(
     """
     tool_actors = []
 
-    if tools:
-        for tool, call_name, config_str in zip(tools, tool_call_names, tool_configs):
-            tool_lower = tool.lower()
+    for tool, call_name, config in zip(tools, tool_call_names, tool_configs):
+        if tool not in TOOL_REGISTRY:
+            available_tools = ", ".join(TOOL_REGISTRY.keys())
+            raise ValueError(f"Unknown tool: {tool}. Available tools: {available_tools}")
 
-            # Look up tool in registry
-            if tool_lower not in TOOL_REGISTRY:
-                available_tools = ", ".join(TOOL_REGISTRY.keys())
-                raise ValueError(f"Unknown tool: {tool}. Available tools: {available_tools}")
+        tool_config_class = TOOL_REGISTRY[tool]
+        # Build config from dictionary
+        try:
+            config = tool_config_class(**config)
+        except Exception as e:
+            raise ValueError(f"Invalid config for tool '{tool}': {e}") from e
 
-            tool_config_class = TOOL_REGISTRY[tool_lower]
-
-            # Parse config JSON
-            try:
-                config_dict = json.loads(config_str)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in tool_configs for tool '{tool}': {e}") from e
-
-            # Validate config dict matches expected fields
-            expected_fields = {f.name for f in dataclasses.fields(tool_config_class)}
-            provided_fields = set(config_dict.keys())
-
-            # Check for unknown fields
-            unknown_fields = provided_fields - expected_fields
-            if unknown_fields:
-                raise ValueError(
-                    f"Unknown config fields for tool '{tool}': {unknown_fields}. Expected fields: {expected_fields}"
-                )
-
-            # Build config from dictionary
-            try:
-                config = tool_config_class(**config_dict)
-            except TypeError as e:
-                raise ValueError(f"Invalid config for tool '{tool}': {e}. Expected fields: {expected_fields}") from e
-
-            # Build remote actor with custom call_name
-            tool_actor = config.build_remote(call_name=call_name, max_concurrency=512)
-            tool_actors.append(tool_actor)
+        # The config is a dataclass, and may have performed additional validation
+        # or transformation of the args, which we then now pass to the tool.
+        kwarg_dict = asdict(config)
+        kwarg_dict["call_name"] = call_name
+        tool_actor = ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**kwarg_dict)
+        tool_actors.append(tool_actor)
 
     return tool_actors
 
@@ -1604,7 +1564,7 @@ def create_model_and_optimizer(
     generation_config,
     data_prep_actor_state: dict | None = None,
     tool_actors: list[ray.actor.ActorHandle] | None = None,
-    tool_parser_type: str = "legacy",
+    tools_config: ToolsConfig | None = None,
 ) -> tuple[
     ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
 ]:
@@ -1681,8 +1641,8 @@ def create_model_and_optimizer(
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         tool_actors=tool_actors,
-        tool_parser_type=tool_parser_type,
-        max_tool_calls=streaming_config.max_tool_calls,
+        tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
+        max_tool_calls=tools_config.max_tool_calls if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
@@ -2349,9 +2309,10 @@ def main(
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
+    tools_config: ToolsConfig,
 ):
     tokenizer = make_tokenizer(tc, model_config)
-    args = setup_runtime_variables(args, streaming_config)
+    args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
 
     if args.verbose:
@@ -2373,7 +2334,7 @@ def main(
     if args.cache_dataset_only:
         return
 
-    pprint([args, model_config])
+    pprint([args, model_config, streaming_config, vllm_config, tools_config])
 
     # Initialize Ray before creating Ray objects
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
@@ -2396,28 +2357,26 @@ def main(
         verification_reward=streaming_config.verification_reward,
         non_stop_penalty=streaming_config.non_stop_penalty,
         non_stop_penalty_value=streaming_config.non_stop_penalty_value,
-        only_reward_good_outputs=streaming_config.only_reward_good_outputs,
+        only_reward_good_outputs=tools_config.only_reward_good_outputs,
         additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
 
-    # Set up tool actors before creating generation configs
-    # Parser will be created inside vLLM actors to avoid serialization issues
+    # Note that parser will be created inside vLLM actors to avoid serialization issues
     tool_actors = create_tools(
-        tools=streaming_config.tools,
-        tool_call_names=streaming_config.tool_call_names,
-        tool_configs=streaming_config.tool_configs,
+        tools=tools_config.tools, tool_call_names=tools_config.tool_call_names, tool_configs=tools_config.tool_configs
     )
 
     # Create parser temporarily to get stop sequences for generation config
     # The actual parser used during generation will be created inside vLLM actors
     if tool_actors:
-        temp_parser = create_tool_parser(parser_type=streaming_config.tool_parser_type, tool_actors=tool_actors)
-        stop_seqs = temp_parser.stop_sequences()
-        logger.info(f"Adding tool stop sequences to config: {stop_seqs}")
-        streaming_config.stop_strings.extend(stop_seqs)
+        parser_stop_seqs = create_tool_parser(
+            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors
+        ).stop_sequences()
+        logger.info(f"Adding tool stop sequences to config: {parser_stop_seqs}")
+        streaming_config.stop_strings.extend(parser_stop_seqs)
 
-    # Create generation configs AFTER adding tool stop sequences
+    # AFTER potentially adding tool stop sequences, create generation configs
     generation_configs = create_generation_configs(args, streaming_config)
 
     checkpoint_state = None
@@ -2452,7 +2411,7 @@ def main(
             generation_configs["train"],
             data_prep_actor_state,
             tool_actors,
-            streaming_config.tool_parser_type,
+            tools_config,
         )
     )
 
@@ -2524,13 +2483,23 @@ if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
     parser = ArgumentParserPlus(
-        (Args, TokenizerConfig, ModelConfig, data_loader_lib.StreamingDataLoaderConfig, data_loader_lib.VLLMConfig)
+        (
+            Args,
+            TokenizerConfig,
+            ModelConfig,
+            data_loader_lib.StreamingDataLoaderConfig,
+            data_loader_lib.VLLMConfig,
+            ToolsConfig,
+        )
     )
-    args, tokenizer_config, model_config, streaming_config, vllm_config = parser.parse_args_into_dataclasses()
+    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
+        parser.parse_args_into_dataclasses()
+    )
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
     assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
+    assert isinstance(tools_config, ToolsConfig)
 
-    main(args, tokenizer_config, model_config, streaming_config, vllm_config)
+    main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config)
