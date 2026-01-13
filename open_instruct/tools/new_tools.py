@@ -126,16 +126,21 @@ class JinaBrowseTool(Tool):
     Get an API key at https://jina.ai/reader/
     """
 
+    config_name = "jina_browse"
+    description = "Fetches and converts webpage content to clean markdown using Jina Reader API"
+    call_name = "jina_browse"
+    parameters = {
+        "type": "object",
+        "properties": {"url": {"type": "string", "description": "The URL of the webpage to fetch"}},
+        "required": ["url"],
+    }
+
     def __init__(self, timeout: int = 30) -> None:
         super().__init__(
-            config_name="jina_browse",
-            description="Fetches and converts webpage content to clean markdown using Jina Reader API",
-            call_name="jina_browse",
-            parameters={
-                "type": "object",
-                "properties": {"url": {"type": "string", "description": "The URL of the webpage to fetch"}},
-                "required": ["url"],
-            },
+            config_name=self.config_name,
+            description=self.description,
+            call_name=self.call_name,
+            parameters=self.parameters,
         )
         self.timeout = timeout
         self.api_key = os.environ.get("JINA_API_KEY")
