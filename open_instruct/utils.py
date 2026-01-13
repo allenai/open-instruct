@@ -50,10 +50,7 @@ from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass
 from multiprocessing import resource_tracker as _rt
-from typing import TYPE_CHECKING, Any, NewType
-
-if TYPE_CHECKING:
-    import vllm
+from typing import Any, NewType
 
 import beaker
 import numpy as np
@@ -61,6 +58,7 @@ import ray
 import requests
 import torch
 import torch.nn.functional as F
+import vllm.config
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
