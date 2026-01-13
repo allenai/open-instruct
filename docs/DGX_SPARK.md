@@ -13,9 +13,10 @@ Support for NVIDIA DGX Spark (GB10 Blackwell, CUDA 13, aarch64) is experimental.
 
 ## Known Limitations
 
-1. **vLLM**: Uses nightly cu130 wheel (0.14.0rc1) - not a stable release
+1. **vLLM**: Uses cu130 wheel (v0.13.0) pinned to specific commit
 2. **Flash Attention**: Not available - uses PyTorch SDPA instead
 3. **PyTorch**: Shows sm_121 warning (safe to ignore - binary compatible with sm_120)
+4. **GRPO/RL**: Requires 2+ GPUs - NCCL weight sync doesn't support single-GPU mode
 
 ## Installation
 
@@ -37,7 +38,10 @@ uv run python -m accelerate.commands.launch \
     ...
 ```
 
-### GRPO/RL (Experimental)
+### GRPO/RL (Requires 2+ GPUs)
+
+> **Note**: GRPO requires at least 2 GPUs because it uses NCCL distributed weight sync between the policy model and vLLM inference engine. Single-GPU training causes "Duplicate GPU detected" NCCL errors.
+
 ```bash
 uv run python open_instruct/grpo_fast.py \
     --model_name_or_path Qwen/Qwen3-0.6B \

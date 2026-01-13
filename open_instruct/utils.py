@@ -58,7 +58,6 @@ import ray
 import requests
 import torch
 import torch.nn.functional as F
-# vllm.config imported lazily in from_vllm_config() to support DGX Spark (CUDA 13/aarch64)
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -1793,8 +1792,8 @@ class ModelDims:
         return embedding_params + layer_params + lm_head_params
 
     @classmethod
-    def from_vllm_config(cls, vllm_config: "vllm.config.VllmConfig") -> "ModelDims":
-        """Create ModelDims from a vLLM config object."""
+    def from_vllm_config(cls, vllm_config: Any) -> "ModelDims":
+        """Create ModelDims from a vLLM VllmConfig object."""
         model_config = vllm_config.model_config
         hidden_size = model_config.get_hidden_size()
 
