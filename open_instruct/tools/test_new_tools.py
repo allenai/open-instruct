@@ -297,6 +297,7 @@ class TestHelperFunctions(unittest.TestCase):
 class TestSerperSearchToolInit(unittest.TestCase):
     """Tests for SerperSearchTool initialization and properties."""
 
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
     def test_initialization_with_defaults(self):
         """Test tool initializes with correct default values."""
         tool = SerperSearchTool()
@@ -305,6 +306,7 @@ class TestSerperSearchToolInit(unittest.TestCase):
         self.assertEqual(tool.call_name, "serper_search")
         self.assertEqual(tool.config_name, "serper_search")
 
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
     def test_initialization_with_custom_values(self):
         """Test tool initializes with custom values."""
         tool = SerperSearchTool(num_results=10)
@@ -312,16 +314,19 @@ class TestSerperSearchToolInit(unittest.TestCase):
         self.assertEqual(tool.num_results, 10)
         self.assertEqual(tool.call_name, "serper_search")
 
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
     def test_tool_call_name(self):
         """Test tool call_name is 'serper_search'."""
         tool = SerperSearchTool()
         self.assertEqual(tool.call_name, "serper_search")
 
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
     def test_tool_description(self):
         """Test tool description is set correctly."""
         tool = SerperSearchTool()
         self.assertEqual(tool.description, "Google search via the Serper API")
 
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
     def test_tool_parameters_schema(self):
         """Test tool parameters schema is correct."""
         tool = SerperSearchTool()
@@ -332,6 +337,7 @@ class TestSerperSearchToolInit(unittest.TestCase):
         self.assertIn("query", params["required"])
         self.assertEqual(params["properties"]["query"]["description"], "The search query for Google")
 
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
     def test_get_openai_tool_definitions(self):
         """Test OpenAI tool definition format."""
         tool = SerperSearchTool()
@@ -342,13 +348,22 @@ class TestSerperSearchToolInit(unittest.TestCase):
         self.assertEqual(definition["function"]["description"], "Google search via the Serper API")
         self.assertIn("parameters", definition["function"])
 
+    @patch.dict("os.environ", {}, clear=True)
+    def test_missing_api_key_raises_error_on_init(self):
+        """Test that missing SERPER_API_KEY raises a ValueError on initialization."""
+        with self.assertRaises(ValueError) as context:
+            SerperSearchTool()
+
+        self.assertEqual(str(context.exception), "Missing SERPER_API_KEY environment variable.")
+
 
 class TestSerperSearchToolExecution(unittest.IsolatedAsyncioTestCase):
     """Tests for SerperSearchTool execution (async __call__)."""
 
     def setUp(self):
         """Set up test fixtures."""
-        self.tool = SerperSearchTool(num_results=5)
+        with patch.dict("os.environ", {"SERPER_API_KEY": "test_key"}):
+            self.tool = SerperSearchTool(num_results=5)
 
     async def test_empty_query_returns_error(self):
         """Test that empty query returns an error without calling API."""
@@ -376,14 +391,6 @@ class TestSerperSearchToolExecution(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result, ToolOutput)
         self.assertEqual(result.error, "Empty query. Please provide a search query.")
-
-    @patch.dict("os.environ", {}, clear=True)
-    async def test_missing_api_key_raises_error(self):
-        """Test that missing SERPER_API_KEY raises a ValueError."""
-        with self.assertRaises(ValueError) as context:
-            await self.tool("test query")
-
-        self.assertEqual(str(context.exception), "Missing SERPER_API_KEY environment variable.")
 
     @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
     @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
@@ -620,6 +627,7 @@ class TestSerperSearchToolConfig(unittest.TestCase):
 
         self.assertEqual(config.num_results, 10)
 
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
     def test_build_creates_tool(self):
         """Test building config creates tool correctly."""
         config = SerperSearchToolConfig(num_results=8)

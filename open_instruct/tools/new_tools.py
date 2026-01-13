@@ -123,18 +123,27 @@ class SerperSearchTool(Tool):
     Requires SERPER_API_KEY environment variable.
     """
 
-    def __init__(self, num_results: int = 5) -> None:
+    config_name = "serper_search"
+    description = "Google search via the Serper API"
+    call_name = "serper_search"  # TODO: fix up when prior pr comes in.
+    parameters = {
+        "type": "object",
+        "properties": {"query": {"type": "string", "description": "The search query for Google"}},
+        "required": ["query"],
+    }
+
+    def __init__(self, num_results: int = 5, timeout: int = 10) -> None:
         super().__init__(
-            config_name="serper_search",
-            description="Google search via the Serper API",
-            call_name="serper_search",
-            parameters={
-                "type": "object",
-                "properties": {"query": {"type": "string", "description": "The search query for Google"}},
-                "required": ["query"],
-            },
+            config_name=self.config_name,
+            description=self.description,
+            call_name=self.call_name,
+            parameters=self.parameters,
         )
         self.num_results = num_results
+        self.timeout = timeout
+        self.api_key = os.environ.get("SERPER_API_KEY")
+        if not self.api_key:
+            raise ValueError("Missing SERPER_API_KEY environment variable.")
 
     async def __call__(self, query: str) -> ToolOutput:
         """Search Google via Serper for documents matching the query."""
@@ -145,18 +154,18 @@ class SerperSearchTool(Tool):
             _log_tool_call(self.call_name, query or "", result)
             return result
 
-        api_key = os.environ.get("SERPER_API_KEY")
-        if not api_key:
-            raise ValueError("Missing SERPER_API_KEY environment variable.")
-
         start_time = time.time()
+        output = ""
+        error = ""
+        timed_out = False
+
         try:
-            timeout = aiohttp.ClientTimeout(total=10)
+            timeout = aiohttp.ClientTimeout(total=self.timeout)
             async with aiohttp.ClientSession(timeout=timeout) as session:  # noqa: SIM117
                 async with session.post(
                     "https://google.serper.dev/search",
                     json={"q": query, "num": self.num_results},
-                    headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+                    headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
                 ) as response:
                     response.raise_for_status()
                     data = await response.json()
@@ -179,32 +188,21 @@ class SerperSearchTool(Tool):
                         elif "snippet" in answer_box:
                             snippets.insert(0, f"**Featured Snippet:** {answer_box['snippet']}")
 
-                    if not snippets:
-                        result = ToolOutput(
-                            output="",
-                            error="Query returned no results.",
-                            called=True,
-                            timeout=False,
-                            runtime=time.time() - start_time,
-                        )
+                    if snippets:
+                        output = "\n\n".join(snippets).strip()
                     else:
-                        result = ToolOutput(
-                            output="\n\n".join(snippets).strip(),
-                            called=True,
-                            error="",
-                            timeout=False,
-                            runtime=time.time() - start_time,
-                        )
+                        error = "Query returned no results."
         except asyncio.TimeoutError:
-            error = "Timeout after 10 seconds"
-            result = ToolOutput(output="", error=error, called=True, timeout=True, runtime=time.time() - start_time)
+            error = f"Timeout after {self.timeout} seconds"
+            timed_out = True
         except aiohttp.ClientResponseError as e:
             error = f"HTTP error: {e.status} {e.message}"
-            result = ToolOutput(output="", error=error, called=True, timeout=False, runtime=time.time() - start_time)
         except aiohttp.ClientError as e:
             error = f"Connection error: {e}"
-            result = ToolOutput(output="", error=error, called=True, timeout=False, runtime=time.time() - start_time)
 
+        result = ToolOutput(
+            output=output, called=True, error=error, timeout=timed_out, runtime=time.time() - start_time
+        )
         _log_tool_call(self.call_name, query, result)
         return result
 
@@ -217,3 +215,5 @@ class SerperSearchToolConfig(BaseToolConfig):
 
     num_results: int = 5
     """Number of results to return from Serper."""
+    timeout: int = 10
+    """Timeout in seconds for the API request."""
