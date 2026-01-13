@@ -106,7 +106,7 @@ class BeakerCallbackV2(Callback):
             allow_multiple=False,
             distributed=False,
         )
-        self._last_update = time.monotonic()
+        self._last_update = time.perf_counter()
 
     def _set_description(self, progress: TrainingProgress) -> None:
         maybe_update_beaker_description(
