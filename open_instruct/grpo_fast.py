@@ -67,7 +67,6 @@ import torch
 import torch.distributed as dist
 import torch.utils
 import torch.utils.data
-import wandb
 from datasets import Dataset
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
@@ -78,6 +77,7 @@ from rich.pretty import pprint
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
+import wandb
 from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
@@ -673,7 +673,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 timeout=timedelta(minutes=self.args.backend_timeout),
             )
             ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
-        torch.distributed.barrier()
+        torch.distributed.barrier(device_ids=[self.local_rank])
 
     def broadcast_to_vllm(self):
         # avoid OOM
