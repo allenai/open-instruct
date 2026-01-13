@@ -41,7 +41,31 @@ sys.modules["olmo_core.train.callbacks.comet"].CometCallback = type("CometCallba
 sys.modules["olmo_core.train.callbacks.wandb"].WandBCallback = type("WandBCallback", (), {"priority": 100})
 
 from open_instruct.beaker_callback import BeakerCallbackV2  # noqa: E402
-from open_instruct.test_utils import setup_beaker_mocks  # noqa: E402
+
+
+def setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_description):
+    """Shared mock setup for beaker tests."""
+    mock_is_beaker_job.return_value = True
+
+    mock_client = MagicMock()
+    mock_beaker_from_env.return_value = mock_client
+
+    mock_workload = MagicMock()
+    mock_client.workload.get.return_value = mock_workload
+
+    mock_spec = MagicMock()
+    mock_spec.description = initial_description
+    mock_client.experiment.get_spec.return_value = mock_spec
+
+    description_history = []
+
+    def track_description(workload, description=None):
+        if description is not None:
+            description_history.append(description)
+
+    mock_client.workload.update.side_effect = track_description
+
+    return mock_client, mock_spec, description_history
 
 
 class TestBeakerCallbackPreTrain(unittest.TestCase):
