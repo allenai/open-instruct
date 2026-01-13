@@ -81,7 +81,7 @@ class BeakerCallbackV2(Callback):
             self.enabled
             and get_rank() == 0
             and self.step % self.trainer.metrics_collect_interval == 0
-            and (self._last_update is None or (time.monotonic() - self._last_update) > 10)
+            and (self._last_update is None or (time.perf_counter() - self._last_update) > 10)
         )
         if should_update:
             self._update()
