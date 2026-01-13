@@ -10,11 +10,7 @@ logger = logger_utils.setup_logger(__name__)
 
 @dataclass
 class ToolsConfig:
-    """Configuration for tools used during generation.
-
-    This config is parsed separately from StreamingDataLoaderConfig and handles
-    all tool-related validation.
-    """
+    """Configuration for tools used during generation."""
 
     tools: list[str] | None = None
     """List of tool names to enable (e.g., ["python", "search"])."""
@@ -33,7 +29,7 @@ class ToolsConfig:
     """Maximum number of tool calls allowed per generation."""
 
     only_reward_good_outputs: bool = False
-    """Only apply rewards to outputs that are marked as good."""
+    """Only apply rewards to outputs from tools that didn't error."""
 
     def __post_init__(self):
         self.max_tool_calls = int(self.max_tool_calls)
