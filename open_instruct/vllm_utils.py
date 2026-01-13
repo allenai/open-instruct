@@ -19,18 +19,11 @@ import argparse
 import asyncio
 import dataclasses
 import os
-import platform
 import queue
 import socket
 import sys
 import threading
 import time
-
-# DGX Spark (aarch64) workaround: vLLM v1 msgspec serialization doesn't handle torch.dtype
-# This enables pickle fallback for serialization. Safe for single-user training on trusted networks.
-# See: https://github.com/huggingface/trl/issues/3676
-if platform.machine() == "aarch64" and "VLLM_ALLOW_INSECURE_SERIALIZATION" not in os.environ:
-    os.environ["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
 from collections import defaultdict
 from collections.abc import Awaitable
 from concurrent import futures

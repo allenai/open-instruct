@@ -129,11 +129,10 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
-    attn_implementation: Literal["flash_attention_2", "sdpa", "eager"] | None = None
-    """Which attention implementation to use. Options: flash_attention_2, sdpa, eager.
-    flash_attention_2: Requires flash-attn package (pip install flash-attn --no-build-isolation)
-    sdpa: Uses PyTorch's native scaled_dot_product_attention (recommended for Blackwell/GB10)
-    eager: Standard attention implementation (slowest but most compatible)"""
+    attn_implementation: Literal["flash_attention_2", "sdpa"] = "flash_attention_2"
+    """Which attention implementation to use.
+    flash_attention_2: Requires flash-attn package (default)
+    sdpa: Uses PyTorch's native scaled_dot_product_attention (use on aarch64/Blackwell where flash-attn unavailable)"""
     use_cache: bool | None = None
     """Whether to use cache in the model."""
     gradient_checkpointing: bool = False
@@ -245,13 +244,11 @@ def load_ref_policy(
     """
     # inference model only has stage 3 (sharding) or stage 0 (no sharding)
     # stage 2 is optimizer sharding which doesn't apply to inference
-    # Use configured attn_implementation, defaulting to flash_attention_2 for stability
-    attn_impl = model_config.attn_implementation or "flash_attention_2"
     ref_policy: transformers.PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
         dtype=torch.bfloat16,
-        attn_implementation=attn_impl,
+        attn_implementation=model_config.attn_implementation,
         use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )

@@ -57,8 +57,9 @@ torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'"},
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
-# vLLM: aarch64/DGX Spark requires cu130 wheel (experimental)
-# Using v0.13.0 stable - see docs/DGX_SPARK.md for details
+# vLLM aarch64 (DGX Spark): PyPI lacks aarch64+cu130 wheels, so we pin to vLLM's nightly wheel server.
+# This can be removed once vLLM publishes official aarch64+cu130 wheels to PyPI.
+# See docs/DGX_SPARK.md for details.
 vllm = [
   { url = "https://wheels.vllm.ai/72506c98349d6bcd32b4e33eec7b5513453c1502/vllm-0.13.0%2Bcu130-cp38-abi3-manylinux_2_35_aarch64.whl", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
@@ -77,7 +78,6 @@ explicit = true
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
-
 
 [project.optional-dependencies]
 code = [
