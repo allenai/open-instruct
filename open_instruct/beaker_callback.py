@@ -3,7 +3,6 @@
 This module will be deleted once Olmo-core switches to Beaker v2."""
 
 import json
-import logging
 import os
 import platform
 import subprocess
@@ -18,9 +17,10 @@ from olmo_core.train.callbacks.comet import CometCallback
 from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.common import TrainingProgress
 
+from open_instruct import logger_utils
 from open_instruct.utils import maybe_update_beaker_description
 
-log = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 BEAKER_WORKLOAD_ID_ENV_VAR = "BEAKER_WORKLOAD_ID"
 BEAKER_RESULT_DIR = "/results"
@@ -50,12 +50,12 @@ class BeakerCallbackV2(Callback):
         if self.enabled and get_rank() == 0:
             workload_id = os.environ.get(BEAKER_WORKLOAD_ID_ENV_VAR)
             if workload_id is None:
-                log.warning(f"BeakerCallbackV2: {BEAKER_WORKLOAD_ID_ENV_VAR} not set, disabling")
+                logger.warning(f"BeakerCallbackV2: {BEAKER_WORKLOAD_ID_ENV_VAR} not set, disabling")
                 self.enabled = False
                 return
 
             self._start_time = time.perf_counter()
-            log.info(f"Running in Beaker workload {workload_id}")
+            logger.info(f"Running in Beaker workload {workload_id}")
 
             result_dir = Path(self.result_dir) / "olmo-core"
             result_dir.mkdir(parents=True, exist_ok=True)
@@ -63,15 +63,13 @@ class BeakerCallbackV2(Callback):
             if self.config is not None:
                 config_path = result_dir / "config.json"
                 with config_path.open("w") as config_file:
-                    log.info(f"Saving config to '{config_path}'")
+                    logger.info(f"Saving config to '{config_path}'")
                     json.dump(self.config, config_file)
 
             requirements_path = result_dir / "requirements.txt"
             with requirements_path.open("w") as requirements_file:
                 requirements_file.write(f"# python={platform.python_version()}\n")
-                subprocess.call(
-                    ["uv", "pip", "freeze"], stdout=requirements_file, stderr=subprocess.DEVNULL, timeout=10
-                )
+                subprocess.run(["uv", "pip", "freeze"], stdout=requirements_file, check=True, timeout=10)
 
             self._url = self._get_tracking_url()
             self._update()
@@ -81,7 +79,7 @@ class BeakerCallbackV2(Callback):
             self.enabled
             and get_rank() == 0
             and self.step % self.trainer.metrics_collect_interval == 0
-            and (self._last_update is None or (time.monotonic() - self._last_update) > 10)
+            and (self._last_update is None or (time.perf_counter() - self._last_update) > 10)
         )
         if should_update:
             self._update()
@@ -106,7 +104,7 @@ class BeakerCallbackV2(Callback):
             allow_multiple=False,
             distributed=False,
         )
-        self._last_update = time.monotonic()
+        self._last_update = time.perf_counter()
 
     def _set_description(self, progress: TrainingProgress) -> None:
         maybe_update_beaker_description(
