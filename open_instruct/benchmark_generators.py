@@ -279,7 +279,7 @@ def setup_vllm_engines(
         pg=None,
         tool_actors=[],
         tool_parser_type="legacy",
-        max_tool_calls=streaming_config.max_tool_calls[0] if streaming_config.max_tool_calls else 5,
+        max_tool_calls=streaming_config.max_tool_calls,
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
         actor_manager=actor_manager,

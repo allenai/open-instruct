@@ -276,7 +276,7 @@ class StreamingDataLoaderConfig:
     """JSON dictionaries for configuring each tool. Must match length of --tools. Use '{}' for defaults."""
     tool_parser_type: str = "legacy"
     """Type of tool parser to use: 'legacy' is the only option for now.'"""
-    max_tool_calls: tuple[int, ...] = (5,)
+    max_tool_calls: int = 5
     only_reward_good_outputs: bool = False
 
     # Computed at post_init
@@ -315,7 +315,7 @@ class StreamingDataLoaderConfig:
         if self.stop_strings is None:
             self.stop_strings = []
 
-        self.max_tool_calls = tuple(int(x) for x in self.max_tool_calls)
+        self.max_tool_calls = int(self.max_tool_calls)
 
         # Validate and set defaults for tool configuration
         if self.tools:

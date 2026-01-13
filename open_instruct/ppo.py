@@ -363,9 +363,8 @@ class Args:
     # Tool settings
     tools: list[str] | None = None
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: tuple[int, ...] = (5,)
-    """Maximum number of tool calls allowed. Can be either a single integer (applies to all tools) or a tuple of integers
-    with length 1 (applies to all tools) or matching the length of the tools list (per-tool limit)."""
+    max_tool_calls: int = 5
+    """Maximum number of tool calls allowed per generation."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
     only_reward_good_outputs: bool = False
@@ -387,8 +386,7 @@ class Args:
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
-        # HfArgumentParser parses tuple[int, ...] elements as strings, so convert to int
-        self.max_tool_calls = tuple(int(x) for x in self.max_tool_calls)
+        self.max_tool_calls = int(self.max_tool_calls)
 
 
 def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
