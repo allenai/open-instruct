@@ -117,4 +117,6 @@ class PythonCodeToolConfig(BaseToolConfig):
 
 
 # Tool Registry: Maps tool names to their config classes
-TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {"code": PythonCodeToolConfig}
+TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
+    PythonCodeToolConfig.tool_class.config_name: PythonCodeToolConfig
+}
