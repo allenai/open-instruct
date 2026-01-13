@@ -1418,7 +1418,6 @@ def setup_runtime_variables(
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = tools_config.enabled
     return args
 
 
@@ -1538,10 +1537,8 @@ def create_tools(
 
         # The config is a dataclass, and may have performed additional validation
         # or transformation of the args, which we then now pass to the tool.
-        kwarg_dict = asdict(config)
-        kwarg_dict["call_name"] = call_name
-        tool_actor = ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**kwarg_dict)
-        tool_actors.append(tool_actor)
+        _kwarg_dict = asdict(config) | {"call_name": call_name}
+        tool_actors.append(ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**_kwarg_dict))
 
     return tool_actors
 

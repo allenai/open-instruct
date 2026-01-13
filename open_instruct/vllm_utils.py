@@ -62,7 +62,7 @@ from open_instruct.data_types import GenerationResult, PromptRequest, RequestInf
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.tools.parsers import ToolParser, create_tool_parser
-from open_instruct.tools.utils import ToolCall, ToolOutput
+from open_instruct.tools.utils import ToolOutput
 from open_instruct.utils import ModelDims, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
@@ -108,73 +108,6 @@ class RequestOutput:
     finished: bool = True
 
 
-@dataclasses.dataclass
-class ToolExecutionResult:
-    """Aggregated results from executing multiple tool calls."""
-
-    outputs: list[str]
-    """Raw outputs from each tool call."""
-    num_calls: int = 0
-    """Number of successful tool calls."""
-    timeout: bool = False
-    """Whether any tool call timed out."""
-    error: str = ""
-    """Concatenated error messages from tool calls."""
-    output: str = ""
-    """Concatenated raw outputs from tool calls."""
-    runtime: float = 0.0
-    """Total runtime of all tool calls."""
-    called: bool = False
-    """Whether any tool was successfully called."""
-
-
-async def execute_tool_calls(
-    tool_calls: list[ToolCall], tool_actor_map: dict[str, ray.actor.ActorHandle]
-) -> ToolExecutionResult:
-    """Execute tool calls and aggregate results.
-
-    Args:
-        tool_calls: List of tool calls to execute.
-        tool_actor_map: Mapping from tool names to Ray actor handles.
-
-    Returns:
-        Aggregated results from all tool calls.
-    """
-    outputs: list[str] = []
-    num_calls = 0
-    timeout = False
-    error = ""
-    output = ""
-    runtime = 0.0
-    called = False
-
-    for tool_call in tool_calls:
-        tool_actor = tool_actor_map.get(tool_call.name)
-        if not tool_actor:
-            logger.warning(f"Tool {tool_call.name} called but not found in actor map")
-            continue
-
-        tool_result: ToolOutput = await tool_actor.__call__.remote(**tool_call.args)
-
-        called = True
-        num_calls += 1
-        timeout = timeout or tool_result.timeout
-        error += "" if not tool_result.error else tool_result.error
-        output += tool_result.output
-        runtime += tool_result.runtime
-        outputs.append(tool_result.output)
-
-    return ToolExecutionResult(
-        outputs=outputs,
-        num_calls=num_calls,
-        timeout=timeout,
-        error=error,
-        output=output,
-        runtime=runtime,
-        called=called,
-    )
-
-
 def process_tool_tokens(
     tool_outputs: list[str],
     tool_parser: ToolParser,
@@ -198,24 +131,23 @@ def process_tool_tokens(
         mask_tool_use: Whether to mask tool tokens in loss computation.
 
     Returns:
-        Tuple of (tokens, logprobs, masks, excess) where excess is the number
-        of tokens truncated due to max_model_len.
+        Tuple of (tokens, logprobs, masks, excess).
     """
     formatted_output = tool_parser.format_tool_outputs(tool_outputs)
-    tool_tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
+    tokens = tokenizer.encode(formatted_output, add_special_tokens=False)
 
-    tool_tokens, excess = truncate_tool_output_tokens(
-        tool_tokens,
+    tokens, excess = truncate_tool_output_tokens(
+        tokens,
         current_prompt_len=current_prompt_len,
         current_response_len=current_response_len,
         max_model_len=max_model_len,
         max_tokens=max_tokens,
     )
 
-    logprobs = [0.0] * len(tool_tokens)
-    masks = [0 if mask_tool_use else 1] * len(tool_tokens)
+    logprobs = [0.0] * len(tokens)
+    masks = [0 if mask_tool_use else 1] * len(tokens)
 
-    return tool_tokens, logprobs, masks, excess
+    return tokens, logprobs, masks, excess
 
 
 def assert_threaded_actor(instance):
@@ -941,23 +873,28 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             break
 
         tool_calls = actor.tool_parser.get_tool_calls(output.text)
+        # sometimes the model will make a tool call that *looks* valid,
+        # but actually that tool doesn't exist for it! So we filter these out.
+        # in future, we could instead add an error message to the model output to indicate that the tool call is invalid.
+        tool_calls = [tc for tc in tool_calls if tc.name in actor.tool_actor_map]
         if not tool_calls:
             break
 
-        exec_result = await execute_tool_calls(tool_calls, actor.tool_actor_map)
-        if not exec_result.outputs:
-            break
+        # Execute tool calls
+        outputs: list[str] = []
+        for tool_call in tool_calls:
+            tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].__call__.remote(**tool_call.args)
 
-        # Accumulate tool execution stats
-        tool_called = tool_called or exec_result.called
-        num_calls += exec_result.num_calls
-        timeout = timeout or exec_result.timeout
-        tool_error += exec_result.error
-        tool_output += exec_result.output
-        tool_runtime += exec_result.runtime
+            tool_called = True
+            num_calls += 1
+            timeout = timeout or tool_result.timeout
+            tool_error += tool_result.error or ""
+            tool_output += tool_result.output
+            tool_runtime += tool_result.runtime
+            outputs.append(tool_result.output)
 
         tool_tokens, tool_logprobs, tool_masks, excess = process_tool_tokens(
-            tool_outputs=exec_result.outputs,
+            tool_outputs=outputs,
             tool_parser=actor.tool_parser,
             tokenizer=actor.llm_engine.tokenizer,
             current_prompt_len=len(current_prompt),
