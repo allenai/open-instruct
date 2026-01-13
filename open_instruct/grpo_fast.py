@@ -2400,9 +2400,8 @@ def main(
         additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
-    generation_configs = create_generation_configs(args, streaming_config)
 
-    # Set up tool actors before creating model/optimizer
+    # Set up tool actors before creating generation configs
     # Parser will be created inside vLLM actors to avoid serialization issues
     tool_actors = create_tools(
         tools=streaming_config.tools,
@@ -2414,7 +2413,12 @@ def main(
     # The actual parser used during generation will be created inside vLLM actors
     if tool_actors:
         temp_parser = create_tool_parser(parser_type=streaming_config.tool_parser_type, tool_actors=tool_actors)
-        streaming_config.stop_strings.extend(temp_parser.stop_sequences())
+        stop_seqs = temp_parser.stop_sequences()
+        logger.info(f"Adding tool stop sequences to config: {stop_seqs}")
+        streaming_config.stop_strings.extend(stop_seqs)
+
+    # Create generation configs AFTER adding tool stop sequences
+    generation_configs = create_generation_configs(args, streaming_config)
 
     checkpoint_state = None
     data_prep_actor_state = None
