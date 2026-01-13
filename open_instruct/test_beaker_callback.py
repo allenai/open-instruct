@@ -59,13 +59,11 @@ sys.modules["olmo_core.train.callbacks.wandb"].WandBCallback = type("WandBCallba
 
 from open_instruct.beaker_callback import BeakerCallbackV2  # noqa: E402
 
-
-def teardown_module():
-    for key in _MOCKED_MODULES:
-        if _original_modules[key] is None:
-            sys.modules.pop(key, None)
-        else:
-            sys.modules[key] = _original_modules[key]
+for _key in _MOCKED_MODULES:
+    if _original_modules[_key] is None:
+        sys.modules.pop(_key, None)
+    else:
+        sys.modules[_key] = _original_modules[_key]
 
 
 class TestBeakerCallbackPreTrain(unittest.TestCase):
