@@ -38,7 +38,7 @@ class TestTensorCacheGPU(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = pathlib.Path(tmpdir) / "cache.pt"
             cache.to_disk(cache_path)
-            loaded_cache = TensorCache.from_disk(cache_path)
+            loaded_cache = TensorCache.from_disk(cache_path, device=torch.device("cpu"))
             self.assertEqual(loaded_cache.tensors["chosen_logps"].device.type, "cpu")
             self.assertTrue(torch.allclose(cache.tensors["chosen_logps"].cpu(), loaded_cache.tensors["chosen_logps"]))
 
