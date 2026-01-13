@@ -446,18 +446,18 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
 
+        # Use configured attn_implementation, defaulting to flash_attention_2 for stability
+        attn_impl = model_config.attn_implementation or "flash_attention_2"
+
         # set sequence parallel
         # note this returns None if sequence_parallel_size == 1
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=model_config.model_name_or_path,
-            core_attn_implementation="flash_attention_2",
+            core_attn_implementation=attn_impl,
             sequence_parallel_size=args.sequence_parallel_size,
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
         )
-
-        # Use configured attn_implementation, defaulting to flash_attention_2 for stability
-        attn_impl = model_config.attn_implementation or "flash_attention_2"
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
