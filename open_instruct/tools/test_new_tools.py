@@ -545,7 +545,7 @@ class TestJinaBrowseToolExecution(unittest.IsolatedAsyncioTestCase):
 
         # Verify ClientSession was created with correct timeout
         call_args = mock_session_class.call_args
-        self.assertIsNotNone(call_args[1].get("timeout"))
+        self.assertEqual(call_args[1].get("timeout").total, 60)
 
 
 class TestJinaBrowseToolConfig(unittest.TestCase):
