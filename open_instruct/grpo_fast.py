@@ -456,8 +456,8 @@ class PolicyTrainerRayProcess(RayProcess):
             seq_length_is_variable=True,
         )
 
-        # Use configured attn_implementation, defaulting to sdpa if not specified
-        attn_impl = model_config.attn_implementation or "sdpa"
+        # Use configured attn_implementation, defaulting to flash_attention_2 for stability
+        attn_impl = model_config.attn_implementation or "flash_attention_2"
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,

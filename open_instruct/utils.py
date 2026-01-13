@@ -50,7 +50,10 @@ from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass
 from multiprocessing import resource_tracker as _rt
-from typing import Any, NewType
+from typing import TYPE_CHECKING, Any, NewType
+
+if TYPE_CHECKING:
+    import vllm
 
 import beaker
 import numpy as np
@@ -1792,8 +1795,8 @@ class ModelDims:
         return embedding_params + layer_params + lm_head_params
 
     @classmethod
-    def from_vllm_config(cls, vllm_config: Any) -> "ModelDims":
-        """Create ModelDims from a vLLM VllmConfig object."""
+    def from_vllm_config(cls, vllm_config: "vllm.config.VllmConfig") -> "ModelDims":
+        """Create ModelDims from a vLLM config object."""
         model_config = vllm_config.model_config
         hidden_size = model_config.get_hidden_size()
 
