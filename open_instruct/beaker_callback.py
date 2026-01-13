@@ -69,9 +69,7 @@ class BeakerCallbackV2(Callback):
             requirements_path = result_dir / "requirements.txt"
             with requirements_path.open("w") as requirements_file:
                 requirements_file.write(f"# python={platform.python_version()}\n")
-                subprocess.run(
-                    ["uv", "pip", "freeze"], stdout=requirements_file, check=True, timeout=10
-                )
+                subprocess.run(["uv", "pip", "freeze"], stdout=requirements_file, check=True, timeout=10)
 
             self._url = self._get_tracking_url()
             self._update()

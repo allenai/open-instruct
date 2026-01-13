@@ -1,21 +1,12 @@
 import json
+import os
 import sys
+import tempfile
 import time
 import unittest
 from unittest.mock import MagicMock, Mock, patch
 
 import parameterized
-
-mock_olmo_core_distributed = MagicMock()
-mock_olmo_core_distributed.utils.get_rank = Mock(return_value=0)
-
-mock_callback = MagicMock()
-mock_comet = MagicMock()
-mock_wandb = MagicMock()
-mock_common = MagicMock()
-
-mock_utils = MagicMock()
-mock_utils.maybe_update_beaker_description = Mock()
 
 
 class MockCallback:
@@ -31,97 +22,123 @@ class MockCallback:
         return self._step
 
 
+mock_olmo_core_distributed = MagicMock()
+mock_olmo_core_distributed.utils.get_rank = Mock(return_value=0)
+mock_callback = MagicMock()
+
 sys.modules["olmo_core"] = MagicMock()
 sys.modules["olmo_core.distributed"] = MagicMock()
 sys.modules["olmo_core.distributed.utils"] = mock_olmo_core_distributed
 sys.modules["olmo_core.train"] = MagicMock()
 sys.modules["olmo_core.train.callbacks"] = MagicMock()
 sys.modules["olmo_core.train.callbacks.callback"] = mock_callback
-sys.modules["olmo_core.train.callbacks.comet"] = mock_comet
-sys.modules["olmo_core.train.callbacks.wandb"] = mock_wandb
-sys.modules["olmo_core.train.common"] = mock_common
-sys.modules["open_instruct.utils"] = mock_utils
+sys.modules["olmo_core.train.callbacks.comet"] = MagicMock()
+sys.modules["olmo_core.train.callbacks.wandb"] = MagicMock()
+sys.modules["olmo_core.train.common"] = MagicMock()
 
 mock_callback.Callback = MockCallback
-mock_comet.CometCallback = type("CometCallback", (), {"priority": 100})
-mock_wandb.WandBCallback = type("WandBCallback", (), {"priority": 100})
+sys.modules["olmo_core.train.callbacks.comet"].CometCallback = type("CometCallback", (), {"priority": 100})
+sys.modules["olmo_core.train.callbacks.wandb"].WandBCallback = type("WandBCallback", (), {"priority": 100})
 
 from open_instruct.beaker_callback import BeakerCallbackV2  # noqa: E402
+from open_instruct.test_utils import setup_beaker_mocks  # noqa: E402
 
 
 class TestBeakerCallbackPreTrain(unittest.TestCase):
-    def test_pre_train_saves_files(self):
-        import tempfile
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            callback = BeakerCallbackV2()
-            callback.enabled = True
-            callback.config = {"key": "value", "nested": {"a": 1}}
-            callback.result_dir = tmp_dir
+    def tearDown(self):
+        self.temp_dir.cleanup()
 
-            trainer_mock = Mock()
-            trainer_mock.callbacks = {}
-            callback._trainer = trainer_mock
+    @patch("os.environ.get")
+    @patch("beaker.Beaker.from_env")
+    @patch("open_instruct.utils.is_beaker_job")
+    def test_pre_train_saves_files(self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get):
+        env_values = {"BEAKER_WORKLOAD_ID": "test-workload-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
+        mock_client, mock_spec, description_history = setup_beaker_mocks(
+            mock_beaker_from_env, mock_is_beaker_job, "Initial description"
+        )
 
-            with (
-                patch("open_instruct.beaker_callback.get_rank", return_value=0),
-                patch.dict("os.environ", {"BEAKER_WORKLOAD_ID": "test-workload-123"}),
-                patch("subprocess.call") as mock_subprocess,
-            ):
-                callback.pre_train()
-                mock_subprocess.assert_called_once()
-                call_args = mock_subprocess.call_args
-                self.assertEqual(call_args[0][0], ["uv", "pip", "freeze"])
+        callback = BeakerCallbackV2()
+        callback.enabled = True
+        callback.config = {"key": "value", "nested": {"a": 1}}
+        callback.result_dir = self.temp_dir.name
 
-            config_path = f"{tmp_dir}/olmo-core/config.json"
-            with open(config_path) as f:
-                saved_config = json.load(f)
-            self.assertEqual(saved_config, {"key": "value", "nested": {"a": 1}})
+        trainer_mock = Mock()
+        trainer_mock.callbacks = {}
+        trainer_mock.run_bookkeeping_op = Mock(side_effect=lambda fn, *args, **kwargs: fn(*args))
+        trainer_mock.training_progress = Mock()
+        trainer_mock.training_progress.current_step = 0
+        trainer_mock.training_progress.total_steps = 100
+        callback._trainer = trainer_mock
 
-            requirements_path = f"{tmp_dir}/olmo-core/requirements.txt"
-            with open(requirements_path) as f:
-                content = f.read()
-            self.assertIn("# python=", content)
+        with (
+            patch("open_instruct.beaker_callback.get_rank", return_value=0),
+            patch.dict("os.environ", {"BEAKER_WORKLOAD_ID": "test-workload-123"}),
+            patch("subprocess.run") as mock_subprocess,
+        ):
+            callback.pre_train()
+            mock_subprocess.assert_called_once()
+            call_args = mock_subprocess.call_args
+            self.assertEqual(call_args[0][0], ["uv", "pip", "freeze"])
 
-    def test_pre_train_gets_tracking_url(self):
-        import tempfile
+        config_path = f"{self.temp_dir.name}/olmo-core/config.json"
+        with open(config_path) as f:
+            saved_config = json.load(f)
+        self.assertEqual(saved_config, {"key": "value", "nested": {"a": 1}})
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            callback = BeakerCallbackV2()
-            callback.enabled = True
-            callback.result_dir = tmp_dir
+        requirements_path = f"{self.temp_dir.name}/olmo-core/requirements.txt"
+        with open(requirements_path) as f:
+            content = f.read()
+        self.assertIn("# python=", content)
 
-            trainer_mock = Mock()
-            trainer_mock.callbacks = {}
-            callback._trainer = trainer_mock
+        self.assertGreaterEqual(len(description_history), 1)
 
-            with (
-                patch("open_instruct.beaker_callback.get_rank", return_value=0),
-                patch.dict("os.environ", {"BEAKER_WORKLOAD_ID": "test-workload-123"}),
-                patch("subprocess.call"),
-                patch.object(callback, "_get_tracking_url", return_value="https://wandb.ai/test/run/123"),
-            ):
-                callback.pre_train()
+    @patch("os.environ.get")
+    @patch("beaker.Beaker.from_env")
+    @patch("open_instruct.utils.is_beaker_job")
+    def test_pre_train_gets_tracking_url(self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get):
+        env_values = {"BEAKER_WORKLOAD_ID": "test-workload-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
+        setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, "Initial description")
 
-            self.assertEqual(callback._url, "https://wandb.ai/test/run/123")
+        callback = BeakerCallbackV2()
+        callback.enabled = True
+        callback.result_dir = self.temp_dir.name
+
+        trainer_mock = Mock()
+        trainer_mock.callbacks = {}
+        trainer_mock.run_bookkeeping_op = Mock(side_effect=lambda fn, *args, **kwargs: fn(*args))
+        trainer_mock.training_progress = Mock()
+        trainer_mock.training_progress.current_step = 0
+        trainer_mock.training_progress.total_steps = 100
+        callback._trainer = trainer_mock
+
+        with (
+            patch("open_instruct.beaker_callback.get_rank", return_value=0),
+            patch.dict("os.environ", {"BEAKER_WORKLOAD_ID": "test-workload-123"}),
+            patch("subprocess.run"),
+            patch.object(callback, "_get_tracking_url", return_value="https://wandb.ai/test/run/123"),
+        ):
+            callback.pre_train()
+
+        self.assertEqual(callback._url, "https://wandb.ai/test/run/123")
 
     def test_pre_train_skips_when_disabled(self):
-        import os
-        import tempfile
+        callback = BeakerCallbackV2()
+        callback.enabled = False
+        callback.config = {"key": "value"}
+        callback.result_dir = self.temp_dir.name
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            callback = BeakerCallbackV2()
-            callback.enabled = False
-            callback.config = {"key": "value"}
-            callback.result_dir = tmp_dir
+        trainer_mock = Mock()
+        callback._trainer = trainer_mock
 
-            trainer_mock = Mock()
-            callback._trainer = trainer_mock
+        with patch("open_instruct.beaker_callback.get_rank", return_value=0):
+            callback.pre_train()
 
-            with patch("open_instruct.beaker_callback.get_rank", return_value=0):
-                callback.pre_train()
-
-            self.assertFalse(os.path.exists(f"{tmp_dir}/olmo-core"))
+        self.assertFalse(os.path.exists(f"{self.temp_dir.name}/olmo-core"))
 
 
 class TestBeakerCallbackPostStep(unittest.TestCase):
@@ -137,7 +154,7 @@ class TestBeakerCallbackPostStep(unittest.TestCase):
         callback = BeakerCallbackV2()
         callback.enabled = enabled
         if last_update_offset is not None:
-            callback._last_update = time.monotonic() + last_update_offset
+            callback._last_update = time.perf_counter() + last_update_offset
         else:
             callback._last_update = None
 
