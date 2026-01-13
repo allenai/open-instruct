@@ -1563,7 +1563,7 @@ def create_tools(
                 raise ValueError(f"Invalid JSON in tool_configs for tool '{tool}': {e}") from e
 
             # Validate config dict matches expected fields
-            expected_fields = {f.name for f in dataclasses.fields(tool_config_class) if f.name != "tool_class"}
+            expected_fields = {f.name for f in dataclasses.fields(tool_config_class)}
             provided_fields = set(config_dict.keys())
 
             # Check for unknown fields

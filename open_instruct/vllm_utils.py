@@ -542,7 +542,9 @@ class LLMRayActor:
         # Build mapping from tool names to actors for fast lookup
         self.tool_actor_map = {}
         if self.tool_actors:
-            self.tool_actor_map = {ray.get(actor.get_call_name.remote()): actor for actor in self.tool_actors}
+            call_name_futures = [actor.get_call_name.remote() for actor in self.tool_actors]
+            call_names = ray.get(call_name_futures)
+            self.tool_actor_map = dict(zip(call_names, self.tool_actors))
 
         # Create tool parser inside the actor (avoids serialization issues)
         self.tool_parser = None
