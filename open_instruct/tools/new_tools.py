@@ -170,7 +170,7 @@ class S2SearchTool(Tool):
                     response.raise_for_status()
                     res = await response.json()
                     data = res.get("data", [])
-                    snippets = [item["snippet"]["text"] for item in data if item.get("snippet")]
+                    snippets = snippets = [text for item in data if (text := item.get("snippet", {}).get("text"))]
 
                     if not snippets:
                         error = "Query returned no results."

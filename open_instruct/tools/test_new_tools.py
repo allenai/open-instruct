@@ -28,6 +28,14 @@ class TestPythonCodeToolInit(unittest.TestCase):
         self.assertEqual(tool.timeout, 3)
         self.assertEqual(tool.call_name, "python")
         self.assertEqual(tool.config_name, "python")
+        self.assertEqual(tool.description, "Executes Python code and returns printed output.")
+
+        # Verify parameters schema
+        params = tool.parameters
+        self.assertEqual(params["type"], "object")
+        self.assertIn("code", params["properties"])
+        self.assertIn("code", params["required"])
+        self.assertEqual(params["properties"]["code"]["description"], "Python code to execute")
 
     def test_initialization_with_custom_values(self):
         """Test tool initializes with custom values."""
@@ -36,26 +44,6 @@ class TestPythonCodeToolInit(unittest.TestCase):
         self.assertEqual(tool.api_endpoint, "http://example.com/run")
         self.assertEqual(tool.timeout, 10)
         self.assertEqual(tool.call_name, "python")
-
-    def test_tool_call_name(self):
-        """Test tool call_name is 'python'."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
-        self.assertEqual(tool.call_name, "python")
-
-    def test_tool_description(self):
-        """Test tool description is set correctly."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
-        self.assertEqual(tool.description, "Executes Python code and returns printed output.")
-
-    def test_tool_parameters_schema(self):
-        """Test tool parameters schema is correct."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
-        params = tool.parameters
-
-        self.assertEqual(params["type"], "object")
-        self.assertIn("code", params["properties"])
-        self.assertIn("code", params["required"])
-        self.assertEqual(params["properties"]["code"]["description"], "Python code to execute")
 
     def test_get_openai_tool_definitions(self):
         """Test OpenAI tool definition format."""
@@ -306,6 +294,14 @@ class TestS2SearchToolInit(unittest.TestCase):
         self.assertEqual(tool.timeout, 60)
         self.assertEqual(tool.call_name, "s2_search")
         self.assertEqual(tool.config_name, "s2_search")
+        self.assertEqual(tool.description, "Searches Semantic Scholar for academic papers and citations")
+
+        # Verify parameters schema
+        params = tool.parameters
+        self.assertEqual(params["type"], "object")
+        self.assertIn("query", params["properties"])
+        self.assertIn("query", params["required"])
+        self.assertEqual(params["properties"]["query"]["description"], "The search query for Semantic Scholar")
 
     @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
     def test_initialization_with_custom_values(self):
@@ -323,29 +319,6 @@ class TestS2SearchToolInit(unittest.TestCase):
             S2SearchTool()
 
         self.assertIn("S2_API_KEY", str(context.exception))
-
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    def test_tool_call_name(self):
-        """Test tool call_name is 's2_search'."""
-        tool = S2SearchTool()
-        self.assertEqual(tool.call_name, "s2_search")
-
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    def test_tool_description(self):
-        """Test tool description is set correctly."""
-        tool = S2SearchTool()
-        self.assertEqual(tool.description, "Searches Semantic Scholar for academic papers and citations")
-
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    def test_tool_parameters_schema(self):
-        """Test tool parameters schema is correct."""
-        tool = S2SearchTool()
-        params = tool.parameters
-
-        self.assertEqual(params["type"], "object")
-        self.assertIn("query", params["properties"])
-        self.assertIn("query", params["required"])
-        self.assertEqual(params["properties"]["query"]["description"], "The search query for Semantic Scholar")
 
     @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
     def test_get_openai_tool_definitions(self):
