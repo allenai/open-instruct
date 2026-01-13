@@ -27,6 +27,8 @@ mock_olmo_core_distributed.utils.get_rank = Mock(return_value=0)
 mock_callback = MagicMock()
 
 sys.modules["olmo_core"] = MagicMock()
+sys.modules["olmo_core.data"] = MagicMock()
+sys.modules["olmo_core.data.data_loader"] = MagicMock()
 sys.modules["olmo_core.distributed"] = MagicMock()
 sys.modules["olmo_core.distributed.utils"] = mock_olmo_core_distributed
 sys.modules["olmo_core.train"] = MagicMock()
