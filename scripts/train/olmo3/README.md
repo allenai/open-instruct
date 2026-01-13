@@ -16,7 +16,6 @@ For our recent [Olmo3 paper](https://arxiv.org/abs/2512.13961), we used the foll
 | 7B RL Zero IF   | [`7b_rlzero_instruction_following.sh`](https://github.com/allenai/open-instruct/blob/main/scripts/train/olmo3/7b_rlzero_instruction_following.sh) | https://beaker.org/ex/01K7MVRTNJNYB37GC8SDTYHKC1/ | https://wandb.ai/ai2-llm/open_instruct_internal/runs/hk80a60o | [`d928a7c`](https://github.com/allenai/open-instruct/commit/d928a7c) |
 | 7B RL Zero General | [`7b_rlzero_general.sh`](https://github.com/allenai/open-instruct/blob/main/scripts/train/olmo3/7b_rlzero_general.sh) | https://beaker.org/ex/01K7FSZ2Y16KAV56Q0KB7TSWN7/ | https://wandb.ai/ai2-llm/open_instruct_internal/runs/0tscl05k | [`d928a7c`](https://github.com/allenai/open-instruct/commit/d928a7c) |
 
-
 To reproduce these runs, if you are internal to Ai2, you can run [`./scripts/train/build_image_and_launch.sh`](https://github.com/allenai/open-instruct/blob/main/scripts/train/build_image_and_launch.sh)
 
 ```
@@ -28,3 +27,27 @@ This will build an image and launch it. You can also check out the beaker link t
 
 1. Modifying the launch scripts to remove the stuff attached to the [`mason.py`](https://github.com/allenai/open-instruct/blob/main/mason.py) command
 2. Setting up your own cluster with the requisite number of {H,A}100 nodes, connected together via Ray.
+
+## Wandb reports
+
+We also have a bunch of Wandb reports for each stage, which contains the same information as above, in a slightly different format: 
+
+| experiment name | wandb report |
+|---|---|
+| Olmo 3 7B Think SFT | https://wandb.ai/ai2-llm/Olmo-3-7B-Think/reports/Olmo-3-7B-Think-SFT-DPO-RL--VmlldzoxNTE3ODQzMA |
+| Olmo 3 7B Think DPO | https://wandb.ai/ai2-llm/Olmo-3-7B-Think/reports/Olmo-3-7B-Think-SFT-DPO-RL--VmlldzoxNTE3ODQzMA |
+| Olmo 3 7B Think RL | https://wandb.ai/ai2-llm/Olmo-3-7B-Think/reports/Olmo-3-7B-Think-SFT-DPO-RL--VmlldzoxNTE3ODQzMA |
+| Olmo 3 7B Instruct SFT | https://wandb.ai/ai2-llm/Olmo-3-7B-Instruct/reports/Olmo-3-7B-Instruct-SFT-DPO-RL--VmlldzoxNTE3ODk3Mg |
+| Olmo 3 7B Instruct DPO | https://wandb.ai/ai2-llm/Olmo-3-7B-Instruct/reports/Olmo-3-7B-Instruct-SFT-DPO-RL--VmlldzoxNTE3ODk3Mg |
+| Olmo 3 7B Instruct RL | https://wandb.ai/ai2-llm/Olmo-3-7B-Instruct/reports/Olmo-3-7B-Instruct-SFT-DPO-RL--VmlldzoxNTE3ODk3Mg |
+| Olmo 3 7B RL Zero General | https://wandb.ai/ai2-llm/Olmo-3-7B-RL-Zero/reports/Olmo-3-7B-RL-Zero--VmlldzoxNTM0OTI1Nw |
+| Olmo 3 7B RL Zero Math | https://wandb.ai/ai2-llm/Olmo-3-7B-RL-Zero/reports/Olmo-3-7B-RL-Zero--VmlldzoxNTM0OTI1Nw |
+| Olmo 3 7B RL Zero Code | https://wandb.ai/ai2-llm/Olmo-3-7B-RL-Zero/reports/Olmo-3-7B-RL-Zero--VmlldzoxNTM0OTI1Nw |
+| Olmo 3 7B RL Zero IF | https://wandb.ai/ai2-llm/Olmo-3-7B-RL-Zero/reports/Olmo-3-7B-RL-Zero--VmlldzoxNTM0OTI1Nw |
+| Olmo 3 32B Think SFT | https://wandb.ai/ai2-llm/Olmo-3-32B-Think/reports/Olmo-3-32B-Think-SFT-DPO-RL--VmlldzoxNTE3OTA5Mg |
+| Olmo 3 32B Think DPO | https://wandb.ai/ai2-llm/Olmo-3-32B-Think/reports/Olmo-3-32B-Think-SFT-DPO-RL--VmlldzoxNTE3OTA5Mg |
+| Olmo 3 32B Think RL | https://wandb.ai/ai2-llm/Olmo-3-32B-Think/reports/Olmo-3-32B-Think-SFT-DPO-RL--VmlldzoxNTE3OTA5Mg |
+| Olmo 3.1 32B Think | https://wandb.ai/ai2-llm/Olmo-3-32B-Think/reports/Olmo-3-32B-Think-SFT-DPO-RL--VmlldzoxNTE3OTA5Mg |
+| Olmo 3 32B Instruct SFT | https://wandb.ai/ai2-llm/Olmo-3-32B-Instruct/reports/Olmo-3-32B-Instruct-SFT-DPO-RL--VmlldzoxNTM0OTIzNw |
+| Olmo 3 32B Instruct DPO | https://wandb.ai/ai2-llm/Olmo-3-32B-Instruct/reports/Olmo-3-32B-Instruct-SFT-DPO-RL--VmlldzoxNTM0OTIzNw |
+| Olmo 3 32B Instruct RL | https://wandb.ai/ai2-llm/Olmo-3-32B-Instruct/reports/Olmo-3-32B-Instruct-SFT-DPO-RL--VmlldzoxNTM0OTIzNw |
