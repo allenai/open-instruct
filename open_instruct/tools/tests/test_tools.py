@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 
-from open_instruct.tools.new_tools import PythonCodeTool, PythonCodeToolConfig, _truncate
+from open_instruct.tools.tools import PythonCodeTool, PythonCodeToolConfig, _truncate
 from open_instruct.tools.utils import ToolOutput, get_openai_tool_definitions
 
 
@@ -96,7 +96,7 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, ToolOutput)
         self.assertEqual(result.error, "Empty code. Please provide some code to execute.")
 
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    @patch("open_instruct.tools.tools.aiohttp.ClientSession")
     async def test_successful_execution(self, mock_session_class):
         """Test successful code execution."""
         mock_response = AsyncMock()
@@ -124,7 +124,7 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
             "http://localhost:1212/execute", json={"code": "print('Hello, World!')", "timeout": 3}
         )
 
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    @patch("open_instruct.tools.tools.aiohttp.ClientSession")
     async def test_execution_with_error_response(self, mock_session_class):
         """Test code execution that returns an error from the API."""
         mock_response = AsyncMock()
@@ -146,7 +146,7 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.error, "NameError: name 'undefined_var' is not defined")
         self.assertFalse(result.timeout)
 
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    @patch("open_instruct.tools.tools.aiohttp.ClientSession")
     async def test_timeout_handling(self, mock_session_class):
         """Test timeout is handled correctly."""
         mock_session = MagicMock()
@@ -161,7 +161,7 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.timeout)
         self.assertIn("Timeout after 3 seconds", result.output)
 
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    @patch("open_instruct.tools.tools.aiohttp.ClientSession")
     async def test_api_connection_error(self, mock_session_class):
         """Test handling of API connection errors."""
         mock_session = MagicMock()
@@ -177,7 +177,7 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Connection error", result.output)
         self.assertIn("Connection refused", result.output)
 
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    @patch("open_instruct.tools.tools.aiohttp.ClientSession")
     async def test_execution_with_output_and_error(self, mock_session_class):
         """Test execution that produces both output and an error."""
         mock_response = AsyncMock()
@@ -199,7 +199,7 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Some warning or error", result.output)
         self.assertEqual(result.error, "Some warning or error")
 
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    @patch("open_instruct.tools.tools.aiohttp.ClientSession")
     async def test_custom_timeout(self, mock_session_class):
         """Test that custom timeout is passed to API."""
         tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute", timeout=10)
