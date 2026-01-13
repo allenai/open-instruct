@@ -364,10 +364,7 @@ async def _check_health(port: int) -> None:
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     while True:
-        should_stop = actor._should_stop()
-        active_count = len(actor.active_tasks)
-        batch_size = actor.inference_batch_size
-        if should_stop or active_count >= batch_size:
+        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
@@ -650,11 +647,10 @@ class LLMRayActor:
         raise RuntimeError(f"vLLM engine {message}")
 
     def _init_openai_client(self) -> None:
-        # Client is now initialized in the event loop thread (_init_engine_and_server)
-        # to avoid cross-thread async issues. Here we just verify it's ready.
         base_url = f"http://127.0.0.1:{self.server_port}/v1"
         self.client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=3600)
         self.model_name = self.llm_engine.vllm_config.model_config.model
+
         logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
 
         asyncio.run(_check_health(self.server_port))
@@ -823,21 +819,17 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         response_tokens.extend(model_tokens)
         current_prompt.extend(model_tokens)
 
-        if not output.logprobs or not output.logprobs.token_logprobs:
-            raise ValueError(f"logprobs must be available for request {sub_request_id}")
+        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
         for logprob in output.logprobs.token_logprobs:
             response_logprobs.append(logprob)
             cumulative_logprob += logprob
 
         response_masks.extend([1] * len(model_tokens))
 
-        # Check if we should process tools
-        has_parser = actor.tool_parser is not None
-        has_actors = bool(actor.tool_actors)
-        if not has_parser or not has_actors or num_calls >= actor.max_tool_calls:
+        # check if we have tools to check for
+        if not actor.tool_actors or actor.tool_parser is None:
             break
 
-        # Extract tool calls from output using parser
         tool_calls = actor.tool_parser.get_tool_calls(output.text)
         if not tool_calls:
             break
@@ -847,14 +839,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         for tool_call in tool_calls:
             tool_actor = actor.tool_actor_map.get(tool_call.name)
             if not tool_actor:
-                logger.warning(f"Tool {tool_call.name} not found in actor map")
+                logger.warning(f"Tool {tool_call.name} called but not found in actor map")
                 continue
-
-            logger.info(f"[process_request] {sub_request_id} calling tool {tool_call.name}")
             tool_result: ToolOutput = await tool_actor.__call__.remote(**tool_call.args)
-            logger.info(
-                f"[process_request] {sub_request_id} tool {tool_call.name} returned (timeout={tool_result.timeout})"
-            )
 
             # Track tool call info
             tool_called = True
@@ -867,6 +854,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             # Collect output for formatting
             tool_outputs_list.append(tool_result.output)
 
+        # no valid tool calls found.
         if not tool_outputs_list:
             break
 
