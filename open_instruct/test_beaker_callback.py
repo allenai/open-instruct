@@ -22,6 +22,20 @@ class MockCallback:
         return self._step
 
 
+_MOCKED_MODULES = [
+    "olmo_core",
+    "olmo_core.distributed",
+    "olmo_core.distributed.utils",
+    "olmo_core.train",
+    "olmo_core.train.callbacks",
+    "olmo_core.train.callbacks.callback",
+    "olmo_core.train.callbacks.comet",
+    "olmo_core.train.callbacks.wandb",
+    "olmo_core.train.common",
+    "open_instruct.utils",
+]
+_original_modules = {k: sys.modules.get(k) for k in _MOCKED_MODULES}
+
 mock_olmo_core_distributed = MagicMock()
 mock_olmo_core_distributed.utils.get_rank = Mock(return_value=0)
 mock_callback = MagicMock()
@@ -44,6 +58,14 @@ sys.modules["olmo_core.train.callbacks.comet"].CometCallback = type("CometCallba
 sys.modules["olmo_core.train.callbacks.wandb"].WandBCallback = type("WandBCallback", (), {"priority": 100})
 
 from open_instruct.beaker_callback import BeakerCallbackV2  # noqa: E402
+
+
+def teardown_module():
+    for key in _MOCKED_MODULES:
+        if _original_modules[key] is None:
+            sys.modules.pop(key, None)
+        else:
+            sys.modules[key] = _original_modules[key]
 
 
 class TestBeakerCallbackPreTrain(unittest.TestCase):
