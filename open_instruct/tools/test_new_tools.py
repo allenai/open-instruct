@@ -1,4 +1,4 @@
-"""Tests for new tools (PythonCodeTool from new_tools.py)."""
+"""Tests for new tools (PythonCodeTool and SerperSearchTool from new_tools.py)."""
 
 import asyncio
 import dataclasses
@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 
-from open_instruct.tools.new_tools import PythonCodeTool, PythonCodeToolConfig, _truncate
+from open_instruct.tools.new_tools import (
+    PythonCodeTool,
+    PythonCodeToolConfig,
+    SerperSearchTool,
+    SerperSearchToolConfig,
+    _truncate,
+)
 from open_instruct.tools.utils import ToolOutput, get_openai_tool_definitions
 
 
@@ -286,6 +292,346 @@ class TestHelperFunctions(unittest.TestCase):
 
         self.assertTrue(result.startswith("Hello, Wor"))
         self.assertIn("more chars", result)
+
+
+class TestSerperSearchToolInit(unittest.TestCase):
+    """Tests for SerperSearchTool initialization and properties."""
+
+    def test_initialization_with_defaults(self):
+        """Test tool initializes with correct default values."""
+        tool = SerperSearchTool()
+
+        self.assertEqual(tool.num_results, 5)
+        self.assertEqual(tool.call_name, "serper_search")
+        self.assertEqual(tool.config_name, "serper_search")
+
+    def test_initialization_with_custom_values(self):
+        """Test tool initializes with custom values."""
+        tool = SerperSearchTool(num_results=10)
+
+        self.assertEqual(tool.num_results, 10)
+        self.assertEqual(tool.call_name, "serper_search")
+
+    def test_tool_call_name(self):
+        """Test tool call_name is 'serper_search'."""
+        tool = SerperSearchTool()
+        self.assertEqual(tool.call_name, "serper_search")
+
+    def test_tool_description(self):
+        """Test tool description is set correctly."""
+        tool = SerperSearchTool()
+        self.assertEqual(tool.description, "Google search via the Serper API")
+
+    def test_tool_parameters_schema(self):
+        """Test tool parameters schema is correct."""
+        tool = SerperSearchTool()
+        params = tool.parameters
+
+        self.assertEqual(params["type"], "object")
+        self.assertIn("query", params["properties"])
+        self.assertIn("query", params["required"])
+        self.assertEqual(params["properties"]["query"]["description"], "The search query for Google")
+
+    def test_get_openai_tool_definitions(self):
+        """Test OpenAI tool definition format."""
+        tool = SerperSearchTool()
+        definition = get_openai_tool_definitions(tool)
+
+        self.assertEqual(definition["type"], "function")
+        self.assertEqual(definition["function"]["name"], "serper_search")
+        self.assertEqual(definition["function"]["description"], "Google search via the Serper API")
+        self.assertIn("parameters", definition["function"])
+
+
+class TestSerperSearchToolExecution(unittest.IsolatedAsyncioTestCase):
+    """Tests for SerperSearchTool execution (async __call__)."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.tool = SerperSearchTool(num_results=5)
+
+    async def test_empty_query_returns_error(self):
+        """Test that empty query returns an error without calling API."""
+        result = await self.tool("")
+
+        self.assertIsInstance(result, ToolOutput)
+        self.assertEqual(result.output, "")
+        self.assertEqual(result.error, "Empty query. Please provide a search query.")
+        self.assertTrue(result.called)
+        self.assertFalse(result.timeout)
+        self.assertEqual(result.runtime, 0)
+
+    async def test_whitespace_only_query_returns_error(self):
+        """Test that whitespace-only query returns an error."""
+        result = await self.tool("   \n\t  ")
+
+        self.assertIsInstance(result, ToolOutput)
+        self.assertEqual(result.output, "")
+        self.assertEqual(result.error, "Empty query. Please provide a search query.")
+        self.assertTrue(result.called)
+
+    async def test_none_query_returns_error(self):
+        """Test that None query returns an error."""
+        result = await self.tool(None)
+
+        self.assertIsInstance(result, ToolOutput)
+        self.assertEqual(result.error, "Empty query. Please provide a search query.")
+
+    @patch.dict("os.environ", {}, clear=True)
+    async def test_missing_api_key_raises_error(self):
+        """Test that missing SERPER_API_KEY raises a ValueError."""
+        with self.assertRaises(ValueError) as context:
+            await self.tool("test query")
+
+        self.assertEqual(str(context.exception), "Missing SERPER_API_KEY environment variable.")
+
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_successful_search_with_organic_results(self, mock_session_class):
+        """Test successful search with organic results."""
+        mock_response = AsyncMock()
+        mock_response.json.return_value = {
+            "organic": [
+                {"title": "Result 1", "snippet": "This is result 1", "link": "https://example.com/1"},
+                {"title": "Result 2", "snippet": "This is result 2", "link": "https://example.com/2"},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
+
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("test query")
+
+        self.assertIsInstance(result, ToolOutput)
+        self.assertIn("Result 1", result.output)
+        self.assertIn("This is result 1", result.output)
+        self.assertIn("https://example.com/1", result.output)
+        self.assertIn("Result 2", result.output)
+        self.assertEqual(result.error, "")
+        self.assertTrue(result.called)
+        self.assertFalse(result.timeout)
+        self.assertGreater(result.runtime, 0)
+
+        # Verify API call
+        mock_session.post.assert_called_once()
+        call_args = mock_session.post.call_args
+        self.assertEqual(call_args[0][0], "https://google.serper.dev/search")
+        self.assertEqual(call_args[1]["json"]["q"], "test query")
+        self.assertEqual(call_args[1]["json"]["num"], 5)
+
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_successful_search_with_answer_box(self, mock_session_class):
+        """Test successful search with answer box."""
+        mock_response = AsyncMock()
+        mock_response.json.return_value = {
+            "answerBox": {"answer": "The answer is 42"},
+            "organic": [{"title": "Result 1", "snippet": "This is result 1", "link": "https://example.com/1"}],
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
+
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("what is the answer")
+
+        self.assertIsInstance(result, ToolOutput)
+        self.assertIn("Direct Answer", result.output)
+        self.assertIn("The answer is 42", result.output)
+        self.assertIn("Result 1", result.output)
+        self.assertEqual(result.error, "")
+        self.assertTrue(result.called)
+
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_successful_search_with_featured_snippet(self, mock_session_class):
+        """Test successful search with featured snippet in answer box."""
+        mock_response = AsyncMock()
+        mock_response.json.return_value = {
+            "answerBox": {"snippet": "This is a featured snippet"},
+            "organic": [{"title": "Result 1", "snippet": "This is result 1", "link": "https://example.com/1"}],
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
+
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("what is python")
+
+        self.assertIsInstance(result, ToolOutput)
+        self.assertIn("Featured Snippet", result.output)
+        self.assertIn("This is a featured snippet", result.output)
+        self.assertTrue(result.called)
+
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_no_results_returns_error(self, mock_session_class):
+        """Test query with no results returns an error."""
+        mock_response = AsyncMock()
+        mock_response.json.return_value = {"organic": []}
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
+
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("nonexistent query")
+
+        self.assertTrue(result.called)
+        self.assertEqual(result.output, "")
+        self.assertEqual(result.error, "Query returned no results.")
+        self.assertFalse(result.timeout)
+
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_timeout_handling(self, mock_session_class):
+        """Test timeout is handled correctly."""
+        mock_session = MagicMock()
+        mock_session.post.side_effect = asyncio.TimeoutError("Connection timed out")
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("test query")
+
+        self.assertTrue(result.called)
+        self.assertTrue(result.timeout)
+        self.assertEqual(result.error, "Timeout after 10 seconds")
+
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_api_connection_error(self, mock_session_class):
+        """Test handling of API connection errors."""
+        mock_session = MagicMock()
+        mock_session.post.side_effect = aiohttp.ClientError("Connection refused")
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("test query")
+
+        self.assertTrue(result.called)
+        self.assertFalse(result.timeout)
+        self.assertIn("Connection error", result.error)
+        self.assertIn("Connection refused", result.error)
+
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_http_error_handling(self, mock_session_class):
+        """Test handling of HTTP errors (e.g., 403, 500)."""
+        mock_session = MagicMock()
+        mock_session.post.side_effect = aiohttp.ClientResponseError(
+            request_info=MagicMock(), history=(), status=403, message="Forbidden"
+        )
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("test query")
+
+        self.assertTrue(result.called)
+        self.assertFalse(result.timeout)
+        self.assertIn("HTTP error", result.error)
+        self.assertIn("403", result.error)
+
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_custom_num_results(self, mock_session_class):
+        """Test that custom num_results is passed to API."""
+        tool = SerperSearchTool(num_results=10)
+
+        mock_response = AsyncMock()
+        mock_response.json.return_value = {"organic": []}
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
+
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        await tool("test query")
+
+        call_args = mock_session.post.call_args
+        self.assertEqual(call_args[1]["json"]["num"], 10)
+
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_results_without_snippets_filtered_out(self, mock_session_class):
+        """Test that results without snippets are filtered out."""
+        mock_response = AsyncMock()
+        mock_response.json.return_value = {
+            "organic": [
+                {"title": "Result 1", "link": "https://example.com/1"},  # No snippet
+                {"title": "Result 2", "snippet": "This has a snippet", "link": "https://example.com/2"},
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
+
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("test query")
+
+        self.assertNotIn("Result 1", result.output)
+        self.assertIn("Result 2", result.output)
+        self.assertIn("This has a snippet", result.output)
+
+
+class TestSerperSearchToolConfig(unittest.TestCase):
+    """Tests for SerperSearchToolConfig."""
+
+    def test_config_default_values(self):
+        """Test config has correct default values."""
+        config = SerperSearchToolConfig()
+
+        self.assertEqual(config.num_results, 5)
+
+    def test_config_custom_values(self):
+        """Test config accepts custom values."""
+        config = SerperSearchToolConfig(num_results=10)
+
+        self.assertEqual(config.num_results, 10)
+
+    def test_build_creates_tool(self):
+        """Test building config creates tool correctly."""
+        config = SerperSearchToolConfig(num_results=8)
+
+        tool = config.build()
+
+        self.assertIsInstance(tool, SerperSearchTool)
+        self.assertEqual(tool.num_results, 8)
+
+    def test_tool_class_attribute(self):
+        """Test tool_class is set to SerperSearchTool."""
+        self.assertEqual(SerperSearchToolConfig.tool_class, SerperSearchTool)
 
 
 if __name__ == "__main__":
