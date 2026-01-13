@@ -18,7 +18,7 @@ uv run open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
-    --chat_template_name r1_simple_chat_postpend_think_tools \
+    --chat_template_name r1_simple_chat_postpend_think_tool_vllm \
     --learning_rate 3e-7 \
     --total_episodes 200 \
     --deepspeed_stage 2 \

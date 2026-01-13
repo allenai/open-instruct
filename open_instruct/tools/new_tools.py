@@ -38,17 +38,17 @@ class PythonCodeTool(Tool):
     Executes Python code via a FastAPI endpoint.
     """
 
+    config_name = "python"
+    description = "Executes Python code and returns printed output."
+    parameters = {
+        "type": "object",
+        "properties": {"code": {"type": "string", "description": "Python code to execute"}},
+        "required": ["code"],
+    }
+
     def __init__(self, call_name: str, api_endpoint: str, timeout: int = 3) -> None:
-        super().__init__(
-            config_name="python",
-            description="Executes Python code and returns printed output.",
-            call_name=call_name,
-            parameters={
-                "type": "object",
-                "properties": {"code": {"type": "string", "description": "Python code to execute"}},
-                "required": ["code"],
-            },
-        )
+        # Set instance-specific attributes
+        self.call_name = call_name
         self.api_endpoint = api_endpoint
         self.timeout = timeout
 
