@@ -1,4 +1,4 @@
-"""Tests for new tools (PythonCodeTool from new_tools.py)."""
+"""Tests for new tools (PythonCodeTool and JinaBrowseTool from new_tools.py)."""
 
 import asyncio
 import dataclasses
@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 
-from open_instruct.tools.new_tools import PythonCodeTool, PythonCodeToolConfig, _truncate
+from open_instruct.tools.new_tools import (
+    JinaBrowseTool,
+    JinaBrowseToolConfig,
+    PythonCodeTool,
+    PythonCodeToolConfig,
+    _truncate,
+)
 from open_instruct.tools.utils import ToolOutput, get_openai_tool_definitions
 
 
@@ -286,6 +292,290 @@ class TestHelperFunctions(unittest.TestCase):
 
         self.assertTrue(result.startswith("Hello, Wor"))
         self.assertIn("more chars", result)
+
+
+class TestJinaBrowseToolInit(unittest.TestCase):
+    """Tests for JinaBrowseTool initialization and properties."""
+
+    @patch.dict("os.environ", {"JINA_API_KEY": "test_key"})
+    def test_initialization_with_defaults(self):
+        """Test tool initializes with correct default values."""
+        tool = JinaBrowseTool()
+
+        self.assertEqual(tool.timeout, 30)
+        self.assertEqual(tool.api_key, "test_key")
+        self.assertEqual(tool.call_name, "jina_browse")
+        self.assertEqual(tool.config_name, "jina_browse")
+
+    @patch.dict("os.environ", {"JINA_API_KEY": "test_key"})
+    def test_initialization_with_custom_values(self):
+        """Test tool initializes with custom values."""
+        tool = JinaBrowseTool(timeout=60)
+
+        self.assertEqual(tool.timeout, 60)
+        self.assertEqual(tool.api_key, "test_key")
+        self.assertEqual(tool.call_name, "jina_browse")
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_initialization_without_api_key_raises_error(self):
+        """Test that missing API key raises ValueError."""
+        with self.assertRaises(ValueError) as context:
+            JinaBrowseTool()
+
+        self.assertIn("JINA_API_KEY", str(context.exception))
+
+    @patch.dict("os.environ", {"JINA_API_KEY": "test_key"})
+    def test_tool_call_name(self):
+        """Test tool call_name is 'jina_browse'."""
+        tool = JinaBrowseTool()
+        self.assertEqual(tool.call_name, "jina_browse")
+
+    @patch.dict("os.environ", {"JINA_API_KEY": "test_key"})
+    def test_tool_description(self):
+        """Test tool description is set correctly."""
+        tool = JinaBrowseTool()
+        self.assertEqual(
+            tool.description, "Fetches and converts webpage content to clean markdown using Jina Reader API"
+        )
+
+    @patch.dict("os.environ", {"JINA_API_KEY": "test_key"})
+    def test_tool_parameters_schema(self):
+        """Test tool parameters schema is correct."""
+        tool = JinaBrowseTool()
+        params = tool.parameters
+
+        self.assertEqual(params["type"], "object")
+        self.assertIn("url", params["properties"])
+        self.assertIn("url", params["required"])
+        self.assertEqual(params["properties"]["url"]["description"], "The URL of the webpage to fetch")
+
+    @patch.dict("os.environ", {"JINA_API_KEY": "test_key"})
+    def test_get_openai_tool_definitions(self):
+        """Test OpenAI tool definition format."""
+        tool = JinaBrowseTool()
+        definition = get_openai_tool_definitions(tool)
+
+        self.assertEqual(definition["type"], "function")
+        self.assertEqual(definition["function"]["name"], "jina_browse")
+        self.assertIn("parameters", definition["function"])
+
+
+class TestJinaBrowseToolExecution(unittest.IsolatedAsyncioTestCase):
+    """Tests for JinaBrowseTool execution (async __call__)."""
+
+    @patch.dict("os.environ", {"JINA_API_KEY": "test_key"})
+    def setUp(self):
+        """Set up test fixtures."""
+        self.tool = JinaBrowseTool(timeout=30)
+
+    async def test_empty_url_returns_error(self):
+        """Test that empty URL returns an error without calling API."""
+        result = await self.tool("")
+
+        self.assertIsInstance(result, ToolOutput)
+        self.assertEqual(result.output, "")
+        self.assertEqual(result.error, "Empty URL. Please provide a URL to fetch.")
+        self.assertTrue(result.called)
+        self.assertFalse(result.timeout)
+        self.assertEqual(result.runtime, 0)
+
+    async def test_whitespace_only_url_returns_error(self):
+        """Test that whitespace-only URL returns an error."""
+        result = await self.tool("   \n\t  ")
+
+        self.assertIsInstance(result, ToolOutput)
+        self.assertEqual(result.output, "")
+        self.assertEqual(result.error, "Empty URL. Please provide a URL to fetch.")
+        self.assertTrue(result.called)
+
+    async def test_none_url_returns_error(self):
+        """Test that None URL returns an error."""
+        result = await self.tool(None)
+
+        self.assertIsInstance(result, ToolOutput)
+        self.assertEqual(result.error, "Empty URL. Please provide a URL to fetch.")
+
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_successful_fetch_with_title(self, mock_session_class):
+        """Test successful webpage fetch with title."""
+        mock_response = AsyncMock()
+        mock_response.json.return_value = {
+            "code": 200,
+            "data": {"title": "Example Page", "content": "This is the page content in markdown format."},
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
+
+        mock_session = MagicMock()
+        mock_session.get.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("https://example.com")
+
+        self.assertIsInstance(result, ToolOutput)
+        self.assertIn("Example Page", result.output)
+        self.assertIn("This is the page content", result.output)
+        self.assertEqual(result.error, "")
+        self.assertTrue(result.called)
+        self.assertFalse(result.timeout)
+        self.assertGreater(result.runtime, 0)
+
+        # Verify API call
+        mock_session.get.assert_called_once()
+        call_args = mock_session.get.call_args
+        self.assertEqual(call_args[0][0], "https://r.jina.ai/https://example.com")
+        self.assertIn("Authorization", call_args[1]["headers"])
+        self.assertEqual(call_args[1]["headers"]["Authorization"], "Bearer test_key")
+
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_successful_fetch_without_title(self, mock_session_class):
+        """Test successful webpage fetch without title."""
+        mock_response = AsyncMock()
+        mock_response.json.return_value = {"code": 200, "data": {"content": "Just content without a title."}}
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
+
+        mock_session = MagicMock()
+        mock_session.get.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("https://example.com/page")
+
+        self.assertIsInstance(result, ToolOutput)
+        self.assertIn("Just content without a title", result.output)
+        self.assertEqual(result.error, "")
+        self.assertTrue(result.called)
+
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_api_error_response(self, mock_session_class):
+        """Test handling of Jina API error response."""
+        mock_response = AsyncMock()
+        mock_response.json.return_value = {"code": 400, "message": "Invalid URL format"}
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
+
+        mock_session = MagicMock()
+        mock_session.get.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("https://invalid-url")
+
+        self.assertTrue(result.called)
+        self.assertEqual(result.output, "")
+        self.assertIn("Jina API error", result.error)
+        self.assertIn("Invalid URL format", result.error)
+
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_timeout_handling(self, mock_session_class):
+        """Test timeout is handled correctly."""
+        mock_session = MagicMock()
+        mock_session.get.side_effect = asyncio.TimeoutError("Connection timed out")
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("https://example.com")
+
+        self.assertTrue(result.called)
+        self.assertTrue(result.timeout)
+        self.assertEqual(result.error, "Timeout after 30 seconds")
+
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_http_error_handling(self, mock_session_class):
+        """Test handling of HTTP errors (e.g., 403, 500)."""
+        mock_session = MagicMock()
+        mock_session.get.side_effect = aiohttp.ClientResponseError(
+            request_info=MagicMock(), history=(), status=403, message="Forbidden"
+        )
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("https://example.com")
+
+        self.assertTrue(result.called)
+        self.assertFalse(result.timeout)
+        self.assertIn("HTTP error", result.error)
+        self.assertIn("403", result.error)
+
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_connection_error_handling(self, mock_session_class):
+        """Test handling of connection errors."""
+        mock_session = MagicMock()
+        mock_session.get.side_effect = aiohttp.ClientError("Connection refused")
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        result = await self.tool("https://example.com")
+
+        self.assertTrue(result.called)
+        self.assertFalse(result.timeout)
+        self.assertIn("Connection error", result.error)
+        self.assertIn("Connection refused", result.error)
+
+    @patch.dict("os.environ", {"JINA_API_KEY": "test_key"})
+    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
+    async def test_custom_timeout(self, mock_session_class):
+        """Test that custom timeout is used."""
+        tool = JinaBrowseTool(timeout=60)
+
+        mock_response = AsyncMock()
+        mock_response.json.return_value = {"code": 200, "data": {"content": "OK"}}
+        mock_response.raise_for_status = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = None
+
+        mock_session = MagicMock()
+        mock_session.get.return_value = mock_response
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session_class.return_value = mock_session
+
+        await tool("https://example.com")
+
+        # Verify ClientSession was created with correct timeout
+        call_args = mock_session_class.call_args
+        self.assertIsNotNone(call_args[1].get("timeout"))
+
+
+class TestJinaBrowseToolConfig(unittest.TestCase):
+    """Tests for JinaBrowseToolConfig."""
+
+    def test_config_default_values(self):
+        """Test config has correct default values."""
+        config = JinaBrowseToolConfig()
+
+        self.assertEqual(config.timeout, 30)
+
+    def test_config_custom_values(self):
+        """Test config accepts custom values."""
+        config = JinaBrowseToolConfig(timeout=60)
+
+        self.assertEqual(config.timeout, 60)
+
+    @patch.dict("os.environ", {"JINA_API_KEY": "env_key"})
+    def test_build_creates_tool(self):
+        """Test building config creates tool correctly."""
+        config = JinaBrowseToolConfig(timeout=45)
+
+        tool = config.build()
+
+        self.assertIsInstance(tool, JinaBrowseTool)
+        self.assertEqual(tool.timeout, 45)
+
+    def test_tool_class_attribute(self):
+        """Test tool_class is set to JinaBrowseTool."""
+        self.assertEqual(JinaBrowseToolConfig.tool_class, JinaBrowseTool)
 
 
 if __name__ == "__main__":
