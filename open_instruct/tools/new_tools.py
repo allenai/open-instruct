@@ -3,6 +3,7 @@ Basic tools that are built-in to open-instruct.
 """
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass
 from typing import ClassVar
@@ -114,3 +115,94 @@ class PythonCodeToolConfig(BaseToolConfig):
     """The API endpoint for the code execution server."""
     timeout: int = 3
     """Timeout in seconds for code execution."""
+
+
+class S2SearchTool(Tool):
+    """
+    Search tool using the Semantic Scholar API.
+    Requires S2_API_KEY environment variable.
+
+    Semantic Scholar is a free AI-powered research tool for scientific literature.
+    Get an API key at https://www.semanticscholar.org/product/api
+    """
+
+    def __init__(self, num_results: int = 10, timeout: int = 60) -> None:
+        super().__init__(
+            config_name="s2_search",
+            description="Searches Semantic Scholar for academic papers and citations",
+            call_name="s2_search",
+            parameters={
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "The search query for Semantic Scholar"}},
+                "required": ["query"],
+            },
+        )
+        self.num_results = num_results
+        self.timeout = timeout
+        self.api_key = os.environ.get("S2_API_KEY")
+        if not self.api_key:
+            raise ValueError("Missing S2_API_KEY environment variable.")
+
+    async def __call__(self, query: str) -> ToolOutput:
+        """Search Semantic Scholar for documents matching the query."""
+        if not query or not query.strip():
+            result = ToolOutput(
+                output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
+            )
+            _log_tool_call(self.call_name, query or "", result)
+            return result
+
+        start_time = time.time()
+        timed_out = False
+        error = ""
+        snippets = []
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=self.timeout)
+            headers = {"x-api-key": self.api_key}
+
+            async with aiohttp.ClientSession(timeout=timeout) as session:  # noqa: SIM117
+                async with session.get(
+                    "https://api.semanticscholar.org/graph/v1/snippet/search",
+                    params={"limit": self.num_results, "query": query},
+                    headers=headers,
+                ) as response:
+                    response.raise_for_status()
+                    res = await response.json()
+                    data = res.get("data", [])
+                    snippets = [item["snippet"]["text"] for item in data if item.get("snippet")]
+
+                    if not snippets:
+                        error = "Query returned no results."
+
+        except asyncio.TimeoutError:
+            error = f"Timeout after {self.timeout} seconds"
+            timed_out = True
+        except aiohttp.ClientResponseError as e:
+            error = f"HTTP error: {e.status} {e.message}"
+        except aiohttp.ClientError as e:
+            error = f"Connection error: {e}"
+        except Exception as e:
+            error = f"Unexpected error: {e}"
+
+        result = ToolOutput(
+            output="\n".join(snippets).strip() if not error else "",
+            called=True,
+            error=error,
+            timeout=timed_out,
+            runtime=time.time() - start_time,
+        )
+        _log_tool_call(self.call_name, query, result)
+        return result
+
+
+@dataclass
+class S2SearchToolConfig(BaseToolConfig):
+    """Configuration for the Semantic Scholar search tool."""
+
+    tool_class: ClassVar[type[Tool]] = S2SearchTool
+
+    num_results: int = 10
+    """Number of results to return from Semantic Scholar."""
+    timeout: int = 60
+    """Timeout in seconds for the API request."""
