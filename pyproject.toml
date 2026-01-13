@@ -27,11 +27,12 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.9.0,<2.10",
     "transformers>=4.57.0",
-    "vllm==0.12.0; platform_system != 'Darwin'",
-    "wandb==0.18.1",
+    "vllm>=0.12.0; platform_system != 'Darwin' and platform_machine != 'aarch64'",
+    "vllm>=0.13.0; platform_system != 'Darwin' and platform_machine == 'aarch64'",
+    "wandb>=0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
-    "flash-attn>=2.8.3; platform_system != 'Darwin'",
+    "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
@@ -53,7 +54,13 @@ flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 # pytorch related setups
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu129", marker = "platform_system != 'Darwin'"},
+  { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'"},
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
+]
+# vLLM: aarch64/DGX Spark requires cu130 wheel (experimental)
+# Using v0.13.0 stable - see docs/DGX_SPARK.md for details
+vllm = [
+  { url = "https://wheels.vllm.ai/72506c98349d6bcd32b4e33eec7b5513453c1502/vllm-0.13.0%2Bcu130-cp38-abi3-manylinux_2_35_aarch64.whl", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
 
 [[tool.uv.index]]
@@ -62,9 +69,15 @@ url = "https://download.pytorch.org/whl/cu129"
 explicit = true
 
 [[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+
 
 [project.optional-dependencies]
 code = [
@@ -78,6 +91,7 @@ python-preference = "only-managed"
 link-mode = "hardlink"
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
     "sys_platform == 'darwin'",
 ]
 

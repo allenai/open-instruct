@@ -58,7 +58,7 @@ import ray
 import requests
 import torch
 import torch.nn.functional as F
-import vllm.config
+# vllm.config imported lazily in from_vllm_config() to support DGX Spark (CUDA 13/aarch64)
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -1733,6 +1733,9 @@ GPU_SPECS = {
     "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
     # Specs from https://www.techpowerup.com/gpu-specs/geforce-rtx-4090-mobile.c3949.
     "4090 laptop": {"flops": 32.98e12, "memory_size": 24e9, "memory_bandwidth": 576e9},
+    # DGX Spark GB10 (Blackwell) - unified LPDDR5X memory with CPU
+    # Specs from https://www.nvidia.com/en-us/products/workstations/dgx-spark/
+    "gb10": {"flops": 104e12, "memory_size": 128e9, "memory_bandwidth": 273e9},  # 273 GB/s LPDDR5X unified
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)

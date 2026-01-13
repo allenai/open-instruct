@@ -448,9 +448,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # set sequence parallel
         # note this returns None if sequence_parallel_size == 1
+        # Use configured attn_implementation, defaulting to sdpa if not specified
+        attn_impl = model_config.attn_implementation or "sdpa"
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=model_config.model_name_or_path,
-            core_attn_implementation="flash_attention_2",
+            core_attn_implementation=attn_impl,
             sequence_parallel_size=args.sequence_parallel_size,
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
@@ -460,7 +462,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            attn_implementation=attn_impl,
             use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
