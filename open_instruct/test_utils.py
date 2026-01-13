@@ -127,7 +127,7 @@ class GetDatasetsTest(unittest.TestCase):
         self.assertTrue(parser.parse("0001-01-01T00:00:00Z"))
 
 
-def _setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_description):
+def setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_description):
     """Shared mock setup for beaker tests."""
     mock_is_beaker_job.return_value = True
 
@@ -166,7 +166,7 @@ class TestBeakerDescription(unittest.TestCase):
         env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
         mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
 
-        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+        mock_client, mock_spec, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Beaker-Mason job."
         )
 
@@ -224,7 +224,7 @@ class TestBeakerDescription(unittest.TestCase):
         env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "def456", "GIT_BRANCH": "dev"}
         mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
 
-        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+        mock_client, mock_spec, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Initial job description"
         )
 
@@ -259,7 +259,7 @@ class TestBeakerDescription(unittest.TestCase):
             "https://wandb.ai/ai2-llm/open_instruct_internal/runs/n53oxnzb "
             "[5.0% complete (step 1/20), eta 0m]"
         )
-        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+        mock_client, mock_spec, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, previous_run_description
         )
 
