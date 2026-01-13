@@ -34,20 +34,8 @@ We also have a bunch of Wandb reports for each stage, which contains the same in
 
 | experiment name | wandb report |
 |---|---|
-| Olmo 3 7B Think SFT | https://wandb.ai/ai2-llm/Olmo-3-7B-Think/reports/Olmo-3-7B-Think-SFT-DPO-RL--VmlldzoxNTE3ODQzMA |
-| Olmo 3 7B Think DPO | https://wandb.ai/ai2-llm/Olmo-3-7B-Think/reports/Olmo-3-7B-Think-SFT-DPO-RL--VmlldzoxNTE3ODQzMA |
-| Olmo 3 7B Think RL | https://wandb.ai/ai2-llm/Olmo-3-7B-Think/reports/Olmo-3-7B-Think-SFT-DPO-RL--VmlldzoxNTE3ODQzMA |
-| Olmo 3 7B Instruct SFT | https://wandb.ai/ai2-llm/Olmo-3-7B-Instruct/reports/Olmo-3-7B-Instruct-SFT-DPO-RL--VmlldzoxNTE3ODk3Mg |
-| Olmo 3 7B Instruct DPO | https://wandb.ai/ai2-llm/Olmo-3-7B-Instruct/reports/Olmo-3-7B-Instruct-SFT-DPO-RL--VmlldzoxNTE3ODk3Mg |
-| Olmo 3 7B Instruct RL | https://wandb.ai/ai2-llm/Olmo-3-7B-Instruct/reports/Olmo-3-7B-Instruct-SFT-DPO-RL--VmlldzoxNTE3ODk3Mg |
-| Olmo 3 7B RL Zero General | https://wandb.ai/ai2-llm/Olmo-3-7B-RL-Zero/reports/Olmo-3-7B-RL-Zero--VmlldzoxNTM0OTI1Nw |
-| Olmo 3 7B RL Zero Math | https://wandb.ai/ai2-llm/Olmo-3-7B-RL-Zero/reports/Olmo-3-7B-RL-Zero--VmlldzoxNTM0OTI1Nw |
-| Olmo 3 7B RL Zero Code | https://wandb.ai/ai2-llm/Olmo-3-7B-RL-Zero/reports/Olmo-3-7B-RL-Zero--VmlldzoxNTM0OTI1Nw |
-| Olmo 3 7B RL Zero IF | https://wandb.ai/ai2-llm/Olmo-3-7B-RL-Zero/reports/Olmo-3-7B-RL-Zero--VmlldzoxNTM0OTI1Nw |
-| Olmo 3 32B Think SFT | https://wandb.ai/ai2-llm/Olmo-3-32B-Think/reports/Olmo-3-32B-Think-SFT-DPO-RL--VmlldzoxNTE3OTA5Mg |
-| Olmo 3 32B Think DPO | https://wandb.ai/ai2-llm/Olmo-3-32B-Think/reports/Olmo-3-32B-Think-SFT-DPO-RL--VmlldzoxNTE3OTA5Mg |
-| Olmo 3 32B Think RL | https://wandb.ai/ai2-llm/Olmo-3-32B-Think/reports/Olmo-3-32B-Think-SFT-DPO-RL--VmlldzoxNTE3OTA5Mg |
-| Olmo 3.1 32B Think | https://wandb.ai/ai2-llm/Olmo-3-32B-Think/reports/Olmo-3-32B-Think-SFT-DPO-RL--VmlldzoxNTE3OTA5Mg |
-| Olmo 3 32B Instruct SFT | https://wandb.ai/ai2-llm/Olmo-3-32B-Instruct/reports/Olmo-3-32B-Instruct-SFT-DPO-RL--VmlldzoxNTM0OTIzNw |
-| Olmo 3 32B Instruct DPO | https://wandb.ai/ai2-llm/Olmo-3-32B-Instruct/reports/Olmo-3-32B-Instruct-SFT-DPO-RL--VmlldzoxNTM0OTIzNw |
-| Olmo 3 32B Instruct RL | https://wandb.ai/ai2-llm/Olmo-3-32B-Instruct/reports/Olmo-3-32B-Instruct-SFT-DPO-RL--VmlldzoxNTM0OTIzNw |
+| Olmo 3 7B Think (SFT, DPO, RL) | https://wandb.ai/ai2-llm/Olmo-3-7B-Think/reports/Olmo-3-7B-Think-SFT-DPO-RL--VmlldzoxNTE3ODQzMA |
+| Olmo 3 7B Instruct (SFT, DPO, RL) | https://wandb.ai/ai2-llm/Olmo-3-7B-Instruct/reports/Olmo-3-7B-Instruct-SFT-DPO-RL--VmlldzoxNTE3ODk3Mg |
+| Olmo 3 7B RL Zero (General, Math, Code, IF) | https://wandb.ai/ai2-llm/Olmo-3-7B-RL-Zero/reports/Olmo-3-7B-RL-Zero--VmlldzoxNTM0OTI1Nw |
+| Olmo 3 32B Think (SFT, DPO, RL) & 3.1 | https://wandb.ai/ai2-llm/Olmo-3-32B-Think/reports/Olmo-3-32B-Think-SFT-DPO-RL--VmlldzoxNTE3OTA5Mg |
+| Olmo 3 32B Instruct (SFT, DPO, RL) | https://wandb.ai/ai2-llm/Olmo-3-32B-Instruct/reports/Olmo-3-32B-Instruct-SFT-DPO-RL--VmlldzoxNTM0OTIzNw |
