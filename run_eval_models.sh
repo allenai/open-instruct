@@ -3,11 +3,13 @@
 # Define arrays for model names and paths
 PY="/opt/anaconda3/envs/python310/bin/python"
 MODEL_NAMES=(
-    "GeneralExpert-RLed"
+    "SourceLabelRT-SFTedExperts"
+    "SourceLabelRT-PretrainedExperts"
 )
 
 MODEL_PATHS=(
-    "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/flex-olmo/olmo2_flex_base-tulu3-no_code-no_math-dpo-rlvr_step_350"
+    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/olmo2-7B-sft-router/router-sft-sft-experts-math-mixed-sourcelabelrt/step1212-hf"
+    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/olmo2-7B-sft-router/router-sft-pretrained-experts-sourcelabelrt/step1212-hf"
 )
 
 # Check that arrays have the same length
