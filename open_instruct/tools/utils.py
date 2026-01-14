@@ -95,26 +95,35 @@ class APIResponse:
 
 
 async def make_api_request(
-    url: str, json_payload: dict, timeout_seconds: int, headers: dict | None = None
+    url: str, timeout_seconds: int, headers: dict | None = None, json_payload: dict | None = None, method: str = "POST"
 ) -> APIResponse:
-    """Make an async POST request with standard error handling.
+    """Make an async HTTP request with standard error handling.
 
     Args:
         url: The API endpoint URL.
-        json_payload: JSON data to send in the request body.
         timeout_seconds: Request timeout in seconds.
         headers: Optional HTTP headers.
+        json_payload: JSON data to send in the request body (for POST requests).
+        method: HTTP method ("GET" or "POST"). Defaults to "POST".
 
     Returns:
         APIResponse with data on success, or error details on failure.
     """
+    if method not in ["GET", "POST"]:
+        raise ValueError(f"Invalid method: {method}")
     try:
         timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         async with aiohttp.ClientSession(timeout=timeout) as session:  # noqa: SIM117
-            async with session.post(url, json=json_payload, headers=headers) as response:
-                response.raise_for_status()
-                data = await response.json()
-                return APIResponse(data=data)
+            if method == "GET":
+                async with session.get(url, headers=headers) as response:
+                    response.raise_for_status()
+                    data = await response.json()
+                    return APIResponse(data=data)
+            else:
+                async with session.post(url, json=json_payload, headers=headers) as response:
+                    response.raise_for_status()
+                    data = await response.json()
+                    return APIResponse(data=data)
     except asyncio.TimeoutError:
         return APIResponse(error=f"Timeout after {timeout_seconds} seconds", timed_out=True)
     except aiohttp.ClientResponseError as e:
