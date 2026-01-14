@@ -21,6 +21,7 @@ uv run python mason.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
         --load_ref_policy false \
+	--no_auto_dataset_cache \
         --num_samples_per_prompt_rollout 16 \
         --num_unique_prompts_rollout 32 \
         --num_mini_batches 1 \
