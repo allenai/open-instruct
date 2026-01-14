@@ -2181,10 +2181,11 @@ def run_training(
             dataset=eval_dataset,
             batch_size=1,
             seed=args.seed,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=args.output_dir,
             automatic_reshuffle=False,
+            collator=lambda x: x[0],
         )
     else:
         eval_data_loader = None
