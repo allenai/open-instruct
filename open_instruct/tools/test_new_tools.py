@@ -1,4 +1,4 @@
-"""Tests for new tools (PythonCodeTool and SerperSearchTool from new_tools.py)."""
+"""Tests for new tools (PythonCodeTool, JinaBrowseTool, and SerperSearchTool from new_tools.py)."""
 
 import asyncio
 import dataclasses
@@ -7,13 +7,15 @@ from unittest.mock import patch
 import pytest
 
 from open_instruct.tools.new_tools import (
+    JinaBrowseTool,
+    JinaBrowseToolConfig,
     PythonCodeTool,
     PythonCodeToolConfig,
     SerperSearchTool,
     SerperSearchToolConfig,
     _truncate,
 )
-from open_instruct.tools.utils import ToolOutput, get_openai_tool_definitions
+from open_instruct.tools.utils import ToolOutput, ToolsConfig, get_openai_tool_definitions
 
 
 class TestPythonCodeToolInit:
@@ -286,6 +288,196 @@ class TestTruncateHelper:
             assert result == expected_result
 
 
+class TestJinaBrowseToolInit:
+    """Tests for JinaBrowseTool initialization and properties."""
+
+    @pytest.mark.parametrize(
+        "timeout,expected_timeout",
+        [
+            (None, 30),  # default
+            (60, 60),  # custom
+        ],
+        ids=["defaults", "custom_values"],
+    )
+    @patch.dict("os.environ", {"JINA_API_KEY": "test_key"})
+    def test_initialization(self, timeout, expected_timeout):
+        """Test tool initializes with correct values."""
+        tool = (
+            JinaBrowseTool(call_name="browse")
+            if timeout is None
+            else JinaBrowseTool(call_name="browse", timeout=timeout)
+        )
+
+        assert tool.timeout == expected_timeout
+        assert tool.call_name == "browse"
+        assert tool.config_name == "jina_browse"
+        assert tool.api_key == "test_key"
+
+    @patch.dict("os.environ", {"JINA_API_KEY": "test_key"})
+    def test_tool_description(self):
+        """Test tool description is set correctly."""
+        tool = JinaBrowseTool(call_name="browse")
+        assert tool.description == "Fetches and converts webpage content to clean markdown using Jina Reader API"
+
+    @patch.dict("os.environ", {"JINA_API_KEY": "test_key"})
+    def test_tool_parameters_schema(self):
+        """Test tool parameters schema is correct."""
+        tool = JinaBrowseTool(call_name="browse")
+        params = tool.parameters
+
+        assert params["type"] == "object"
+        assert "url" in params["properties"]
+        assert "url" in params["required"]
+        assert params["properties"]["url"]["description"] == "The URL of the webpage to fetch"
+
+    @patch.dict("os.environ", {"JINA_API_KEY": "test_key"})
+    def test_get_openai_tool_definitions(self):
+        """Test OpenAI tool definition format."""
+        tool = JinaBrowseTool(call_name="browse")
+        definition = get_openai_tool_definitions(tool)
+
+        assert definition["type"] == "function"
+        assert definition["function"]["name"] == "browse"
+        assert "parameters" in definition["function"]
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_missing_api_key_raises_error_on_init(self):
+        """Test that missing JINA_API_KEY raises a ValueError on initialization."""
+        with pytest.raises(ValueError, match="Missing JINA_API_KEY environment variable."):
+            JinaBrowseTool(call_name="browse")
+
+
+class TestJinaBrowseToolExecution:
+    """Tests for JinaBrowseTool execution (async execute)."""
+
+    @pytest.fixture
+    def tool(self):
+        """Set up test fixture."""
+        with patch.dict("os.environ", {"JINA_API_KEY": "test_key"}):
+            return JinaBrowseTool(call_name="browse", timeout=30)
+
+    @pytest.mark.parametrize("url_input", ["", "   \n\t  ", None], ids=["empty", "whitespace", "none"])
+    def test_empty_url_returns_error(self, tool, url_input):
+        """Test that empty/whitespace/None URL returns an error without calling API."""
+        result = asyncio.run(tool.execute(url_input))
+
+        assert isinstance(result, ToolOutput)
+        assert result.output == ""
+        assert result.error == "Empty URL. Please provide a URL to fetch."
+        assert result.called is True
+        assert result.timeout is False
+
+    @pytest.mark.parametrize(
+        "api_data,expected_in_output",
+        [
+            # With title
+            (
+                {"code": 200, "data": {"title": "Example Page", "content": "This is the page content."}},
+                ["# Example Page", "This is the page content."],
+            ),
+            # Without title
+            ({"code": 200, "data": {"content": "Just content without a title."}}, ["Just content without a title."]),
+        ],
+        ids=["with_title", "without_title"],
+    )
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_successful_fetch(self, mock_api_request, tool, api_data, expected_in_output):
+        """Test successful webpage fetch with various response types."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data=api_data)
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(tool.execute("https://example.com"))
+
+        assert isinstance(result, ToolOutput)
+        for expected in expected_in_output:
+            assert expected in result.output
+        assert result.error == ""
+        assert result.called is True
+        assert result.timeout is False
+
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_jina_api_error_response(self, mock_api_request, tool):
+        """Test handling of Jina API error response (code != 200)."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"code": 400, "message": "Invalid URL format"})
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(tool.execute("https://invalid-url"))
+
+        assert result.called is True
+        assert "Jina API error" in result.error
+        assert "Invalid URL format" in result.error
+        assert "Jina API error" in result.output  # Error in output for model feedback
+
+    @pytest.mark.parametrize(
+        "api_response,expected_timeout,expected_error_contains",
+        [
+            ({"error": "Timeout after 30 seconds", "timed_out": True}, True, "Timeout after 30 seconds"),
+            ({"error": "Connection error: Connection refused", "timed_out": False}, False, "Connection error"),
+            ({"error": "HTTP error: 403 Forbidden", "timed_out": False}, False, "HTTP error"),
+        ],
+        ids=["timeout", "connection_error", "http_error"],
+    )
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_error_handling(self, mock_api_request, tool, api_response, expected_timeout, expected_error_contains):
+        """Test error handling for various API error types."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(**api_response)
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(tool.execute("https://example.com"))
+
+        assert result.called is True
+        assert result.timeout is expected_timeout
+        assert expected_error_contains in result.error
+        assert expected_error_contains in result.output  # Error message also in output for model feedback
+
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_uses_get_method(self, mock_api_request, tool):
+        """Test that JinaBrowseTool uses GET method."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"code": 200, "data": {"content": "OK"}})
+
+        mock_api_request.side_effect = mock_response
+
+        asyncio.run(tool.execute("https://example.com"))
+
+        mock_api_request.assert_called_once()
+        call_args = mock_api_request.call_args
+        assert call_args[1]["method"] == "GET"
+        assert "r.jina.ai" in call_args[1]["url"]
+
+
+class TestJinaBrowseToolConfig:
+    """Tests for JinaBrowseToolConfig."""
+
+    def test_config_default_values(self):
+        """Test config has correct default values."""
+        config = JinaBrowseToolConfig()
+        assert config.timeout == 30
+
+    def test_config_custom_values(self):
+        """Test config accepts custom values."""
+        config = JinaBrowseToolConfig(timeout=60)
+        assert config.timeout == 60
+
+    def test_tool_class_attribute(self):
+        """Test tool_class is set to JinaBrowseTool."""
+        assert JinaBrowseToolConfig.tool_class == JinaBrowseTool
+
+
 class TestSerperSearchToolInit:
     """Tests for SerperSearchTool initialization and properties."""
 
@@ -455,8 +647,8 @@ class TestSerperSearchToolExecution:
         result = asyncio.run(tool.execute("nonexistent query"))
 
         assert result.called is True
-        assert result.output == ""
         assert result.error == "Query returned no results."
+        assert result.output == result.error  # Error in output for model feedback
         assert result.timeout is False
 
     @patch("open_instruct.tools.new_tools.make_api_request")
@@ -499,6 +691,54 @@ class TestSerperSearchToolConfig:
     def test_tool_class_attribute(self):
         """Test tool_class is set to SerperSearchTool."""
         assert SerperSearchToolConfig.tool_class == SerperSearchTool
+
+
+class TestToolsConfig:
+    """Tests for ToolsConfig dataclass."""
+
+    def test_no_tools_configured(self):
+        """Test ToolsConfig works when no tools are configured."""
+        config = ToolsConfig()
+        assert config.tools is None
+        assert config.tool_configs == []
+        assert config._parsed_tool_configs == []
+        assert config.tool_call_names is None
+        assert config.enabled is False
+
+    def test_tools_with_default_configs(self):
+        """Test ToolsConfig sets default tool_configs when not provided."""
+        config = ToolsConfig(tools=["python", "search"])
+        assert config.tools == ["python", "search"]
+        assert config.tool_configs == ["{}", "{}"]
+        assert config._parsed_tool_configs == [{}, {}]
+        assert config.tool_call_names == ["python", "search"]
+        assert config.enabled is True
+
+    def test_tools_with_custom_configs(self):
+        """Test ToolsConfig parses custom tool_configs from JSON strings."""
+        config = ToolsConfig(tools=["python", "search"], tool_configs=['{"timeout": 10}', '{"num_results": 5}'])
+        assert config.tool_configs == ['{"timeout": 10}', '{"num_results": 5}']
+        assert config._parsed_tool_configs == [{"timeout": 10}, {"num_results": 5}]
+
+    def test_tools_with_custom_call_names(self):
+        """Test ToolsConfig allows custom tool_call_names."""
+        config = ToolsConfig(tools=["python", "search"], tool_call_names=["code", "web_search"])
+        assert config.tool_call_names == ["code", "web_search"]
+
+    def test_mismatched_tool_configs_length_raises(self):
+        """Test ToolsConfig raises when tool_configs length doesn't match tools."""
+        with pytest.raises(ValueError, match="tool_configs must have same length as tools"):
+            ToolsConfig(tools=["python", "search"], tool_configs=["{}"])
+
+    def test_mismatched_tool_call_names_length_raises(self):
+        """Test ToolsConfig raises when tool_call_names length doesn't match tools."""
+        with pytest.raises(ValueError, match="tool_call_names must have same length as tools"):
+            ToolsConfig(tools=["python", "search"], tool_call_names=["code"])
+
+    def test_invalid_tool_config_json_raises(self):
+        """Test ToolsConfig raises on invalid JSON in tool_configs."""
+        with pytest.raises(ValueError, match="Invalid tool_config for tool python"):
+            ToolsConfig(tools=["python"], tool_configs=["not valid json"])
 
 
 if __name__ == "__main__":

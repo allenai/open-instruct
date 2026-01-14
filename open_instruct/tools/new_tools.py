@@ -4,6 +4,7 @@ Basic tools that are built-in to open-instruct.
 
 import os
 import time
+import urllib.parse
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -65,7 +66,7 @@ class PythonCodeTool(Tool):
 
         start_time = time.time()
         api_response = await make_api_request(
-            url=self.api_endpoint, json_payload={"code": code, "timeout": self.timeout}, timeout_seconds=self.timeout
+            url=self.api_endpoint, timeout_seconds=self.timeout, json_payload={"code": code, "timeout": self.timeout}
         )
 
         if api_response.error:
@@ -98,6 +99,94 @@ class PythonCodeToolConfig(BaseToolConfig):
     """The API endpoint for the code execution server."""
     timeout: int = 3
     """Timeout in seconds for code execution."""
+
+
+class JinaBrowseTool(Tool):
+    """
+    Tool for fetching webpage content using Jina Reader API.
+    Converts webpages to clean, LLM-friendly markdown format.
+
+    Jina Reader is a free API for converting web pages to clean text.
+    Get an API key at https://jina.ai/reader/.
+    """
+
+    config_name = "jina_browse"
+    description = "Fetches and converts webpage content to clean markdown using Jina Reader API"
+    parameters = {
+        "type": "object",
+        "properties": {"url": {"type": "string", "description": "The URL of the webpage to fetch"}},
+        "required": ["url"],
+    }
+
+    def __init__(self, call_name: str, timeout: int = 30) -> None:
+        self.call_name = call_name
+        self.timeout = timeout
+        self.api_key = os.environ.get("JINA_API_KEY")
+        if not self.api_key:
+            raise ValueError("Missing JINA_API_KEY environment variable.")
+
+    async def execute(self, url: str) -> ToolOutput:
+        """Fetch webpage content via Jina Reader API."""
+        if not url or not url.strip():
+            result = ToolOutput(
+                output="", error="Empty URL. Please provide a URL to fetch.", called=True, timeout=False, runtime=0
+            )
+            _log_tool_call(self.call_name, url or "", result)
+            return result
+
+        start_time = time.time()
+        api_response = await make_api_request(
+            url=f"https://r.jina.ai/{urllib.parse.quote(url.strip(), safe=':/')}",
+            timeout_seconds=self.timeout,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+                "X-Return-Format": "markdown",
+            },
+            method="GET",
+        )
+
+        if api_response.error:
+            result = ToolOutput(
+                output=api_response.error,
+                called=True,
+                error=api_response.error,
+                timeout=api_response.timed_out,
+                runtime=time.time() - start_time,
+            )
+            _log_tool_call(self.call_name, url, result)
+            return result
+
+        # Extract content from Jina response
+        data = api_response.data
+        content = ""
+        error = ""
+
+        if data.get("code") == 200:
+            inner_data = data.get("data", {})
+            content = inner_data.get("content") or ""
+            title = inner_data.get("title") or ""
+
+            # Format output with title if available
+            if title and content:
+                content = f"# {title}\n\n{content}"
+        else:
+            error = f"Jina API error: {data.get('message', 'Unknown error')}"
+
+        output = error if error else content
+        result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
+        _log_tool_call(self.call_name, url, result)
+        return result
+
+
+@dataclass
+class JinaBrowseToolConfig(BaseToolConfig):
+    """Configuration for the Jina Reader browse tool."""
+
+    tool_class: ClassVar[type[Tool]] = JinaBrowseTool
+
+    timeout: int = 30
+    """Timeout in seconds for webpage fetching."""
 
 
 class SerperSearchTool(Tool):
@@ -134,8 +223,8 @@ class SerperSearchTool(Tool):
         start_time = time.time()
         api_response = await make_api_request(
             url="https://google.serper.dev/search",
-            json_payload={"q": query, "num": self.num_results},
             timeout_seconds=self.timeout,
+            json_payload={"q": query, "num": self.num_results},
             headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
         )
 
@@ -170,8 +259,8 @@ class SerperSearchTool(Tool):
             elif "snippet" in answer_box:
                 snippets.insert(0, f"**Featured Snippet:** {answer_box['snippet']}")
 
-        output = "\n\n".join(snippets).strip() if snippets else ""
         error = "" if snippets else "Query returned no results."
+        output = "\n\n".join(snippets).strip() if snippets else error
 
         result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
         _log_tool_call(self.call_name, query, result)
@@ -193,5 +282,6 @@ class SerperSearchToolConfig(BaseToolConfig):
 # Tool Registry: Maps tool names to their config classes
 TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     PythonCodeToolConfig.tool_class.config_name: PythonCodeToolConfig,
+    JinaBrowseToolConfig.tool_class.config_name: JinaBrowseToolConfig,
     SerperSearchToolConfig.tool_class.config_name: SerperSearchToolConfig,
 }
