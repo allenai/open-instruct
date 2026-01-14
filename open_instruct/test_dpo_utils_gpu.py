@@ -13,14 +13,13 @@ import unittest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from open_instruct.dpo_utils import DataCollatorForSeq2SeqDPO, concatenated_forward, separate_forward
-from open_instruct.model_utils import TensorCache
+from open_instruct import dpo_utils, model_utils
 
 
 @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
 class TestTensorCacheGPU(unittest.TestCase):
     def test_tensor_cache_gpu_indexing(self):
-        cache = TensorCache(
+        cache = model_utils.TensorCache(
             tensors={
                 "chosen_logps": torch.tensor([1.0, 2.0, 3.0, 4.0]).cuda(),
                 "rejected_logps": torch.tensor([5.0, 6.0, 7.0, 8.0]).cuda(),
@@ -34,11 +33,11 @@ class TestTensorCacheGPU(unittest.TestCase):
         self.assertTrue(torch.equal(result["rejected_logps"], torch.tensor([5.0, 7.0]).cuda()))
 
     def test_tensor_cache_disk_roundtrip_with_gpu(self):
-        cache = TensorCache(tensors={"chosen_logps": torch.tensor([1.0, 2.0, 3.0]).cuda()})
+        cache = model_utils.TensorCache(tensors={"chosen_logps": torch.tensor([1.0, 2.0, 3.0]).cuda()})
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = pathlib.Path(tmpdir) / "cache.pt"
             cache.to_disk(cache_path)
-            loaded_cache = TensorCache.from_disk(cache_path)
+            loaded_cache = model_utils.TensorCache.from_disk(cache_path)
             self.assertEqual(loaded_cache.tensors["chosen_logps"].device.type, "cpu")
             self.assertTrue(torch.allclose(cache.tensors["chosen_logps"].cpu(), loaded_cache.tensors["chosen_logps"]))
 
@@ -66,7 +65,7 @@ class TestDataCollatorDatasetIndex(unittest.TestCase):
             for i in range(4)
         ]
 
-        collator = DataCollatorForSeq2SeqDPO(tokenizer=self.tokenizer, model=self.model, padding="longest")
+        collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=self.tokenizer, model=self.model, padding="longest")
         batch = collator(samples)
 
         self.assertIn("index", batch)
@@ -105,7 +104,7 @@ class TestForwardFunctionsOlmo(unittest.TestCase):
 
     def test_concatenated_forward_olmo(self):
         batch = self._make_batch()
-        chosen_logps, rejected_logps, aux_loss = concatenated_forward(self.olmo_model, batch, is_olmo=True)
+        chosen_logps, rejected_logps, aux_loss = dpo_utils.concatenated_forward_olmo(self.olmo_model, batch)
 
         self.assertEqual(chosen_logps.shape, (2,))
         self.assertEqual(rejected_logps.shape, (2,))
@@ -115,7 +114,7 @@ class TestForwardFunctionsOlmo(unittest.TestCase):
 
     def test_separate_forward_olmo(self):
         batch = self._make_batch()
-        chosen_logps, rejected_logps, aux_loss = separate_forward(self.olmo_model, batch, is_olmo=True)
+        chosen_logps, rejected_logps, aux_loss = dpo_utils.separate_forward_olmo(self.olmo_model, batch)
 
         self.assertEqual(chosen_logps.shape, (2,))
         self.assertEqual(rejected_logps.shape, (2,))
@@ -126,7 +125,7 @@ class TestForwardFunctionsOlmo(unittest.TestCase):
     def test_concatenated_forward_hf(self):
         tokenizer = AutoTokenizer.from_pretrained(self.hf_model_name)
         batch = self._make_batch(vocab_size=tokenizer.vocab_size)
-        chosen_logps, rejected_logps, aux_loss = concatenated_forward(self.hf_model, batch, is_olmo=False)
+        chosen_logps, rejected_logps, aux_loss = dpo_utils.concatenated_forward(self.hf_model, batch)
 
         self.assertEqual(chosen_logps.shape, (2,))
         self.assertEqual(rejected_logps.shape, (2,))
@@ -137,7 +136,7 @@ class TestForwardFunctionsOlmo(unittest.TestCase):
     def test_separate_forward_hf(self):
         tokenizer = AutoTokenizer.from_pretrained(self.hf_model_name)
         batch = self._make_batch(vocab_size=tokenizer.vocab_size)
-        chosen_logps, rejected_logps, aux_loss = separate_forward(self.hf_model, batch, is_olmo=False)
+        chosen_logps, rejected_logps, aux_loss = dpo_utils.separate_forward(self.hf_model, batch)
 
         self.assertEqual(chosen_logps.shape, (2,))
         self.assertEqual(rejected_logps.shape, (2,))
@@ -147,11 +146,11 @@ class TestForwardFunctionsOlmo(unittest.TestCase):
 
     def test_olmo_and_hf_produce_different_results(self):
         batch = self._make_batch()
-        olmo_chosen, olmo_rejected, _ = concatenated_forward(self.olmo_model, batch, is_olmo=True)
+        olmo_chosen, olmo_rejected, _ = dpo_utils.concatenated_forward_olmo(self.olmo_model, batch)
 
         tokenizer = AutoTokenizer.from_pretrained(self.hf_model_name)
         hf_batch = self._make_batch(vocab_size=tokenizer.vocab_size)
-        hf_chosen, hf_rejected, _ = concatenated_forward(self.hf_model, hf_batch, is_olmo=False)
+        hf_chosen, hf_rejected, _ = dpo_utils.concatenated_forward(self.hf_model, hf_batch)
 
         self.assertFalse(torch.allclose(olmo_chosen, hf_chosen))
 
