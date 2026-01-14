@@ -46,7 +46,6 @@ class PythonCodeTool(Tool):
     }
 
     def __init__(self, call_name: str, api_endpoint: str, timeout: int = 3) -> None:
-        # Set instance-specific attributes
         self.call_name = call_name
         self.api_endpoint = api_endpoint
         self.timeout = timeout
@@ -189,6 +188,82 @@ class JinaBrowseToolConfig(BaseToolConfig):
     """Timeout in seconds for webpage fetching."""
 
 
+class S2SearchTool(Tool):
+    """
+    Search tool using the Semantic Scholar API.
+    Requires S2_API_KEY environment variable.
+    Get an API key at https://www.semanticscholar.org/product/api.
+    """
+
+    config_name = "s2_search"
+    description = "Searches Semantic Scholar for academic papers and citations"
+    parameters = {
+        "type": "object",
+        "properties": {"query": {"type": "string", "description": "The search query for Semantic Scholar"}},
+        "required": ["query"],
+    }
+
+    def __init__(self, call_name: str, num_results: int = 10, timeout: int = 60) -> None:
+        self.call_name = call_name
+        self.num_results = num_results
+        self.timeout = timeout
+        self.api_key = os.environ.get("S2_API_KEY")
+        if not self.api_key:
+            raise ValueError("Missing S2_API_KEY environment variable.")
+
+    async def execute(self, query: str) -> ToolOutput:
+        """Search Semantic Scholar for documents matching the query."""
+        if not query or not query.strip():
+            result = ToolOutput(
+                output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
+            )
+            _log_tool_call(self.call_name, query or "", result)
+            return result
+
+        start_time = time.time()
+        api_response = await make_api_request(
+            url="https://api.semanticscholar.org/graph/v1/snippet/search",
+            timeout_seconds=self.timeout,
+            headers={"x-api-key": self.api_key},
+            params={"limit": self.num_results, "query": query},
+            method="GET",
+        )
+
+        if api_response.error:
+            result = ToolOutput(
+                output=api_response.error,
+                called=True,
+                error=api_response.error,
+                timeout=api_response.timed_out,
+                runtime=time.time() - start_time,
+            )
+            _log_tool_call(self.call_name, query, result)
+            return result
+
+        # Extract snippets from response
+        data = api_response.data.get("data", [])
+        snippets = [text for item in data if (text := item.get("snippet", {}).get("text"))]
+
+        error = "" if snippets else "Query returned no results."
+        output = "\n".join(snippets).strip() if snippets else error
+
+        result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
+        _log_tool_call(self.call_name, query, result)
+        return result
+
+
+@dataclass
+class S2SearchToolConfig(BaseToolConfig):
+    """Configuration for the Semantic Scholar search tool."""
+
+    tool_class: ClassVar[type[Tool]] = S2SearchTool
+
+    num_results: int = 10
+    """Number of results to return from Semantic Scholar."""
+    timeout: int = 60
+    """Timeout in seconds for the API request."""
+
+
 class SerperSearchTool(Tool):
     """
     Search tool using the Serper API (Google Search results).
@@ -283,5 +358,6 @@ class SerperSearchToolConfig(BaseToolConfig):
 TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     PythonCodeToolConfig.tool_class.config_name: PythonCodeToolConfig,
     JinaBrowseToolConfig.tool_class.config_name: JinaBrowseToolConfig,
+    S2SearchToolConfig.tool_class.config_name: S2SearchToolConfig,
     SerperSearchToolConfig.tool_class.config_name: SerperSearchToolConfig,
 }
