@@ -92,8 +92,6 @@ class TrainingConfig:
     """Use paged optimizer from bitsandbytes."""
     fused_optimizer: bool = True
     """Whether to use fused AdamW or not."""
-    clip_grad_norm: float = -1
-    """Clip gradient norm. -1 means no clipping."""
 
 
 @dataclass

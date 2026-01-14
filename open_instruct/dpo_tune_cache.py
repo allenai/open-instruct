@@ -163,7 +163,6 @@ class FlatArguments(
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
     )
-    num_train_epochs: int = field(default=2, metadata={"help": "Total number of training epochs to perform."})
     use_qlora: bool = field(
         default=False,
         metadata={"help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."},
@@ -188,8 +187,6 @@ class FlatArguments(
             "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
         },
     )
-    wandb_project_name: str = "open_instruct_internal"
-    """The wandb's project name"""
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
@@ -479,7 +476,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
         accelerator.init_trackers(
-            args.wandb_project_name,
+            args.wandb_project,
             experiment_config,
             init_kwargs={
                 "wandb": {
@@ -715,7 +712,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if args.max_train_steps is None:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+        args.max_train_steps = args.num_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
 
     # Create the learning rate scheduler.
@@ -749,9 +746,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+        args.max_train_steps = args.num_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
-    args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+    args.num_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
@@ -763,7 +760,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
-    logger.info(f"  Num Epochs = {args.num_train_epochs}")
+    logger.info(f"  Num Epochs = {args.num_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.per_device_train_batch_size}")
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
@@ -834,7 +831,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     episode = 0
     total_tokens_processed = 0
     mfu_interval_start = time.perf_counter()
-    for epoch in range(starting_epoch, args.num_train_epochs):
+    for epoch in range(starting_epoch, args.num_epochs):
         model.train()
         train_dataloader.set_epoch(epoch)
         if last_checkpoint_path and resume_step is not None:
@@ -893,8 +890,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
-                if accelerator.sync_gradients and args.clip_grad_norm > 0:
-                    accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                if accelerator.sync_gradients and args.max_grad_norm > 0:
+                    accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()
