@@ -6,7 +6,7 @@ EXP_NAME=olmo3-7b-DPO-debug-32k-${LR}
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --description "Multi-node DPO run with OLMo3-7B, 32k sequence length." \
+    --description "2 node DPO run with OLMo3-7B, 16k sequence length." \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
