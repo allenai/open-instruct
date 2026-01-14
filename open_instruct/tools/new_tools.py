@@ -77,8 +77,8 @@ class PythonCodeTool(Tool):
                 runtime=time.time() - start_time,
             )
         else:
-            output = api_response.data.get("output", "")
-            error = api_response.data.get("error", "")
+            output = api_response.data.get("output") or ""
+            error = api_response.data.get("error") or ""
             full_output = output + ("\n" + error if error else "")
             result = ToolOutput(
                 output=full_output, called=True, error=error, timeout=False, runtime=time.time() - start_time
