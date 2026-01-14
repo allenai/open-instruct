@@ -34,5 +34,4 @@ python mason.py \
     --dpo_beta 5 \
     --use_flash_attn \
     --gradient_checkpointing \
-    --report_to wandb \
     --with_tracking \

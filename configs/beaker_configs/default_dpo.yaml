@@ -28,7 +28,6 @@ tasks:
       --num_train_epochs 3
       --output_dir /output/
       --with_tracking
-      --report_to tensorboard
       --logging_steps 1
     ']
     envVars:
