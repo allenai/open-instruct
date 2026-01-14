@@ -1,11 +1,20 @@
 #!/bin/bash
-set -eo pipefail
+set -xeo pipefail
 
+echo "=== Debug info ==="
+echo "PWD: $(pwd)"
+echo "BEAKER_TOKEN set: ${BEAKER_TOKEN:+yes}"
+echo "Args: $@"
+echo "=================="
+
+echo "Getting beaker user..."
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+echo "BEAKER_USER: $BEAKER_USER"
 
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 echo "Using Beaker image: $BEAKER_IMAGE"
 
+echo "Starting mason.py..."
 uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/ceres \
