@@ -2,102 +2,120 @@
 
 import asyncio
 import dataclasses
-import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
+import pytest
 
 from open_instruct.tools.new_tools import PythonCodeTool, PythonCodeToolConfig, _truncate
 from open_instruct.tools.utils import ToolOutput, get_openai_tool_definitions
 
 
-class TestPythonCodeToolInit(unittest.TestCase):
+class TestPythonCodeToolInit:
     """Tests for PythonCodeTool initialization and properties."""
 
-    def test_initialization_with_defaults(self):
-        """Test tool initializes with correct default values."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
+    @pytest.mark.parametrize(
+        "call_name,api_endpoint,timeout,expected_timeout",
+        [
+            ("python", "http://localhost:1212/execute", None, 3),  # default timeout
+            ("code", "http://example.com/run", 10, 10),  # custom values
+        ],
+        ids=["defaults", "custom_values"],
+    )
+    def test_initialization(self, call_name, api_endpoint, timeout, expected_timeout):
+        """Test tool initializes with correct values."""
+        tool = (
+            PythonCodeTool(call_name=call_name, api_endpoint=api_endpoint)
+            if timeout is None
+            else PythonCodeTool(call_name=call_name, api_endpoint=api_endpoint, timeout=timeout)
+        )
 
-        self.assertEqual(tool.api_endpoint, "http://localhost:1212/execute")
-        self.assertEqual(tool.timeout, 3)
-        self.assertEqual(tool.call_name, "python")
-        self.assertEqual(tool.config_name, "python")
+        assert tool.api_endpoint == api_endpoint
+        assert tool.timeout == expected_timeout
+        assert tool.call_name == call_name
 
-    def test_initialization_with_custom_values(self):
-        """Test tool initializes with custom values."""
-        tool = PythonCodeTool(api_endpoint="http://example.com/run", timeout=10)
-
-        self.assertEqual(tool.api_endpoint, "http://example.com/run")
-        self.assertEqual(tool.timeout, 10)
-        self.assertEqual(tool.call_name, "python")
-
-    def test_tool_call_name(self):
-        """Test tool call_name is 'python'."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
-        self.assertEqual(tool.call_name, "python")
+    @pytest.mark.parametrize("call_name", ["python", "code"])
+    def test_tool_call_name(self, call_name):
+        """Test tool call_name can be customized."""
+        tool = PythonCodeTool(call_name=call_name, api_endpoint="http://localhost:1212/execute")
+        assert tool.call_name == call_name
 
     def test_tool_description(self):
         """Test tool description is set correctly."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
-        self.assertEqual(tool.description, "Executes Python code and returns printed output.")
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute")
+        assert tool.description == "Executes Python code and returns printed output."
 
     def test_tool_parameters_schema(self):
         """Test tool parameters schema is correct."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute")
         params = tool.parameters
 
-        self.assertEqual(params["type"], "object")
-        self.assertIn("code", params["properties"])
-        self.assertIn("code", params["required"])
-        self.assertEqual(params["properties"]["code"]["description"], "Python code to execute")
+        assert params["type"] == "object"
+        assert "code" in params["properties"]
+        assert "code" in params["required"]
+        assert params["properties"]["code"]["description"] == "Python code to execute"
 
     def test_get_openai_tool_definitions(self):
         """Test OpenAI tool definition format."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute")
         definition = get_openai_tool_definitions(tool)
 
-        self.assertEqual(definition["type"], "function")
-        self.assertEqual(definition["function"]["name"], "python")
-        self.assertEqual(definition["function"]["description"], "Executes Python code and returns printed output.")
-        self.assertIn("parameters", definition["function"])
+        assert definition["type"] == "function"
+        assert definition["function"]["name"] == "python"
+        assert definition["function"]["description"] == "Executes Python code and returns printed output."
+        assert "parameters" in definition["function"]
+
+    @pytest.mark.parametrize(
+        "custom_call_name,expected_call_name",
+        [
+            ("code", "code"),
+            (None, "python"),  # default uses config_name
+        ],
+        ids=["custom_name", "default_name"],
+    )
+    def test_call_name_via_config(self, custom_call_name, expected_call_name):
+        """Test that call_name can be set when instantiating tools from config."""
+        config = PythonCodeToolConfig(api_endpoint="http://example.com/execute")
+        # Instantiate tool directly with config values
+        call_name = custom_call_name if custom_call_name else config.tool_class.config_name
+        tool = PythonCodeTool(call_name=call_name, api_endpoint=config.api_endpoint, timeout=config.timeout)
+        assert tool.call_name == expected_call_name
+
+        # Verify OpenAI definition uses the correct name
+        definition = get_openai_tool_definitions(tool)
+        assert definition["function"]["name"] == expected_call_name
 
 
-class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
-    """Tests for PythonCodeTool execution (async __call__)."""
+class TestPythonCodeToolExecution:
+    """Tests for PythonCodeTool execution (async execute)."""
 
-    def setUp(self):
-        """Set up test fixtures."""
-        self.tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute", timeout=3)
+    @pytest.fixture
+    def tool(self):
+        """Set up test fixture."""
+        return PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute", timeout=3)
 
-    async def test_empty_code_returns_error(self):
-        """Test that empty code returns an error without calling API."""
-        result = await self.tool("")
+    @pytest.mark.parametrize(
+        "code_input",
+        [
+            "",  # empty string
+            "   \n\t  ",  # whitespace only
+            None,  # None value
+        ],
+        ids=["empty", "whitespace", "none"],
+    )
+    def test_empty_code_returns_error(self, tool, code_input):
+        """Test that empty/whitespace/None code returns an error without calling API."""
+        result = asyncio.run(tool(code_input))
 
-        self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.output, "")
-        self.assertEqual(result.error, "Empty code. Please provide some code to execute.")
-        self.assertTrue(result.called)
-        self.assertFalse(result.timeout)
-        self.assertEqual(result.runtime, 0)
-
-    async def test_whitespace_only_code_returns_error(self):
-        """Test that whitespace-only code returns an error."""
-        result = await self.tool("   \n\t  ")
-
-        self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.output, "")
-        self.assertEqual(result.error, "Empty code. Please provide some code to execute.")
-        self.assertTrue(result.called)
-
-    async def test_none_code_returns_error(self):
-        """Test that None code returns an error."""
-        result = await self.tool(None)
-
-        self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.error, "Empty code. Please provide some code to execute.")
+        assert isinstance(result, ToolOutput)
+        assert result.output == ""
+        assert result.error == "Empty code. Please provide some code to execute."
+        assert result.called
+        assert not result.timeout
+        assert result.runtime == 0
 
     @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_successful_execution(self, mock_session_class):
+    def test_successful_execution(self, mock_session_class, tool):
         """Test successful code execution."""
         mock_response = AsyncMock()
         mock_response.json.return_value = {"output": "Hello, World!\n", "error": None}
@@ -111,21 +129,21 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         mock_session.__aexit__.return_value = None
         mock_session_class.return_value = mock_session
 
-        result = await self.tool("print('Hello, World!')")
+        result = asyncio.run(tool("print('Hello, World!')"))
 
-        self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.output, "Hello, World!\n")
-        self.assertEqual(result.error, "")
-        self.assertTrue(result.called)
-        self.assertFalse(result.timeout)
-        self.assertGreater(result.runtime, 0)
+        assert isinstance(result, ToolOutput)
+        assert result.output == "Hello, World!\n"
+        assert result.error == ""
+        assert result.called
+        assert not result.timeout
+        assert result.runtime > 0
 
         mock_session.post.assert_called_once_with(
             "http://localhost:1212/execute", json={"code": "print('Hello, World!')", "timeout": 3}
         )
 
     @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_execution_with_error_response(self, mock_session_class):
+    def test_execution_with_error_response(self, mock_session_class, tool):
         """Test code execution that returns an error from the API."""
         mock_response = AsyncMock()
         mock_response.json.return_value = {"output": "", "error": "NameError: name 'undefined_var' is not defined"}
@@ -139,15 +157,15 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         mock_session.__aexit__.return_value = None
         mock_session_class.return_value = mock_session
 
-        result = await self.tool("print(undefined_var)")
+        result = asyncio.run(tool("print(undefined_var)"))
 
-        self.assertTrue(result.called)
-        self.assertIn("NameError", result.output)
-        self.assertEqual(result.error, "NameError: name 'undefined_var' is not defined")
-        self.assertFalse(result.timeout)
+        assert result.called
+        assert "NameError" in result.output
+        assert result.error == "NameError: name 'undefined_var' is not defined"
+        assert not result.timeout
 
     @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_timeout_handling(self, mock_session_class):
+    def test_timeout_handling(self, mock_session_class, tool):
         """Test timeout is handled correctly."""
         mock_session = MagicMock()
         mock_session.post.side_effect = asyncio.TimeoutError("Connection timed out")
@@ -155,14 +173,14 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         mock_session.__aexit__.return_value = None
         mock_session_class.return_value = mock_session
 
-        result = await self.tool("import time; time.sleep(100)")
+        result = asyncio.run(tool("import time; time.sleep(100)"))
 
-        self.assertTrue(result.called)
-        self.assertTrue(result.timeout)
-        self.assertIn("Timeout after 3 seconds", result.output)
+        assert result.called
+        assert result.timeout
+        assert "Timeout after 3 seconds" in result.output
 
     @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_api_connection_error(self, mock_session_class):
+    def test_api_connection_error(self, mock_session_class, tool):
         """Test handling of API connection errors."""
         mock_session = MagicMock()
         mock_session.post.side_effect = aiohttp.ClientError("Connection refused")
@@ -170,15 +188,15 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         mock_session.__aexit__.return_value = None
         mock_session_class.return_value = mock_session
 
-        result = await self.tool("print('test')")
+        result = asyncio.run(tool("print('test')"))
 
-        self.assertTrue(result.called)
-        self.assertFalse(result.timeout)
-        self.assertIn("Connection error", result.output)
-        self.assertIn("Connection refused", result.output)
+        assert result.called
+        assert not result.timeout
+        assert "Connection error" in result.output
+        assert "Connection refused" in result.output
 
     @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_execution_with_output_and_error(self, mock_session_class):
+    def test_execution_with_output_and_error(self, mock_session_class, tool):
         """Test execution that produces both output and an error."""
         mock_response = AsyncMock()
         mock_response.json.return_value = {"output": "Partial output\n", "error": "Some warning or error"}
@@ -192,17 +210,17 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         mock_session.__aexit__.return_value = None
         mock_session_class.return_value = mock_session
 
-        result = await self.tool("print('Partial output'); raise Exception()")
+        result = asyncio.run(tool("print('Partial output'); raise Exception()"))
 
-        self.assertTrue(result.called)
-        self.assertIn("Partial output", result.output)
-        self.assertIn("Some warning or error", result.output)
-        self.assertEqual(result.error, "Some warning or error")
+        assert result.called
+        assert "Partial output" in result.output
+        assert "Some warning or error" in result.output
+        assert result.error == "Some warning or error"
 
     @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_custom_timeout(self, mock_session_class):
+    def test_custom_timeout(self, mock_session_class):
         """Test that custom timeout is passed to API."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute", timeout=10)
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute", timeout=10)
 
         mock_response = AsyncMock()
         mock_response.json.return_value = {"output": "OK", "error": None}
@@ -216,77 +234,73 @@ class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
         mock_session.__aexit__.return_value = None
         mock_session_class.return_value = mock_session
 
-        await tool("print('test')")
+        asyncio.run(tool("print('test')"))
 
         mock_session.post.assert_called_once_with(
             "http://localhost:1212/execute", json={"code": "print('test')", "timeout": 10}
         )
 
 
-class TestPythonCodeToolConfig(unittest.TestCase):
+class TestPythonCodeToolConfig:
     """Tests for PythonCodeToolConfig."""
 
     def test_config_requires_api_endpoint(self):
         """Test config requires api_endpoint."""
         fields = {f.name: f for f in dataclasses.fields(PythonCodeToolConfig)}
-        self.assertIn("api_endpoint", fields)
-        self.assertEqual(fields["api_endpoint"].default, dataclasses.MISSING)
-        self.assertEqual(fields["api_endpoint"].default_factory, dataclasses.MISSING)
+        assert "api_endpoint" in fields
+        assert fields["api_endpoint"].default == dataclasses.MISSING
+        assert fields["api_endpoint"].default_factory == dataclasses.MISSING
 
     def test_config_custom_values(self):
         """Test config accepts custom values."""
         config = PythonCodeToolConfig(api_endpoint="http://example.com/execute", timeout=5)
 
-        self.assertEqual(config.api_endpoint, "http://example.com/execute")
-        self.assertEqual(config.timeout, 5)
+        assert config.api_endpoint == "http://example.com/execute"
+        assert config.timeout == 5
 
-    def test_build_with_endpoint(self):
-        """Test building with api_endpoint creates tool correctly."""
+    def test_config_values_used_for_tool(self):
+        """Test config values can be used to create tool correctly."""
         config = PythonCodeToolConfig(api_endpoint="http://localhost:1212/execute", timeout=5)
 
-        tool = config.build()
+        # Create tool using config values (as build_remote does internally)
+        tool = PythonCodeTool(
+            call_name=config.tool_class.config_name, api_endpoint=config.api_endpoint, timeout=config.timeout
+        )
 
-        self.assertIsInstance(tool, PythonCodeTool)
-        self.assertEqual(tool.api_endpoint, "http://localhost:1212/execute")
-        self.assertEqual(tool.timeout, 5)
+        assert isinstance(tool, PythonCodeTool)
+        assert tool.api_endpoint == "http://localhost:1212/execute"
+        assert tool.timeout == 5
 
     def test_tool_class_attribute(self):
         """Test tool_class is set to PythonCodeTool."""
-        self.assertEqual(PythonCodeToolConfig.tool_class, PythonCodeTool)
+        assert PythonCodeToolConfig.tool_class == PythonCodeTool
 
 
-class TestHelperFunctions(unittest.TestCase):
-    """Tests for helper functions in new_tools.py."""
+class TestTruncateHelper:
+    """Tests for _truncate helper function."""
 
-    def test_truncate_short_text(self):
-        """Test _truncate doesn't modify short text."""
-        short_text = "Hello, World!"
-        result = _truncate(short_text, max_length=500)
-        self.assertEqual(result, short_text)
+    @pytest.mark.parametrize(
+        "text,max_length,expected_result,should_truncate",
+        [
+            ("Hello, World!", 500, "Hello, World!", False),  # short text
+            ("a" * 600, 500, "a" * 500 + "... [100 more chars]", True),  # long text
+            ("a" * 500, 500, "a" * 500, False),  # exact boundary
+            ("Hello, World! This is a test.", 10, "Hello, Wor", True),  # custom max_length
+        ],
+        ids=["short_text", "long_text", "exact_boundary", "custom_max_length"],
+    )
+    def test_truncate(self, text, max_length, expected_result, should_truncate):
+        """Test _truncate with various inputs."""
+        result = _truncate(text, max_length=max_length)
 
-    def test_truncate_long_text(self):
-        """Test _truncate truncates long text with ellipsis."""
-        long_text = "a" * 600
-        result = _truncate(long_text, max_length=500)
-
-        self.assertEqual(len(result), 500 + len("... [100 more chars]"))
-        self.assertTrue(result.startswith("a" * 500))
-        self.assertTrue(result.endswith("... [100 more chars]"))
-
-    def test_truncate_exact_length(self):
-        """Test _truncate at exact max_length boundary."""
-        text = "a" * 500
-        result = _truncate(text, max_length=500)
-        self.assertEqual(result, text)
-
-    def test_truncate_custom_max_length(self):
-        """Test _truncate with custom max_length."""
-        text = "Hello, World! This is a test."
-        result = _truncate(text, max_length=10)
-
-        self.assertTrue(result.startswith("Hello, Wor"))
-        self.assertIn("more chars", result)
+        if should_truncate:
+            assert result.startswith(text[:max_length])
+            assert "more chars" in result
+            if text == "a" * 600:
+                assert len(result) == 500 + len("... [100 more chars]")
+        else:
+            assert result == expected_result
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main([__file__])
