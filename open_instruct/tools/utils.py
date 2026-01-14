@@ -139,9 +139,13 @@ class Tool(ABC):
         return get_openai_tool_definitions(self)
 
     @abstractmethod
-    async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
+    async def execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
         """Execute the tool, must be implemented by subclasses."""
-        raise NotImplementedError("__call__ must be implemented by subclasses.")
+        raise NotImplementedError("execute must be implemented by subclasses.")
+
+    async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
+        """Alias for execute, useful for inference scripts."""
+        return await self.execute(*args, **kwargs)
 
 
 @dataclass

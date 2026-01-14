@@ -87,7 +87,7 @@ class TestPythonCodeToolInit:
 
 
 class TestPythonCodeToolExecution:
-    """Tests for PythonCodeTool execution (async __call__)."""
+    """Tests for PythonCodeTool execution (async execute)."""
 
     @pytest.fixture
     def tool(self):

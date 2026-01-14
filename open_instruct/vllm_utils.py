@@ -883,7 +883,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         # Execute tool calls
         outputs: list[str] = []
         for tool_call in tool_calls:
-            tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].__call__.remote(**tool_call.args)
+            tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].execute.remote(**tool_call.args)
 
             tool_called = True
             num_calls += 1

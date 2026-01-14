@@ -52,7 +52,7 @@ class PythonCodeTool(Tool):
         self.api_endpoint = api_endpoint
         self.timeout = timeout
 
-    async def __call__(self, code: str) -> ToolOutput:
+    async def execute(self, code: str) -> ToolOutput:
         """Execute Python code via the API."""
         if not code or not code.strip():
             result = ToolOutput(
