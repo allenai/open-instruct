@@ -115,15 +115,14 @@ async def make_api_request(
         timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         async with aiohttp.ClientSession(timeout=timeout) as session:  # noqa: SIM117
             if method == "GET":
-                async with session.get(url, headers=headers) as response:
-                    response.raise_for_status()
-                    data = await response.json()
-                    return APIResponse(data=data)
+                request_context = session.get(url, headers=headers)
             else:
-                async with session.post(url, json=json_payload, headers=headers) as response:
-                    response.raise_for_status()
-                    data = await response.json()
-                    return APIResponse(data=data)
+                request_context = session.post(url, json=json_payload, headers=headers)
+
+            async with request_context as response:
+                response.raise_for_status()
+                data = await response.json()
+                return APIResponse(data=data)
     except asyncio.TimeoutError:
         return APIResponse(error=f"Timeout after {timeout_seconds} seconds", timed_out=True)
     except aiohttp.ClientResponseError as e:

@@ -412,9 +412,9 @@ class TestJinaBrowseToolExecution:
         result = asyncio.run(tool.execute("https://invalid-url"))
 
         assert result.called is True
-        assert result.output == ""
         assert "Jina API error" in result.error
         assert "Invalid URL format" in result.error
+        assert "Jina API error" in result.output  # Error in output for model feedback
 
     @pytest.mark.parametrize(
         "api_response,expected_timeout,expected_error_contains",
@@ -647,8 +647,8 @@ class TestSerperSearchToolExecution:
         result = asyncio.run(tool.execute("nonexistent query"))
 
         assert result.called is True
-        assert result.output == ""
         assert result.error == "Query returned no results."
+        assert result.output == result.error  # Error in output for model feedback
         assert result.timeout is False
 
     @patch("open_instruct.tools.new_tools.make_api_request")

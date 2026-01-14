@@ -4,6 +4,7 @@ Basic tools that are built-in to open-instruct.
 
 import os
 import time
+import urllib.parse
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -135,7 +136,7 @@ class JinaBrowseTool(Tool):
 
         start_time = time.time()
         api_response = await make_api_request(
-            url=f"https://r.jina.ai/{url.strip()}",
+            url=f"https://r.jina.ai/{urllib.parse.quote(url.strip(), safe=':/')}",
             timeout_seconds=self.timeout,
             headers={
                 "Accept": "application/json",
@@ -172,7 +173,8 @@ class JinaBrowseTool(Tool):
         else:
             error = f"Jina API error: {data.get('message', 'Unknown error')}"
 
-        result = ToolOutput(output=content, called=True, error=error, timeout=False, runtime=time.time() - start_time)
+        output = error if error else content
+        result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
         _log_tool_call(self.call_name, url, result)
         return result
 
@@ -257,8 +259,8 @@ class SerperSearchTool(Tool):
             elif "snippet" in answer_box:
                 snippets.insert(0, f"**Featured Snippet:** {answer_box['snippet']}")
 
-        output = "\n\n".join(snippets).strip() if snippets else ""
         error = "" if snippets else "Query returned no results."
+        output = "\n\n".join(snippets).strip() if snippets else error
 
         result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
         _log_tool_call(self.call_name, query, result)
