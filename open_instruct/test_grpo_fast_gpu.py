@@ -138,7 +138,7 @@ class TestGeneration(TestGrpoFastBase):
             if use_tools
             else None
         )
-        max_tool_calls = (5,) if use_tools else None
+        max_tool_calls = 5 if use_tools else None
 
         result = self._setup_engine_and_generate(
             tokenizer_name=tokenizer_name,

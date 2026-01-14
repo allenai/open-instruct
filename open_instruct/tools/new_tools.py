@@ -38,21 +38,21 @@ class PythonCodeTool(Tool):
     Executes Python code via a FastAPI endpoint.
     """
 
-    def __init__(self, api_endpoint: str, timeout: int = 3) -> None:
-        super().__init__(
-            config_name="python",
-            description="Executes Python code and returns printed output.",
-            call_name="python",
-            parameters={
-                "type": "object",
-                "properties": {"code": {"type": "string", "description": "Python code to execute"}},
-                "required": ["code"],
-            },
-        )
+    config_name = "python"
+    description = "Executes Python code and returns printed output."
+    parameters = {
+        "type": "object",
+        "properties": {"code": {"type": "string", "description": "Python code to execute"}},
+        "required": ["code"],
+    }
+
+    def __init__(self, call_name: str, api_endpoint: str, timeout: int = 3) -> None:
+        # Set instance-specific attributes
+        self.call_name = call_name
         self.api_endpoint = api_endpoint
         self.timeout = timeout
 
-    async def __call__(self, code: str) -> ToolOutput:
+    async def execute(self, code: str) -> ToolOutput:
         """Execute Python code via the API."""
         if not code or not code.strip():
             result = ToolOutput(
@@ -114,3 +114,7 @@ class PythonCodeToolConfig(BaseToolConfig):
     """The API endpoint for the code execution server."""
     timeout: int = 3
     """Timeout in seconds for code execution."""
+
+
+# Tool Registry: Maps tool names to their config classes
+TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {PythonCodeToolConfig.tool_class.config_name: PythonCodeToolConfig}

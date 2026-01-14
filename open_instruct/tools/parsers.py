@@ -105,3 +105,26 @@ class OpenInstructLegacyToolParser(ToolParser):
 def get_available_parsers() -> list[str]:
     """Return list of available parser types."""
     return ["legacy"]
+
+
+def create_tool_parser(
+    parser_type: str, tool_actors: list[ray.actor.ActorHandle], output_wrap_name: str = "output"
+) -> ToolParser:
+    """Create a tool parser based on configuration.
+
+    Args:
+        parser_type: Type of parser to use ('legacy', 'vllm_hermes', etc.).
+        tool_actors: List of Ray actor handles for tools.
+        output_wrap_name: Name to wrap tool outputs with (for legacy parser).
+
+    Returns:
+        A ToolParser instance.
+
+    Raises:
+        ValueError: If parser type is not supported.
+    """
+    if parser_type == "legacy":
+        return OpenInstructLegacyToolParser(tool_actors, output_wrap_name=output_wrap_name)
+    else:
+        # TODO: Implement other parser types (vllm_hermes, vllm_llama3_json, etc.)
+        raise ValueError(f"Parser type '{parser_type}' not yet implemented. Use 'legacy' for now.")
