@@ -47,7 +47,7 @@ class TestDPOLoss(unittest.TestCase):
     def test_reference_free(self):
         policy_chosen = torch.tensor([0.0])
         policy_rejected = torch.tensor([-1.0])
-        ref_chosen = torch.tensor([-10.0])
+        ref_chosen = torch.tensor([-5.0])
         ref_rejected = torch.tensor([-10.0])
 
         losses_ref, _, _ = dpo_utils.dpo_loss(
