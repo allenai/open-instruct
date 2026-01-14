@@ -172,13 +172,7 @@ class JinaBrowseTool(Tool):
         else:
             error = f"Jina API error: {data.get('message', 'Unknown error')}"
 
-        result = ToolOutput(
-            output=content,
-            called=True,
-            error=error,
-            timeout=False,
-            runtime=time.time() - start_time,
-        )
+        result = ToolOutput(output=content, called=True, error=error, timeout=False, runtime=time.time() - start_time)
         _log_tool_call(self.call_name, url, result)
         return result
 
