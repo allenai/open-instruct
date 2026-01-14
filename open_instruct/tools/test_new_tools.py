@@ -15,7 +15,7 @@ from open_instruct.tools.new_tools import (
     SerperSearchToolConfig,
     _truncate,
 )
-from open_instruct.tools.utils import ToolOutput, get_openai_tool_definitions
+from open_instruct.tools.utils import ToolOutput, ToolsConfig, get_openai_tool_definitions
 
 
 class TestPythonCodeToolInit:
@@ -691,6 +691,51 @@ class TestSerperSearchToolConfig:
     def test_tool_class_attribute(self):
         """Test tool_class is set to SerperSearchTool."""
         assert SerperSearchToolConfig.tool_class == SerperSearchTool
+
+
+class TestToolsConfig:
+    """Tests for ToolsConfig dataclass."""
+
+    def test_no_tools_configured(self):
+        """Test ToolsConfig works when no tools are configured."""
+        config = ToolsConfig()
+        assert config.tools is None
+        assert config.tool_configs == []
+        assert config.tool_call_names is None
+        assert config.enabled is False
+
+    def test_tools_with_default_configs(self):
+        """Test ToolsConfig sets default tool_configs when not provided."""
+        config = ToolsConfig(tools=["python", "search"])
+        assert config.tools == ["python", "search"]
+        assert config.tool_configs == [{}, {}]
+        assert config.tool_call_names == ["python", "search"]
+        assert config.enabled is True
+
+    def test_tools_with_custom_configs(self):
+        """Test ToolsConfig parses custom tool_configs from JSON strings."""
+        config = ToolsConfig(tools=["python", "search"], tool_configs=['{"timeout": 10}', '{"num_results": 5}'])
+        assert config.tool_configs == [{"timeout": 10}, {"num_results": 5}]
+
+    def test_tools_with_custom_call_names(self):
+        """Test ToolsConfig allows custom tool_call_names."""
+        config = ToolsConfig(tools=["python", "search"], tool_call_names=["code", "web_search"])
+        assert config.tool_call_names == ["code", "web_search"]
+
+    def test_mismatched_tool_configs_length_raises(self):
+        """Test ToolsConfig raises when tool_configs length doesn't match tools."""
+        with pytest.raises(ValueError, match="tool_configs must have same length as tools"):
+            ToolsConfig(tools=["python", "search"], tool_configs=["{}"])
+
+    def test_mismatched_tool_call_names_length_raises(self):
+        """Test ToolsConfig raises when tool_call_names length doesn't match tools."""
+        with pytest.raises(ValueError, match="tool_call_names must have same length as tools"):
+            ToolsConfig(tools=["python", "search"], tool_call_names=["code"])
+
+    def test_invalid_tool_config_json_raises(self):
+        """Test ToolsConfig raises on invalid JSON in tool_configs."""
+        with pytest.raises(ValueError, match="Invalid tool_config for tool python"):
+            ToolsConfig(tools=["python"], tool_configs=["not valid json"])
 
 
 if __name__ == "__main__":

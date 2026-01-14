@@ -56,13 +56,13 @@ class ToolsConfig:
                     f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
                 )
 
-        # turn all the tool_configs into dicts
-        # using a simple loop to make the error message more informative
-        for i, (tool_name, config) in enumerate(zip(self.tools, self.tool_configs)):
-            try:
-                self.tool_configs[i] = json.loads(config)
-            except Exception as e:
-                raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
+            # turn all the tool_configs into dicts
+            # using a simple loop to make the error message more informative
+            for i, (tool_name, config) in enumerate(zip(self.tools, self.tool_configs)):
+                try:
+                    self.tool_configs[i] = json.loads(config)
+                except Exception as e:
+                    raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
 
     @property
     def enabled(self) -> bool:
