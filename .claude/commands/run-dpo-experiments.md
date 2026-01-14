@@ -5,6 +5,6 @@ Run the following scripts, in order:
 
 Wait for the first to finish before running the second. Monitor the results and fix any errors.
 
-If they pass, then update PR #1357 with links to them in this format:
+If they pass, then update the PR with links to them in this format:
 
 Ran single GPU DPO script ([Beaker](link)) and multi-node DPO ([Beaker](link)) scripts.
