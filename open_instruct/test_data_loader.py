@@ -30,8 +30,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             collator=single_example_collator,
         )
@@ -48,10 +48,10 @@ class TestHFDataLoader(unittest.TestCase):
         mock_batch = loader.get_mock_batch()
         self.assertIn("index", mock_batch)
 
-    @parameterized.parameterized.expand([("world_size_2", 2), ("world_size_4", 4), ("world_size_8", 8)])
-    def test_multi_rank_sampling(self, name, world_size):
+    @parameterized.parameterized.expand([("dp_world_size_2", 2), ("dp_world_size_4", 4), ("dp_world_size_8", 8)])
+    def test_multi_rank_sampling(self, name, dp_world_size):
         num_examples = 100
-        batch_size = world_size
+        batch_size = dp_world_size
         dataset = make_test_dataset(num_examples)
 
         loaders = [
@@ -59,23 +59,23 @@ class TestHFDataLoader(unittest.TestCase):
                 dataset=dataset,
                 batch_size=batch_size,
                 seed=42,
-                rank=rank,
-                world_size=world_size,
+                dp_rank=dp_rank,
+                dp_world_size=dp_world_size,
                 work_dir=tempfile.gettempdir(),
                 collator=single_example_collator,
             )
-            for rank in range(world_size)
+            for dp_rank in range(dp_world_size)
         ]
 
         all_indices = []
-        for _rank, loader in enumerate(loaders):
+        for _dp_rank, loader in enumerate(loaders):
             rank_indices = []
             for batch in loader:
                 rank_indices.append(batch["index"])
             all_indices.append(set(rank_indices))
 
-        for i in range(world_size):
-            for j in range(i + 1, world_size):
+        for i in range(dp_world_size):
+            for j in range(i + 1, dp_world_size):
                 overlap = all_indices[i] & all_indices[j]
                 self.assertEqual(len(overlap), 0, f"Rank {i} and {j} have overlapping indices: {overlap}")
 
@@ -97,8 +97,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             collator=single_example_collator,
         )
@@ -118,8 +118,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             collator=single_example_collator,
         )
@@ -137,8 +137,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             collator=single_example_collator,
         )
@@ -154,8 +154,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             collator=single_example_collator,
         )
@@ -163,8 +163,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             collator=single_example_collator,
         )
@@ -188,8 +188,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             collator=single_example_collator,
         )
@@ -210,8 +210,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             collator=single_example_collator,
         )
@@ -231,8 +231,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             collator=single_example_collator,
         )
@@ -254,8 +254,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             collator=single_example_collator,
         )
@@ -272,8 +272,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             collator=single_example_collator,
         )
@@ -289,8 +289,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             automatic_reshuffle=True,
             collator=single_example_collator,
@@ -311,8 +311,8 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             automatic_reshuffle=False,
             collator=single_example_collator,
@@ -335,7 +335,7 @@ class TestHFDataLoader(unittest.TestCase):
         dataset = make_test_dataset(10)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=2, seed=42, rank=0, world_size=2, work_dir=tempfile.gettempdir()
+            dataset=dataset, batch_size=2, seed=42, dp_rank=0, dp_world_size=2, work_dir=tempfile.gettempdir()
         )
 
         batch_with_input_ids = {"input_ids": torch.zeros(4, 128)}
@@ -345,7 +345,8 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(loader.global_num_tokens_in_batch(batch_with_dpo), (2 * 64 + 2 * 64) * 2)
 
         batch_without_tokens = {"labels": torch.zeros(4, 128)}
-        self.assertIsNone(loader.global_num_tokens_in_batch(batch_without_tokens))
+        with self.assertRaises(ValueError):
+            loader.global_num_tokens_in_batch(batch_without_tokens)
 
 
 if __name__ == "__main__":

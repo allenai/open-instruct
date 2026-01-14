@@ -74,8 +74,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         dataset: Dataset,
         batch_size: int,
         seed: int,
-        rank: int,
-        world_size: int,
+        dp_rank: int,
+        dp_world_size: int,
         work_dir: str,
         automatic_reshuffle: bool = False,
         collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
@@ -87,8 +87,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
             dataset: The HuggingFace Dataset to load data from. Must have an 'index' column.
             batch_size: The global batch size.
             seed: Random seed for shuffling.
-            rank: The rank of the current process in the distributed setup.
-            world_size: Total number of data-parallel processes in the distributed setup.
+            dp_rank: The rank of the current process in the distributed setup.
+            dp_world_size: Total number of data-parallel processes in the distributed setup.
             work_dir: Working directory for the data loader (required by DataLoaderBase).
             automatic_reshuffle: If True, automatically reshuffle at epoch boundaries.
             collator: Optional collation function for batching examples. If None, batches will be
@@ -101,7 +101,11 @@ class HFDataLoader(data_loader.DataLoaderBase):
             add it with: dataset.add_column('index', range(len(dataset)))
         """
         super().__init__(
-            work_dir=work_dir, global_batch_size=batch_size, dp_world_size=world_size, dp_rank=rank, fs_local_rank=rank
+            work_dir=work_dir,
+            global_batch_size=batch_size,
+            dp_world_size=dp_world_size,
+            dp_rank=dp_rank,
+            fs_local_rank=dp_rank,
         )
 
         if "index" not in dataset.column_names:
@@ -112,17 +116,17 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._full_dataset = dataset
         self.seed = seed
         self._batch_size = batch_size
-        if batch_size < world_size:
+        if batch_size < dp_world_size:
             raise ValueError(
-                f"Global batch size ({batch_size}) must be >= world size ({world_size}). "
+                f"Global batch size ({batch_size}) must be >= world size ({dp_world_size}). "
                 f"Each rank needs at least one example per batch."
             )
-        if batch_size % world_size != 0:
+        if batch_size % dp_world_size != 0:
             logger.warning(
-                f"Global batch size {batch_size} is not divisible by world size {world_size}. "
-                f"The effective global batch size will be {batch_size // world_size * world_size}."
+                f"Global batch size {batch_size} is not divisible by world size {dp_world_size}. "
+                f"The effective global batch size will be {batch_size // dp_world_size * dp_world_size}."
             )
-        self._per_rank_batch_size = batch_size // world_size
+        self._per_rank_batch_size = batch_size // dp_world_size
         self._collator = collator if collator is not None else (lambda x: {"examples": x})
         self._automatic_reshuffle = automatic_reshuffle
         self._excluded_indices: set[int] = set()
@@ -236,7 +240,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         examples = [self.dataset[i] for i in range(num_examples)]
         return to_device(self._collator(examples), self._device)  # type: ignore[return-value]
 
-    def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int | None:
+    def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int:
         """Return the total number of tokens in the batch across all ranks.
 
         Counts tokens from all keys containing 'input_ids' that are torch tensors.
@@ -245,14 +249,17 @@ class HFDataLoader(data_loader.DataLoaderBase):
             batch: A batch dictionary containing input tensors.
 
         Returns:
-            Total number of tokens across all ranks, or None if no input_ids found.
+            Total number of tokens across all ranks.
+
+        Raises:
+            ValueError: If no input_ids tensors are found in the batch.
         """
         num_tokens = 0
         for key, value in batch.items():
             if "input_ids" in key and isinstance(value, torch.Tensor):
                 num_tokens += value.numel()
         if num_tokens == 0:
-            return None
+            raise ValueError("Batch contains no input_ids tensors. Cannot compute token count.")
         return num_tokens * self.dp_world_size
 
 
@@ -760,7 +767,7 @@ def accumulate_inference_batches(
 
 def prepare_collated_data_for_workers(
     packed_sequences: PackedSequences,
-    world_size: int,
+    dp_world_size: int,
     per_device_train_batch_size: int,
     pad_token_id: int,
     pin_memory: bool = True,
@@ -774,7 +781,7 @@ def prepare_collated_data_for_workers(
         packed_sequences: Packed training sequences containing query responses,
             attention masks, position IDs, advantages, response masks,
             and vllm logprobs.
-        world_size: Number of distributed workers.
+        dp_world_size: Number of distributed workers.
         per_device_train_batch_size: Batch size for each device's micro-batch.
         pad_token_id: Token ID used for padding sequences.
         pin_memory: Whether to pin memory for faster data transfer to GPU.
@@ -785,18 +792,18 @@ def prepare_collated_data_for_workers(
         advantages, response_masks, and vllm_logprobs.
     """
     total_sequences = len(packed_sequences.query_responses)
-    if total_sequences % world_size != 0:
-        new_total = (total_sequences // world_size) * world_size
+    if total_sequences % dp_world_size != 0:
+        new_total = (total_sequences // dp_world_size) * dp_world_size
         logger.warning(
-            f"Total packed sequences ({total_sequences}) is not evenly divisible by world_size ({world_size}). "
+            f"Total packed sequences ({total_sequences}) is not evenly divisible by dp_world_size ({dp_world_size}). "
             f"Truncating to {new_total} sequences (dropping {total_sequences - new_total})."
         )
-    B = total_sequences // world_size
+    B = total_sequences // dp_world_size
     collated_data = []
     assert packed_sequences.position_ids is not None
     assert packed_sequences.advantages is not None
     assert packed_sequences.vllm_logprobs is not None
-    for i in range(world_size):
+    for i in range(dp_world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
         per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
         per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
@@ -893,8 +900,8 @@ class DataPreparationActor:
             dataset=dataset,
             batch_size=1,
             seed=seed,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=work_dir,
             automatic_reshuffle=True,
             collator=lambda x: x[0],
