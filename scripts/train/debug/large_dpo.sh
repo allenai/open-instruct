@@ -14,9 +14,9 @@ uv run python mason.py \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
+    --no_auto_dataset_cache \
     --gpus 8 -- accelerate launch \
     --mixed_precision bf16 \
-    --no_auto_dataset_cache \
     --num_processes 8 \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
