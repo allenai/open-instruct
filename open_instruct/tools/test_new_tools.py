@@ -701,6 +701,7 @@ class TestToolsConfig:
         config = ToolsConfig()
         assert config.tools is None
         assert config.tool_configs == []
+        assert config._parsed_tool_configs == []
         assert config.tool_call_names is None
         assert config.enabled is False
 
@@ -708,14 +709,16 @@ class TestToolsConfig:
         """Test ToolsConfig sets default tool_configs when not provided."""
         config = ToolsConfig(tools=["python", "search"])
         assert config.tools == ["python", "search"]
-        assert config.tool_configs == [{}, {}]
+        assert config.tool_configs == ["{}", "{}"]
+        assert config._parsed_tool_configs == [{}, {}]
         assert config.tool_call_names == ["python", "search"]
         assert config.enabled is True
 
     def test_tools_with_custom_configs(self):
         """Test ToolsConfig parses custom tool_configs from JSON strings."""
         config = ToolsConfig(tools=["python", "search"], tool_configs=['{"timeout": 10}', '{"num_results": 5}'])
-        assert config.tool_configs == [{"timeout": 10}, {"num_results": 5}]
+        assert config.tool_configs == ['{"timeout": 10}', '{"num_results": 5}']
+        assert config._parsed_tool_configs == [{"timeout": 10}, {"num_results": 5}]
 
     def test_tools_with_custom_call_names(self):
         """Test ToolsConfig allows custom tool_call_names."""

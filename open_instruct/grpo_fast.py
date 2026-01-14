@@ -2361,7 +2361,9 @@ def main(
 
     # Note that parser will be created inside vLLM actors to avoid serialization issues
     tool_actors = create_tools(
-        tools=tools_config.tools, tool_call_names=tools_config.tool_call_names, tool_configs=tools_config.tool_configs
+        tools=tools_config.tools,
+        tool_call_names=tools_config.tool_call_names,
+        tool_configs=tools_config._parsed_tool_configs,
     )
 
     # Create parser temporarily to get stop sequences for generation config
