@@ -188,7 +188,6 @@ class JinaBrowseToolConfig(BaseToolConfig):
     """Timeout in seconds for webpage fetching."""
 
 
-
 class S2SearchTool(Tool):
     """
     Search tool using the Semantic Scholar API.
@@ -265,6 +264,7 @@ class S2SearchToolConfig(BaseToolConfig):
     """Number of results to return from Semantic Scholar."""
     timeout: int = 60
     """Timeout in seconds for the API request."""
+
 
 class SerperSearchTool(Tool):
     """
