@@ -66,11 +66,11 @@ ENV UV_CACHE_DIR=/root/.cache/uv \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
     UV_COMPILE_BYTECODE=0
 
-# Install dependencies
+# Install dependencies only (not the project itself, which will be imported from local files)
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv run --frozen python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
+    uv run --frozen --no-install-project python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
