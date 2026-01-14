@@ -539,7 +539,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # in the environment
     accelerator_log_kwargs = {}
     if args.with_tracking:
-        accelerator_log_kwargs["log_with"] = "wandb"
+        accelerator_log_kwargs["log_with"] = ["wandb", "tensorboard"]
         accelerator_log_kwargs["project_dir"] = args.output_dir
     # if you get timeouts (e.g. due to long tokenization) increase this.
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
