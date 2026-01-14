@@ -91,7 +91,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
             world_size: Total number of processes in the distributed setup.
             work_dir: Working directory for the data loader (required by DataLoaderBase).
             automatic_reshuffle: If True, automatically reshuffle at epoch boundaries.
-            collator: Optional collation function for batching examples.
+            collator: Optional collation function for batching examples. If None, batches will be
+                dictionaries of the form `{'examples': [example_1, example_2, ...]}`.
             device: Device to move tensors to.
 
         Note:
