@@ -23,7 +23,7 @@ class ToolsConfig:
     Must match length of tools if set. Defaults to tools if not specified."""
 
     tool_configs: list[str] = field(default_factory=list)
-    """JSON dictionaries for configuring each tool. Must match length of tools. Use '{}' for defaults."""
+    """JSON strings for configuring each tool. Must match length of tools. Use '{}' for defaults."""
 
     tool_parser_type: str = "legacy"
     """Type of tool parser to use: 'legacy' is the only option for now."""
@@ -33,6 +33,9 @@ class ToolsConfig:
 
     only_reward_good_outputs: bool = False
     """Only apply rewards to outputs from tools that didn't error."""
+
+    _parsed_tool_configs: list[dict[str, Any]] = field(default_factory=list, init=False)
+    """Parsed tool configurations as dictionaries. Populated from tool_configs during __post_init__."""
 
     def __post_init__(self):
         self.max_tool_calls = int(self.max_tool_calls)
@@ -56,13 +59,14 @@ class ToolsConfig:
                     f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
                 )
 
-        # turn all the tool_configs into dicts
-        # using a simple loop to make the error message more informative
-        for i, (tool_name, config) in enumerate(zip(self.tools, self.tool_configs)):
-            try:
-                self.tool_configs[i] = json.loads(config)
-            except Exception as e:
-                raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
+            # Parse all tool_configs into dicts and store in _parsed_tool_configs
+            # using a simple loop to make the error message more informative
+            self._parsed_tool_configs = []
+            for i, (tool_name, config) in enumerate(zip(self.tools, self.tool_configs)):
+                try:
+                    self._parsed_tool_configs.append(json.loads(config))
+                except Exception as e:
+                    raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
 
     @property
     def enabled(self) -> bool:
