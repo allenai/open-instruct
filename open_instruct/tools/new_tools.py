@@ -192,9 +192,7 @@ class S2SearchTool(Tool):
     """
     Search tool using the Semantic Scholar API.
     Requires S2_API_KEY environment variable.
-
-    Semantic Scholar is a free AI-powered research tool for scientific literature.
-    Get an API key at https://www.semanticscholar.org/product/api
+    Get an API key at https://www.semanticscholar.org/product/api.
     """
 
     config_name = "s2_search"
