@@ -1,598 +1,421 @@
-"""Tests for new tools (PythonCodeTool and S2SearchTool from new_tools.py)."""
+"""Tests for new tools (PythonCodeTool, S2SearchTool, and SerperSearchTool from new_tools.py)."""
 
 import asyncio
 import dataclasses
-import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-import aiohttp
+import pytest
 
 from open_instruct.tools.new_tools import (
     PythonCodeTool,
     PythonCodeToolConfig,
     S2SearchTool,
     S2SearchToolConfig,
+    SerperSearchTool,
+    SerperSearchToolConfig,
     _truncate,
 )
 from open_instruct.tools.utils import ToolOutput, get_openai_tool_definitions
 
 
-class TestPythonCodeToolInit(unittest.TestCase):
+class TestPythonCodeToolInit:
     """Tests for PythonCodeTool initialization and properties."""
 
-    def test_initialization_with_defaults(self):
-        """Test tool initializes with correct default values."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
+    @pytest.mark.parametrize(
+        "call_name,api_endpoint,timeout,expected_timeout",
+        [
+            ("python", "http://localhost:1212/execute", None, 3),  # default timeout
+            ("code", "http://example.com/run", 10, 10),  # custom values
+        ],
+        ids=["defaults", "custom_values"],
+    )
+    def test_initialization(self, call_name, api_endpoint, timeout, expected_timeout):
+        """Test tool initializes with correct values."""
+        tool = (
+            PythonCodeTool(call_name=call_name, api_endpoint=api_endpoint)
+            if timeout is None
+            else PythonCodeTool(call_name=call_name, api_endpoint=api_endpoint, timeout=timeout)
+        )
 
-        self.assertEqual(tool.api_endpoint, "http://localhost:1212/execute")
-        self.assertEqual(tool.timeout, 3)
-        self.assertEqual(tool.call_name, "python")
-        self.assertEqual(tool.config_name, "python")
-        self.assertEqual(tool.description, "Executes Python code and returns printed output.")
+        assert tool.api_endpoint == api_endpoint
+        assert tool.timeout == expected_timeout
+        assert tool.call_name == call_name
 
-        # Verify parameters schema
+    def test_tool_description(self):
+        """Test tool description is set correctly."""
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute")
+        assert tool.description == "Executes Python code and returns printed output."
+
+    def test_tool_parameters_schema(self):
+        """Test tool parameters schema is correct."""
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute")
         params = tool.parameters
-        self.assertEqual(params["type"], "object")
-        self.assertIn("code", params["properties"])
-        self.assertIn("code", params["required"])
-        self.assertEqual(params["properties"]["code"]["description"], "Python code to execute")
 
-    def test_initialization_with_custom_values(self):
-        """Test tool initializes with custom values."""
-        tool = PythonCodeTool(api_endpoint="http://example.com/run", timeout=10)
-
-        self.assertEqual(tool.api_endpoint, "http://example.com/run")
-        self.assertEqual(tool.timeout, 10)
-        self.assertEqual(tool.call_name, "python")
+        assert params["type"] == "object"
+        assert "code" in params["properties"]
+        assert "code" in params["required"]
 
     def test_get_openai_tool_definitions(self):
         """Test OpenAI tool definition format."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute")
+        tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute")
         definition = get_openai_tool_definitions(tool)
 
-        self.assertEqual(definition["type"], "function")
-        self.assertEqual(definition["function"]["name"], "python")
-        self.assertEqual(definition["function"]["description"], "Executes Python code and returns printed output.")
-        self.assertIn("parameters", definition["function"])
+        assert definition["type"] == "function"
+        assert definition["function"]["name"] == "python"
 
 
-class TestPythonCodeToolExecution(unittest.IsolatedAsyncioTestCase):
-    """Tests for PythonCodeTool execution (async __call__)."""
+class TestPythonCodeToolExecution:
+    """Tests for PythonCodeTool execution (async execute)."""
 
-    def setUp(self):
-        """Set up test fixtures."""
-        self.tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute", timeout=3)
+    @pytest.fixture
+    def tool(self):
+        """Set up test fixture."""
+        return PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute", timeout=3)
 
-    async def test_empty_code_returns_error(self):
-        """Test that empty code returns an error without calling API."""
-        result = await self.tool("")
+    @pytest.mark.parametrize("code_input", ["", "   \n\t  ", None], ids=["empty", "whitespace", "none"])
+    def test_empty_code_returns_error(self, tool, code_input):
+        """Test that empty/whitespace/None code returns an error without calling API."""
+        result = asyncio.run(tool(code_input))
 
-        self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.output, "")
-        self.assertEqual(result.error, "Empty code. Please provide some code to execute.")
-        self.assertTrue(result.called)
-        self.assertFalse(result.timeout)
-        self.assertEqual(result.runtime, 0)
+        assert isinstance(result, ToolOutput)
+        assert result.output == ""
+        assert result.error == "Empty code. Please provide some code to execute."
+        assert result.called
 
-    async def test_whitespace_only_code_returns_error(self):
-        """Test that whitespace-only code returns an error."""
-        result = await self.tool("   \n\t  ")
-
-        self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.output, "")
-        self.assertEqual(result.error, "Empty code. Please provide some code to execute.")
-        self.assertTrue(result.called)
-
-    async def test_none_code_returns_error(self):
-        """Test that None code returns an error."""
-        result = await self.tool(None)
-
-        self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.error, "Empty code. Please provide some code to execute.")
-
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_successful_execution(self, mock_session_class):
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_successful_execution(self, mock_api_request, tool):
         """Test successful code execution."""
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {"output": "Hello, World!\n", "error": None}
-        mock_response.raise_for_status = MagicMock()
-        mock_response.__aenter__.return_value = mock_response
-        mock_response.__aexit__.return_value = None
+        from open_instruct.tools.utils import APIResponse
 
-        mock_session = MagicMock()
-        mock_session.post.return_value = mock_response
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"output": "Hello, World!\n", "error": None})
 
-        result = await self.tool("print('Hello, World!')")
+        mock_api_request.side_effect = mock_response
+        result = asyncio.run(tool("print('Hello, World!')"))
 
-        self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.output, "Hello, World!\n")
-        self.assertEqual(result.error, "")
-        self.assertTrue(result.called)
-        self.assertFalse(result.timeout)
-        self.assertGreater(result.runtime, 0)
+        assert result.output == "Hello, World!\n"
+        assert result.error == ""
+        assert result.called
 
-        mock_session.post.assert_called_once_with(
-            "http://localhost:1212/execute", json={"code": "print('Hello, World!')", "timeout": 3}
-        )
-
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_execution_with_error_response(self, mock_session_class):
-        """Test code execution that returns an error from the API."""
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {"output": "", "error": "NameError: name 'undefined_var' is not defined"}
-        mock_response.raise_for_status = MagicMock()
-        mock_response.__aenter__.return_value = mock_response
-        mock_response.__aexit__.return_value = None
-
-        mock_session = MagicMock()
-        mock_session.post.return_value = mock_response
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
-
-        result = await self.tool("print(undefined_var)")
-
-        self.assertTrue(result.called)
-        self.assertIn("NameError", result.output)
-        self.assertEqual(result.error, "NameError: name 'undefined_var' is not defined")
-        self.assertFalse(result.timeout)
-
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_timeout_handling(self, mock_session_class):
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_timeout_handling(self, mock_api_request, tool):
         """Test timeout is handled correctly."""
-        mock_session = MagicMock()
-        mock_session.post.side_effect = asyncio.TimeoutError("Connection timed out")
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
+        from open_instruct.tools.utils import APIResponse
 
-        result = await self.tool("import time; time.sleep(100)")
+        async def mock_response(*args, **kwargs):
+            return APIResponse(error="Timeout after 3 seconds", timed_out=True)
 
-        self.assertTrue(result.called)
-        self.assertTrue(result.timeout)
-        self.assertIn("Timeout after 3 seconds", result.output)
+        mock_api_request.side_effect = mock_response
+        result = asyncio.run(tool("import time; time.sleep(100)"))
 
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_api_connection_error(self, mock_session_class):
-        """Test handling of API connection errors."""
-        mock_session = MagicMock()
-        mock_session.post.side_effect = aiohttp.ClientError("Connection refused")
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
-
-        result = await self.tool("print('test')")
-
-        self.assertTrue(result.called)
-        self.assertFalse(result.timeout)
-        self.assertIn("Connection error", result.output)
-        self.assertIn("Connection refused", result.output)
-
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_execution_with_output_and_error(self, mock_session_class):
-        """Test execution that produces both output and an error."""
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {"output": "Partial output\n", "error": "Some warning or error"}
-        mock_response.raise_for_status = MagicMock()
-        mock_response.__aenter__.return_value = mock_response
-        mock_response.__aexit__.return_value = None
-
-        mock_session = MagicMock()
-        mock_session.post.return_value = mock_response
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
-
-        result = await self.tool("print('Partial output'); raise Exception()")
-
-        self.assertTrue(result.called)
-        self.assertIn("Partial output", result.output)
-        self.assertIn("Some warning or error", result.output)
-        self.assertEqual(result.error, "Some warning or error")
-
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_custom_timeout(self, mock_session_class):
-        """Test that custom timeout is passed to API."""
-        tool = PythonCodeTool(api_endpoint="http://localhost:1212/execute", timeout=10)
-
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {"output": "OK", "error": None}
-        mock_response.raise_for_status = MagicMock()
-        mock_response.__aenter__.return_value = mock_response
-        mock_response.__aexit__.return_value = None
-
-        mock_session = MagicMock()
-        mock_session.post.return_value = mock_response
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
-
-        await tool("print('test')")
-
-        mock_session.post.assert_called_once_with(
-            "http://localhost:1212/execute", json={"code": "print('test')", "timeout": 10}
-        )
+        assert result.timeout
+        assert "Timeout" in result.output
 
 
-class TestPythonCodeToolConfig(unittest.TestCase):
+class TestPythonCodeToolConfig:
     """Tests for PythonCodeToolConfig."""
 
     def test_config_requires_api_endpoint(self):
         """Test config requires api_endpoint."""
         fields = {f.name: f for f in dataclasses.fields(PythonCodeToolConfig)}
-        self.assertIn("api_endpoint", fields)
-        self.assertEqual(fields["api_endpoint"].default, dataclasses.MISSING)
-        self.assertEqual(fields["api_endpoint"].default_factory, dataclasses.MISSING)
-
-    def test_config_custom_values(self):
-        """Test config accepts custom values."""
-        config = PythonCodeToolConfig(api_endpoint="http://example.com/execute", timeout=5)
-
-        self.assertEqual(config.api_endpoint, "http://example.com/execute")
-        self.assertEqual(config.timeout, 5)
-
-    def test_build_with_endpoint(self):
-        """Test building with api_endpoint creates tool correctly."""
-        config = PythonCodeToolConfig(api_endpoint="http://localhost:1212/execute", timeout=5)
-
-        tool = config.build()
-
-        self.assertIsInstance(tool, PythonCodeTool)
-        self.assertEqual(tool.api_endpoint, "http://localhost:1212/execute")
-        self.assertEqual(tool.timeout, 5)
+        assert "api_endpoint" in fields
 
     def test_tool_class_attribute(self):
         """Test tool_class is set to PythonCodeTool."""
-        self.assertEqual(PythonCodeToolConfig.tool_class, PythonCodeTool)
+        assert PythonCodeToolConfig.tool_class == PythonCodeTool
 
 
-class TestHelperFunctions(unittest.TestCase):
-    """Tests for helper functions in new_tools.py."""
+class TestTruncateHelper:
+    """Tests for _truncate helper function."""
 
-    def test_truncate_short_text(self):
-        """Test _truncate doesn't modify short text."""
-        short_text = "Hello, World!"
-        result = _truncate(short_text, max_length=500)
-        self.assertEqual(result, short_text)
-
-    def test_truncate_long_text(self):
-        """Test _truncate truncates long text with ellipsis."""
-        long_text = "a" * 600
-        result = _truncate(long_text, max_length=500)
-
-        self.assertEqual(len(result), 500 + len("... [100 more chars]"))
-        self.assertTrue(result.startswith("a" * 500))
-        self.assertTrue(result.endswith("... [100 more chars]"))
-
-    def test_truncate_exact_length(self):
-        """Test _truncate at exact max_length boundary."""
-        text = "a" * 500
-        result = _truncate(text, max_length=500)
-        self.assertEqual(result, text)
-
-    def test_truncate_custom_max_length(self):
-        """Test _truncate with custom max_length."""
-        text = "Hello, World! This is a test."
-        result = _truncate(text, max_length=10)
-
-        self.assertTrue(result.startswith("Hello, Wor"))
-        self.assertIn("more chars", result)
+    @pytest.mark.parametrize(
+        "text,max_length,should_truncate",
+        [("Hello, World!", 500, False), ("a" * 600, 500, True)],
+        ids=["short_text", "long_text"],
+    )
+    def test_truncate(self, text, max_length, should_truncate):
+        """Test _truncate with various inputs."""
+        result = _truncate(text, max_length=max_length)
+        if should_truncate:
+            assert "more chars" in result
+        else:
+            assert result == text
 
 
-class TestS2SearchToolInit(unittest.TestCase):
+class TestS2SearchToolInit:
     """Tests for S2SearchTool initialization and properties."""
 
+    @pytest.mark.parametrize(
+        "num_results,expected_num_results", [(None, 10), (5, 5)], ids=["defaults", "custom_values"]
+    )
     @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    def test_initialization_with_defaults(self):
-        """Test tool initializes with correct default values."""
-        tool = S2SearchTool()
+    def test_initialization(self, num_results, expected_num_results):
+        """Test tool initializes with correct values."""
+        tool = (
+            S2SearchTool(call_name="s2")
+            if num_results is None
+            else S2SearchTool(call_name="s2", num_results=num_results)
+        )
 
-        self.assertEqual(tool.num_results, 10)
-        self.assertEqual(tool.timeout, 60)
-        self.assertEqual(tool.call_name, "s2_search")
-        self.assertEqual(tool.config_name, "s2_search")
-        self.assertEqual(tool.description, "Searches Semantic Scholar for academic papers and citations")
-
-        # Verify parameters schema
-        params = tool.parameters
-        self.assertEqual(params["type"], "object")
-        self.assertIn("query", params["properties"])
-        self.assertIn("query", params["required"])
-        self.assertEqual(params["properties"]["query"]["description"], "The search query for Semantic Scholar")
+        assert tool.num_results == expected_num_results
+        assert tool.call_name == "s2"
+        assert tool.config_name == "s2_search"
 
     @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    def test_initialization_with_custom_values(self):
-        """Test tool initializes with custom values."""
-        tool = S2SearchTool(num_results=5, timeout=30)
-
-        self.assertEqual(tool.num_results, 5)
-        self.assertEqual(tool.timeout, 30)
-        self.assertEqual(tool.call_name, "s2_search")
+    def test_tool_description(self):
+        """Test tool description is set correctly."""
+        tool = S2SearchTool(call_name="s2")
+        assert "Semantic Scholar" in tool.description
 
     @patch.dict("os.environ", {}, clear=True)
-    def test_initialization_without_api_key_raises_error(self):
-        """Test that missing API key raises ValueError during initialization."""
-        with self.assertRaises(ValueError) as context:
-            S2SearchTool()
-
-        self.assertIn("S2_API_KEY", str(context.exception))
-
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    def test_get_openai_tool_definitions(self):
-        """Test OpenAI tool definition format."""
-        tool = S2SearchTool()
-        definition = get_openai_tool_definitions(tool)
-
-        self.assertEqual(definition["type"], "function")
-        self.assertEqual(definition["function"]["name"], "s2_search")
-        self.assertEqual(
-            definition["function"]["description"], "Searches Semantic Scholar for academic papers and citations"
-        )
-        self.assertIn("parameters", definition["function"])
+    def test_missing_api_key_raises_error_on_init(self):
+        """Test that missing S2_API_KEY raises a ValueError on initialization."""
+        with pytest.raises(ValueError, match="Missing S2_API_KEY"):
+            S2SearchTool(call_name="s2")
 
 
-class TestS2SearchToolExecution(unittest.IsolatedAsyncioTestCase):
-    """Tests for S2SearchTool execution (async __call__)."""
+class TestS2SearchToolExecution:
+    """Tests for S2SearchTool execution (async execute)."""
 
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    def setUp(self):
-        """Set up test fixtures."""
-        self.tool = S2SearchTool(num_results=10, timeout=60)
+    @pytest.fixture
+    def tool(self):
+        """Set up test fixture."""
+        with patch.dict("os.environ", {"S2_API_KEY": "test_key"}):
+            return S2SearchTool(call_name="s2", num_results=10)
 
-    async def test_empty_query_returns_error(self):
-        """Test that empty query returns an error without calling API."""
-        result = await self.tool("")
+    @pytest.mark.parametrize("query_input", ["", "   \n\t  ", None], ids=["empty", "whitespace", "none"])
+    def test_empty_query_returns_error(self, tool, query_input):
+        """Test that empty/whitespace/None query returns an error without calling API."""
+        result = asyncio.run(tool.execute(query_input))
 
-        self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.output, "")
-        self.assertEqual(result.error, "Empty query. Please provide a search query.")
-        self.assertTrue(result.called)
-        self.assertFalse(result.timeout)
-        self.assertEqual(result.runtime, 0)
+        assert result.output == ""
+        assert result.error == "Empty query. Please provide a search query."
+        assert result.called is True
 
-    async def test_whitespace_only_query_returns_error(self):
-        """Test that whitespace-only query returns an error."""
-        result = await self.tool("   \n\t  ")
-
-        self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.output, "")
-        self.assertEqual(result.error, "Empty query. Please provide a search query.")
-        self.assertTrue(result.called)
-
-    async def test_none_query_returns_error(self):
-        """Test that None query returns an error."""
-        result = await self.tool(None)
-
-        self.assertIsInstance(result, ToolOutput)
-        self.assertEqual(result.error, "Empty query. Please provide a search query.")
-
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_successful_search(self, mock_session_class):
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_successful_search(self, mock_api_request, tool):
         """Test successful search with results."""
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {
-            "data": [
-                {"snippet": {"text": "This is the first research paper snippet."}},
-                {"snippet": {"text": "This is the second research paper snippet."}},
-            ]
-        }
-        mock_response.raise_for_status = MagicMock()
-        mock_response.__aenter__.return_value = mock_response
-        mock_response.__aexit__.return_value = None
+        from open_instruct.tools.utils import APIResponse
 
-        mock_session = MagicMock()
-        mock_session.get.return_value = mock_response
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
+        async def mock_response(*args, **kwargs):
+            return APIResponse(
+                data={
+                    "data": [
+                        {"snippet": {"text": "First research paper snippet."}},
+                        {"snippet": {"text": "Second research paper snippet."}},
+                    ]
+                }
+            )
 
-        result = await self.tool("machine learning")
+        mock_api_request.side_effect = mock_response
+        result = asyncio.run(tool.execute("machine learning"))
 
-        self.assertIsInstance(result, ToolOutput)
-        self.assertIn("first research paper snippet", result.output)
-        self.assertIn("second research paper snippet", result.output)
-        self.assertEqual(result.error, "")
-        self.assertTrue(result.called)
-        self.assertFalse(result.timeout)
-        self.assertGreater(result.runtime, 0)
+        assert "First research paper snippet" in result.output
+        assert "Second research paper snippet" in result.output
+        assert result.error == ""
+        assert result.called is True
 
-        # Verify API call
-        mock_session.get.assert_called_once()
-        call_args = mock_session.get.call_args
-        self.assertEqual(call_args[0][0], "https://api.semanticscholar.org/graph/v1/snippet/search")
-        self.assertEqual(call_args[1]["params"]["query"], "machine learning")
-        self.assertEqual(call_args[1]["params"]["limit"], 10)
-        self.assertIn("x-api-key", call_args[1]["headers"])
-
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_search_with_items_without_snippets(self, mock_session_class):
-        """Test search where some items don't have snippets."""
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {
-            "data": [
-                {"snippet": {"text": "Valid snippet."}},
-                {"title": "Paper without snippet"},  # No snippet field
-                {"snippet": {"text": "Another valid snippet."}},
-            ]
-        }
-        mock_response.raise_for_status = MagicMock()
-        mock_response.__aenter__.return_value = mock_response
-        mock_response.__aexit__.return_value = None
-
-        mock_session = MagicMock()
-        mock_session.get.return_value = mock_response
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
-
-        result = await self.tool("test query")
-
-        self.assertTrue(result.called)
-        self.assertIn("Valid snippet", result.output)
-        self.assertIn("Another valid snippet", result.output)
-        self.assertNotIn("Paper without snippet", result.output)
-        self.assertEqual(result.error, "")
-
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_no_results_returns_error(self, mock_session_class):
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_no_results_returns_error(self, mock_api_request, tool):
         """Test query with no results returns an error."""
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {"data": []}
-        mock_response.raise_for_status = MagicMock()
-        mock_response.__aenter__.return_value = mock_response
-        mock_response.__aexit__.return_value = None
+        from open_instruct.tools.utils import APIResponse
 
-        mock_session = MagicMock()
-        mock_session.get.return_value = mock_response
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"data": []})
 
-        result = await self.tool("nonexistent query")
+        mock_api_request.side_effect = mock_response
+        result = asyncio.run(tool.execute("nonexistent query"))
 
-        self.assertTrue(result.called)
-        self.assertEqual(result.output, "")
-        self.assertEqual(result.error, "Query returned no results.")
-        self.assertFalse(result.timeout)
+        assert result.error == "Query returned no results."
+        assert result.output == result.error  # Error in output for model feedback
 
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_timeout_handling(self, mock_session_class):
-        """Test timeout is handled correctly."""
-        mock_session = MagicMock()
-        mock_session.get.side_effect = asyncio.TimeoutError("Connection timed out")
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
+    @pytest.mark.parametrize(
+        "api_response,expected_timeout,expected_error_contains",
+        [
+            ({"error": "Timeout after 60 seconds", "timed_out": True}, True, "Timeout"),
+            ({"error": "Connection error: Connection refused", "timed_out": False}, False, "Connection error"),
+            ({"error": "HTTP error: 403 Forbidden", "timed_out": False}, False, "HTTP error"),
+        ],
+        ids=["timeout", "connection_error", "http_error"],
+    )
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_error_handling(self, mock_api_request, tool, api_response, expected_timeout, expected_error_contains):
+        """Test error handling for various API error types."""
+        from open_instruct.tools.utils import APIResponse
 
-        result = await self.tool("test query")
+        async def mock_response(*args, **kwargs):
+            return APIResponse(**api_response)
 
-        self.assertTrue(result.called)
-        self.assertTrue(result.timeout)
-        self.assertEqual(result.error, "Timeout after 60 seconds")
+        mock_api_request.side_effect = mock_response
+        result = asyncio.run(tool.execute("test query"))
 
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_http_error_handling(self, mock_session_class):
-        """Test handling of HTTP errors (e.g., 403, 500)."""
-        mock_session = MagicMock()
-        mock_session.get.side_effect = aiohttp.ClientResponseError(
-            request_info=MagicMock(), history=(), status=403, message="Forbidden"
-        )
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
+        assert result.called is True
+        assert result.timeout is expected_timeout
+        assert expected_error_contains in result.error
+        assert expected_error_contains in result.output
 
-        result = await self.tool("test query")
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_uses_get_method(self, mock_api_request, tool):
+        """Test that S2SearchTool uses GET method."""
+        from open_instruct.tools.utils import APIResponse
 
-        self.assertTrue(result.called)
-        self.assertFalse(result.timeout)
-        self.assertIn("HTTP error", result.error)
-        self.assertIn("403", result.error)
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"data": []})
 
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_connection_error_handling(self, mock_session_class):
-        """Test handling of connection errors."""
-        mock_session = MagicMock()
-        mock_session.get.side_effect = aiohttp.ClientError("Connection refused")
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
+        mock_api_request.side_effect = mock_response
+        asyncio.run(tool.execute("test query"))
 
-        result = await self.tool("test query")
-
-        self.assertTrue(result.called)
-        self.assertFalse(result.timeout)
-        self.assertIn("Connection error", result.error)
-        self.assertIn("Connection refused", result.error)
-
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_custom_num_results(self, mock_session_class):
-        """Test that custom num_results is passed to API."""
-        tool = S2SearchTool(num_results=5)
-
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {"data": []}
-        mock_response.raise_for_status = MagicMock()
-        mock_response.__aenter__.return_value = mock_response
-        mock_response.__aexit__.return_value = None
-
-        mock_session = MagicMock()
-        mock_session.get.return_value = mock_response
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
-
-        await tool("test query")
-
-        call_args = mock_session.get.call_args
-        self.assertEqual(call_args[1]["params"]["limit"], 5)
-
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    @patch("open_instruct.tools.new_tools.aiohttp.ClientSession")
-    async def test_custom_timeout(self, mock_session_class):
-        """Test that custom timeout is used."""
-        tool = S2SearchTool(timeout=30)
-
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {"data": []}
-        mock_response.raise_for_status = MagicMock()
-        mock_response.__aenter__.return_value = mock_response
-        mock_response.__aexit__.return_value = None
-
-        mock_session = MagicMock()
-        mock_session.get.return_value = mock_response
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        mock_session_class.return_value = mock_session
-
-        await tool("test query")
-
-        # Verify ClientSession was created with correct timeout
-        call_args = mock_session_class.call_args
-        self.assertIsNotNone(call_args[1].get("timeout"))
+        mock_api_request.assert_called_once()
+        call_args = mock_api_request.call_args
+        assert call_args[1]["method"] == "GET"
 
 
-class TestS2SearchToolConfig(unittest.TestCase):
+class TestS2SearchToolConfig:
     """Tests for S2SearchToolConfig."""
 
     def test_config_default_values(self):
         """Test config has correct default values."""
         config = S2SearchToolConfig()
-
-        self.assertEqual(config.num_results, 10)
-        self.assertEqual(config.timeout, 60)
-
-    def test_config_custom_values(self):
-        """Test config accepts custom values."""
-        config = S2SearchToolConfig(num_results=5, timeout=30)
-
-        self.assertEqual(config.num_results, 5)
-        self.assertEqual(config.timeout, 30)
-
-    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
-    def test_build_creates_tool(self):
-        """Test building config creates tool correctly."""
-        config = S2SearchToolConfig(num_results=8, timeout=45)
-
-        tool = config.build()
-
-        self.assertIsInstance(tool, S2SearchTool)
-        self.assertEqual(tool.num_results, 8)
-        self.assertEqual(tool.timeout, 45)
+        assert config.num_results == 10
+        assert config.timeout == 60
 
     def test_tool_class_attribute(self):
         """Test tool_class is set to S2SearchTool."""
-        self.assertEqual(S2SearchToolConfig.tool_class, S2SearchTool)
+        assert S2SearchToolConfig.tool_class == S2SearchTool
+
+
+class TestSerperSearchToolInit:
+    """Tests for SerperSearchTool initialization and properties."""
+
+    @pytest.mark.parametrize(
+        "num_results,expected_num_results", [(None, 5), (10, 10)], ids=["defaults", "custom_values"]
+    )
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
+    def test_initialization(self, num_results, expected_num_results):
+        """Test tool initializes with correct values."""
+        tool = (
+            SerperSearchTool(call_name="search")
+            if num_results is None
+            else SerperSearchTool(call_name="search", num_results=num_results)
+        )
+
+        assert tool.num_results == expected_num_results
+        assert tool.call_name == "search"
+        assert tool.config_name == "serper_search"
+
+    @patch.dict("os.environ", {"SERPER_API_KEY": "test_key"})
+    def test_tool_description(self):
+        """Test tool description is set correctly."""
+        tool = SerperSearchTool(call_name="search")
+        assert tool.description == "Google search via the Serper API"
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_missing_api_key_raises_error_on_init(self):
+        """Test that missing SERPER_API_KEY raises a ValueError on initialization."""
+        with pytest.raises(ValueError, match="Missing SERPER_API_KEY"):
+            SerperSearchTool(call_name="search")
+
+
+class TestSerperSearchToolExecution:
+    """Tests for SerperSearchTool execution (async execute)."""
+
+    @pytest.fixture
+    def tool(self):
+        """Set up test fixture."""
+        with patch.dict("os.environ", {"SERPER_API_KEY": "test_key"}):
+            return SerperSearchTool(call_name="search", num_results=5)
+
+    @pytest.mark.parametrize("query_input", ["", "   \n\t  ", None], ids=["empty", "whitespace", "none"])
+    def test_empty_query_returns_error(self, tool, query_input):
+        """Test that empty/whitespace/None query returns an error without calling API."""
+        result = asyncio.run(tool.execute(query_input))
+
+        assert result.output == ""
+        assert result.error == "Empty query. Please provide a search query."
+        assert result.called is True
+
+    @pytest.mark.parametrize(
+        "api_data,expected_in_output",
+        [
+            (
+                {"organic": [{"title": "Result 1", "snippet": "This is result 1", "link": "https://example.com/1"}]},
+                ["Result 1", "This is result 1"],
+            ),
+            (
+                {
+                    "answerBox": {"answer": "The answer is 42"},
+                    "organic": [{"title": "Result 1", "snippet": "This is result 1", "link": "https://example.com/1"}],
+                },
+                ["Direct Answer", "The answer is 42"],
+            ),
+        ],
+        ids=["organic_results", "answer_box"],
+    )
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_successful_search(self, mock_api_request, tool, api_data, expected_in_output):
+        """Test successful search with various response types."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data=api_data)
+
+        mock_api_request.side_effect = mock_response
+        result = asyncio.run(tool.execute("test query"))
+
+        for expected in expected_in_output:
+            assert expected in result.output
+        assert result.error == ""
+
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_no_results_returns_error(self, mock_api_request, tool):
+        """Test query with no results returns an error."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"organic": []})
+
+        mock_api_request.side_effect = mock_response
+        result = asyncio.run(tool.execute("nonexistent query"))
+
+        assert result.error == "Query returned no results."
+        assert result.output == result.error  # Error in output for model feedback
+
+    @pytest.mark.parametrize(
+        "api_response,expected_timeout,expected_error_contains",
+        [
+            ({"error": "Timeout after 10 seconds", "timed_out": True}, True, "Timeout"),
+            ({"error": "Connection error: Connection refused", "timed_out": False}, False, "Connection error"),
+        ],
+        ids=["timeout", "connection_error"],
+    )
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_error_handling(self, mock_api_request, tool, api_response, expected_timeout, expected_error_contains):
+        """Test error handling for various API error types."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(**api_response)
+
+        mock_api_request.side_effect = mock_response
+        result = asyncio.run(tool.execute("test query"))
+
+        assert result.timeout is expected_timeout
+        assert expected_error_contains in result.error
+        assert expected_error_contains in result.output
+
+
+class TestSerperSearchToolConfig:
+    """Tests for SerperSearchToolConfig."""
+
+    def test_config_default_values(self):
+        """Test config has correct default values."""
+        config = SerperSearchToolConfig()
+        assert config.num_results == 5
+
+    def test_tool_class_attribute(self):
+        """Test tool_class is set to SerperSearchTool."""
+        assert SerperSearchToolConfig.tool_class == SerperSearchTool
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main([__file__])

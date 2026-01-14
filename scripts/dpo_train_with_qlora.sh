@@ -32,7 +32,6 @@ accelerate launch \
     --num_train_epochs 5 \
     --output_dir output/tulu_v2_dpo_qlora/ \
     --with_tracking \
-    --report_to tensorboard \
     --logging_steps 1 &&
 
 python open_instruct/merge_lora.py \
