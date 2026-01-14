@@ -53,7 +53,6 @@ do
         --dpo_beta 5 \
         --use_flash_attn \
         --gradient_checkpointing \
-        --report_to wandb \
         --chat_template_name olmo123 \
         --with_tracking \
         --eval_workspace ai2/olmo-instruct \

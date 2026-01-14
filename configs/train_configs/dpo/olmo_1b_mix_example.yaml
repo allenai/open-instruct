@@ -21,7 +21,5 @@ weight_decay: 0.0
 num_train_epochs: 3
 output_dir: output/olmo_instruct_dpo/
 with_tracking: true
-report_to:
-  - wandb
 logging_steps: 1
 add_bos: true

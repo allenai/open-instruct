@@ -31,5 +31,4 @@ accelerate launch \
     --num_train_epochs 3 \
     --output_dir ~/dpo_7b_recreate2 \
     --with_tracking \
-    --report_to tensorboard \
     --logging_steps 1
