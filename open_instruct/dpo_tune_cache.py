@@ -175,6 +175,9 @@ class FlatArguments(
             "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
         },
     )
+    resume_from_checkpoint: str | None = field(
+        default=None, metadata={"help": "If the training should continue from a checkpoint folder."}
+    )
     save_to_hub: str | None = field(
         default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
     )
@@ -395,7 +398,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # in the environment
     accelerator_log_kwargs = {}
     if args.with_tracking:
-        accelerator_log_kwargs["log_with"] = args.report_to
+        accelerator_log_kwargs["log_with"] = "wandb"
         accelerator_log_kwargs["project_dir"] = args.output_dir
     # if you get timeouts (e.g. due to long tokenization) increase this.
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
@@ -487,9 +490,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             },
         )
 
-    if accelerator.is_main_process:
+    if args.with_tracking:
         wandb_tracker = accelerator.get_tracker("wandb")
-        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None)
+        if accelerator.is_main_process:
+            maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
+    else:
+        wandb_tracker = None
+
+    if accelerator.is_main_process:
         pprint([args, tc])
 
     init_gpu_memory = None
@@ -983,7 +991,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                             current_step=completed_steps,
                             total_steps=args.max_train_steps,
                             start_time=start_time,
-                            wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
+                            wandb_url=None if wandb_tracker is None else wandb_tracker.run.get_url(),
                         )
                     # Reset the local metrics
                     local_metrics.metrics.zero_()

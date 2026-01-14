@@ -204,7 +204,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
             tools=tools,
-            max_tool_calls=(3,),
+            max_tool_calls=3,
             reward_config=RewardConfig(),
             train_dataset=train_dataset,
         )

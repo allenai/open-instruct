@@ -1,13 +1,77 @@
+import asyncio
 import json
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-import ray
+import aiohttp
 
 from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
+
+
+@dataclass
+class ToolsConfig:
+    """Configuration for tools used during generation."""
+
+    tools: list[str] | None = None
+    """List of tool names to enable (e.g., ["python", "search"])."""
+
+    tool_call_names: list[str] | None = None
+    """Override names used in tool calls (e.g., '<name>...</name>').
+    Must match length of tools if set. Defaults to tools if not specified."""
+
+    tool_configs: list[str] = field(default_factory=list)
+    """JSON strings for configuring each tool. Must match length of tools. Use '{}' for defaults."""
+
+    tool_parser_type: str = "legacy"
+    """Type of tool parser to use: 'legacy' is the only option for now."""
+
+    max_tool_calls: int = 5
+    """Maximum number of tool calls allowed per generation."""
+
+    only_reward_good_outputs: bool = False
+    """Only apply rewards to outputs from tools that didn't error."""
+
+    _parsed_tool_configs: list[dict[str, Any]] = field(default_factory=list, init=False)
+    """Parsed tool configurations as dictionaries. Populated from tool_configs during __post_init__."""
+
+    def __post_init__(self):
+        self.max_tool_calls = int(self.max_tool_calls)
+
+        if self.tools:
+            # Set default tool_call_names if not provided
+            if not self.tool_call_names:
+                self.tool_call_names = self.tools
+            elif len(self.tool_call_names) != len(self.tools):
+                raise ValueError(
+                    f"tool_call_names must have same length as tools. "
+                    f"Got {len(self.tool_call_names)} names for {len(self.tools)} tools."
+                )
+
+            # Set default tool_configs if not provided
+            if not self.tool_configs:
+                self.tool_configs = ["{}"] * len(self.tools)
+            elif len(self.tool_configs) != len(self.tools):
+                raise ValueError(
+                    f"tool_configs must have same length as tools. "
+                    f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
+                )
+
+            # Parse all tool_configs into dicts and store in _parsed_tool_configs
+            # using a simple loop to make the error message more informative
+            self._parsed_tool_configs = []
+            for i, (tool_name, config) in enumerate(zip(self.tools, self.tool_configs)):
+                try:
+                    self._parsed_tool_configs.append(json.loads(config))
+                except Exception as e:
+                    raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
+
+    @property
+    def enabled(self) -> bool:
+        """Return True if any tools are configured."""
+        return bool(self.tools)
 
 
 @dataclass
@@ -23,6 +87,52 @@ class ToolOutput:
 class ToolCall:
     name: str
     args: dict[str, Any]
+
+
+@dataclass
+class APIResponse:
+    """Response from an async API request."""
+
+    data: dict | None = None
+    error: str = ""
+    timed_out: bool = False
+
+
+async def make_api_request(
+    url: str, timeout_seconds: int, headers: dict | None = None, json_payload: dict | None = None, method: str = "POST"
+) -> APIResponse:
+    """Make an async HTTP request with standard error handling.
+
+    Args:
+        url: The API endpoint URL.
+        timeout_seconds: Request timeout in seconds.
+        headers: Optional HTTP headers.
+        json_payload: JSON data to send in the request body (for POST requests).
+        method: HTTP method ("GET" or "POST"). Defaults to "POST".
+
+    Returns:
+        APIResponse with data on success, or error details on failure.
+    """
+    if method not in ["GET", "POST"]:
+        raise ValueError(f"Invalid method: {method}")
+    try:
+        timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+        async with aiohttp.ClientSession(timeout=timeout) as session:  # noqa: SIM117
+            if method == "GET":
+                request_context = session.get(url, headers=headers)
+            else:
+                request_context = session.post(url, json=json_payload, headers=headers)
+
+            async with request_context as response:
+                response.raise_for_status()
+                data = await response.json()
+                return APIResponse(data=data)
+    except asyncio.TimeoutError:
+        return APIResponse(error=f"Timeout after {timeout_seconds} seconds", timed_out=True)
+    except aiohttp.ClientResponseError as e:
+        return APIResponse(error=f"HTTP error: {e.status} {e.message}")
+    except aiohttp.ClientError as e:
+        return APIResponse(error=f"Connection error: {e}")
 
 
 def get_openai_tool_definitions(tool: "Tool") -> dict[str, Any]:
@@ -82,9 +192,13 @@ class Tool(ABC):
         return get_openai_tool_definitions(self)
 
     @abstractmethod
-    async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
+    async def execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
         """Execute the tool, must be implemented by subclasses."""
-        raise NotImplementedError("__call__ must be implemented by subclasses.")
+        raise NotImplementedError("execute must be implemented by subclasses.")
+
+    async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
+        """Alias for execute, useful for inference scripts."""
+        return await self.execute(*args, **kwargs)
 
 
 @dataclass
@@ -96,36 +210,3 @@ class BaseToolConfig:
 
     tool_class: ClassVar[type[Tool]]
     """Related tool class for this config."""
-
-    def _get_init_kwargs(self) -> dict[str, Any]:
-        """Get kwargs for initializing the tool.
-
-        Passes all dataclass instance fields as kwargs.
-        Override this method for tools with validation or non-standard initialization.
-
-        Returns:
-            Dictionary of kwargs to pass to tool_class.__init__
-        """
-        return asdict(self)
-
-    def build(self) -> Tool:
-        """Build the tool instance from this config.
-
-        Returns:
-            A Tool instance.
-        """
-        return self.tool_class(**self._get_init_kwargs())
-
-    def build_remote(self, max_concurrency: int = 512) -> ray.actor.ActorHandle:
-        """Build the tool as a Ray remote actor.
-
-        Allows for passing to vllm actors without needing to serialize tool itself,
-        and to centralize control over tool concurrency.
-
-        Args:
-            max_concurrency: Maximum number of concurrent calls the actor can handle.
-
-        Returns:
-            A Ray actor handle for the Tool.
-        """
-        return ray.remote(self.tool_class).options(max_concurrency=max_concurrency).remote(**self._get_init_kwargs())
