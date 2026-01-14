@@ -642,7 +642,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     if args.with_tracking:
         wandb_tracker = accelerator.get_tracker("wandb")
-        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
+        if accelerator.is_main_process:
+            maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
     else:
         wandb_tracker = None
 
