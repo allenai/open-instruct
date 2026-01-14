@@ -1,7 +1,10 @@
+import asyncio
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
+
+import aiohttp
 
 from open_instruct import logger_utils
 
@@ -80,6 +83,44 @@ class ToolOutput:
 class ToolCall:
     name: str
     args: dict[str, Any]
+
+
+@dataclass
+class APIResponse:
+    """Response from an async API request."""
+
+    data: dict | None = None
+    error: str = ""
+    timed_out: bool = False
+
+
+async def make_api_request(
+    url: str, json_payload: dict, timeout_seconds: int, headers: dict | None = None
+) -> APIResponse:
+    """Make an async POST request with standard error handling.
+
+    Args:
+        url: The API endpoint URL.
+        json_payload: JSON data to send in the request body.
+        timeout_seconds: Request timeout in seconds.
+        headers: Optional HTTP headers.
+
+    Returns:
+        APIResponse with data on success, or error details on failure.
+    """
+    try:
+        timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+        async with aiohttp.ClientSession(timeout=timeout) as session:  # noqa: SIM117
+            async with session.post(url, json=json_payload, headers=headers) as response:
+                response.raise_for_status()
+                data = await response.json()
+                return APIResponse(data=data)
+    except asyncio.TimeoutError:
+        return APIResponse(error=f"Timeout after {timeout_seconds} seconds", timed_out=True)
+    except aiohttp.ClientResponseError as e:
+        return APIResponse(error=f"HTTP error: {e.status} {e.message}")
+    except aiohttp.ClientError as e:
+        return APIResponse(error=f"Connection error: {e}")
 
 
 def get_openai_tool_definitions(tool: "Tool") -> dict[str, Any]:
