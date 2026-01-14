@@ -17,7 +17,7 @@ uv run python mason.py \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --budget ai2/oe-adapt \
-	--no_auto_dataset_cache \
+        --no_auto_dataset_cache \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
