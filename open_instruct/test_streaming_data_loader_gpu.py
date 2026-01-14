@@ -28,7 +28,7 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
-from open_instruct.tools.tools import PythonCodeTool
+from open_instruct.tools.new_tools import PythonCodeTool
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
