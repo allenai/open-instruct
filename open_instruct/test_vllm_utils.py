@@ -97,13 +97,11 @@ class TestVllmUtils3(unittest.TestCase):
             }
         }
 
-        tools = {"</tool>": MagicMock()}
-
         result, is_eval = vllm_utils.process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
             current_time=1001.0,
-            tools=tools,
+            use_tools=True,
             request_metadata=request_metadata,
         )
 
@@ -174,7 +172,7 @@ class TestVllmUtils3(unittest.TestCase):
             request_id=request_id,
             outs=[mock_request_output],
             current_time=2000.5,
-            tools=None,
+            use_tools=False,
             request_metadata=request_metadata,
         )
 
