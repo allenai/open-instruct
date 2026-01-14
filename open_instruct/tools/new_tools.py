@@ -2,16 +2,13 @@
 Basic tools that are built-in to open-instruct.
 """
 
-import asyncio
 import os
 import time
 from dataclasses import dataclass
 from typing import ClassVar
 
-import aiohttp
-
 from open_instruct import logger_utils
-from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput
+from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, make_api_request
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -39,21 +36,21 @@ class PythonCodeTool(Tool):
     Executes Python code via a FastAPI endpoint.
     """
 
-    def __init__(self, api_endpoint: str, timeout: int = 3) -> None:
-        super().__init__(
-            config_name="python",
-            description="Executes Python code and returns printed output.",
-            call_name="python",
-            parameters={
-                "type": "object",
-                "properties": {"code": {"type": "string", "description": "Python code to execute"}},
-                "required": ["code"],
-            },
-        )
+    config_name = "python"
+    description = "Executes Python code and returns printed output."
+    parameters = {
+        "type": "object",
+        "properties": {"code": {"type": "string", "description": "Python code to execute"}},
+        "required": ["code"],
+    }
+
+    def __init__(self, call_name: str, api_endpoint: str, timeout: int = 3) -> None:
+        # Set instance-specific attributes
+        self.call_name = call_name
         self.api_endpoint = api_endpoint
         self.timeout = timeout
 
-    async def __call__(self, code: str) -> ToolOutput:
+    async def execute(self, code: str) -> ToolOutput:
         """Execute Python code via the API."""
         if not code or not code.strip():
             result = ToolOutput(
@@ -67,40 +64,26 @@ class PythonCodeTool(Tool):
             return result
 
         start_time = time.time()
-        all_outputs = []
-        timed_out = False
-        error = ""
-
-        try:
-            timeout = aiohttp.ClientTimeout(total=self.timeout)
-            async with aiohttp.ClientSession(timeout=timeout) as session:  # noqa: SIM117
-                async with session.post(self.api_endpoint, json={"code": code, "timeout": self.timeout}) as response:
-                    response.raise_for_status()
-                    res = await response.json()
-                    output = res.get("output", "")
-                    error = res.get("error") or ""
-
-                    all_outputs.append(output)
-                    if error:
-                        all_outputs.append("\n" + error)
-        except asyncio.TimeoutError:
-            error = f"Timeout after {self.timeout} seconds"
-            all_outputs.append(error)
-            timed_out = True
-        except aiohttp.ClientResponseError as e:
-            error = f"HTTP error: {e.status} {e.message}"
-            all_outputs.append(error)
-        except aiohttp.ClientError as e:
-            error = f"Connection error: {e}"
-            all_outputs.append(error)
-
-        result = ToolOutput(
-            output="\n".join(all_outputs),
-            called=True,
-            error=error,
-            timeout=timed_out,
-            runtime=time.time() - start_time,
+        api_response = await make_api_request(
+            url=self.api_endpoint, timeout_seconds=self.timeout, json_payload={"code": code, "timeout": self.timeout}
         )
+
+        if api_response.error:
+            result = ToolOutput(
+                output=api_response.error,
+                called=True,
+                error=api_response.error,
+                timeout=api_response.timed_out,
+                runtime=time.time() - start_time,
+            )
+        else:
+            output = api_response.data.get("output") or ""
+            error = api_response.data.get("error") or ""
+            full_output = output + ("\n" + error if error else "")
+            result = ToolOutput(
+                output=full_output, called=True, error=error, timeout=False, runtime=time.time() - start_time
+            )
+
         _log_tool_call(self.call_name, code, result)
         return result
 
@@ -128,26 +111,20 @@ class JinaBrowseTool(Tool):
 
     config_name = "jina_browse"
     description = "Fetches and converts webpage content to clean markdown using Jina Reader API"
-    call_name = "jina_browse"
     parameters = {
         "type": "object",
         "properties": {"url": {"type": "string", "description": "The URL of the webpage to fetch"}},
         "required": ["url"],
     }
 
-    def __init__(self, timeout: int = 30) -> None:
-        super().__init__(
-            config_name=self.config_name,
-            description=self.description,
-            call_name=self.call_name,
-            parameters=self.parameters,
-        )
+    def __init__(self, call_name: str, timeout: int = 30) -> None:
+        self.call_name = call_name
         self.timeout = timeout
         self.api_key = os.environ.get("JINA_API_KEY")
         if not self.api_key:
             raise ValueError("Missing JINA_API_KEY environment variable.")
 
-    async def __call__(self, url: str) -> ToolOutput:
+    async def execute(self, url: str) -> ToolOutput:
         """Fetch webpage content via Jina Reader API."""
         if not url or not url.strip():
             result = ToolOutput(
@@ -157,53 +134,49 @@ class JinaBrowseTool(Tool):
             return result
 
         start_time = time.time()
-        timed_out = False
-        error = ""
-        content = ""
-
-        try:
-            # Jina Reader API endpoint
-            api_url = f"https://r.jina.ai/{url.strip()}"
-
-            timeout = aiohttp.ClientTimeout(total=self.timeout)
-            headers = {
+        api_response = await make_api_request(
+            url=f"https://r.jina.ai/{url.strip()}",
+            timeout_seconds=self.timeout,
+            headers={
                 "Accept": "application/json",
                 "Authorization": f"Bearer {self.api_key}",
                 "X-Return-Format": "markdown",
-            }
+            },
+            method="GET",
+        )
 
-            async with aiohttp.ClientSession(timeout=timeout) as session:  # noqa: SIM117
-                async with session.get(api_url, headers=headers) as response:
-                    response.raise_for_status()
-                    res = await response.json()
+        if api_response.error:
+            result = ToolOutput(
+                output=api_response.error,
+                called=True,
+                error=api_response.error,
+                timeout=api_response.timed_out,
+                runtime=time.time() - start_time,
+            )
+            _log_tool_call(self.call_name, url, result)
+            return result
 
-                    # Extract content from Jina response
-                    if res.get("code") == 200:
-                        data = res.get("data", {})
-                        content = data.get("content", "")
-                        title = data.get("title", "")
+        # Extract content from Jina response
+        data = api_response.data
+        content = ""
+        error = ""
 
-                        # Format output with title if available
-                        if title and content:
-                            content = f"# {title}\n\n{content}"
-                    else:
-                        error = f"Jina API error: {res.get('message', 'Unknown error')}"
+        if data.get("code") == 200:
+            inner_data = data.get("data", {})
+            content = inner_data.get("content") or ""
+            title = inner_data.get("title") or ""
 
-        except asyncio.TimeoutError:
-            error = f"Timeout after {self.timeout} seconds"
-            timed_out = True
-        except aiohttp.ClientResponseError as e:
-            error = f"HTTP error: {e.status} {e.message}"
-        except aiohttp.ClientError as e:
-            error = f"Connection error: {e}"
-        except Exception as e:
-            error = f"Unexpected error: {e}"
+            # Format output with title if available
+            if title and content:
+                content = f"# {title}\n\n{content}"
+        else:
+            error = f"Jina API error: {data.get('message', 'Unknown error')}"
 
         result = ToolOutput(
-            output=content if not error else "",
+            output=content,
             called=True,
             error=error,
-            timeout=timed_out,
+            timeout=False,
             runtime=time.time() - start_time,
         )
         _log_tool_call(self.call_name, url, result)
@@ -218,3 +191,101 @@ class JinaBrowseToolConfig(BaseToolConfig):
 
     timeout: int = 30
     """Timeout in seconds for webpage fetching."""
+
+
+class SerperSearchTool(Tool):
+    """
+    Search tool using the Serper API (Google Search results).
+    Requires SERPER_API_KEY environment variable.
+    """
+
+    config_name = "serper_search"
+    description = "Google search via the Serper API"
+    parameters = {
+        "type": "object",
+        "properties": {"query": {"type": "string", "description": "The search query for Google"}},
+        "required": ["query"],
+    }
+
+    def __init__(self, call_name: str, num_results: int = 5, timeout: int = 10) -> None:
+        self.call_name = call_name
+        self.num_results = num_results
+        self.timeout = timeout
+        self.api_key = os.environ.get("SERPER_API_KEY")
+        if not self.api_key:
+            raise ValueError("Missing SERPER_API_KEY environment variable.")
+
+    async def execute(self, query: str) -> ToolOutput:
+        """Search Google via Serper for documents matching the query."""
+        if not query or not query.strip():
+            result = ToolOutput(
+                output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
+            )
+            _log_tool_call(self.call_name, query or "", result)
+            return result
+
+        start_time = time.time()
+        api_response = await make_api_request(
+            url="https://google.serper.dev/search",
+            timeout_seconds=self.timeout,
+            json_payload={"q": query, "num": self.num_results},
+            headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
+        )
+
+        if api_response.error:
+            result = ToolOutput(
+                output=api_response.error,
+                called=True,
+                error=api_response.error,
+                timeout=api_response.timed_out,
+                runtime=time.time() - start_time,
+            )
+            _log_tool_call(self.call_name, query, result)
+            return result
+
+        # Process the response data
+        data = api_response.data
+        snippets = []
+
+        # Extract snippets from organic results
+        for item in data.get("organic", [])[: self.num_results]:
+            title = item.get("title", "")
+            snippet = item.get("snippet", "")
+            link = item.get("link", "")
+            if snippet:
+                snippets.append(f"**{title}**\n{snippet}\nSource: {link}")
+
+        # Also include answer box if present
+        if "answerBox" in data:
+            answer_box = data["answerBox"]
+            if "answer" in answer_box:
+                snippets.insert(0, f"**Direct Answer:** {answer_box['answer']}")
+            elif "snippet" in answer_box:
+                snippets.insert(0, f"**Featured Snippet:** {answer_box['snippet']}")
+
+        output = "\n\n".join(snippets).strip() if snippets else ""
+        error = "" if snippets else "Query returned no results."
+
+        result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
+        _log_tool_call(self.call_name, query, result)
+        return result
+
+
+@dataclass
+class SerperSearchToolConfig(BaseToolConfig):
+    """Configuration for the Serper (Google Search) tool."""
+
+    tool_class: ClassVar[type[Tool]] = SerperSearchTool
+
+    num_results: int = 5
+    """Number of results to return from Serper."""
+    timeout: int = 10
+    """Timeout in seconds for the API request."""
+
+
+# Tool Registry: Maps tool names to their config classes
+TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
+    PythonCodeToolConfig.tool_class.config_name: PythonCodeToolConfig,
+    JinaBrowseToolConfig.tool_class.config_name: JinaBrowseToolConfig,
+    SerperSearchToolConfig.tool_class.config_name: SerperSearchToolConfig,
+}

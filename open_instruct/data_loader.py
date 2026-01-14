@@ -268,18 +268,6 @@ class StreamingDataLoaderConfig:
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
-    # Tools
-    tools: list[str] | None = None
-    max_tool_calls: tuple[int, ...] = (5,)
-    only_reward_good_outputs: bool = False
-
-    # RAG
-    number_documents_to_search: int = 3
-    search_api_endpoint: str | None = None
-
-    # Code tool
-    code_tool_api_endpoint: str | None = None
-
     # Computed at post_init
     max_possible_score: float = 1.0
 
@@ -315,14 +303,6 @@ class StreamingDataLoaderConfig:
 
         if self.stop_strings is None:
             self.stop_strings = []
-
-        self.max_tool_calls = tuple(int(x) for x in self.max_tool_calls)
-
-        if self.tools is not None and len(self.tools) > 0:
-            for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
 
         self.max_possible_score = 0.0
         if self.apply_verifiable_reward:
