@@ -78,9 +78,9 @@ jobs:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: |
           beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-          image_name="open-instruct-gpu-tests-ci"
+          short_sha="${GITHUB_SHA::8}"
+          image_name="open-instruct-gpu-tests-${short_sha}"
 
-          beaker image rename "$beaker_user/$image_name" "" 2>/dev/null || true
           beaker image create open-instruct-gpu-tests:latest -n "$image_name" -w "ai2/$beaker_user" --description "Git commit: ${{ github.sha }}"
 
           uv sync --frozen
