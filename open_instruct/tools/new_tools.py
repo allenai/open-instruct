@@ -107,7 +107,7 @@ class JinaBrowseTool(Tool):
     Converts webpages to clean, LLM-friendly markdown format.
 
     Jina Reader is a free API for converting web pages to clean text.
-    Get an API key at https://jina.ai/reader/
+    Get an API key at https://jina.ai/reader/.
     """
 
     config_name = "jina_browse"
