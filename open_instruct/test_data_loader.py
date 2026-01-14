@@ -82,8 +82,8 @@ class TestHFDataLoader(unittest.TestCase):
         for indices in all_indices:
             union |= indices
         total_batches = num_examples // batch_size
-        expected_num_samples = total_batches * batch_size
-        self.assertEqual(len(union), expected_num_samples)
+        expected_indices = set(range(total_batches * batch_size))
+        self.assertEqual(union, expected_indices)
 
     def test_reshuffle(self):
         dataset = make_test_dataset(20)
