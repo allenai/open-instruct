@@ -25,12 +25,15 @@ console = Console()
 OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/finetune.py",
     "open_instruct/dpo_tune_cache.py",
+    "open_instruct/dpo.py",
     "open_instruct/grpo_fast.py",
     "open_instruct/ppo.py",
     "open_instruct/reward_modeling.py",
 ]
 
 OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo_fast.py"]
+
+OLMO_CORE_JOBS = ["open_instruct/dpo.py"]
 
 CACHE_EXCLUDED_ARGS = {
     "--with_tracking": False,
@@ -262,6 +265,7 @@ def get_env_vars(
     num_nodes: int,
     additional_env_vars: list[dict[str, str]],
     additional_secrets: list[dict[str, str]],
+    command: str,
 ):
     additional_env_var_names = {var["name"] for var in additional_env_vars}
 
@@ -315,6 +319,8 @@ def get_env_vars(
                 ),
             ]
         )
+        if any(job in command for job in OLMO_CORE_JOBS):
+            env_vars.append(beaker.BeakerEnvVar(name="OLMO_SHARED_FS", value="1"))
         if num_nodes > 1:
             env_vars.extend(
                 [
@@ -776,6 +782,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
             args.num_nodes,
             args.env,
             args.secret,
+            full_command,
         ),
         resources=beaker.BeakerTaskResources(gpu_count=args.gpus, shared_memory=args.shared_memory),
         replicas=args.num_nodes,
