@@ -88,7 +88,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             batch_size: The global batch size.
             seed: Random seed for shuffling.
             rank: The rank of the current process in the distributed setup.
-            world_size: Total number of processes in the distributed setup.
+            world_size: Total number of data-parallel processes in the distributed setup.
             work_dir: Working directory for the data loader (required by DataLoaderBase).
             automatic_reshuffle: If True, automatically reshuffle at epoch boundaries.
             collator: Optional collation function for batching examples. If None, batches will be
