@@ -117,11 +117,13 @@ async def make_api_request(
     """
     if method not in ["GET", "POST"]:
         raise ValueError(f"Invalid method: {method}")
+    if method == "GET" and json_payload:
+        raise ValueError("JSON payload cannot be provided for GET requests")
     try:
         timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             if method == "GET":
-                request_context = session.get(url, params=params, json=json_payload, headers=headers)
+                request_context = session.get(url, params=params, headers=headers)
             else:
                 request_context = session.post(url, params=params, json=json_payload, headers=headers)
 
