@@ -17,7 +17,6 @@ weight_decay: 0.0
 num_train_epochs: 3
 output_dir: output/dpo_pythia_14m/
 with_tracking: true
-  - wandb
 logging_steps: 1
 checkpointing_steps: 1000
 keep_last_n_checkpoints: 3
