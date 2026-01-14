@@ -112,6 +112,11 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._full_dataset = dataset
         self.seed = seed
         self._batch_size = batch_size
+        if batch_size % world_size != 0:
+            logger.warning(
+                f"Global batch size {batch_size} is not divisible by world size {world_size}. "
+                f"The effective global batch size will be {batch_size // world_size * world_size}."
+            )
         self._per_rank_batch_size = batch_size // world_size
         self._collator = collator if collator is not None else (lambda x: {"examples": x})
         self._automatic_reshuffle = automatic_reshuffle
