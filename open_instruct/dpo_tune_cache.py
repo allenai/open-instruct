@@ -274,15 +274,6 @@ class FlatArguments:
     resume_from_checkpoint: str | None = field(
         default=None, metadata={"help": "If the training should continue from a checkpoint folder."}
     )
-    report_to: str | list[str] = field(
-        default="all",
-        metadata={
-            "help": "The integration(s) to report results and logs to. "
-            "Can be a single string or a list of strings. "
-            "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'. "
-            "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
-        },
-    )
     save_to_hub: str | None = field(
         default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
     )

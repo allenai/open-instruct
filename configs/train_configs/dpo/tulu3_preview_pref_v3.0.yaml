@@ -16,7 +16,6 @@ weight_decay: 0.0
 num_train_epochs: 1
 output_dir: /output
 with_tracking: true
-report_to:
   - wandb
 logging_steps: 1
 use_lora: false
