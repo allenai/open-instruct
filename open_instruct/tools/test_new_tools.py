@@ -1,4 +1,4 @@
-"""Tests for new tools (PythonCodeTool, JinaBrowseTool, and SerperSearchTool from new_tools.py)."""
+"""Tests for new tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, and SerperSearchTool from new_tools.py)."""
 
 import asyncio
 import dataclasses
@@ -11,6 +11,8 @@ from open_instruct.tools.new_tools import (
     JinaBrowseToolConfig,
     PythonCodeTool,
     PythonCodeToolConfig,
+    S2SearchTool,
+    S2SearchToolConfig,
     SerperSearchTool,
     SerperSearchToolConfig,
     _truncate,
@@ -476,6 +478,189 @@ class TestJinaBrowseToolConfig:
     def test_tool_class_attribute(self):
         """Test tool_class is set to JinaBrowseTool."""
         assert JinaBrowseToolConfig.tool_class == JinaBrowseTool
+
+
+class TestS2SearchToolInit:
+    """Tests for S2SearchTool initialization and properties."""
+
+    @pytest.mark.parametrize(
+        "num_results,expected_num_results",
+        [
+            (None, 10),  # default
+            (5, 5),  # custom
+        ],
+        ids=["defaults", "custom_values"],
+    )
+    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
+    def test_initialization(self, num_results, expected_num_results):
+        """Test tool initializes with correct values."""
+        tool = (
+            S2SearchTool(call_name="s2")
+            if num_results is None
+            else S2SearchTool(call_name="s2", num_results=num_results)
+        )
+
+        assert tool.num_results == expected_num_results
+        assert tool.call_name == "s2"
+        assert tool.config_name == "s2_search"
+
+    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
+    def test_tool_description(self):
+        """Test tool description is set correctly."""
+        tool = S2SearchTool(call_name="s2")
+        assert "Semantic Scholar" in tool.description
+
+    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
+    def test_tool_parameters_schema(self):
+        """Test tool parameters schema is correct."""
+        tool = S2SearchTool(call_name="s2")
+        params = tool.parameters
+
+        assert params["type"] == "object"
+        assert "query" in params["properties"]
+        assert "query" in params["required"]
+
+    @patch.dict("os.environ", {"S2_API_KEY": "test_key"})
+    def test_get_openai_tool_definitions(self):
+        """Test OpenAI tool definition format."""
+        tool = S2SearchTool(call_name="s2")
+        definition = get_openai_tool_definitions(tool)
+
+        assert definition["type"] == "function"
+        assert definition["function"]["name"] == "s2"
+        assert "parameters" in definition["function"]
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_missing_api_key_raises_error_on_init(self):
+        """Test that missing S2_API_KEY raises a ValueError on initialization."""
+        with pytest.raises(ValueError, match="Missing S2_API_KEY environment variable."):
+            S2SearchTool(call_name="s2")
+
+
+class TestS2SearchToolExecution:
+    """Tests for S2SearchTool execution (async execute)."""
+
+    @pytest.fixture
+    def tool(self):
+        """Set up test fixture."""
+        with patch.dict("os.environ", {"S2_API_KEY": "test_key"}):
+            return S2SearchTool(call_name="s2", num_results=10)
+
+    @pytest.mark.parametrize("query_input", ["", "   \n\t  ", None], ids=["empty", "whitespace", "none"])
+    def test_empty_query_returns_error(self, tool, query_input):
+        """Test that empty/whitespace/None query returns an error without calling API."""
+        result = asyncio.run(tool.execute(query_input))
+
+        assert isinstance(result, ToolOutput)
+        assert result.output == ""
+        assert result.error == "Empty query. Please provide a search query."
+        assert result.called is True
+        assert result.timeout is False
+
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_successful_search(self, mock_api_request, tool):
+        """Test successful search with results."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(
+                data={
+                    "data": [
+                        {"snippet": {"text": "First research paper snippet."}},
+                        {"snippet": {"text": "Second research paper snippet."}},
+                    ]
+                }
+            )
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(tool.execute("machine learning"))
+
+        assert isinstance(result, ToolOutput)
+        assert "First research paper snippet" in result.output
+        assert "Second research paper snippet" in result.output
+        assert result.error == ""
+        assert result.called is True
+        assert result.timeout is False
+
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_no_results_returns_error(self, mock_api_request, tool):
+        """Test query with no results returns an error."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"data": []})
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(tool.execute("nonexistent query"))
+
+        assert result.called is True
+        assert result.error == "Query returned no results."
+        assert result.output == result.error  # Error in output for model feedback
+        assert result.timeout is False
+
+    @pytest.mark.parametrize(
+        "api_response,expected_timeout,expected_error_contains",
+        [
+            ({"error": "Timeout after 60 seconds", "timed_out": True}, True, "Timeout after 60 seconds"),
+            ({"error": "Connection error: Connection refused", "timed_out": False}, False, "Connection error"),
+            ({"error": "HTTP error: 403 Forbidden", "timed_out": False}, False, "HTTP error"),
+        ],
+        ids=["timeout", "connection_error", "http_error"],
+    )
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_error_handling(self, mock_api_request, tool, api_response, expected_timeout, expected_error_contains):
+        """Test error handling for various API error types."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(**api_response)
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(tool.execute("test query"))
+
+        assert result.called is True
+        assert result.timeout is expected_timeout
+        assert expected_error_contains in result.error
+        assert expected_error_contains in result.output  # Error message also in output for model feedback
+
+    @patch("open_instruct.tools.new_tools.make_api_request")
+    def test_uses_get_method(self, mock_api_request, tool):
+        """Test that S2SearchTool uses GET method."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"data": []})
+
+        mock_api_request.side_effect = mock_response
+
+        asyncio.run(tool.execute("test query"))
+
+        mock_api_request.assert_called_once()
+        call_args = mock_api_request.call_args
+        assert call_args[1]["method"] == "GET"
+
+
+class TestS2SearchToolConfig:
+    """Tests for S2SearchToolConfig."""
+
+    def test_config_default_values(self):
+        """Test config has correct default values."""
+        config = S2SearchToolConfig()
+        assert config.num_results == 10
+        assert config.timeout == 60
+
+    def test_config_custom_values(self):
+        """Test config accepts custom values."""
+        config = S2SearchToolConfig(num_results=5, timeout=30)
+        assert config.num_results == 5
+        assert config.timeout == 30
+
+    def test_tool_class_attribute(self):
+        """Test tool_class is set to S2SearchTool."""
+        assert S2SearchToolConfig.tool_class == S2SearchTool
 
 
 class TestSerperSearchToolInit:
