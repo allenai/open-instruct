@@ -132,7 +132,7 @@ class ModelConfig:
     attn_implementation: Literal["flash_attention_2", "sdpa"] = "flash_attention_2"
     """Which attention implementation to use.
     flash_attention_2: Requires flash-attn package (default)
-    sdpa: Uses PyTorch's native scaled_dot_product_attention (use on aarch64/Blackwell where flash-attn unavailable)"""
+    sdpa: Uses PyTorch's native scaled_dot_product_attention (no flash-attn required)"""
     use_cache: bool | None = None
     """Whether to use cache in the model."""
     gradient_checkpointing: bool = False
