@@ -99,7 +99,12 @@ class APIResponse:
 
 
 async def make_api_request(
-    url: str, timeout_seconds: int, headers: dict | None = None, json_payload: dict | None = None, method: str = "POST"
+    url: str,
+    timeout_seconds: int,
+    headers: dict | None = None,
+    json_payload: dict | None = None,
+    params: dict | None = None,
+    method: str = "POST",
 ) -> APIResponse:
     """Make an async HTTP request with standard error handling.
 
@@ -107,7 +112,8 @@ async def make_api_request(
         url: The API endpoint URL.
         timeout_seconds: Request timeout in seconds.
         headers: Optional HTTP headers.
-        json_payload: JSON data to send in the request body (for POST requests).
+        json_payload: JSON data to send in the request body.
+        params: Query parameters.
         method: HTTP method ("GET" or "POST"). Defaults to "POST".
 
     Returns:
@@ -115,13 +121,15 @@ async def make_api_request(
     """
     if method not in ["GET", "POST"]:
         raise ValueError(f"Invalid method: {method}")
+    if method == "GET" and json_payload:
+        raise ValueError("JSON payload cannot be provided for GET requests")
     try:
         timeout = aiohttp.ClientTimeout(total=timeout_seconds)
-        async with aiohttp.ClientSession(timeout=timeout) as session:  # noqa: SIM117
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             if method == "GET":
-                request_context = session.get(url, headers=headers)
+                request_context = session.get(url, params=params, headers=headers)
             else:
-                request_context = session.post(url, json=json_payload, headers=headers)
+                request_context = session.post(url, params=params, json=json_payload, headers=headers)
 
             async with request_context as response:
                 response.raise_for_status()
