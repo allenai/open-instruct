@@ -112,6 +112,11 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._full_dataset = dataset
         self.seed = seed
         self._batch_size = batch_size
+        if batch_size < world_size:
+            raise ValueError(
+                f"Global batch size ({batch_size}) must be >= world size ({world_size}). "
+                f"Each rank needs at least one example per batch."
+            )
         if batch_size % world_size != 0:
             logger.warning(
                 f"Global batch size {batch_size} is not divisible by world size {world_size}. "

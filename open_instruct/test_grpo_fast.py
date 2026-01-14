@@ -232,7 +232,7 @@ class TestGrpoFastBase(unittest.TestCase):
 
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
         data_loader = data_loader_lib.HFDataLoader(
-            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
+            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp", collator=lambda x: x[0]
         )
 
         for example in data_loader:
@@ -556,7 +556,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
         data_loader = data_loader_lib.HFDataLoader(
-            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
+            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp", collator=lambda x: x[0]
         )
 
         for example in data_loader:
@@ -587,7 +587,7 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
         data_loader = data_loader_lib.HFDataLoader(
-            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
+            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp", collator=lambda x: x[0]
         )
 
         for example in data_loader:

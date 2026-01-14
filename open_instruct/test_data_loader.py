@@ -2,6 +2,7 @@ import tempfile
 import unittest
 
 import datasets
+import numpy as np
 import parameterized
 import torch
 
@@ -82,7 +83,11 @@ class TestHFDataLoader(unittest.TestCase):
         for indices in all_indices:
             union |= indices
         total_batches = num_examples // batch_size
-        expected_indices = set(range(total_batches * batch_size))
+        usable_size = total_batches * batch_size
+        rng = np.random.default_rng(42)
+        shuffled = np.arange(num_examples)
+        rng.shuffle(shuffled)
+        expected_indices = set(shuffled[:usable_size].tolist())
         self.assertEqual(union, expected_indices)
 
     def test_reshuffle(self):
