@@ -70,8 +70,7 @@ jobs:
           build-args: |
             GIT_COMMIT=${{ github.sha }}
             GIT_BRANCH=${{ github.head_ref || github.ref_name }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
+          no-cache: true
 
       - name: Upload image to Beaker and run tests
         env:
