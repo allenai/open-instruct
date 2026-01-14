@@ -133,7 +133,7 @@ class TestGeneration(TestGrpoFastBase):
         tokenizer_name = "Qwen/Qwen3-1.7B"
         tool_actors = (
             create_tools(
-                tools=["python"], tool_call_names=["</code>"], tool_configs=[{"api_endpoint": self.tool_api_endpoint}]
+                tools=["python"], tool_call_names=["code"], tool_configs=[{"api_endpoint": self.tool_api_endpoint}]
             )
             if use_tools
             else None
