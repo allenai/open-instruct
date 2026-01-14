@@ -213,6 +213,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         total_batches = global_size // self._batch_size
         usable_size = total_batches * self._batch_size
 
+        # Distribute examples from global batches to ranks. This is a form of strided sampling where each
+        # rank gets a subset of examples from each global batch, ensuring a diverse set of examples.
         rank_indices = all_indices[:usable_size].reshape(total_batches, self._batch_size)
         rank_indices = rank_indices[:, self.dp_rank :: self.dp_world_size].flatten()
 
