@@ -88,6 +88,7 @@ def wpo_loss(
     rejected_loss_mask: torch.BoolTensor = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Compute the Weighted Preference Optimization (WPO) loss.
+    Paper: https://arxiv.org/abs/2406.11827
 
     WPO extends DPO by weighting the loss based on the policy model's confidence,
     computed from the average log probabilities of chosen and rejected responses.
