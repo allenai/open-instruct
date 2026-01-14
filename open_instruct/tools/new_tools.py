@@ -141,7 +141,7 @@ class SerperSearchTool(Tool):
 
         if api_response.error:
             result = ToolOutput(
-                output="",
+                output=api_response.error,
                 called=True,
                 error=api_response.error,
                 timeout=api_response.timed_out,

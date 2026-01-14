@@ -440,6 +440,7 @@ class TestSerperSearchToolExecution:
         assert result.called is True
         assert result.timeout is expected_timeout
         assert expected_error_contains in result.error
+        assert expected_error_contains in result.output  # Error message also in output for model feedback
 
     @patch("open_instruct.tools.new_tools.make_api_request")
     def test_no_results_returns_error(self, mock_api_request, tool):
