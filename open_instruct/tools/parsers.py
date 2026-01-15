@@ -285,7 +285,6 @@ class DRTuluToolParser(ToolParser):
         default_stop_string: str = "</call_tool>",
     ):
         self.tool_names = [ray.get(actor.get_call_name.remote()) for actor in tool_actors]
-        self.output_wrap_name = "tool_output"
         assert len(self.tool_names) == len(set(self.tool_names)), "Tool names must be unique"
 
         # Build param name mapping for each tool
@@ -320,11 +319,8 @@ class DRTuluToolParser(ToolParser):
                 tool_calls.append(ToolCall(name=tool_name, args={param_name: match.group(2)}))
         return tool_calls
 
-    def _format_tool_output(self, tool_output: str) -> str:
-        return f"<{self.output_wrap_name}>\n{tool_output}\n</{self.output_wrap_name}>\n"
-
     def format_tool_outputs(self, tool_outputs: list[str]) -> str:
-        return "\n".join(self._format_tool_output(output) for output in tool_outputs)
+        return "\n".join(f"<tool_output>\n{output}\n</tool_output>\n" for output in tool_outputs)
 
 
 def get_available_parsers() -> list[str]:
