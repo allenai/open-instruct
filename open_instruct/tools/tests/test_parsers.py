@@ -13,6 +13,7 @@ from open_instruct.tools.parsers import (
     create_tool_parser,
     get_available_parsers,
 )
+from open_instruct.utils import import_class_from_string
 
 
 class MockTool:
@@ -277,6 +278,12 @@ class TestVllmParserRegistry(unittest.TestCase):
         self.assertIn("test_output", formatted)
         # Check stop_sequences is a sized iterable (list, tuple, set, etc.)
         self.assertGreaterEqual(len(config.stop_sequences), 0, "stop_sequences must be a sized iterable")
+
+    @parameterized.expand(VLLM_PARSERS.items())
+    def test_vllm_parser_import_path_is_valid(self, name, config):
+        """Test that the import path resolves to a valid class."""
+        parser_cls = import_class_from_string(config.import_path)
+        self.assertTrue(callable(parser_cls))
 
 
 class TestVllmToolParser(unittest.TestCase):
