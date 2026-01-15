@@ -2254,11 +2254,7 @@ def initialize_tools(
     Returns:
         Tuple of (tool_actors, tool_definitions).
     """
-    tool_actors = create_tools(
-        tools=tools_config.tools,
-        tool_call_names=tools_config.tool_call_names,
-        tool_configs=tools_config._parsed_tool_configs,
-    )
+    tool_actors = create_tools(tools_config._parsed_tools)
     tool_definitions = (
         ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
     )
