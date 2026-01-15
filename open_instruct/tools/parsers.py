@@ -20,21 +20,12 @@ from typing import Any
 
 import ray
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
+from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
 
 from open_instruct.logger_utils import setup_logger
 from open_instruct.tools.utils import ToolCall
 from open_instruct.utils import import_class_from_string
-
-# Optional imports for vLLM (not available on macOS)
-try:
-    from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-    from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
-
-    VLLM_AVAILABLE = True
-except ImportError:
-    VLLM_AVAILABLE = False
-    ChatCompletionRequest = None  # type: ignore[misc, assignment]
-    VllmNativeToolParser = None  # type: ignore[misc, assignment]
 
 logger = setup_logger(__name__)
 
@@ -160,8 +151,6 @@ class VllmToolParser(ToolParser):
 
         Usually these only need the list of tools.
         """
-        if ChatCompletionRequest is None:
-            raise ImportError("vLLM is required to use VllmToolParser")
         return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
@@ -260,14 +249,7 @@ def create_vllm_parser(
 
     Returns:
         VllmToolParser configured for the specified model family.
-
-    Raises:
-        ImportError: If vLLM is not installed.
-        ValueError: If parser_name is not found in VLLM_PARSERS.
     """
-    if not VLLM_AVAILABLE:
-        raise ImportError("vLLM is required to use vLLM tool parsers. Install it with: pip install vllm")
-
     if parser_name not in VLLM_PARSERS:
         available = list(VLLM_PARSERS.keys())
         raise ValueError(f"Unknown parser: {parser_name}. Available: {available}")
