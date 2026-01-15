@@ -46,7 +46,6 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra dr-tulu open_instruct/grpo_fa
     --apply_verifiable_reward true \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
-    --chat_template_name r1_simple_chat_postpend_think_tool_vllm \
     --learning_rate 3e-7 \
     --total_episodes 200 \
     --deepspeed_stage 3 \
@@ -68,6 +67,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra dr-tulu open_instruct/grpo_fa
     --tool_parser dr_tulu \
     --tool_configs '{"tool_names": "snippet_search,google_search", "parser_name": "unified", "host": "'"$MCP_HOST"'", "port": '"$MCP_PORT"'}' \
     --max_tool_calls 5 \
+    --pass_tools_to_chat_template false \
     --push_to_hub false
 
 echo "Training complete!"
