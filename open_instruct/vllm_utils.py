@@ -656,7 +656,7 @@ class LLMRayActor:
         self.tool_parser = create_tool_parser(
             parser_type=self._tool_parser_type,
             tool_actors=self.tool_actors,
-            tokenizer=self.llm_engine.tokenizer if self._tool_parser_type.startswith("vllm_") else None,
+            tokenizer=self.llm_engine.tokenizer,
             tool_definitions=tool_definitions,
         )
 
