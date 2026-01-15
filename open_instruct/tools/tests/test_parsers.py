@@ -635,7 +635,7 @@ class TestCreateToolParser(unittest.TestCase):
         parser = create_tool_parser("dr_tulu", tokenizer=mock_tokenizer, tool_actors=[mock_actor])
         self.assertIsInstance(parser, DRTuluToolParser)
 
-    @parameterized.expand([(p,) for p in VLLM_PARSERS.keys()])
+    @parameterized.expand([(p,) for p in VLLM_PARSERS])
     def test_create_vllm_parser(self, parser_type):
         """Test creating vLLM parsers."""
         mock_actor = create_mock_tool_actor("search")

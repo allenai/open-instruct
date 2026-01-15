@@ -2,7 +2,6 @@
 Basic tools that are built-in to open-instruct.
 """
 
-import asyncio
 import inspect
 import os
 import time
@@ -22,8 +21,8 @@ try:
         Crawl4AIBrowseTool,
         MassiveServeSearchTool,
         SemanticScholarSnippetSearchTool,
-        SerperSearchTool as DrAgentSerperSearchTool,
     )
+    from dr_agent.tool_interface.mcp_tools import SerperSearchTool as DrAgentSerperSearchTool
 
     DR_AGENT_MCP_AVAILABLE = True
     DR_AGENT_MCP_TOOLS: dict[str, type] = {
