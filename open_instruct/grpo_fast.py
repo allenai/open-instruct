@@ -1882,8 +1882,8 @@ def one_training_step(
         **average_metrics,
         **utilization_metrics,
     }
-    # Print only scalar metrics (excluding verbose tool metrics)
-    scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int) and not k.startswith("tools/")}
+    # Print only scalar metrics
+    scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
     print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
