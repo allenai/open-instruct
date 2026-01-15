@@ -16,6 +16,7 @@ import time
 import unittest
 
 os.environ["VLLM_BATCH_INVARIANT"] = "1"
+os.environ["VLLM_ATTENTION_BACKEND"] = "FLASH_ATTN"
 
 import datasets
 import ray
@@ -27,8 +28,8 @@ from transformers import AutoTokenizer
 
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig
+from open_instruct.grpo_fast import create_tools
 from open_instruct.test_grpo_fast import TestGrpoFastBase
-from open_instruct.tools.tools import PythonCodeTool
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
@@ -48,7 +49,7 @@ class TestGeneration(TestGrpoFastBase):
         super().setUpClass()
         cls.server_process = subprocess.Popen(
             ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1212"],
-            cwd="open_instruct/tools/code_server",
+            cwd="open_instruct/tools/servers/python_server",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
@@ -67,7 +68,7 @@ class TestGeneration(TestGrpoFastBase):
                 cls.server_process.wait()
         super().tearDownClass()
 
-    def _setup_engine_and_generate(self, tokenizer_name, prompt, tools=None, max_tool_calls=None, max_tokens=50):
+    def _setup_engine_and_generate(self, tokenizer_name, prompt, tool_actors=None, max_tool_calls=None, max_tokens=50):
         """Helper to create vLLM engine and run generation."""
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
@@ -77,10 +78,7 @@ class TestGeneration(TestGrpoFastBase):
         self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
 
         prompt_token_ids = tokenizer.encode(prompt, return_tensors="pt").tolist()[0]
-        stop = list(tools.keys()) if tools else None
-        generation_config = SamplingConfig(
-            temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, stop=stop, logprobs=1
-        )
+        generation_config = SamplingConfig(temperature=0.0, top_p=1.0, max_tokens=max_tokens, seed=42, logprobs=1)
         request = PromptRequest(
             prompt=prompt_token_ids, index=0, prompt_id="test_0", generation_config=generation_config
         )
@@ -109,8 +107,8 @@ class TestGeneration(TestGrpoFastBase):
             prompt_queue=param_prompt_Q,
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
-            tools=tools,
-            max_tool_calls=max_tool_calls,
+            tool_actors=tool_actors,
+            max_tool_calls=max_tool_calls or 5,
             reward_config=reward_config,
             train_dataset=train_dataset,
         )
@@ -133,17 +131,19 @@ class TestGeneration(TestGrpoFastBase):
         test_data_path = TEST_DATA_DIR / test_data_filename
 
         tokenizer_name = "Qwen/Qwen3-1.7B"
-        tools = (
-            {"</code>": PythonCodeTool(api_endpoint=self.tool_api_endpoint, start_str="<code>", end_str="</code>")}
+        tool_actors = (
+            create_tools(
+                tools=["python"], tool_call_names=["code"], tool_configs=[{"api_endpoint": self.tool_api_endpoint}]
+            )
             if use_tools
             else None
         )
-        max_tool_calls = (5,) if use_tools else None
+        max_tool_calls = 5 if use_tools else None
 
         result = self._setup_engine_and_generate(
             tokenizer_name=tokenizer_name,
             prompt=prompt,
-            tools=tools,
+            tool_actors=tool_actors,
             max_tool_calls=max_tool_calls,
             max_tokens=max_tokens,
         )
