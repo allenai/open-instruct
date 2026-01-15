@@ -29,6 +29,7 @@ from open_instruct.dataset_transformation import (
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.grpo_fast import create_tools
 from open_instruct.test_grpo_fast import TestGrpoFastBase
+from open_instruct.tools.utils import ParsedToolConfig
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
@@ -184,7 +185,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         self._ray_queues.extend([param_prompt_Q, inference_results_Q, eval_results_Q])
 
         tool_actors = create_tools(
-            tools=["python"], tool_call_names=["code"], tool_configs=[{"api_endpoint": self.tool_api_endpoint}]
+            [ParsedToolConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})]
         )
 
         pg = placement_group([{"GPU": 1, "CPU": 1}], strategy="PACK")
@@ -242,7 +243,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             model_dims=self.create_llama7b_model_dims(),
             verbose=True,
             work_dir="/tmp",
-            tool_names=list(tools.keys()),
+            tool_names=["code"],
         )
 
         loader = data_loader.StreamingDataLoader(
