@@ -438,10 +438,9 @@ class F1Verifier(VerifierFunction):
         self, tokenized_prediction: list[int], prediction: str, label: str | list[str], query: str | None = None
     ) -> VerificationResult:
         prediction = remove_thinking_section(prediction)
-        if isinstance(label, list):
-            score = max(f1_score(prediction, str(lab))["f1"] for lab in label)
-        else:
-            score = f1_score(prediction, label)["f1"]
+        # normalize label to a list
+        labels = label if isinstance(label, list) else [label]
+        score = max(f1_score(prediction, str(lab))["f1"] for lab in labels)
         return VerificationResult(score=score)
 
 
