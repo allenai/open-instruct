@@ -859,10 +859,13 @@ class TestToolsConfig(unittest.TestCase):
         config = ToolsConfig(tools=["python", "search"])
         self.assertEqual(config.tools, ["python", "search"])
         self.assertEqual(config.tool_configs, ["{}", "{}"])
-        self.assertEqual(config._parsed_tools, [
-            ParsedToolConfig(name="python", call_name="python", config={}),
-            ParsedToolConfig(name="search", call_name="search", config={}),
-        ])
+        self.assertEqual(
+            config._parsed_tools,
+            [
+                ParsedToolConfig(name="python", call_name="python", config={}),
+                ParsedToolConfig(name="search", call_name="search", config={}),
+            ],
+        )
         self.assertEqual(config.tool_call_names, ["python", "search"])
         self.assertTrue(config.enabled)
 
@@ -870,10 +873,13 @@ class TestToolsConfig(unittest.TestCase):
         """Test ToolsConfig parses custom tool_configs from JSON strings."""
         config = ToolsConfig(tools=["python", "search"], tool_configs=['{"timeout": 10}', '{"num_results": 5}'])
         self.assertEqual(config.tool_configs, ['{"timeout": 10}', '{"num_results": 5}'])
-        self.assertEqual(config._parsed_tools, [
-            ParsedToolConfig(name="python", call_name="python", config={"timeout": 10}),
-            ParsedToolConfig(name="search", call_name="search", config={"num_results": 5}),
-        ])
+        self.assertEqual(
+            config._parsed_tools,
+            [
+                ParsedToolConfig(name="python", call_name="python", config={"timeout": 10}),
+                ParsedToolConfig(name="search", call_name="search", config={"num_results": 5}),
+            ],
+        )
 
     def test_tools_with_custom_call_names(self):
         """Test ToolsConfig allows custom tool_call_names."""
