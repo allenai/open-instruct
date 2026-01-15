@@ -2241,18 +2241,16 @@ def run_training(
 
 def initialize_tools(
     tools_config: ToolsConfig,
-    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     tokenizer,
-) -> tuple[list, list]:
-    """Initialize tool actors and update streaming config with tool stop sequences.
+) -> tuple[list, list, list[str]]:
+    """Initialize tool actors and get tool definitions and stop sequences.
 
     Args:
         tools_config: Configuration for tools.
-        streaming_config: Streaming config to update with stop sequences.
         tokenizer: Tokenizer for the model.
 
     Returns:
-        Tuple of (tool_actors, tool_definitions).
+        Tuple of (tool_actors, tool_definitions, stop_sequences).
     """
     tool_actors = create_tools(tools_config._parsed_tools)
     tool_definitions = (
@@ -2261,14 +2259,13 @@ def initialize_tools(
 
     # Create parser temporarily to get stop sequences for generation config
     # The actual parser used during generation will be created inside vLLM actors
+    stop_sequences = []
     if tool_actors:
-        parser_stop_seqs = create_tool_parser(
+        stop_sequences = create_tool_parser(
             parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
         ).stop_sequences
-        logger.info(f"Adding tool stop sequences to config: {parser_stop_seqs}")
-        streaming_config.stop_strings.extend(parser_stop_seqs)
 
-    return tool_actors, tool_definitions
+    return tool_actors, tool_definitions, stop_sequences
 
 
 def main(
@@ -2293,7 +2290,10 @@ def main(
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
-    tool_actors, tool_definitions = initialize_tools(tools_config, streaming_config, tokenizer)
+    tool_actors, tool_definitions, tool_stop_sequences = initialize_tools(tools_config, tokenizer)
+    if tool_stop_sequences:
+        logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
+        streaming_config.stop_strings.extend(tool_stop_sequences)
 
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config, tool_definitions)
 
