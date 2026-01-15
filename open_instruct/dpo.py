@@ -37,40 +37,10 @@ from olmo_core.train.train_module.transformer import (
     TransformerDataParallelWrappingStrategy,
 )
 
+from open_instruct import data_loader, dataset_transformation, dpo_utils, logger_utils, model_utils, utils
 from open_instruct import dpo_config as dpo_config_lib
-from open_instruct import logger_utils
 from open_instruct.beaker_callback import BeakerCallbackV2
-from open_instruct.data_loader import HFDataLoader
-from open_instruct.dataset_transformation import (
-    TokenizerConfig,
-    compute_config_hash,
-    get_cached_dataset_tulu,
-    load_dataset_configs,
-)
-from open_instruct.dpo_utils import (
-    DataCollatorForSeq2SeqDPO,
-    DPOLossType,
-    build_reference_logprobs_cache,
-    compute_reference_logprobs_cache_hash,
-    concatenated_forward_olmo,
-    config_to_json_serializable,
-    dpo_loss,
-    separate_forward_olmo,
-    simpo_loss,
-    wpo_loss,
-)
-from open_instruct.model_utils import TensorCache, push_folder_to_hub
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
-from open_instruct.utils import (
-    GPU_SPECS,
-    ArgumentParserPlus,
-    get_device_name,
-    is_beaker_job,
-    launch_ai2_evals_on_weka,
-    maybe_get_beaker_config,
-    maybe_use_ai2_hf_entity,
-    maybe_use_ai2_wandb_entity,
-)
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -131,7 +101,7 @@ class DPOConfig(config.Config):
     """Configuration for DPO-specific settings."""
 
     dpo_beta: float = 0.1
-    dpo_loss_type: DPOLossType = DPOLossType.dpo
+    dpo_loss_type: dpo_utils.DPOLossType = dpo_utils.DPOLossType.dpo
     dpo_gamma_beta_ratio: float = 0.3
     dpo_label_smoothing: float = 0.0
     load_balancing_loss: bool = False
@@ -151,7 +121,7 @@ class DPOTrainModule(TrainModule):
         model: nn.Module,
         optim: torch.optim.Optimizer,
         dpo_config: DPOConfig,
-        reference_cache: TensorCache,
+        reference_cache: model_utils.TensorCache,
         scheduler: Scheduler,
         device: torch.device | None = None,
         max_grad_norm: float | None = None,
@@ -164,14 +134,17 @@ class DPOTrainModule(TrainModule):
         self.scheduler = scheduler
         self.device = device
         self.max_grad_norm = max_grad_norm
-        self.average_log_prob = dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
+        self.average_log_prob = dpo_config.dpo_loss_type in (
+            dpo_utils.DPOLossType.simpo,
+            dpo_utils.DPOLossType.dpo_norm,
+        )
 
         if dpo_config.packing:
-            self._forward_fn = partial(concatenated_forward_olmo, packing=True)
+            self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
         elif dpo_config.concatenated_forward:
-            self._forward_fn = concatenated_forward_olmo
+            self._forward_fn = dpo_utils.concatenated_forward_olmo
         else:
-            self._forward_fn = separate_forward_olmo
+            self._forward_fn = dpo_utils.separate_forward_olmo
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state_dict: dict[str, Any] = {"model": self.model.state_dict()}
@@ -224,9 +197,9 @@ class DPOTrainModule(TrainModule):
             output_router_logits=self.dpo_config.load_balancing_loss,
         )
 
-        if self.dpo_config.dpo_loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm):
+        if self.dpo_config.dpo_loss_type in (dpo_utils.DPOLossType.dpo, dpo_utils.DPOLossType.dpo_norm):
             ref_logps = self.reference_cache[batch["index"]]
-            losses, chosen_rewards, rejected_rewards = dpo_loss(
+            losses, chosen_rewards, rejected_rewards = dpo_utils.dpo_loss(
                 policy_chosen_logps,
                 policy_rejected_logps,
                 ref_logps["chosen_logps"],
@@ -234,17 +207,17 @@ class DPOTrainModule(TrainModule):
                 beta=self.dpo_config.dpo_beta,
                 label_smoothing=self.dpo_config.dpo_label_smoothing,
             )
-        elif self.dpo_config.dpo_loss_type == DPOLossType.simpo:
-            losses, chosen_rewards, rejected_rewards = simpo_loss(
+        elif self.dpo_config.dpo_loss_type == dpo_utils.DPOLossType.simpo:
+            losses, chosen_rewards, rejected_rewards = dpo_utils.simpo_loss(
                 policy_chosen_logps,
                 policy_rejected_logps,
                 beta=self.dpo_config.dpo_beta,
                 gamma_beta_ratio=self.dpo_config.dpo_gamma_beta_ratio,
                 label_smoothing=self.dpo_config.dpo_label_smoothing,
             )
-        elif self.dpo_config.dpo_loss_type == DPOLossType.wpo:
+        elif self.dpo_config.dpo_loss_type == dpo_utils.DPOLossType.wpo:
             ref_logps = self.reference_cache[batch["index"]]
-            losses, chosen_rewards, rejected_rewards = wpo_loss(
+            losses, chosen_rewards, rejected_rewards = dpo_utils.wpo_loss(
                 policy_chosen_logps,
                 policy_rejected_logps,
                 ref_logps["chosen_logps"],
@@ -267,7 +240,11 @@ class DPOTrainModule(TrainModule):
             self.record_metric("train/logps_chosen", policy_chosen_logps.mean().detach(), ReduceType.mean)
             self.record_metric("train/logps_rejected", policy_rejected_logps.mean().detach(), ReduceType.mean)
 
-            if self.dpo_config.dpo_loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm, DPOLossType.wpo):
+            if self.dpo_config.dpo_loss_type in (
+                dpo_utils.DPOLossType.dpo,
+                dpo_utils.DPOLossType.dpo_norm,
+                dpo_utils.DPOLossType.wpo,
+            ):
                 accuracy = (chosen_rewards > rejected_rewards).float().mean()
                 margin = (chosen_rewards - rejected_rewards).mean()
                 self.record_metric("train/rewards_chosen", chosen_rewards.mean().detach(), ReduceType.mean)
@@ -298,7 +275,7 @@ class DPOExperimentConfig(
 ):
     """Configuration for a DPO training experiment."""
 
-    dpo_loss_type: DPOLossType = DPOLossType.dpo
+    dpo_loss_type: dpo_utils.DPOLossType = dpo_utils.DPOLossType.dpo
     olmo_config_name: str | None = None
     """Override for OLMo-core TransformerConfig name (e.g., 'olmo2_7B'). If not set, auto-detected from model_name_or_path."""
 
@@ -306,7 +283,7 @@ class DPOExperimentConfig(
     def dpo_config(self) -> DPOConfig:
         return DPOConfig(
             dpo_beta=self.dpo_beta,
-            dpo_loss_type=DPOLossType(self.dpo_loss_type),
+            dpo_loss_type=dpo_utils.DPOLossType(self.dpo_loss_type),
             dpo_gamma_beta_ratio=self.dpo_gamma_beta_ratio,
             dpo_label_smoothing=self.dpo_label_smoothing,
             load_balancing_loss=self.load_balancing_loss,
@@ -326,7 +303,7 @@ class DPOExperimentConfig(
     reference_logprobs_cache_path: str = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
 
 
-def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
+def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) -> None:
     """Main entry point for DPO training with OLMo-core."""
     if args.model_name_or_path is None:
         raise ValueError("--model_name_or_path is required. Specify a HuggingFace model name or path.")
@@ -337,21 +314,21 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     tokenizer = tc.tokenizer
 
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
-    if is_beaker_job():
+    if utils.is_beaker_job():
         args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
 
-    dcs = load_dataset_configs(
+    dcs = dataset_transformation.load_dataset_configs(
         args.dataset_mixer_list,
         args.dataset_mixer_list_splits,
         args.dataset_transform_fn,
         transform_fn_args,
         args.dataset_target_columns,
     )
-    dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
+    dataset_config_hash = args.dataset_config_hash or dataset_transformation.compute_config_hash(dcs, tc)
 
-    ref_cache_hash = compute_reference_logprobs_cache_hash(
+    ref_cache_hash = dpo_utils.compute_reference_logprobs_cache_hash(
         model_name_or_path=args.model_name_or_path,
         model_revision=args.model_revision,
         dpo_loss_type=args.dpo_loss_type,
@@ -366,7 +343,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     logger.info(f"Reference logprobs cache path: {reference_cache_path}")
 
     if args.cache_dataset_only:
-        dataset = get_cached_dataset_tulu(
+        dataset = dataset_transformation.get_cached_dataset_tulu(
             dataset_mixer_list=args.dataset_mixer_list,
             dataset_mixer_list_splits=args.dataset_mixer_list_splits,
             tc=tc,
@@ -388,7 +365,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     is_main_process = dp_rank == 0
 
     if is_main_process:
-        dataset = get_cached_dataset_tulu(
+        dataset = dataset_transformation.get_cached_dataset_tulu(
             dataset_mixer_list=args.dataset_mixer_list,
             dataset_mixer_list_splits=args.dataset_mixer_list_splits,
             tc=tc,
@@ -406,7 +383,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         dist.barrier()  # type: ignore[attr-defined]
 
     if not is_main_process:
-        dataset = get_cached_dataset_tulu(
+        dataset = dataset_transformation.get_cached_dataset_tulu(
             dataset_mixer_list=args.dataset_mixer_list,
             dataset_mixer_list_splits=args.dataset_mixer_list_splits,
             tc=tc,
@@ -437,14 +414,14 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         args.output_dir = path_list[0]
 
     beaker_config = None
-    if is_beaker_job() and is_main_process:
-        beaker_config = maybe_get_beaker_config()
+    if utils.is_beaker_job() and is_main_process:
+        beaker_config = utils.maybe_get_beaker_config()
 
     if args.push_to_hub and is_main_process:
         if args.hf_repo_id is None:
             args.hf_repo_id = "open_instruct_dev"
         if args.hf_entity is None:
-            args.hf_entity = maybe_use_ai2_hf_entity()
+            args.hf_entity = utils.maybe_use_ai2_hf_entity()
         if args.hf_entity is None:
             args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
@@ -453,7 +430,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
 
     if args.wandb_entity is None:
-        args.wandb_entity = maybe_use_ai2_wandb_entity()
+        args.wandb_entity = utils.maybe_use_ai2_wandb_entity()
 
     if is_main_process:
         os.makedirs(args.output_dir, exist_ok=True)
@@ -481,10 +458,10 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     if args.dpo_config.packing:
         collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
-        collator = DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
+        collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
     global_batch_size = args.per_device_train_batch_size * dp_world_size
-    data_loader_instance = HFDataLoader(
+    data_loader_instance = data_loader.HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size,
         seed=args.seed,
@@ -495,10 +472,14 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         device=device,
     )
 
-    forward_fn = concatenated_forward_olmo if args.dpo_config.concatenated_forward else separate_forward_olmo
+    forward_fn = (
+        dpo_utils.concatenated_forward_olmo
+        if args.dpo_config.concatenated_forward
+        else dpo_utils.separate_forward_olmo
+    )
     if args.dpo_config.packing:
-        forward_fn = partial(concatenated_forward_olmo, packing=True)
-    average_log_prob = args.dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
+        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
+    average_log_prob = args.dpo_config.dpo_loss_type in (dpo_utils.DPOLossType.simpo, dpo_utils.DPOLossType.dpo_norm)
 
     logger.info("Caching reference logprobs (before HSDP)...")
 
@@ -511,7 +492,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     def all_reduce_max(tensor: torch.Tensor) -> None:
         dist.all_reduce(tensor, op=dist.ReduceOp.MAX)
 
-    reference_cache = build_reference_logprobs_cache(
+    reference_cache = dpo_utils.build_reference_logprobs_cache(
         model=model,
         dataloader=data_loader_instance,
         average_log_prob=average_log_prob,
@@ -585,10 +566,10 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         scheduler=scheduler,
     )
 
-    json_config = config_to_json_serializable(args.as_dict())
+    json_config = dpo_utils.config_to_json_serializable(args.as_dict())
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
-    device_name = get_device_name(torch.cuda.get_device_name(0))
-    device_peak_flops = int(GPU_SPECS[device_name]["flops"])
+    device_name = utils.get_device_name(torch.cuda.get_device_name(0))
+    device_peak_flops = int(utils.GPU_SPECS[device_name]["flops"])
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback(
         num_flops_per_token=model.num_flops_per_token(args.max_seq_length),
         device_peak_flops_per_second=device_peak_flops,
@@ -629,7 +610,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     if (
         args.try_auto_save_to_beaker
         and is_main_process
-        and is_beaker_job()
+        and utils.is_beaker_job()
         and beaker_config is not None
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and output_path != beaker_output_path
@@ -638,7 +619,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
             dist.barrier()
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
-    if is_beaker_job() and is_main_process and args.try_launch_beaker_eval_jobs:
+    if utils.is_beaker_job() and is_main_process and args.try_launch_beaker_eval_jobs:
         wandb_url = None
         if args.with_tracking:
             wandb_tracker = trainer_callbacks.get("wandb")
@@ -648,7 +629,7 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
             eval_path = args.output_dir
             if beaker_config is not None and beaker_config.beaker_dataset_ids:
                 eval_path = beaker_config.beaker_dataset_ids[-1]
-            launch_ai2_evals_on_weka(
+            utils.launch_ai2_evals_on_weka(
                 path=eval_path,
                 leaderboard_name=args.hf_repo_revision,
                 oe_eval_max_length=args.oe_eval_max_length,
@@ -661,12 +642,14 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
             )
 
     if args.push_to_hub and is_main_process:
-        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+        model_utils.push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
     train.teardown_training_environment()
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus([DPOExperimentConfig, TokenizerConfig])
-    args, tc = cast(tuple[DPOExperimentConfig, TokenizerConfig], parser.parse_args_into_dataclasses())
+    parser = utils.ArgumentParserPlus([DPOExperimentConfig, dataset_transformation.TokenizerConfig])
+    args, tc = cast(
+        tuple[DPOExperimentConfig, dataset_transformation.TokenizerConfig], parser.parse_args_into_dataclasses()
+    )
     main(args, tc)
