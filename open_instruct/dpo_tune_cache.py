@@ -74,6 +74,170 @@ from open_instruct.utils import (
 
 logger = get_logger(__name__)
 
+REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
+    "REFERENCE_LOGPROBS_CACHE_PATH", "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
+)
+
+
+@dataclass
+class FlatArguments(
+    dpo_config_lib.ExperimentConfig,
+    dpo_config_lib.ModelConfig,
+    dpo_config_lib.DPOHyperparamsConfig,
+    dpo_config_lib.TrainingConfig,
+    dpo_config_lib.DatasetConfig,
+    dpo_config_lib.LoRAConfig,
+    dpo_config_lib.LoggingConfig,
+    dpo_config_lib.HubConfig,
+    dpo_config_lib.CheckpointConfig,
+    dpo_config_lib.EvalConfig,
+):
+    """
+    Full arguments class for all fine-tuning jobs.
+    """
+
+    # Sometimes users will pass in a `str` repr of a dict in the CLI
+    # We need to track what fields those can be. Each time a new arg
+    # has a dict type, it must be added to this list.
+    # Important: These should be typed with Optional[Union[dict,str,...]]
+    _VALID_DICT_FIELDS = ["additional_model_arguments"]
+
+    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    do_not_randomize_output_dir: bool = False
+    """By default the output directory will be randomized"""
+    config_name: str | None = field(
+        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
+    )
+    additional_model_arguments: dict | str | None = field(
+        default_factory=dict, metadata={"help": "A dictionary of additional model args used to construct the model."}
+    )
+    sync_each_batch: bool = False
+    """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
+    dataset_name: str | None = field(
+        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
+    )
+    dataset_mixer: dict | None = field(
+        default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
+    )
+    dataset_mix_dir: str | None = field(
+        default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
+    )
+    dataset_config_name: str | None = field(
+        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+    )
+    max_train_samples: int | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "For debugging purposes or quicker training, truncate the number of training examples to this "
+                "value if set."
+            )
+        },
+    )
+    preprocessing_num_workers: int | None = field(
+        default=None, metadata={"help": "The number of processes to use for the preprocessing."}
+    )
+    max_seq_length: int | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "The maximum total input sequence length after tokenization. "
+                "Sequences longer than this will be truncated,"
+            )
+        },
+    )
+    overwrite_cache: bool = field(
+        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
+    )
+    use_qlora: bool = field(
+        default=False,
+        metadata={"help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."},
+    )
+    timeout: int = field(
+        default=1800,
+        metadata={
+            "help": "Timeout for the training process in seconds."
+            "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
+        },
+    )
+    resume_from_checkpoint: str | None = field(
+        default=None, metadata={"help": "If the training should continue from a checkpoint folder."}
+    )
+    save_to_hub: str | None = field(
+        default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
+    )
+    use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
+    checkpointing_steps: str | None = field(
+        default=None,
+        metadata={
+            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
+        },
+    )
+    hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
+    """What dataset to upload the metadata to. If unset, don't upload metadata"""
+
+    zero_stage: int | None = field(
+        default=None,
+        metadata={
+            "help": "DeepSpeed ZeRO optimization stage (0, 1, 2, or 3). If None, DeepSpeed config must be provided via accelerate launch."
+        },
+    )
+    offload_optimizer: bool = field(
+        default=False,
+        metadata={"help": "Offload optimizer states to CPU to save GPU memory. Only used if zero_stage is set."},
+    )
+    offload_param: bool = field(
+        default=False, metadata={"help": "Offload parameters to CPU to save GPU memory. Only used with zero_stage 3."}
+    )
+    zero_hpz_partition_size: int = field(
+        default=8, metadata={"help": "Hierarchical partition size for ZeRO stage 3. Only used with zero_stage 3."}
+    )
+
+    # Ai2 specific settings
+    try_auto_save_to_beaker: bool = True
+    """Whether to try to save the model to Beaker dataset `/output` after training"""
+    gs_bucket_path: str | None = None
+    """The path to the gs bucket to save the model to"""
+    oe_eval_tasks: list[str] | None = None
+    """The beaker evaluation tasks to launch"""
+    oe_eval_max_length: int = 4096
+    """the max generation length for evaluation for oe-eval"""
+    oe_eval_gpu_multiplier: int | None = None
+    """the multiplier for the number of GPUs for evaluation"""
+    eval_workspace: str | None = "ai2/tulu-3-results"
+    """The workspace to launch evaluation jobs on"""
+    eval_priority: str | None = "high"
+    """The priority of auto-launched evaluation jobs"""
+
+    def __post_init__(self):
+        if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
+            raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
+        if (
+            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
+            or (self.dataset_name is not None)
+            or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
+        ):
+            raise ValueError("Cannot provide two dataset selection mechanisms.")
+        if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
+            raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
+
+        # Parse in args that could be `dict` sent in from the CLI as a string
+        for dict_feld in self._VALID_DICT_FIELDS:
+            passed_value = getattr(self, dict_feld)
+            # We only want to do this if the str starts with a bracket to indicate a `dict`
+            # else its likely a filename if supported
+            if isinstance(passed_value, str) and passed_value.startswith("{"):
+                loaded_dict = json.loads(passed_value)
+                # Convert str values to types if applicable
+                loaded_dict = _convert_str_dict(loaded_dict)
+                setattr(self, dict_feld, loaded_dict)
+
+        if self.zero_stage is not None:
+            if self.zero_stage not in [0, 1, 2, 3]:
+                raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
+            if self.offload_param and self.zero_stage != 3:
+                raise ValueError("offload_param can only be used with zero_stage 3")
+
 
 def build_deepspeed_config(
     zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, zero_hpz_partition_size: int = 8
