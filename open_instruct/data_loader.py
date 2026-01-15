@@ -46,9 +46,7 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 logger = logging.getLogger(__name__)
 
 
-def compute_tool_metrics(
-    tool_call_stats: list[list[data_types.ToolCallStats]] | None, num_rollouts: int
-) -> dict[str, float]:
+def compute_tool_metrics(tool_call_stats: list[list[data_types.ToolCallStats]], num_rollouts: int) -> dict[str, float]:
     """Compute per-tool and aggregate tool metrics.
 
     Args:
@@ -765,8 +763,7 @@ def accumulate_inference_batches(
         combined_tool_outputs.extend(result.request_info.tool_outputs)
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
-        if result.request_info.tool_call_stats is not None:
-            combined_tool_call_stats.extend(result.request_info.tool_call_stats)
+        combined_tool_call_stats.extend(result.request_info.tool_call_stats)
 
         combined_logprobs.extend(result.logprobs)
 
@@ -795,7 +792,7 @@ def accumulate_inference_batches(
         tool_outputs=combined_tool_outputs,
         tool_runtimes=combined_tool_runtimes,
         tool_calleds=combined_tool_calleds,
-        tool_call_stats=combined_tool_call_stats if combined_tool_call_stats else None,
+        tool_call_stats=combined_tool_call_stats,
     )
 
     combined_result = data_types.GenerationResult(

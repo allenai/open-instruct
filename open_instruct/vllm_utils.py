@@ -98,7 +98,7 @@ class CompletionOutput:
     tool_output: str = ""
     tool_runtime: float = 0.0
     tool_called: bool = False
-    tool_call_stats: list[ToolCallStats] | None = None
+    tool_call_stats: list[ToolCallStats] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -283,7 +283,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_outputs = [getattr(out, "tool_output", "") for out in final_output.outputs]
         tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in final_output.outputs]
         tool_calleds = [getattr(out, "tool_called", False) for out in final_output.outputs]
-        tool_call_stats = [getattr(out, "tool_call_stats", []) or [] for out in final_output.outputs]
+        tool_call_stats = [out.tool_call_stats for out in final_output.outputs]
     else:
         # Use default values when tools are not used
         masks = [[1] * len(resp) for resp in response_ids]

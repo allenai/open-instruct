@@ -1,5 +1,5 @@
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
@@ -39,7 +39,7 @@ class RequestInfo:
     tool_runtimes: list[float]
     tool_calleds: list[bool]
     # Per-tool call statistics: list of ToolCallStats for each rollout
-    tool_call_stats: list[list[ToolCallStats]] | None = None
+    tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
 
 
 @dataclass
