@@ -437,11 +437,7 @@ class F1Verifier(VerifierFunction):
     def __call__(
         self, tokenized_prediction: list[int], prediction: str, label: str | list[str], query: str | None = None
     ) -> VerificationResult:
-        # remove thinking section from the prediction
-        prediction = prediction.split("</think>")[-1]
-        # remove answer tags from the prediction
-        prediction = prediction.replace("<answer>", "").replace("</answer>", "")
-        # if label is a list, take the max F1 score over all labels
+        prediction = remove_thinking_section(prediction)
         if isinstance(label, list):
             score = max(f1_score(prediction, str(lab))["f1"] for lab in label)
         else:
