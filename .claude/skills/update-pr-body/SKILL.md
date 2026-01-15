@@ -59,12 +59,13 @@ EOF
 
 Add to existing body (read first, then append):
 ```bash
-CURRENT_BODY=$(gh pr view 1372 --json body --jq '.body')
-gh pr edit 1372 --body "$(cat <<EOF
-$CURRENT_BODY
+# Read the current PR body, ensuring to get the raw string
+CURRENT_BODY=$(gh pr view 1372 --json body --jq -r '.body')
+
+# Append new content safely using a double-quoted string
+gh pr edit 1372 --body "${CURRENT_BODY}
 
 ## Additional Notes
 New content appended here.
-EOF
-)"
+"
 ```
