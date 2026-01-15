@@ -145,8 +145,8 @@ class VllmToolParser(ToolParser):
         self.output_formatter = output_formatter
         self._stop_sequences = stop_sequences or []
         self._tool_definitions = tool_definitions
-        self.output_postfix = output_postfix
-        self.output_prefix = output_prefix
+        self._output_postfix = output_postfix
+        self._output_prefix = output_prefix
 
     def _make_request(self) -> Any:
         """Create a dummy ChatCompletionRequest for vLLM parsers.
@@ -193,7 +193,7 @@ class VllmToolParser(ToolParser):
             Formatted string with prefix, all tool outputs, and postfix.
         """
         formatted_parts = [self.output_formatter(output) for output in tool_outputs]
-        return self.output_prefix + "".join(formatted_parts) + self.output_postfix
+        return self._output_prefix + "".join(formatted_parts) + self._output_postfix
 
     def stop_sequences(self) -> list[str]:
         return self._stop_sequences
