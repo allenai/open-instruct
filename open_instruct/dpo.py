@@ -209,7 +209,7 @@ class DPOTrainModule(TrainModule):
     def eval_batch_spec(self) -> EvalBatchSpec:
         return EvalBatchSpec(rank_batch_size=1)
 
-    def eval_batch(self, batch: dict[str, Any], labels: Any | None = None) -> torch.Tensor:
+    def eval_batch(self, batch: dict[str, Any]) -> torch.Tensor:
         self.model.eval()
         with torch.no_grad():
             return self.model(**batch)

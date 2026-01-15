@@ -4,7 +4,7 @@ import unittest
 
 from parameterized import parameterized
 
-from open_instruct import dpo
+from open_instruct import dpo_utils
 from open_instruct.dpo_utils import DPOLossType, config_to_json_serializable
 
 
@@ -12,7 +12,7 @@ class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
     """Tests for compute_reference_logprobs_cache_hash function."""
 
     def test_deterministic_hash(self):
-        hash1 = dpo.compute_reference_logprobs_cache_hash(
+        hash1 = dpo_utils.compute_reference_logprobs_cache_hash(
             model_name_or_path="allenai/OLMo-2-1124-7B",
             model_revision="main",
             dpo_loss_type="dpo",
@@ -23,7 +23,7 @@ class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
             max_train_samples=None,
             dataset_config_hash="abc123",
         )
-        hash2 = dpo.compute_reference_logprobs_cache_hash(
+        hash2 = dpo_utils.compute_reference_logprobs_cache_hash(
             model_name_or_path="allenai/OLMo-2-1124-7B",
             model_revision="main",
             dpo_loss_type="dpo",
@@ -37,7 +37,7 @@ class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
         self.assertEqual(hash1, hash2)
 
     def test_different_inputs_different_hash(self):
-        hash1 = dpo.compute_reference_logprobs_cache_hash(
+        hash1 = dpo_utils.compute_reference_logprobs_cache_hash(
             model_name_or_path="allenai/OLMo-2-1124-7B",
             model_revision="main",
             dpo_loss_type="dpo",
@@ -48,7 +48,7 @@ class TestComputeReferenceLogprobsCacheHash(unittest.TestCase):
             max_train_samples=None,
             dataset_config_hash="abc123",
         )
-        hash2 = dpo.compute_reference_logprobs_cache_hash(
+        hash2 = dpo_utils.compute_reference_logprobs_cache_hash(
             model_name_or_path="allenai/OLMo-2-1124-7B",
             model_revision="main",
             dpo_loss_type="simpo",

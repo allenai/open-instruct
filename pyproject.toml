@@ -18,6 +18,7 @@ dependencies = [
     "multiprocess<0.70.18",  # avoid AttributeError in ResourceTracker.__del__
     "nltk>=3.9.1",
     "numpy<2",
+    # TODO: Switch back to PyPI release once olmo-core 2.4.0+ is released with HF model loading support
     "ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@9a4833e3d28669ee037e8bd6f983237490471525",
     "nvitop>=1.4.2",
     "packaging>=24.2",
