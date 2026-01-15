@@ -45,10 +45,7 @@ class MockTool:
 
 
 def create_mock_tool_actor(
-    name: str,
-    param_name: str = "text",
-    required: list[str] | None = None,
-    stop_strings: list[str] | None = None,
+    name: str, param_name: str = "text", required: list[str] | None = None, stop_strings: list[str] | None = None
 ) -> MagicMock:
     """Create a mock tool actor handle that works with ray.get()."""
     mock_tool = MockTool(name, param_name, required, stop_strings)
@@ -314,8 +311,8 @@ class TestDRTuluToolParser(unittest.TestCase):
         mock_browse = create_mock_tool_actor("browse_webpage", param_name="url")
         parser = DRTuluToolParser([mock_search, mock_browse])
 
-        text = '''<call_tool name="google_search">AI research</call_tool>
-        Found a link. <call_tool name="browse_webpage">https://example.com</call_tool>'''
+        text = """<call_tool name="google_search">AI research</call_tool>
+        Found a link. <call_tool name="browse_webpage">https://example.com</call_tool>"""
         tool_calls = parser.get_tool_calls(text)
 
         self.assertEqual(len(tool_calls), 2)
@@ -449,8 +446,8 @@ retrieval augmented generation
         mock_actor = create_mock_tool_actor("google_search", param_name="query")
         parser = DRTuluToolParser([mock_actor])
 
-        text = '''<call_tool name="google_search">first query</call_tool>
-        <call_tool name="google_search">second query</call_tool>'''
+        text = """<call_tool name="google_search">first query</call_tool>
+        <call_tool name="google_search">second query</call_tool>"""
         tool_calls = parser.get_tool_calls(text)
 
         self.assertEqual(len(tool_calls), 2)
@@ -465,9 +462,9 @@ retrieval augmented generation
         parser = DRTuluToolParser([mock_search, mock_browse, mock_snippet])
 
         # Interleaved tool calls
-        text = '''<call_tool name="google_search">first</call_tool>
+        text = """<call_tool name="google_search">first</call_tool>
         <call_tool name="browse_webpage">https://example.com</call_tool>
-        <call_tool name="google_search">second</call_tool>'''
+        <call_tool name="google_search">second</call_tool>"""
         tool_calls = parser.get_tool_calls(text)
 
         self.assertEqual(len(tool_calls), 3)

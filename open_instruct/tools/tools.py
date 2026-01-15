@@ -466,7 +466,9 @@ class DrAgentMCPTool(Tool):
                     errors.append(str(e))
 
         if not outputs:
-            result = ToolOutput(output="", called=False, error="No tool calls found", timeout=False, runtime=time.time() - start_time)
+            result = ToolOutput(
+                output="", called=False, error="No tool calls found", timeout=False, runtime=time.time() - start_time
+            )
         else:
             result = ToolOutput(
                 output="\n".join(outputs),

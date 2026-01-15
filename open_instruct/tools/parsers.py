@@ -275,15 +275,9 @@ class DRTuluToolParser(ToolParser):
     Parser for <call_tool name="tool_name">content</call_tool> style tool calls.
     """
 
-    CALL_TOOL_REGEX = re.compile(
-        r'<call_tool\s+name=["\']([^"\']+)["\']\s*(?:[^>]*)>(.*?)</call_tool>', re.DOTALL
-    )
+    CALL_TOOL_REGEX = re.compile(r'<call_tool\s+name=["\']([^"\']+)["\']\s*(?:[^>]*)>(.*?)</call_tool>', re.DOTALL)
 
-    def __init__(
-        self,
-        tool_actors: list[ray.actor.ActorHandle],
-        default_stop_string: str = "</call_tool>",
-    ):
+    def __init__(self, tool_actors: list[ray.actor.ActorHandle], default_stop_string: str = "</call_tool>"):
         # Fetch metadata in parallel
         tool_names_futures = [actor.get_tool_names.remote() for actor in tool_actors]
         params_futures = [actor.get_parameters.remote() for actor in tool_actors]
