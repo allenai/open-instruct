@@ -1,97 +1,106 @@
-import os
 import tempfile
 import unittest
 
 import datasets
+import numpy as np
 import parameterized
+import torch
 
 import open_instruct.data_loader
-import open_instruct.dataset_transformation
 
-TEST_DATA_PATH = os.path.join(os.path.dirname(__file__), "test_data", "rlvr_test.jsonl")
+
+def single_example_collator(examples: list[dict]) -> dict:
+    """Collator for batch_size=1 that extracts the single example."""
+    assert len(examples) == 1
+    return examples[0]
+
+
+def make_test_dataset(num_examples: int) -> datasets.Dataset:
+    """Create a test dataset with the required 'index' column."""
+    data = {"text": [f"example_{i}" for i in range(num_examples)], "label": list(range(num_examples))}
+    dataset = datasets.Dataset.from_dict(data)
+    return dataset.add_column("index", range(num_examples))
 
 
 class TestHFDataLoader(unittest.TestCase):
-    def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-
-    def tearDown(self):
-        self.temp_dir.cleanup()
-
-    def _create_test_dataset(self, num_examples: int) -> datasets.Dataset:
-        tc = open_instruct.dataset_transformation.TokenizerConfig(
-            tokenizer_name_or_path="Qwen/Qwen3-1.7B",
-            tokenizer_revision="main",
-            chat_template_name="r1_simple_chat_postpend_think",
-        )
-        dataset = open_instruct.dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=[TEST_DATA_PATH, str(num_examples)],
-            dataset_mixer_list_splits=["train"],
-            tc=tc,
-            dataset_transform_fn=["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"],
-            transform_fn_args=[{}, {"max_prompt_token_length": 512}],
-            dataset_skip_cache=True,
-            dataset_local_cache_dir=self.temp_dir.name,
-        )
-        return dataset
-
     def test_smoke(self):
-        dataset = self._create_test_dataset(20)
+        dataset = make_test_dataset(20)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         batches = list(loader)
         self.assertEqual(len(batches), 20)
         for batch in batches:
             self.assertIn("index", batch)
+            self.assertIn("text", batch)
+            self.assertIn("label", batch)
 
         self.assertEqual(loader.total_batches, 20)
 
         mock_batch = loader.get_mock_batch()
         self.assertIn("index", mock_batch)
 
-    @parameterized.parameterized.expand([("world_size_2", 2), ("world_size_4", 4), ("world_size_8", 8)])
-    def test_multi_rank_sampling(self, name, world_size):
+    @parameterized.parameterized.expand([("dp_world_size_2", 2), ("dp_world_size_4", 4), ("dp_world_size_8", 8)])
+    def test_multi_rank_sampling(self, name, dp_world_size):
         num_examples = 100
-        dataset = self._create_test_dataset(num_examples)
+        batch_size = dp_world_size
+        dataset = make_test_dataset(num_examples)
 
         loaders = [
             open_instruct.data_loader.HFDataLoader(
                 dataset=dataset,
-                batch_size=1,
+                batch_size=batch_size,
                 seed=42,
-                rank=rank,
-                world_size=world_size,
+                dp_rank=dp_rank,
+                dp_world_size=dp_world_size,
                 work_dir=tempfile.gettempdir(),
+                collator=single_example_collator,
             )
-            for rank in range(world_size)
+            for dp_rank in range(dp_world_size)
         ]
 
         all_indices = []
-        for _rank, loader in enumerate(loaders):
+        for _dp_rank, loader in enumerate(loaders):
             rank_indices = []
             for batch in loader:
                 rank_indices.append(batch["index"])
             all_indices.append(set(rank_indices))
 
-        for i in range(world_size):
-            for j in range(i + 1, world_size):
+        for i in range(dp_world_size):
+            for j in range(i + 1, dp_world_size):
                 overlap = all_indices[i] & all_indices[j]
                 self.assertEqual(len(overlap), 0, f"Rank {i} and {j} have overlapping indices: {overlap}")
 
         union = set()
         for indices in all_indices:
             union |= indices
-        expected_indices = set(range(num_examples))
+        total_batches = num_examples // batch_size
+        usable_size = total_batches * batch_size
+        rng = np.random.default_rng(42)
+        shuffled = np.arange(num_examples)
+        rng.shuffle(shuffled)
+        expected_indices = set(shuffled[:usable_size].tolist())
         self.assertEqual(union, expected_indices)
 
     def test_reshuffle(self):
-        dataset = self._create_test_dataset(20)
+        dataset = make_test_dataset(20)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         first_pass = [batch["index"] for batch in loader]
@@ -103,10 +112,16 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(set(first_pass), set(second_pass))
 
     def test_state_dict_load_state_dict(self):
-        dataset = self._create_test_dataset(20)
+        dataset = make_test_dataset(20)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         for _ in range(5):
@@ -119,7 +134,13 @@ class TestHFDataLoader(unittest.TestCase):
         state = loader.state_dict()
 
         new_loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
         new_loader.load_state_dict(state)
 
@@ -127,13 +148,25 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(new_loader.batches_processed, loader.batches_processed)
 
     def test_reproducibility_across_runs(self):
-        dataset = self._create_test_dataset(50)
+        dataset = make_test_dataset(50)
 
         loader1 = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
         loader2 = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         indices1 = [batch["index"] for batch in loader1]
@@ -149,10 +182,16 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertNotEqual(indices1, indices1_epoch1)
 
     def test_checkpoint_resumption_exact_position(self):
-        dataset = self._create_test_dataset(50)
+        dataset = make_test_dataset(50)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         loader.reshuffle(epoch=1)
@@ -168,7 +207,13 @@ class TestHFDataLoader(unittest.TestCase):
             remaining_original.append(next(loader_iter)["index"])
 
         new_loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
         new_loader.load_state_dict(state)
 
@@ -180,10 +225,16 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(remaining_original, remaining_restored)
 
     def test_batches_processed_increments_during_iteration(self):
-        dataset = self._create_test_dataset(20)
+        dataset = make_test_dataset(20)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         self.assertEqual(loader.batches_processed, 0)
@@ -197,10 +248,16 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(state["batches_processed"], 20)
 
     def test_checkpoint_mid_epoch_restores_position(self):
-        dataset = self._create_test_dataset(20)
+        dataset = make_test_dataset(20)
 
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
 
         loader.reshuffle(epoch=1)
@@ -212,7 +269,13 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(state["batches_processed"], 10)
 
         new_loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=single_example_collator,
         )
         new_loader.load_state_dict(state)
 
@@ -220,16 +283,17 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(len(remaining), 10)
 
     def test_infinite_loop_all_excluded(self):
-        dataset = self._create_test_dataset(10)
+        dataset = make_test_dataset(10)
 
         loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             automatic_reshuffle=True,
+            collator=single_example_collator,
         )
 
         for batch in loader:
@@ -241,16 +305,17 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertIn("All dataset examples have been excluded", str(context.exception))
 
     def test_unique_prompt_ids_across_iterations(self):
-        dataset = self._create_test_dataset(10)
+        dataset = make_test_dataset(10)
 
         loader = open_instruct.data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=tempfile.gettempdir(),
             automatic_reshuffle=False,
+            collator=single_example_collator,
         )
 
         all_prompt_ids = []
@@ -266,31 +331,22 @@ class TestHFDataLoader(unittest.TestCase):
 
         self.assertEqual(len(all_prompt_ids), len(set(all_prompt_ids)))
 
-    def test_getitem_by_index(self):
-        dataset = self._create_test_dataset(20)
+    def test_global_num_tokens_in_batch(self):
+        dataset = make_test_dataset(10)
+
         loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
+            dataset=dataset, batch_size=2, seed=42, dp_rank=0, dp_world_size=2, work_dir=tempfile.gettempdir()
         )
 
-        for batch in loader:
-            original_index = batch["index"]
-            retrieved = loader[original_index]
-            self.assertEqual(retrieved["index"], original_index)
+        batch_with_input_ids = {"input_ids": torch.zeros(4, 128)}
+        self.assertEqual(loader.global_num_tokens_in_batch(batch_with_input_ids), 4 * 128 * 2)
 
-    def test_getitem_after_reshuffle(self):
-        dataset = self._create_test_dataset(20)
-        loader = open_instruct.data_loader.HFDataLoader(
-            dataset=dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir=tempfile.gettempdir()
-        )
+        batch_with_dpo = {"chosen_input_ids": torch.zeros(2, 64), "rejected_input_ids": torch.zeros(2, 64)}
+        self.assertEqual(loader.global_num_tokens_in_batch(batch_with_dpo), (2 * 64 + 2 * 64) * 2)
 
-        indices_before = [batch["index"] for batch in loader]
-        loader.reshuffle()
-        indices_after = [batch["index"] for batch in loader]
-
-        self.assertNotEqual(indices_before, indices_after)
-        for idx in indices_after:
-            retrieved = loader[idx]
-            self.assertEqual(retrieved["index"], idx)
+        batch_without_tokens = {"labels": torch.zeros(4, 128)}
+        with self.assertRaises(ValueError):
+            loader.global_num_tokens_in_batch(batch_without_tokens)
 
 
 if __name__ == "__main__":

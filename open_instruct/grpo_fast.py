@@ -101,7 +101,9 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, masked_mean
-from open_instruct.tools import tools
+from open_instruct.tools.new_tools import TOOL_REGISTRY
+from open_instruct.tools.parsers import create_tool_parser
+from open_instruct.tools.utils import ToolsConfig
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -1383,9 +1385,11 @@ def validate_configs(
     )
 
 
-def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig) -> Args:
+def setup_runtime_variables(
+    args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig, tools_config: ToolsConfig
+) -> Args:
     """Set up runtime variables for the experiment."""
-    if streaming_config.tools and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
+    if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
         assert streaming_config.mask_tool_use, (
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )
@@ -1414,7 +1418,6 @@ def setup_runtime_variables(args: Args, streaming_config: data_loader_lib.Stream
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = streaming_config.tools is not None and len(streaming_config.tools) > 0
     return args
 
 
@@ -1500,42 +1503,44 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def load_tools(args: Args) -> dict[str, tools.Tool]:
-    """Load tool instances based on args.tools configuration.
+def create_tools(
+    tools: list[str] | None, tool_call_names: list[str] | None = None, tool_configs: list[dict[str, Any]] | None = None
+) -> list[ray.actor.ActorHandle]:
+    """Create tool actors based on tool configuration using the TOOL_REGISTRY.
 
     Args:
-        args: Parsed training arguments with tool configuration.
+        tools: List of tool names to enable (e.g., ["code", "search"]).
+        tool_call_names: Optional list of names to use in model output (e.g., ["python", "search"]).
+                        Must match length of tools. Defaults to tools if not specified.
+        tool_configs: List of JSON dictionaries for configuring each tool. Must match length of tools.
+                     Use '{}' for defaults. Example: ['{"api_endpoint": "http://..."}', '{}']
 
     Returns:
-        A mapping from tool end strings to tool instances.
+        A list of Ray actor handles for the requested tools.
 
     Raises:
-        ValueError: If an unknown tool is requested.
+        ValueError: If an unknown tool is requested, configs are invalid, or required fields are missing.
     """
-    tool_objects: dict[str, tools.Tool] = {}
-    if not args.tools:
-        return tool_objects
+    tool_actors = []
 
-    for tool in args.tools:
-        if tool.lower() == "search":
-            from open_instruct.tools.search_tool import SearchTool
+    for tool, call_name, config in zip(tools, tool_call_names, tool_configs):
+        if tool not in TOOL_REGISTRY:
+            available_tools = ", ".join(TOOL_REGISTRY.keys())
+            raise ValueError(f"Unknown tool: {tool}. Available tools: {available_tools}")
 
-            tool_instance = SearchTool(
-                start_str="<query>",
-                end_str="</query>",
-                api_endpoint=args.search_api_endpoint,
-                number_documents_to_search=args.number_documents_to_search,
-            )
-        elif tool.lower() == "code":
-            tool_instance = tools.PythonCodeTool(
-                start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint
-            )
-        else:
-            raise ValueError(f"Unknown tool: {tool}")
+        tool_config_class = TOOL_REGISTRY[tool]
+        # Build config from dictionary
+        try:
+            config = tool_config_class(**config)
+        except Exception as e:
+            raise ValueError(f"Invalid config for tool '{tool}': {e}") from e
 
-        tool_objects[tool_instance.end_str] = tool_instance
+        # The config is a dataclass, and may have performed additional validation
+        # or transformation of the args, which we then now pass to the tool.
+        _kwarg_dict = asdict(config) | {"call_name": call_name}
+        tool_actors.append(ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**_kwarg_dict))
 
-    return tool_objects
+    return tool_actors
 
 
 def create_model_and_optimizer(
@@ -1555,40 +1560,16 @@ def create_model_and_optimizer(
     reward_config: RewardConfig,
     generation_config,
     data_prep_actor_state: dict | None = None,
-) -> tuple[ModelGroup, list[vllm_utils.LLMRayActor], dict[str, tools.Tool], int, int]:
+    tool_actors: list[ray.actor.ActorHandle] | None = None,
+    tools_config: ToolsConfig | None = None,
+) -> tuple[
+    ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
+]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
-
-    # Set up tools
-    tool_objects: dict[str, tools.Tool] = {}
-    if streaming_config.tools:
-        for tool in streaming_config.tools:
-            if tool.lower() == "search":
-                from open_instruct.tools.search_tool import SearchTool
-
-                tool = SearchTool(
-                    start_str="<query>",
-                    end_str="</query>",
-                    api_endpoint=streaming_config.search_api_endpoint,
-                    number_documents_to_search=streaming_config.number_documents_to_search,
-                )
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                streaming_config.stop_strings.append(tool.end_str)
-            elif tool.lower() == "code":
-                from open_instruct.tools.tools import PythonCodeTool
-
-                tool = PythonCodeTool(
-                    start_str="<code>", end_str="</code>", api_endpoint=streaming_config.code_tool_api_endpoint
-                )
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                streaming_config.stop_strings.append(tool.end_str)
-            else:
-                raise ValueError(f"Unknown tool: {tool}")
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -1656,8 +1637,9 @@ def create_model_and_optimizer(
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        tools=tool_objects,
-        max_tool_calls=streaming_config.max_tool_calls,
+        tool_actors=tool_actors,
+        tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
+        max_tool_calls=tools_config.max_tool_calls if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
@@ -1709,16 +1691,7 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
-    return (
-        policy_group,
-        vllm_engines,
-        tool_objects,
-        resume_training_step,
-        episode,
-        actor_manager,
-        model_dims,
-        _data_prep_actor,
-    )
+    return (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor)
 
 
 def create_generation_configs(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig):
@@ -2208,10 +2181,11 @@ def run_training(
             dataset=eval_dataset,
             batch_size=1,
             seed=args.seed,
-            rank=0,
-            world_size=1,
+            dp_rank=0,
+            dp_world_size=1,
             work_dir=args.output_dir,
             automatic_reshuffle=False,
+            collator=lambda x: x[0],
         )
     else:
         eval_data_loader = None
@@ -2333,9 +2307,10 @@ def main(
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
+    tools_config: ToolsConfig,
 ):
     tokenizer = make_tokenizer(tc, model_config)
-    args = setup_runtime_variables(args, streaming_config)
+    args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
 
     if args.verbose:
@@ -2357,7 +2332,7 @@ def main(
     if args.cache_dataset_only:
         return
 
-    pprint([args, model_config])
+    pprint([args, model_config, streaming_config, vllm_config, tools_config])
 
     # Initialize Ray before creating Ray objects
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
@@ -2380,10 +2355,28 @@ def main(
         verification_reward=streaming_config.verification_reward,
         non_stop_penalty=streaming_config.non_stop_penalty,
         non_stop_penalty_value=streaming_config.non_stop_penalty_value,
-        only_reward_good_outputs=streaming_config.only_reward_good_outputs,
+        only_reward_good_outputs=tools_config.only_reward_good_outputs,
         additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
+
+    # Note that parser will be created inside vLLM actors to avoid serialization issues
+    tool_actors = create_tools(
+        tools=tools_config.tools,
+        tool_call_names=tools_config.tool_call_names,
+        tool_configs=tools_config._parsed_tool_configs,
+    )
+
+    # Create parser temporarily to get stop sequences for generation config
+    # The actual parser used during generation will be created inside vLLM actors
+    if tool_actors:
+        parser_stop_seqs = create_tool_parser(
+            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors
+        ).stop_sequences()
+        logger.info(f"Adding tool stop sequences to config: {parser_stop_seqs}")
+        streaming_config.stop_strings.extend(parser_stop_seqs)
+
+    # AFTER potentially adding tool stop sequences, create generation configs
     generation_configs = create_generation_configs(args, streaming_config)
 
     checkpoint_state = None
@@ -2399,32 +2392,27 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
-    (
-        policy_group,
-        vllm_engines,
-        tool_objects,
-        resume_training_step,
-        episode,
-        actor_manager,
-        model_dims,
-        _data_prep_actor,
-    ) = create_model_and_optimizer(
-        args,
-        tc,
-        model_config,
-        beaker_config,
-        wandb_url,
-        tokenizer,
-        inference_results_Q,
-        prompt_Q,
-        evaluation_inference_results_Q,
-        streaming_config,
-        vllm_config,
-        train_dataset,
-        eval_dataset,
-        reward_config,
-        generation_configs["train"],
-        data_prep_actor_state,
+    (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
+        create_model_and_optimizer(
+            args,
+            tc,
+            model_config,
+            beaker_config,
+            wandb_url,
+            tokenizer,
+            inference_results_Q,
+            prompt_Q,
+            evaluation_inference_results_Q,
+            streaming_config,
+            vllm_config,
+            train_dataset,
+            eval_dataset,
+            reward_config,
+            generation_configs["train"],
+            data_prep_actor_state,
+            tool_actors,
+            tools_config,
+        )
     )
 
     if checkpoint_state:
@@ -2495,13 +2483,23 @@ if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
     parser = ArgumentParserPlus(
-        (Args, TokenizerConfig, ModelConfig, data_loader_lib.StreamingDataLoaderConfig, data_loader_lib.VLLMConfig)
+        (
+            Args,
+            TokenizerConfig,
+            ModelConfig,
+            data_loader_lib.StreamingDataLoaderConfig,
+            data_loader_lib.VLLMConfig,
+            ToolsConfig,
+        )
     )
-    args, tokenizer_config, model_config, streaming_config, vllm_config = parser.parse_args_into_dataclasses()
+    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
+        parser.parse_args_into_dataclasses()
+    )
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
     assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
+    assert isinstance(tools_config, ToolsConfig)
 
-    main(args, tokenizer_config, model_config, streaming_config, vllm_config)
+    main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config)
