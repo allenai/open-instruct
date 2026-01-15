@@ -268,22 +268,23 @@ class TestVllmParserRegistry(unittest.TestCase):
     """Tests for vLLM parser registry and helpers."""
 
     @parameterized.expand(VLLM_PARSERS.items())
-    def test_vllm_parser_has_required_fields(self, name, config):
-        """Test that a registered vLLM parser has required configuration."""
+    def test_vllm_parser_config(self, name, config):
+        """Test that a registered vLLM parser has valid configuration."""
+        # Check config type
         self.assertIsInstance(config, VllmParserConfig)
-        self.assertTrue(config.import_path, "missing import_path")
-        self.assertTrue(config.output_template, "missing output_template")
-        # Verify template is usable with .format()
-        formatted = config.output_template.format("test_output")
-        self.assertIn("test_output", formatted)
-        # Check stop_sequences is a sized iterable (list, tuple, set, etc.)
-        self.assertGreaterEqual(len(config.stop_sequences), 0, "stop_sequences must be a sized iterable")
 
-    @parameterized.expand(VLLM_PARSERS.items())
-    def test_vllm_parser_import_path_is_valid(self, name, config):
-        """Test that the import path resolves to a valid class."""
+        # Verify import_path resolves to a callable class
+        self.assertTrue(config.import_path, "missing import_path")
         parser_cls = import_class_from_string(config.import_path)
         self.assertTrue(callable(parser_cls))
+
+        # Verify output_template is usable with .format()
+        self.assertTrue(config.output_template, "missing output_template")
+        formatted = config.output_template.format("test_output")
+        self.assertIn("test_output", formatted)
+
+        # Check stop_sequences is a sized iterable (list, tuple, set, etc.)
+        self.assertGreaterEqual(len(config.stop_sequences), 0, "stop_sequences must be a sized iterable")
 
 
 class TestVllmToolParser(unittest.TestCase):
