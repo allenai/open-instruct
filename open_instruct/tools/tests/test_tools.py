@@ -17,7 +17,7 @@ from open_instruct.tools.tools import (
     SerperSearchToolConfig,
     _truncate,
 )
-from open_instruct.tools.utils import ToolOutput, ToolsConfig, get_openai_tool_definitions
+from open_instruct.tools.utils import ParsedTool, ToolOutput, ToolsConfig, get_openai_tool_definitions
 
 
 class TestPythonCodeToolInit:
@@ -886,7 +886,7 @@ class TestToolsConfig:
         config = ToolsConfig()
         assert config.tools == []
         assert config.tool_configs == []
-        assert config._parsed_tool_configs == []
+        assert config._parsed_tools == []
         assert config.tool_call_names == []
         assert config.enabled is False
 
@@ -895,7 +895,10 @@ class TestToolsConfig:
         config = ToolsConfig(tools=["python", "search"])
         assert config.tools == ["python", "search"]
         assert config.tool_configs == ["{}", "{}"]
-        assert config._parsed_tool_configs == [{}, {}]
+        assert config._parsed_tools == [
+            ParsedTool(name="python", call_name="python", config={}),
+            ParsedTool(name="search", call_name="search", config={}),
+        ]
         assert config.tool_call_names == ["python", "search"]
         assert config.enabled is True
 
@@ -903,12 +906,17 @@ class TestToolsConfig:
         """Test ToolsConfig parses custom tool_configs from JSON strings."""
         config = ToolsConfig(tools=["python", "search"], tool_configs=['{"timeout": 10}', '{"num_results": 5}'])
         assert config.tool_configs == ['{"timeout": 10}', '{"num_results": 5}']
-        assert config._parsed_tool_configs == [{"timeout": 10}, {"num_results": 5}]
+        assert config._parsed_tools == [
+            ParsedTool(name="python", call_name="python", config={"timeout": 10}),
+            ParsedTool(name="search", call_name="search", config={"num_results": 5}),
+        ]
 
     def test_tools_with_custom_call_names(self):
         """Test ToolsConfig allows custom tool_call_names."""
         config = ToolsConfig(tools=["python", "search"], tool_call_names=["code", "web_search"])
         assert config.tool_call_names == ["code", "web_search"]
+        assert config._parsed_tools[0].call_name == "code"
+        assert config._parsed_tools[1].call_name == "web_search"
 
     def test_mismatched_tool_configs_length_raises(self):
         """Test ToolsConfig raises when tool_configs length doesn't match tools."""

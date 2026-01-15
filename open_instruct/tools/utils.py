@@ -12,6 +12,20 @@ logger = logger_utils.setup_logger(__name__)
 
 
 @dataclass
+class ParsedTool:
+    """A parsed tool configuration combining name, call name, and config."""
+
+    name: str
+    """The tool name (e.g., "python", "search")."""
+
+    call_name: str
+    """The name used in tool calls (e.g., "code", "web_search")."""
+
+    config: dict[str, Any]
+    """The parsed configuration dictionary for this tool."""
+
+
+@dataclass
 class ToolsConfig:
     """Configuration for tools used during generation."""
 
@@ -34,8 +48,8 @@ class ToolsConfig:
     only_reward_good_outputs: bool = False
     """Only apply rewards to outputs from tools that didn't error."""
 
-    _parsed_tool_configs: list[dict[str, Any]] = field(default_factory=list, init=False)
-    """Parsed tool configurations as dictionaries. Populated from tool_configs during __post_init__."""
+    _parsed_tools: list[ParsedTool] = field(default_factory=list, init=False)
+    """Parsed tool configurations. Populated during __post_init__."""
 
     def __post_init__(self):
         self.max_tool_calls = int(self.max_tool_calls)
@@ -61,13 +75,15 @@ class ToolsConfig:
                 f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
             )
 
-        # Parse tool_configs into dicts
-        self._parsed_tool_configs = []
-        for i, (tool_name, config) in enumerate(zip(self.tools, self.tool_configs)):
+        # Parse and combine into ParsedTool instances
+        for i, (tool_name, call_name, config_str) in enumerate(
+            zip(self.tools, self.tool_call_names, self.tool_configs)
+        ):
             try:
-                self._parsed_tool_configs.append(json.loads(config))
+                config = json.loads(config_str)
             except Exception as e:
                 raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
+            self._parsed_tools.append(ParsedTool(name=tool_name, call_name=call_name, config=config))
 
     @property
     def enabled(self) -> bool:

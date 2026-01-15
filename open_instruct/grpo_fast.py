@@ -103,7 +103,7 @@ from open_instruct.model_utils import (
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.tools.parsers import create_tool_parser
 from open_instruct.tools.tools import TOOL_REGISTRY
-from open_instruct.tools.utils import ToolsConfig
+from open_instruct.tools.utils import ParsedTool, ToolsConfig
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -1503,16 +1503,11 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def create_tools(
-    tools: list[str], tool_call_names: list[str], tool_configs: list[dict[str, Any]]
-) -> list[ray.actor.ActorHandle]:
+def create_tools(parsed_tools: list[ParsedTool]) -> list[ray.actor.ActorHandle]:
     """Create tool actors based on tool configuration using the TOOL_REGISTRY.
 
     Args:
-        tools: List of tool names to enable (e.g., ["code", "search"]).
-        tool_call_names: List of names to use in model output (e.g., ["python", "search"]).
-                        Must match length of tools.
-        tool_configs: List of config dictionaries for each tool. Must match length of tools.
+        parsed_tools: List of ParsedTool instances containing name, call_name, and config.
 
     Returns:
         A list of Ray actor handles for the requested tools.
@@ -1522,21 +1517,21 @@ def create_tools(
     """
     tool_actors = []
 
-    for tool, call_name, config in zip(tools, tool_call_names, tool_configs):
-        if tool not in TOOL_REGISTRY:
+    for parsed_tool in parsed_tools:
+        if parsed_tool.name not in TOOL_REGISTRY:
             available_tools = ", ".join(TOOL_REGISTRY.keys())
-            raise ValueError(f"Unknown tool: {tool}. Available tools: {available_tools}")
+            raise ValueError(f"Unknown tool: {parsed_tool.name}. Available tools: {available_tools}")
 
-        tool_config_class = TOOL_REGISTRY[tool]
+        tool_config_class = TOOL_REGISTRY[parsed_tool.name]
         # Build config from dictionary
         try:
-            config = tool_config_class(**config)
+            config = tool_config_class(**parsed_tool.config)
         except Exception as e:
-            raise ValueError(f"Invalid config for tool '{tool}': {e}") from e
+            raise ValueError(f"Invalid config for tool '{parsed_tool.name}': {e}") from e
 
         # The config is a dataclass, and may have performed additional validation
         # or transformation of the args, which we then now pass to the tool.
-        _kwarg_dict = asdict(config) | {"call_name": call_name}
+        _kwarg_dict = asdict(config) | {"call_name": parsed_tool.call_name}
         tool_actors.append(ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**_kwarg_dict))
 
     return tool_actors
@@ -2360,11 +2355,7 @@ def main(
     )
 
     # Note that parser will be created inside vLLM actors to avoid serialization issues
-    tool_actors = create_tools(
-        tools=tools_config.tools,
-        tool_call_names=tools_config.tool_call_names,
-        tool_configs=tools_config._parsed_tool_configs,
-    )
+    tool_actors = create_tools(tools_config._parsed_tools)
 
     # Create parser temporarily to get stop sequences for generation config
     # The actual parser used during generation will be created inside vLLM actors
