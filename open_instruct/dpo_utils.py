@@ -29,20 +29,19 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from accelerate import Accelerator
-from accelerate.logging import get_logger
 from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
 
 from open_instruct import dpo_config as dpo_config_lib
-from open_instruct import model_utils
+from open_instruct import logger_utils, model_utils
 from open_instruct.dataset_transformation import TokenizerConfig, compute_config_hash, load_dataset_configs
 from open_instruct.dpo_config import DPOLossType
 from open_instruct.model_utils import log_softmax_and_gather
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
-logger = get_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 REFERENCE_LOGPROBS_CACHE_PATH = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
 
