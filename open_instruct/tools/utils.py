@@ -50,6 +50,9 @@ class ToolsConfig:
     only_reward_good_outputs: bool = False
     """Only apply rewards to outputs from tools that didn't error."""
 
+    pass_tools_to_chat_template: bool = True
+    """Pass tool definitions to the chat template. Set to False if using a custom system prompt."""
+
     _parsed_tools: list[ParsedToolConfig] = field(default_factory=list, init=False)
     """Parsed tool configurations. Populated during __post_init__."""
 
