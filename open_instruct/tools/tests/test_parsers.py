@@ -160,7 +160,7 @@ hello()"""
         mock_code = create_mock_tool_actor("code")
         parser = OpenInstructLegacyToolParser([mock_search, mock_code])
 
-        stop_seqs = parser.stop_sequences()
+        stop_seqs = parser.stop_sequences
 
         self.assertEqual(len(stop_seqs), 2)
         self.assertIn("</search>", stop_seqs)
@@ -323,7 +323,7 @@ class TestVllmToolParser(unittest.TestCase):
         """Test that stop sequences can be empty for vLLM parsers."""
         mock_native = MagicMock()
         parser = VllmToolParser(tool_parser=mock_native, output_formatter=lambda x: x, stop_sequences=[])
-        self.assertEqual(parser.stop_sequences(), [])
+        self.assertEqual(parser.stop_sequences, [])
 
     def test_stop_sequences_custom(self):
         """Test custom stop sequences."""
@@ -331,7 +331,7 @@ class TestVllmToolParser(unittest.TestCase):
         parser = VllmToolParser(
             tool_parser=mock_native, output_formatter=lambda x: x, stop_sequences=["</tool>", "<|end|>"]
         )
-        self.assertEqual(parser.stop_sequences(), ["</tool>", "<|end|>"])
+        self.assertEqual(parser.stop_sequences, ["</tool>", "<|end|>"])
 
 
 class TestCreateToolParser(unittest.TestCase):

@@ -30,6 +30,11 @@ logger = setup_logger(__name__)
 
 
 class ToolParser(ABC):
+    """Base class for tool parsers."""
+
+    stop_sequences: list[str] = []
+    """Stop strings this parser relies on."""
+
     @abstractmethod
     def get_tool_calls(self, text: str) -> list[ToolCall]:
         """Extract tool calls from model outputs."""
@@ -38,11 +43,6 @@ class ToolParser(ABC):
     @abstractmethod
     def format_tool_outputs(self, tool_outputs: list[str]) -> str:
         """Format multiple tool outputs with any necessary prefixes/postfixes."""
-        pass
-
-    @abstractmethod
-    def stop_sequences(self) -> list[str]:
-        """Get stop strings this parser relies on."""
         pass
 
 
@@ -67,7 +67,7 @@ class OpenInstructLegacyToolParser(ToolParser):
         self.tool_names = [ray.get(actor.get_call_name.remote()) for actor in tool_actors]
         self.output_wrap_name = output_wrap_name
         assert len(self.tool_names) == len(set(self.tool_names)), "Tool names must be unique"
-        self.tool_stop_strings = [f"</{tool_name}>" for tool_name in self.tool_names]
+        self.stop_sequences = [f"</{tool_name}>" for tool_name in self.tool_names]
         self.tool_start_strings = [f"<{tool_name}>" for tool_name in self.tool_names]
 
         self.tool_param_names: dict[str, str] = {}
@@ -110,9 +110,6 @@ class OpenInstructLegacyToolParser(ToolParser):
     def format_tool_outputs(self, tool_outputs: list[str]) -> str:
         return "\n".join(self._format_tool_output(tool_output) for tool_output in tool_outputs)
 
-    def stop_sequences(self) -> list[str]:
-        return self.tool_stop_strings
-
 
 class VllmToolParser(ToolParser):
     """
@@ -143,7 +140,7 @@ class VllmToolParser(ToolParser):
         """
         self.tool_parser = tool_parser
         self.output_formatter = output_formatter
-        self._stop_sequences = stop_sequences or []
+        self.stop_sequences = stop_sequences or []
         self._tool_definitions = tool_definitions
         self._output_postfix = output_postfix
         self._output_prefix = output_prefix
@@ -193,9 +190,6 @@ class VllmToolParser(ToolParser):
         """
         formatted_parts = [self.output_formatter(output) for output in tool_outputs]
         return self._output_prefix + "".join(formatted_parts) + self._output_postfix
-
-    def stop_sequences(self) -> list[str]:
-        return self._stop_sequences
 
 
 @dataclass
