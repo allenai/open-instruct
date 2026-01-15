@@ -48,7 +48,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         super().setUpClass()
         cls.server_process = subprocess.Popen(
             ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1213"],
-            cwd="open_instruct/tools/code_server",
+            cwd="open_instruct/tools/servers/python_server",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
