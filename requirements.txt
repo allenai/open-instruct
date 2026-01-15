@@ -813,6 +813,8 @@ torch==2.9.0+cu129 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     #   torchvision
     #   vllm
     #   xgrammar
+torchao==0.15.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via open-instruct
 torchaudio==2.9.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via vllm
 torchvision==0.24.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
