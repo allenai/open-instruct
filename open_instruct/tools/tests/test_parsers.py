@@ -10,9 +10,7 @@ from open_instruct.tools.parsers import (
     VllmToolParser,
     create_tool_parser,
     get_available_parsers,
-    get_available_vllm_parsers,
     get_parser_stop_sequences,
-    get_vllm_parser_mapping,
 )
 
 
@@ -261,26 +259,11 @@ class TestGetAvailableParsers(unittest.TestCase):
         parsers = get_available_parsers()
         self.assertIn("vllm_hermes", parsers)
         self.assertIn("vllm_llama3_json", parsers)
-        self.assertIn("vllm_qwen3_coder", parsers)
+        self.assertIn("vllm_olmo3", parsers)
 
 
 class TestVllmParserRegistry(unittest.TestCase):
     """Tests for vLLM parser registry and helpers."""
-
-    def test_get_available_vllm_parsers(self):
-        """Test that vLLM parser names are returned."""
-        parsers = get_available_vllm_parsers()
-        self.assertIsInstance(parsers, list)
-        self.assertIn("hermes", parsers)
-        self.assertIn("llama3_json", parsers)
-        self.assertIn("qwen3_coder", parsers)
-
-    def test_get_vllm_parser_mapping(self):
-        """Test that CLI names map to internal names."""
-        mapping = get_vllm_parser_mapping()
-        self.assertEqual(mapping["vllm_hermes"], "hermes")
-        self.assertEqual(mapping["vllm_llama3_json"], "llama3_json")
-        self.assertEqual(mapping["vllm_qwen3_coder"], "qwen3_coder")
 
     def test_vllm_parsers_have_required_fields(self):
         """Test that all registered vLLM parsers have required configuration."""
@@ -357,7 +340,7 @@ class TestGetParserStopSequences(unittest.TestCase):
         mock_actor = create_mock_tool_actor("search")
         self.assertEqual(get_parser_stop_sequences("vllm_hermes", [mock_actor]), [])
         self.assertEqual(get_parser_stop_sequences("vllm_llama3_json", [mock_actor]), [])
-        self.assertEqual(get_parser_stop_sequences("vllm_qwen3_coder", [mock_actor]), [])
+        self.assertEqual(get_parser_stop_sequences("vllm_olmo3", [mock_actor]), [])
 
     def test_legacy_parser_returns_stop_sequences(self):
         """Test that legacy parser returns stop sequences."""
@@ -382,25 +365,16 @@ class TestCreateToolParser(unittest.TestCase):
     def test_create_legacy_parser(self):
         """Test creating a legacy parser."""
         mock_actor = create_mock_tool_actor("search")
-        parser = create_tool_parser("legacy", tool_actors=[mock_actor])
+        mock_tokenizer = MagicMock()
+        parser = create_tool_parser("legacy", tokenizer=mock_tokenizer, tool_actors=[mock_actor])
         self.assertIsInstance(parser, OpenInstructLegacyToolParser)
-
-    def test_create_legacy_parser_requires_tool_actors(self):
-        """Test that legacy parser requires tool_actors."""
-        with self.assertRaises(ValueError) as context:
-            create_tool_parser("legacy", tool_actors=None)
-        self.assertIn("requires tool_actors", str(context.exception))
-
-    def test_create_vllm_parser_requires_tokenizer(self):
-        """Test that vLLM parsers require a tokenizer."""
-        with self.assertRaises(ValueError) as context:
-            create_tool_parser("vllm_hermes", tokenizer=None)
-        self.assertIn("requires a tokenizer", str(context.exception))
 
     def test_unknown_parser_raises_error(self):
         """Test that unknown parser types raise an error."""
+        mock_actor = create_mock_tool_actor("search")
+        mock_tokenizer = MagicMock()
         with self.assertRaises(ValueError) as context:
-            create_tool_parser("unknown_parser")
+            create_tool_parser("unknown_parser", tokenizer=mock_tokenizer, tool_actors=[mock_actor])
         self.assertIn("Unknown parser type", str(context.exception))
         self.assertIn("Available:", str(context.exception))
 

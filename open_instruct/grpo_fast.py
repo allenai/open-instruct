@@ -2304,7 +2304,7 @@ def main(
     # The actual parser used during generation will be created inside vLLM actors
     if tool_actors:
         parser_stop_seqs = create_tool_parser(
-            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors
+            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
         ).stop_sequences()
         logger.info(f"Adding tool stop sequences to config: {parser_stop_seqs}")
         streaming_config.stop_strings.extend(parser_stop_seqs)

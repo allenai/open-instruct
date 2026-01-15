@@ -31,6 +31,7 @@ except Exception:
 # isort: on
 import dataclasses
 import functools
+import importlib
 import json
 import logging
 import math
@@ -81,6 +82,27 @@ INVALID_LOGPROB = 1.0  # Sentinel value for masked/invalid log probabilities
 logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+def import_class_from_string(import_path: str) -> type:
+    """Dynamically import a class from a 'module.path:ClassName' string.
+
+    Args:
+        import_path: Import path in format 'module.submodule:ClassName'.
+
+    Returns:
+        The imported class.
+
+    Raises:
+        ValueError: If the import path format is invalid.
+        ModuleNotFoundError: If the module cannot be found.
+        AttributeError: If the class doesn't exist in the module.
+    """
+    if ":" not in import_path:
+        raise ValueError(f"Invalid import path '{import_path}'. Expected format: 'module.path:ClassName'")
+    module_name, class_name = import_path.rsplit(":", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)
 
 
 def warn_if_low_disk_space(

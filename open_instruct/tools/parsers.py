@@ -6,26 +6,25 @@ Includes:
 - VllmToolParser: Wraps vLLM's native tool parsers
 - OpenInstructLegacyToolParser: <tool_name>content</tool_name> style
 
-For vLLM parsers, use create_vllm_parser() factory function.
+For vLLM parsers, add to VLLM_PARSERS!
 See: https://docs.vllm.ai/en/latest/features/tool_calling/
 """
 
-import importlib
 import json
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import ray
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
+from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
 
 from open_instruct.logger_utils import setup_logger
 from open_instruct.tools.utils import ToolCall
-
-if TYPE_CHECKING:
-    from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
-    from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
+from open_instruct.utils import import_class_from_string
 
 logger = setup_logger(__name__)
 
@@ -154,8 +153,6 @@ class VllmToolParser(ToolParser):
 
         Usually these only need the list of tools.
         """
-        from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-
         return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
@@ -179,6 +176,7 @@ class VllmToolParser(ToolParser):
                 args = json.loads(call.function.arguments)
                 tool_calls.append(ToolCall(name=call.function.name, args=args))
             except json.JSONDecodeError as e:
+                # the model may have mungled the tool call somehow, catch the error here.
                 logger.warning(
                     f"VllmToolParser: Failed to parse tool arguments: {e}\nArguments: {call.function.arguments!r}"
                 )
@@ -220,49 +218,27 @@ class VllmParserConfig:
 # Registry of available vLLM tool parsers
 VLLM_PARSERS: dict[str, VllmParserConfig] = {
     # Hermes-style (also works for Qwen2.5/3)
-    "hermes": VllmParserConfig(
+    "vllm_hermes": VllmParserConfig(
         import_path="vllm.entrypoints.openai.tool_parsers.hermes_tool_parser:Hermes2ProToolParser",
         output_template="<|im_start|>tool\n<tool_response>\n{}\n</tool_response>\n<|im_end|>\n",
         stop_sequences=["</tool_call>"],
         output_postfix="<|im_start|>assistant\n",
     ),
     # Llama 3.x JSON style
-    "llama3_json": VllmParserConfig(
+    "vllm_llama3_json": VllmParserConfig(
         import_path="vllm.entrypoints.openai.tool_parsers.llama_tool_parser:Llama3JsonToolParser",
         output_template="<|start_header_id|>ipython<|end_header_id|>\n\n{}<|eot_id|>",
         stop_sequences=["<|eom_id|>"],
         output_postfix="<|start_header_id|>assistant<|end_header_id|>\n\n",
     ),
-    # Qwen3 Coder
-    "qwen3_coder": VllmParserConfig(
-        import_path="vllm.entrypoints.openai.tool_parsers.qwen3coder_tool_parser:Qwen3CoderToolParser",
-        output_template="<tool_response>\n{}\n</tool_response>\n",
-        stop_sequences=["</tool_call>"],
-        output_postfix="<|im_end|>\n<|im_start|>assistant\n",
-        output_prefix="<|im_start|>user\n",
+    # Olmo 3
+    "vllm_olmo3": VllmParserConfig(
+        import_path="vllm.entrypoints.openai.tool_parsers.olmo3_tool_parser:Olmo3PythonicToolParser",
+        output_template="<|im_start|>environment\n{}<|im_end|>\n",
+        stop_sequences=["</function_calls>"],
+        output_postfix="<|im_start|>assistant\n",
     ),
 }
-
-
-def _import_parser_class(import_path: str) -> type:
-    """Import a parser class from module:ClassName path."""
-    module_name, class_name = import_path.rsplit(":", 1)
-    module = importlib.import_module(module_name)
-    return getattr(module, class_name)
-
-
-def get_available_vllm_parsers() -> list[str]:
-    """Return list of available vLLM parser names."""
-    return list(VLLM_PARSERS.keys())
-
-
-def get_vllm_parser_mapping() -> dict[str, str]:
-    """Get mapping from CLI parser names (vllm_X) to internal names (X).
-
-    To add a new vLLM parser, just add it to VLLM_PARSERS above.
-    The CLI argument will automatically be available as --tool_parser vllm_{name}.
-    """
-    return {f"vllm_{name}": name for name in VLLM_PARSERS}
 
 
 def create_vllm_parser(
@@ -283,27 +259,21 @@ def create_vllm_parser(
 
     Returns:
         VllmToolParser configured for the specified model family.
-
-    Example:
-        >>> tool_definitions = []
-        >>> for tool in my_tools:
-        ...     tool_definitions.append(tool.get_openai_tool_definitions())
-        >>> parser = create_vllm_parser("hermes", tokenizer, tool_definitions=tool_definitions)
     """
     if parser_name not in VLLM_PARSERS:
-        available = get_available_vllm_parsers()
+        available = list(VLLM_PARSERS.keys())
         raise ValueError(f"Unknown parser: {parser_name}. Available: {available}")
 
     config = VLLM_PARSERS[parser_name]
     template = output_template or config.output_template
 
-    parser_cls = _import_parser_class(config.import_path)
+    parser_cls = import_class_from_string(config.import_path)
     native_parser = parser_cls(tokenizer)
 
     return VllmToolParser(
         tool_parser=native_parser,
         output_formatter=lambda x, t=template: t.format(x),
-        stop_sequences=[],  # for vLLM parser, we allow the models to decide when to stop.
+        stop_sequences=[],  # we rely on the model's native stop sequences.
         tool_definitions=tool_definitions,
         output_postfix=config.output_postfix,
         output_prefix=config.output_prefix,
@@ -312,12 +282,13 @@ def create_vllm_parser(
 
 def get_available_parsers() -> list[str]:
     """Return list of available parser types."""
-    return ["legacy"] + list(get_vllm_parser_mapping().keys())
+    return ["legacy"] + list(VLLM_PARSERS.keys())
+
 
 def create_tool_parser(
     parser_type: str,
     tokenizer: "PreTrainedTokenizer | PreTrainedTokenizerFast",
-    tool_actors: list[ray.actor.ActorHandle] | None = None,
+    tool_actors: list[ray.actor.ActorHandle],
     output_wrap_name: str = "output",
     tool_definitions: list[dict[str, Any]] | None = None,
 ) -> ToolParser:
@@ -337,13 +308,10 @@ def create_tool_parser(
         ValueError: If parser type is not supported or required arguments are missing.
     """
     if parser_type == "legacy":
-        if tool_actors is None:
-            raise ValueError("parser_type='legacy' requires tool_actors to be provided")
         return OpenInstructLegacyToolParser(tool_actors, output_wrap_name=output_wrap_name)
 
-    vllm_mapping = get_vllm_parser_mapping()
-    if parser_type in vllm_mapping:
-        vllm_parser_name = vllm_mapping[parser_type]
+    if parser_type in VLLM_PARSERS:
+        vllm_parser_name = parser_type
         return create_vllm_parser(vllm_parser_name, tokenizer, tool_definitions=tool_definitions)
 
     raise ValueError(f"Unknown parser type: '{parser_type}'. Available: {get_available_parsers()}")
