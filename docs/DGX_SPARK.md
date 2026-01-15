@@ -39,6 +39,8 @@ uv run python -m accelerate.commands.launch \
 
 ### GRPO/RL (Single GPU)
 
+`VLLM_ALLOW_INSECURE_SERIALIZATION=1` is needed due to a vLLM v1 msgspec serialization bug on aarch64. See [huggingface/trl#3676](https://github.com/huggingface/trl/issues/3676).
+
 ```bash
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run python open_instruct/grpo_fast.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
