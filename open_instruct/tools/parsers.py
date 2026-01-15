@@ -14,7 +14,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import ray
@@ -207,8 +207,8 @@ class VllmParserConfig:
     """Import path for the parser class (e.g., 'vllm.entrypoints.openai.tool_parsers.hermes_tool_parser:Hermes2ProToolParser')."""
     output_template: str
     """Template for formatting each tool output, uses {} as placeholder."""
-    stop_sequences: list[str]
-    """Stop sequences to use for this parser."""
+    stop_sequences: list[str] = field(default_factory=list)
+    """Stop sequences to use for this parser. If empty, we rely on the model's native stop sequences."""
     output_postfix: str
     """Postfix to add after all tool outputs (includes generation prompt)."""
     output_prefix: str = ""
@@ -221,21 +221,18 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
     "vllm_hermes": VllmParserConfig(
         import_path="vllm.entrypoints.openai.tool_parsers.hermes_tool_parser:Hermes2ProToolParser",
         output_template="<|im_start|>tool\n<tool_response>\n{}\n</tool_response>\n<|im_end|>\n",
-        stop_sequences=["</tool_call>"],
         output_postfix="<|im_start|>assistant\n",
     ),
     # Llama 3.x JSON style
     "vllm_llama3_json": VllmParserConfig(
         import_path="vllm.entrypoints.openai.tool_parsers.llama_tool_parser:Llama3JsonToolParser",
         output_template="<|start_header_id|>ipython<|end_header_id|>\n\n{}<|eot_id|>",
-        stop_sequences=["<|eom_id|>"],
         output_postfix="<|start_header_id|>assistant<|end_header_id|>\n\n",
     ),
     # Olmo 3
     "vllm_olmo3": VllmParserConfig(
         import_path="vllm.entrypoints.openai.tool_parsers.olmo3_tool_parser:Olmo3PythonicToolParser",
         output_template="<|im_start|>environment\n{}<|im_end|>\n",
-        stop_sequences=["</function_calls>"],
         output_postfix="<|im_start|>assistant\n",
     ),
 }
@@ -273,7 +270,7 @@ def create_vllm_parser(
     return VllmToolParser(
         tool_parser=native_parser,
         output_formatter=lambda x, t=template: t.format(x),
-        stop_sequences=[],  # we rely on the model's native stop sequences.
+        stop_sequences=config.stop_sequences,
         tool_definitions=tool_definitions,
         output_postfix=config.output_postfix,
         output_prefix=config.output_prefix,

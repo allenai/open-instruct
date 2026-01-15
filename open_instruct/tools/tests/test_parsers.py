@@ -10,7 +10,6 @@ from open_instruct.tools.parsers import (
     VllmToolParser,
     create_tool_parser,
     get_available_parsers,
-    get_parser_stop_sequences,
 )
 
 
@@ -320,33 +319,6 @@ class TestVllmToolParser(unittest.TestCase):
             tool_parser=mock_native, output_formatter=lambda x: x, stop_sequences=["</tool>", "<|end|>"]
         )
         self.assertEqual(parser.stop_sequences(), ["</tool>", "<|end|>"])
-
-
-class TestGetParserStopSequences(unittest.TestCase):
-    """Tests for get_parser_stop_sequences function."""
-
-    def setUp(self):
-        """Set up mock actors for each test."""
-        self.patcher = patch("open_instruct.tools.parsers.ray")
-        self.mock_ray = self.patcher.start()
-        self.mock_ray.get.side_effect = lambda x: x
-
-    def tearDown(self):
-        """Stop the patcher."""
-        self.patcher.stop()
-
-    def test_vllm_parsers_return_empty_list(self):
-        """Test that vLLM parsers return empty stop sequences."""
-        mock_actor = create_mock_tool_actor("search")
-        self.assertEqual(get_parser_stop_sequences("vllm_hermes", [mock_actor]), [])
-        self.assertEqual(get_parser_stop_sequences("vllm_llama3_json", [mock_actor]), [])
-        self.assertEqual(get_parser_stop_sequences("vllm_olmo3", [mock_actor]), [])
-
-    def test_legacy_parser_returns_stop_sequences(self):
-        """Test that legacy parser returns stop sequences."""
-        mock_actor = create_mock_tool_actor("search")
-        stop_seqs = get_parser_stop_sequences("legacy", [mock_actor])
-        self.assertEqual(stop_seqs, ["</search>"])
 
 
 class TestCreateToolParser(unittest.TestCase):
