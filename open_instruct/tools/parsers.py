@@ -346,7 +346,23 @@ def create_tool_parser(
     tool_actors: list[ray.actor.ActorHandle],
     tool_definitions: list[dict[str, Any]] | None = None,
 ) -> ToolParser:
-    """Create a tool parser by type."""
+    """Create a tool parser instance by type.
+
+    Args:
+        parser_type: Type of parser to create. Options:
+            - "legacy": OpenInstructLegacyToolParser for <tool_name>content</tool_name> format
+            - "dr_tulu": DRTuluToolParser for <call_tool name="...">content</call_tool> format
+            - "vllm_*": VllmToolParser variants (vllm_hermes, vllm_llama3_json, vllm_olmo3)
+        tokenizer: Tokenizer for the model (required for all parser types).
+        tool_actors: List of Ray actor handles for the tools.
+        tool_definitions: OpenAI-format tool definitions (required for vllm_* parsers).
+
+    Returns:
+        A ToolParser instance configured for the specified type.
+
+    Raises:
+        ValueError: If parser_type is unknown.
+    """
     if parser_type == "legacy":
         return OpenInstructLegacyToolParser(tool_actors, output_wrap_name="output")
 
