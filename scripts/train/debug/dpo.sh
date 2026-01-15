@@ -14,8 +14,8 @@ uv run python mason.py \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --gpus 1 -- torchrun --nproc_per_node=1 open_instruct/dpo.py \
-    --model_name_or_path allenai/Olmo-3-1025-7B \
-    --chat_template_name olmo \
+    --model_name_or_path Qwen/Qwen3-0.6B \
+    --chat_template_name qwen \
     --max_seq_length 1024 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
@@ -24,11 +24,10 @@ uv run python mason.py \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
     --num_epochs 3 \
-    --output_dir output/dpo_olmo_debug/ \
+    --output_dir output/dpo_qwen_debug/ \
+    --logging_steps 1 \
     --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --seed 123 \
     --use_flash_attn \
     --gradient_checkpointing \
-    --logging_steps 10 \
-    --with_tracking \
-    --push_to_hub False
+    --with_tracking

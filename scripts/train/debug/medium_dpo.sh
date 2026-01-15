@@ -2,7 +2,7 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=allenai/Olmo-3-1025-7B
 LR=1e-6
-EXP_NAME=olmo3-7b-DPO-debug-32k-${LR}
+EXP_NAME=olmo3-7b-DPO-debug-16k-${LR}
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -15,13 +15,7 @@ uv run python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
-    --gpus 8 -- accelerate launch \
-    --mixed_precision bf16 \
-    --num_processes 8 \
-    --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
-    --deepspeed_multinode_launcher standard \
-    open_instruct/dpo_tune_cache.py \
+    --gpus 8 -- torchrun --nproc_per_node=8 open_instruct/dpo.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
     --chat_template_name olmo \
@@ -32,7 +26,7 @@ uv run python mason.py \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
-    --num_train_epochs 1 \
+    --num_epochs 1 \
     --output_dir output/dpo_olmo3_debug/ \
     --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 1000 \
     --seed 123 \
