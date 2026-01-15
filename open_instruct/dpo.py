@@ -293,6 +293,7 @@ class DPOExperimentConfig(
     dpo_config_lib.HubConfig,
     dpo_config_lib.CheckpointConfig,
     dpo_config_lib.EvalConfig,
+    dpo_config_lib.Ai2EvalConfig,
     config.Config,
 ):
     """Configuration for a DPO training experiment."""
@@ -323,14 +324,6 @@ class DPOExperimentConfig(
     log_every: int = 10
 
     reference_logprobs_cache_path: str = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
-
-    try_auto_save_to_beaker: bool = True
-    oe_eval_tasks: list[str] | None = None
-    oe_eval_max_length: int = 4096
-    oe_eval_gpu_multiplier: int | None = None
-    eval_workspace: str | None = "ai2/tulu-3-results"
-    eval_priority: str | None = "high"
-    gs_bucket_path: str | None = None
 
 
 def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:

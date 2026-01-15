@@ -105,6 +105,7 @@ class FlatArguments(
     dpo_config_lib.HubConfig,
     dpo_config_lib.CheckpointConfig,
     dpo_config_lib.EvalConfig,
+    dpo_config_lib.Ai2EvalConfig,
 ):
     """
     Full arguments class for all fine-tuning jobs.
@@ -206,22 +207,6 @@ class FlatArguments(
     zero_hpz_partition_size: int = field(
         default=8, metadata={"help": "Hierarchical partition size for ZeRO stage 3. Only used with zero_stage 3."}
     )
-
-    # Ai2 specific settings
-    try_auto_save_to_beaker: bool = True
-    """Whether to try to save the model to Beaker dataset `/output` after training"""
-    gs_bucket_path: str | None = None
-    """The path to the gs bucket to save the model to"""
-    oe_eval_tasks: list[str] | None = None
-    """The beaker evaluation tasks to launch"""
-    oe_eval_max_length: int = 4096
-    """the max generation length for evaluation for oe-eval"""
-    oe_eval_gpu_multiplier: int | None = None
-    """the multiplier for the number of GPUs for evaluation"""
-    eval_workspace: str | None = "ai2/tulu-3-results"
-    """The workspace to launch evaluation jobs on"""
-    eval_priority: str | None = "high"
-    """The priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
         if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
