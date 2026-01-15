@@ -196,6 +196,15 @@ class DPOTrainModule(TrainModule):
             self.trainer.record_metric(f"LR (group {group_idx})", new_lr, namespace="optim")
         self.optim.step()
 
+    def num_flops_per_token(self, seq_len: int) -> int:
+        return self.model.num_flops_per_token(seq_len)
+
+    def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int:
+        seq_len = batch["input_ids"].shape[1]
+        flops_per_token = self.num_flops_per_token(seq_len)
+        global_num_tokens = self.trainer.data_loader.global_num_tokens_in_batch(batch)
+        return flops_per_token * global_num_tokens
+
     @property
     def eval_batch_spec(self) -> EvalBatchSpec:
         return EvalBatchSpec(rank_batch_size=1)
