@@ -95,9 +95,9 @@ class ToolStatistics:
         """Initialize tool statistics tracker.
 
         Args:
-            tool_names: List of tool names to track. If None, only tracks tools that are actually called.
+            tool_names: List of tool names to track. New tool names seen in add_rollout are added automatically.
         """
-        self.tool_names = tool_names or []
+        self.tool_names: set[str] = set(tool_names) if tool_names else set()
         self.num_rollouts = 0
         self._counts: defaultdict[str, int] = defaultdict(int)
         self._failures: defaultdict[str, int] = defaultdict(int)
@@ -111,6 +111,7 @@ class ToolStatistics:
         """
         self.num_rollouts += 1
         for s in tool_call_stats:
+            self.tool_names.add(s.tool_name)
             self._counts[s.tool_name] += 1
             self._failures[s.tool_name] += not s.success
             self._runtimes[s.tool_name] += s.runtime
@@ -127,7 +128,7 @@ class ToolStatistics:
             - tools/aggregate/failure_rate
             - tools/aggregate/avg_runtime
         """
-        if not self.num_rollouts or (not self.tool_names and not self._counts):
+        if not self.num_rollouts or not self.tool_names:
             return {}
 
         metrics: dict[str, float] = {}
@@ -135,7 +136,7 @@ class ToolStatistics:
         total_failures = 0
         total_runtime = 0.0
 
-        for name in set(self._counts) | set(self.tool_names):
+        for name in self.tool_names:
             calls, failures, runtime = self._counts[name], self._failures[name], self._runtimes[name]
             metrics[f"tools/{name}/avg_calls_per_rollout"] = calls / self.num_rollouts
             metrics[f"tools/{name}/failure_rate"] = failures / calls if calls else 0.0
