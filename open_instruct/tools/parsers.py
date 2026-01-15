@@ -283,10 +283,9 @@ class DRTuluToolParser(ToolParser):
         self,
         tool_actors: list[ray.actor.ActorHandle],
         default_stop_string: str = "</call_tool>",
-        output_wrap_name: str = "tool_output",
     ):
         self.tool_names = [ray.get(actor.get_call_name.remote()) for actor in tool_actors]
-        self.output_wrap_name = output_wrap_name
+        self.output_wrap_name = "tool_output"
         assert len(self.tool_names) == len(set(self.tool_names)), "Tool names must be unique"
 
         # Build param name mapping for each tool
