@@ -6,9 +6,8 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
-# note: you might have to setup your own search api endpoint. I've been using massive-serve:
-# https://github.com/RulinShao/massive-serve
-# and then set the search_api_endpoint accordingly.
+# Note: Only 'python' tool (called as 'code') is currently supported with the new tools system.
+# Search tool implementation is pending.
 uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/augusta \
@@ -73,6 +72,7 @@ uv run python mason.py \
     --vllm_num_engines 1 \
     --max_tool_calls 5 \
     --vllm_enable_prefix_caching \
-    --tools code search \
-    --search_api_endpoint "http://saturn-cs-aus-248.reviz.ai2.in:47479/search" \
-    --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute
+    --tools python \
+    --tool_call_names code \
+    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "timeout": 3}' \
+    --tool_parser_type legacy
