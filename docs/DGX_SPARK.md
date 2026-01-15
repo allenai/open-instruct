@@ -98,7 +98,7 @@ git checkout v0.13.0  # or desired version
 
 # Set CUDA 13 environment
 export CUDA_HOME=/usr/local/cuda
-export TORCH_CUDA_ARCH_LIST="12.1a"
+export TORCH_CUDA_ARCH_LIST="12.0"
 export TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 
 # Build
