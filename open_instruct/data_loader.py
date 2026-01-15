@@ -16,6 +16,7 @@ import logging
 import os
 import threading
 import time
+from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -48,26 +49,36 @@ logger = logging.getLogger(__name__)
 
 def compute_tool_metrics(tool_call_stats: list[list[data_types.ToolCallStats]], num_rollouts: int) -> dict[str, float]:
     """Compute per-tool and aggregate tool metrics (tools/{name}/avg_calls_per_rollout, success_rate, etc.)."""
-    all_stats = [stat for rollout in tool_call_stats for stat in rollout]
-    if not all_stats or num_rollouts == 0:
-        return {}
+    # Single pass: accumulate counts and sums per tool
+    per_tool: dict[str, dict[str, float]] = defaultdict(lambda: {"count": 0, "success_sum": 0, "runtime_sum": 0.0})
+    for rollout in tool_call_stats:
+        for stat in rollout:
+            per_tool[stat.tool_name]["count"] += 1
+            per_tool[stat.tool_name]["success_sum"] += stat.success
+            per_tool[stat.tool_name]["runtime_sum"] += stat.runtime
 
+    # Compute metrics from accumulated stats
     metrics: dict[str, float] = {}
+    total_calls = total_successes = 0
+    total_runtime = 0.0
 
-    # Per-tool metrics
-    for tool_name in {s.tool_name for s in all_stats}:
-        tool_stats = [s for s in all_stats if s.tool_name == tool_name]
-        calls_per_rollout = [sum(1 for s in rollout if s.tool_name == tool_name) for rollout in tool_call_stats]
-        metrics[f"tools/{tool_name}/avg_calls_per_rollout"] = float(np.mean(calls_per_rollout))
-        metrics[f"tools/{tool_name}/success_rate"] = float(np.mean([s.success for s in tool_stats]))
-        metrics[f"tools/{tool_name}/failure_rate"] = 1.0 - metrics[f"tools/{tool_name}/success_rate"]
-        metrics[f"tools/{tool_name}/avg_runtime"] = float(np.mean([s.runtime for s in tool_stats]))
+    for tool_name, stats in per_tool.items():
+        count = stats["count"]
+        success_rate = stats["success_sum"] / count if count else 0.0
+        metrics[f"tools/{tool_name}/avg_calls_per_rollout"] = count / num_rollouts if num_rollouts else 0.0
+        metrics[f"tools/{tool_name}/success_rate"] = success_rate
+        metrics[f"tools/{tool_name}/failure_rate"] = 1.0 - success_rate
+        metrics[f"tools/{tool_name}/avg_runtime"] = stats["runtime_sum"] / count if count else 0.0
+        total_calls += count
+        total_successes += stats["success_sum"]
+        total_runtime += stats["runtime_sum"]
 
-    # Aggregate metrics
-    metrics["tools/aggregate/avg_calls_per_rollout"] = len(all_stats) / num_rollouts
-    metrics["tools/aggregate/success_rate"] = float(np.mean([s.success for s in all_stats]))
-    metrics["tools/aggregate/failure_rate"] = 1.0 - metrics["tools/aggregate/success_rate"]
-    metrics["tools/aggregate/avg_runtime"] = float(np.mean([s.runtime for s in all_stats]))
+    if total_calls and num_rollouts:
+        agg_success_rate = total_successes / total_calls
+        metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / num_rollouts
+        metrics["tools/aggregate/success_rate"] = agg_success_rate
+        metrics["tools/aggregate/failure_rate"] = 1.0 - agg_success_rate
+        metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls
 
     return metrics
 
