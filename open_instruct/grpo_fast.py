@@ -1307,63 +1307,6 @@ def compute_token_weights(metrics_list: list[dict[str, float]]) -> list[float]:
     return [1.0 / len(metrics_list)] * len(metrics_list)
 
 
-def calculate_utilization_metrics(
-    model_dims: utils.ModelDims,
-    prompt_lengths: list[int],
-    response_lengths: list[int],
-    total_generation_time: float,
-    samples_per_prompt: int,
-    num_engines: int,
-    num_gpus_per_engine: int,
-    training_time: float,
-    num_training_gpus: int,
-) -> dict:
-    """Calculate MFU and MBU metrics for model inference and training.
-
-    Args:
-        model_dims: Model dimensions with device information
-        prompt_lengths: List of prompt lengths
-        response_lengths: List of response lengths
-        total_generation_time: Total time taken for generation (for actor metrics)
-        samples_per_prompt: Number of samples generated per prompt
-        num_engines: Number of vLLM engines for inference
-        num_gpus_per_engine: Number of GPUs assigned to each vLLM engine (tensor parallel size)
-        training_time: Time taken for training step (for learner metrics)
-        num_training_gpus: Number of GPUs used for training (for learner metrics)
-
-    Returns:
-        Dict with the following keys:
-            - actor_mfu: Model FLOPs utilization for inference (percentage)
-            - actor_mbu: Model bandwidth utilization for inference (percentage)
-            - learner_mfu: Model FLOPs utilization for training (percentage)
-    """
-    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-    )
-
-    actor_metrics = model_dims.calculate_actor_utilization(
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
-        total_generation_time=total_generation_time,
-        samples_per_prompt=samples_per_prompt,
-        num_engines=num_engines,
-        num_gpus_per_engine=num_gpus_per_engine,
-    )
-
-    learner_metrics = model_dims.calculate_learner_utilization(
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
-        training_time=training_time,
-        samples_per_prompt=samples_per_prompt,
-        num_training_gpus=num_training_gpus,
-    )
-
-    utilization_metrics = {f"actor_{k}": v for k, v in actor_metrics.items()}
-    utilization_metrics["learner_mfu"] = learner_metrics["mfu"]
-
-    return utilization_metrics
-
-
 def validate_configs(
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
@@ -1853,7 +1796,7 @@ def one_training_step(
     response_lengths = array_metrics[0]["batch/response_lengths"]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
-    utilization_metrics = calculate_utilization_metrics(
+    utilization_metrics = utils.calculate_utilization_metrics(
         model_dims=model_dims,
         prompt_lengths=prompt_lengths,
         response_lengths=response_lengths,
