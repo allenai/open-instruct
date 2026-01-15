@@ -91,7 +91,10 @@ from open_instruct.utils import (
 
 logger = get_logger(__name__)
 
-REFERENCE_LOGPROBS_CACHE_PATH = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
+REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
+    "REFERENCE_LOGPROBS_CACHE_PATH",
+    "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
+)
 
 
 @dataclass
