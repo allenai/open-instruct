@@ -17,7 +17,7 @@ When updating a GitHub PR body:
 
 2. Get the current PR body to review existing content:
    ```bash
-   gh pr view <pr-number> --json body --jq '.body'
+   gh pr view <pr-number> --json body --jq -r '.body'
    ```
 
 3. Update the PR body using `gh pr edit`:
