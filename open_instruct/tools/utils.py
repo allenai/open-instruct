@@ -42,7 +42,7 @@ class ToolsConfig:
     """JSON strings for configuring each tool. Must match length of tools. Use '{}' for defaults."""
 
     tool_parser_type: str = "legacy"
-    """Type of tool parser to use: 'legacy' is the only option for now."""
+    """Type of tool parser to use. See parsers.get_available_parsers() for valid options."""
 
     max_tool_calls: int = 5
     """Maximum number of tool calls allowed per generation."""
