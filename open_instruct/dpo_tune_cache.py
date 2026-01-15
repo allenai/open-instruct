@@ -25,14 +25,12 @@ with contextlib.suppress(Exception):
     import deepspeed
 
 # isort: on
-import hashlib
 import json
 import math
 import pathlib
 import random
 import shutil
 import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
@@ -56,7 +54,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, g
 from transformers.training_args import _convert_str_dict
 
 from open_instruct import dpo_config as dpo_config_lib
-from open_instruct import logger_utils, model_utils, utils
+from open_instruct import dpo_utils, logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     TokenizerConfig,
@@ -64,14 +62,6 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     load_dataset_configs,
     visualize_token,
-)
-from open_instruct.dpo_utils import (
-    DataCollatorForSeq2SeqDPO,
-    concatenated_forward,
-    dpo_loss,
-    separate_forward,
-    simpo_loss,
-    wpo_loss,
 )
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
@@ -292,100 +282,6 @@ def build_deepspeed_config(
         config["zero_optimization"]["offload_param"] = {"device": "cpu", "pin_memory": True}
 
     return config
-
-
-def compute_reference_cache_hash(args: FlatArguments, tc: TokenizerConfig) -> str:
-    """Compute deterministic hash for reference logprobs cache from FlatArguments."""
-    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
-    dcs = load_dataset_configs(
-        args.dataset_mixer_list,
-        args.dataset_mixer_list_splits,
-        args.dataset_transform_fn,
-        transform_fn_args,
-        args.dataset_target_columns,
-    )
-    dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
-    average_log_prob = args.dpo_loss_type in ["simpo", "dpo_norm"]
-    config_str = json.dumps(
-        {
-            "average_log_prob": average_log_prob,
-            "concatenated_forward": args.concatenated_forward,
-            "dataset_config_hash": dataset_config_hash,
-            "dpo_loss_type": args.dpo_loss_type,
-            "max_train_samples": args.max_train_samples,
-            "model_name_or_path": args.model_name_or_path,
-            "model_revision": args.model_revision,
-            "packing": args.packing,
-            "use_lora": args.use_lora,
-            "use_qlora": args.use_qlora,
-        },
-        sort_keys=True,
-    )
-    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
-
-
-def build_reference_logprobs_cache(
-    model: torch.nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    accelerator: Accelerator,
-    average_log_prob: bool,
-    forward_fn: Callable,
-    full_dataset_size: int,
-    reference_cache_hash: str,
-    use_lora: bool = False,
-) -> model_utils.TensorCache:
-    """Build a TensorCache with reference logprobs by computing logprobs once for all samples."""
-    cache_path = pathlib.Path(REFERENCE_LOGPROBS_CACHE_PATH) / f"{reference_cache_hash}.pt"
-    if cache_path.exists():
-        logger.info(f"Loading reference logprobs cache from {cache_path}")
-        return model_utils.TensorCache.from_disk(cache_path, device=accelerator.device)
-
-    model.eval()
-    device = accelerator.device
-    chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
-    rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
-
-    with torch.no_grad():
-        for batch in tqdm(
-            dataloader, disable=not accelerator.is_local_main_process, desc="Caching reference logprobs"
-        ):
-            if use_lora:
-                with accelerator.unwrap_model(model).disable_adapter():
-                    chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
-            else:
-                chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
-
-            chosen_tensor[batch["index"]] = chosen_logps
-            rejected_tensor[batch["index"]] = rejected_logps
-
-    # Use MAX instead of SUM because Accelerate's distributed sampler can duplicate
-    # examples across ranks when even_batches=True. MAX works because duplicate
-    # indices compute identical logprobs, so MAX of identical values is correct.
-    # TODO(finbarr): Refactor to use HFDataLoader and explicitly shard the dataset to prevent duplicates.
-    if dist.is_initialized():
-        dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
-        dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
-
-    missing_chosen = torch.where(chosen_tensor == float("-inf"))[0]
-    missing_rejected = torch.where(rejected_tensor == float("-inf"))[0]
-    if len(missing_chosen) > 0 or len(missing_rejected) > 0:
-        missing_indices = torch.unique(torch.cat([missing_chosen, missing_rejected]))
-        raise RuntimeError(
-            f"Missing {len(missing_indices)} indices during reference logprobs caching. "
-            f"First 10: {missing_indices[:10].tolist()}"
-        )
-
-    model.train()
-    cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
-
-    if accelerator.is_main_process:
-        logger.info(f"Saving reference logprobs cache to {cache_path}")
-        cache.to_disk(cache_path)
-
-    if dist.is_initialized():
-        dist.barrier()
-
-    return cache
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
@@ -679,7 +575,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         accelerator.print("Using packing/padding-free collation")
         collate_fn = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
-        collate_fn = DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
+        collate_fn = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
 
     train_dataloader = DataLoader(
         train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
@@ -797,22 +693,59 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # Cache the logprobs
     average_log_prob_loss_types = ["simpo", "dpo_norm"]
     average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
-    forward_fn = concatenated_forward if args.concatenated_forward else separate_forward
+    forward_fn = dpo_utils.concatenated_forward if args.concatenated_forward else dpo_utils.separate_forward
     if args.packing:
         if not args.concatenated_forward:
             raise NotImplementedError("seperate forward not implemented for packing/padding-free")
         forward_fn = partial(forward_fn, packing=True)
     if args.dpo_loss_type in ["dpo", "dpo_norm", "wpo"]:
-        reference_cache = build_reference_logprobs_cache(
+        transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+        dcs = load_dataset_configs(
+            args.dataset_mixer_list,
+            args.dataset_mixer_list_splits,
+            args.dataset_transform_fn,
+            transform_fn_args,
+            args.dataset_target_columns,
+        )
+        dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
+        reference_cache_hash = dpo_utils.compute_reference_logprobs_cache_hash(
+            model_name_or_path=args.model_name_or_path,
+            model_revision=args.model_revision,
+            dpo_loss_type=args.dpo_loss_type,
+            concatenated_forward=args.concatenated_forward,
+            packing=args.packing,
+            use_lora=args.use_lora,
+            use_qlora=args.use_qlora,
+            max_train_samples=args.max_train_samples,
+            dataset_config_hash=dataset_config_hash,
+        )
+        cache_path = pathlib.Path(REFERENCE_LOGPROBS_CACHE_PATH) / f"{reference_cache_hash}.pt"
+
+        def make_disable_adapter_context() -> contextlib.AbstractContextManager:
+            if args.use_lora:
+                return accelerator.unwrap_model(model).disable_adapter()
+            return contextlib.nullcontext()
+
+        def all_reduce_max(tensor: torch.Tensor) -> None:
+            dist.all_reduce(tensor, op=dist.ReduceOp.MAX)
+
+        reference_cache = dpo_utils.build_reference_logprobs_cache(
             model=model,
             dataloader=train_dataloader,
-            accelerator=accelerator,
             average_log_prob=average_log_prob,
             forward_fn=forward_fn,
             full_dataset_size=original_dataset_size,
             use_lora=args.use_lora,
-            reference_cache_hash=compute_reference_cache_hash(args, tc),
+            device=accelerator.device,
+            cache_path=cache_path,
+            disable_adapter_context=make_disable_adapter_context,
+            is_distributed=dist.is_initialized,
+            all_reduce_fn=all_reduce_max,
+            is_main_process=accelerator.is_main_process,
+            show_progress=accelerator.is_local_main_process,
         )
+        if dist.is_initialized():
+            dist.barrier()
         logger.info("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
         torch.cuda.empty_cache()
@@ -851,7 +784,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     ref_logps = reference_cache[batch["index"]]
                     reference_chosen_logps = ref_logps["chosen_logps"]
                     reference_rejected_logps = ref_logps["rejected_logps"]
-                    losses, _, _ = dpo_loss(
+                    losses, _, _ = dpo_utils.dpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
                         reference_chosen_logps,
@@ -860,7 +793,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         label_smoothing=args.dpo_label_smoothing,
                     )
                 elif args.dpo_loss_type == "simpo":
-                    losses, _, _ = simpo_loss(
+                    losses, _, _ = dpo_utils.simpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
                         beta=args.dpo_beta,
@@ -871,7 +804,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     ref_logps = reference_cache[batch["index"]]
                     reference_chosen_logps = ref_logps["chosen_logps"]
                     reference_rejected_logps = ref_logps["rejected_logps"]
-                    losses, _, _ = wpo_loss(
+                    losses, _, _ = dpo_utils.wpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
                         reference_chosen_logps,
