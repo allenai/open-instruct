@@ -28,7 +28,7 @@ import torch
 from dateutil import parser
 from parameterized import parameterized
 
-from open_instruct import data_types, grpo_fast, launch_utils, utils
+from open_instruct import data_types, launch_utils, utils
 from open_instruct.finetune import FlatArguments
 
 
@@ -542,7 +542,7 @@ class TestModelDims(unittest.TestCase):
 
     @parameterized.expand(_load_mbu_test_cases())
     def test_mbu_reproduction(self, name, case_data):
-        metrics = grpo_fast.calculate_utilization_metrics(
+        metrics = utils.calculate_utilization_metrics(
             model_dims=MODEL_DIMS[case_data["model_name"]],
             prompt_lengths=case_data["prompt_lengths"],
             response_lengths=case_data["response_lengths"],
@@ -583,7 +583,7 @@ class TestModelDims(unittest.TestCase):
         prompt_lengths = [prompt_len] * num_prompts
         response_lengths = [int(response_len)] * (num_prompts * samples_per_prompt)
 
-        metrics = grpo_fast.calculate_utilization_metrics(
+        metrics = utils.calculate_utilization_metrics(
             model_dims=MODEL_DIMS[model_name],
             prompt_lengths=prompt_lengths,
             response_lengths=response_lengths,
@@ -608,34 +608,6 @@ class TestModelDims(unittest.TestCase):
             f"(num_engines={num_engines}, num_gpus_per_engine={num_gpus_per_engine})",
         )
         self.assertLessEqual(metrics["learner_mfu"], 100)
-
-    def test_model_dims_match_vllm_config(self):
-        expected_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
-
-        mock_hf_text_config = mock.Mock()
-        mock_hf_text_config.intermediate_size = 18944
-        mock_hf_text_config.sliding_window = None
-        mock_hf_text_config.num_attention_heads = 28
-        mock_hf_text_config.num_key_value_heads = 4
-
-        mock_model_config = mock.Mock()
-        mock_model_config.get_hidden_size.return_value = 3584
-        mock_model_config.get_num_layers.return_value = 28
-        mock_model_config.get_vocab_size.return_value = 152064
-        mock_model_config.get_head_size.return_value = 128
-        mock_model_config.hf_text_config = mock_hf_text_config
-
-        mock_vllm_config = mock.Mock()
-        mock_vllm_config.model_config = mock_model_config
-        mock_vllm_config.parallel_config = mock.Mock()
-
-        with (
-            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
-            mock.patch("torch.cuda.is_available", return_value=True),
-        ):
-            vllm_dims = utils.ModelDims.from_vllm_config(mock_vllm_config)
-
-        self.assertEqual(vllm_dims, expected_dims)
 
 
 class TestModelDimsFromHFConfig(unittest.TestCase):

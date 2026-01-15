@@ -14,13 +14,27 @@ logger = logger_utils.setup_logger(__name__)
 
 
 @dataclass
+class ParsedToolConfig:
+    """A parsed tool configuration combining name, call name, and config."""
+
+    name: str
+    """The tool name (e.g., "python", "search")."""
+
+    call_name: str
+    """The name used in tool calls (e.g., "code", "web_search")."""
+
+    config: dict[str, Any]
+    """The parsed configuration dictionary for this tool."""
+
+
+@dataclass
 class ToolsConfig:
     """Configuration for tools used during generation."""
 
-    tools: list[str] | None = None
+    tools: list[str] = field(default_factory=list)
     """List of tool names to enable (e.g., ["python", "search"])."""
 
-    tool_call_names: list[str] | None = None
+    tool_call_names: list[str] = field(default_factory=list)
     """Override names used in tool calls (e.g., '<name>...</name>').
     Must match length of tools if set. Defaults to tools if not specified."""
 
@@ -36,39 +50,42 @@ class ToolsConfig:
     only_reward_good_outputs: bool = False
     """Only apply rewards to outputs from tools that didn't error."""
 
-    _parsed_tool_configs: list[dict[str, Any]] = field(default_factory=list, init=False)
-    """Parsed tool configurations as dictionaries. Populated from tool_configs during __post_init__."""
+    _parsed_tools: list[ParsedToolConfig] = field(default_factory=list, init=False)
+    """Parsed tool configurations. Populated during __post_init__."""
 
     def __post_init__(self):
         self.max_tool_calls = int(self.max_tool_calls)
 
-        if self.tools:
-            # Set default tool_call_names if not provided
-            if not self.tool_call_names:
-                self.tool_call_names = self.tools
-            elif len(self.tool_call_names) != len(self.tools):
-                raise ValueError(
-                    f"tool_call_names must have same length as tools. "
-                    f"Got {len(self.tool_call_names)} names for {len(self.tools)} tools."
-                )
+        if not self.tools:
+            return
 
-            # Set default tool_configs if not provided
-            if not self.tool_configs:
-                self.tool_configs = ["{}"] * len(self.tools)
-            elif len(self.tool_configs) != len(self.tools):
-                raise ValueError(
-                    f"tool_configs must have same length as tools. "
-                    f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
-                )
+        # Set defaults for empty lists
+        if not self.tool_call_names:
+            self.tool_call_names = list(self.tools)
+        if not self.tool_configs:
+            self.tool_configs = ["{}"] * len(self.tools)
 
-            # Parse all tool_configs into dicts and store in _parsed_tool_configs
-            # using a simple loop to make the error message more informative
-            self._parsed_tool_configs = []
-            for i, (tool_name, config) in enumerate(zip(self.tools, self.tool_configs)):
-                try:
-                    self._parsed_tool_configs.append(json.loads(config))
-                except Exception as e:
-                    raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
+        # Validate lengths
+        if len(self.tool_call_names) != len(self.tools):
+            raise ValueError(
+                f"tool_call_names must have same length as tools. "
+                f"Got {len(self.tool_call_names)} names for {len(self.tools)} tools."
+            )
+        if len(self.tool_configs) != len(self.tools):
+            raise ValueError(
+                f"tool_configs must have same length as tools. "
+                f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
+            )
+
+        # Parse and combine into ParsedTool instances
+        for i, (tool_name, call_name, config_str) in enumerate(
+            zip(self.tools, self.tool_call_names, self.tool_configs)
+        ):
+            try:
+                config = json.loads(config_str)
+            except Exception as e:
+                raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
+            self._parsed_tools.append(ParsedToolConfig(name=tool_name, call_name=call_name, config=config))
 
     @property
     def enabled(self) -> bool:
