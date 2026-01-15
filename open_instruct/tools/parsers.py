@@ -127,8 +127,6 @@ class VllmToolParser(ToolParser):
 
     This parser delegates to vLLM's native tool parsing implementations
     (e.g., Hermes, Llama3, Qwen3) while providing a consistent interface.
-
-    Requires vLLM to be installed.
     """
 
     def __init__(
