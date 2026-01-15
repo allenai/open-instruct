@@ -68,6 +68,7 @@ class TestVllmUtils3(unittest.TestCase):
         mock_output1.tool_output = "result1"
         mock_output1.tool_runtime = 0.5
         mock_output1.tool_called = True
+        mock_output1.tool_call_stats = []
         mock_output1.finish_reason = "stop"
 
         mock_output2 = MagicMock(spec=vllm.CompletionOutput)
@@ -80,6 +81,7 @@ class TestVllmUtils3(unittest.TestCase):
         mock_output2.tool_output = "result2"
         mock_output2.tool_runtime = 0.3
         mock_output2.tool_called = True
+        mock_output2.tool_call_stats = []
         mock_output2.finish_reason = "stop"
 
         mock_request_output = MagicMock(spec=vllm.RequestOutput)
