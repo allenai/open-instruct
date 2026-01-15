@@ -2335,7 +2335,13 @@ def main(
     pprint([args, model_config, streaming_config, vllm_config, tools_config])
 
     # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
+    # Use ray.LoggingConfig to propagate log level to all workers
+    ray_log_level = "DEBUG" if args.verbose else "INFO"
+    ray.init(
+        dashboard_host="0.0.0.0",
+        runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)},
+        logging_config=ray.LoggingConfig(log_level=ray_log_level),
+    )
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
