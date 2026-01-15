@@ -463,8 +463,8 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
 
     train.prepare_training_environment(seed=args.seed)
 
-    rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
-    is_main_process = rank == 0
+    dp_rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
+    is_main_process = dp_rank == 0
 
     if is_main_process:
         dataset = get_cached_dataset_tulu(
@@ -502,9 +502,9 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     dataset = dataset.shuffle(seed=args.seed)
     dataset.set_format(type="pt")
 
-    world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
+    dp_world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
 
-    logger_utils.setup_logger(rank=rank)
+    logger_utils.setup_logger(rank=dp_rank)
 
     if args.add_seed_and_date_to_exp_name:
         args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
@@ -560,13 +560,13 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     else:
         collator = DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
-    global_batch_size = args.per_device_train_batch_size * world_size
+    global_batch_size = args.per_device_train_batch_size * dp_world_size
     data_loader_instance = HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size,
         seed=args.seed,
-        rank=rank,
-        world_size=world_size,
+        dp_rank=dp_rank,
+        dp_world_size=dp_world_size,
         work_dir=args.output_dir,
         collator=collator,
         device=device,
