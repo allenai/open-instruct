@@ -74,12 +74,9 @@ INFERENCE_INIT_TIMEOUT_S = 1200
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelDims:
-    """Create ModelDims from a vLLM config object."""
     model_config = vllm_config.model_config
     hidden_size = model_config.get_hidden_size()
-
     intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
-
     sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
     num_layers = model_config.get_num_layers(vllm_config.parallel_config)
     num_sliding_window_layers = 0

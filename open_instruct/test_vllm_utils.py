@@ -206,7 +206,7 @@ class TestVllmUtils3(unittest.TestCase):
 
 
 class TestModelDimsFromVllmConfig(unittest.TestCase):
-    def test_model_dims_match_vllm_config(self):
+    def test_model_dims_from_vllm_config(self):
         expected_dims = ModelDims(
             num_layers=28,
             hidden_size=3584,
