@@ -304,15 +304,13 @@ class DRTuluToolParser(ToolParser):
             for name in names:
                 self.tool_param_names[name] = param_name
 
-        # Collect stop strings, handling tools that don't have the method
+        # Collect stop strings in parallel
+        stop_strings_futures = [actor.get_stop_strings.remote() for actor in tool_actors]
+        all_stop_strings = ray.get(stop_strings_futures)
         stop_strings: list[str] = []
-        for actor in tool_actors:
-            try:
-                tool_stops = ray.get(actor.get_stop_strings.remote())
-                if tool_stops:
-                    stop_strings.extend(tool_stops)
-            except (AttributeError, ray.exceptions.RayActorError):
-                pass
+        for tool_stops in all_stop_strings:
+            if tool_stops:
+                stop_strings.extend(tool_stops)
         self.stop_sequences = list(dict.fromkeys(stop_strings)) or [default_stop_string]
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:

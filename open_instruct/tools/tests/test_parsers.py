@@ -57,11 +57,8 @@ def create_mock_tool_actor(
     actor_handle.get_tool_names.remote.return_value = mock_tool.get_tool_names()
     actor_handle.get_parameters.remote.return_value = mock_tool.get_parameters()
 
-    # Handle get_stop_strings - either return value or raise AttributeError
-    if stop_strings is not None:
-        actor_handle.get_stop_strings.remote.return_value = mock_tool.get_stop_strings()
-    else:
-        actor_handle.get_stop_strings.remote.side_effect = AttributeError("No stop_strings defined")
+    # Handle get_stop_strings - return value or None (real Ray doesn't raise on .remote())
+    actor_handle.get_stop_strings.remote.return_value = stop_strings
 
     return actor_handle
 
