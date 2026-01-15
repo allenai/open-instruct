@@ -3,14 +3,12 @@ import json
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 import aiohttp
 
 from open_instruct import logger_utils
-
-if TYPE_CHECKING:
-    from open_instruct.data_types import ToolCallStats
+from open_instruct.data_types import ToolCallStats
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -105,7 +103,7 @@ class ToolStatistics:
         self._failures: defaultdict[str, int] = defaultdict(int)
         self._runtimes: defaultdict[str, float] = defaultdict(float)
 
-    def add_rollout(self, tool_call_stats: list["ToolCallStats"]) -> None:
+    def add_rollout(self, tool_call_stats: list[ToolCallStats]) -> None:
         """Add statistics from a single rollout.
 
         Args:
