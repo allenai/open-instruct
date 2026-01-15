@@ -47,7 +47,9 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 logger = logging.getLogger(__name__)
 
 
-def compute_tool_metrics(tool_call_stats: list[list[data_types.ToolCallStats]], num_rollouts: int) -> dict[str, float]:
+def compute_tool_metrics(
+    tool_call_stats: list[list[data_types.ToolCallStats]], num_rollouts: int, tool_names: list[str] | None = None
+) -> dict[str, float]:
     """Compute per-tool and aggregate tool metrics (tools/{name}/avg_calls_per_rollout, failure_rate, avg_runtime)."""
     per_tool: dict[str, dict[str, float]] = defaultdict(lambda: {"count": 0, "failure_sum": 0, "runtime_sum": 0.0})
     for rollout in tool_call_stats:
@@ -55,6 +57,10 @@ def compute_tool_metrics(tool_call_stats: list[list[data_types.ToolCallStats]], 
             per_tool[stat.tool_name]["count"] += 1
             per_tool[stat.tool_name]["failure_sum"] += not stat.success
             per_tool[stat.tool_name]["runtime_sum"] += stat.runtime
+
+    # Ensure all known tools have entries (defaulting to 0)
+    for name in tool_names or []:
+        _ = per_tool[name]  # triggers defaultdict to create entry if missing
 
     metrics: dict[str, float] = {}
     total_calls = total_failures = 0
@@ -69,10 +75,10 @@ def compute_tool_metrics(tool_call_stats: list[list[data_types.ToolCallStats]], 
         total_failures += stats["failure_sum"]
         total_runtime += stats["runtime_sum"]
 
-    if total_calls and num_rollouts:
+    if num_rollouts:
         metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / num_rollouts
-        metrics["tools/aggregate/failure_rate"] = total_failures / total_calls
-        metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls
+        metrics["tools/aggregate/failure_rate"] = total_failures / total_calls if total_calls else 0.0
+        metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls if total_calls else 0.0
 
     return metrics
 
@@ -914,6 +920,7 @@ class DataPreparationActor:
         verbose: bool,
         work_dir: str,
         initial_state: dict | None = None,
+        tool_names: list[str] | None = None,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
@@ -929,6 +936,7 @@ class DataPreparationActor:
         self.model_dims = model_dims
         self.verbose = verbose
         self.dataset = dataset
+        self.tool_names = tool_names
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
@@ -1128,7 +1136,9 @@ class DataPreparationActor:
 
                 # Add per-tool metrics
                 tool_metrics = compute_tool_metrics(
-                    result.request_info.tool_call_stats, num_rollouts=len(result.request_info.num_calls)
+                    result.request_info.tool_call_stats,
+                    num_rollouts=len(result.request_info.num_calls),
+                    tool_names=self.tool_names,
                 )
                 step_metrics.update(tool_metrics)
 
