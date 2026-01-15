@@ -560,14 +560,7 @@ class LLMRayActor:
     ):
         assert_threaded_actor(self)
         self._init_config(
-            tool_actors,
-            tool_parser_type,
-            max_tool_calls,
-            mask_tool_use,
-            inflight_updates,
-            reward_config,
-            train_dataset,
-            eval_dataset,
+            tool_actors, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -578,12 +571,12 @@ class LLMRayActor:
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
-        self._init_tool_parser()
+        # comes after executor as it requires tokenizer access.
+        self._init_tool_parser(tool_parser_type)
 
     def _init_config(
         self,
         tool_actors: list[ray.actor.ActorHandle] | None,
-        tool_parser_type: str,
         max_tool_calls: int,
         mask_tool_use: bool,
         inflight_updates: bool,
@@ -615,10 +608,6 @@ class LLMRayActor:
             call_names = ray.get([actor.get_call_name.remote() for actor in self.tool_actors])
             self.tool_actor_map = dict(zip(call_names, self.tool_actors))
 
-        # Store parser type for later initialization (after engine is started)
-        self._tool_parser_type = tool_parser_type
-        self.tool_parser = None
-
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
         self.prompt_queue = prompt_queue
@@ -636,28 +625,15 @@ class LLMRayActor:
         self._prefetch_future = self.executor.submit(_prefetch_worker, self)
         self._process_future = self.executor.submit(self.process_from_queue)
 
-    def _init_tool_parser(self) -> None:
-        """Initialize the tool parser after the engine is started.
-
-        This must be called after _setup_and_start_async_engine because vLLM parsers
-        require access to the tokenizer, which is only available after the engine starts.
-        """
+    def _init_tool_parser(self, tool_parser_type: str) -> None:
         if not self.tool_actors:
             return
-
-        # Get tool definitions for vLLM parsers
-        tool_definitions = None
-        if self._tool_parser_type.startswith("vllm_"):
-            tool_definitions = []
-            for actor in self.tool_actors:
-                tool_def = ray.get(actor.get_openai_tool_definitions.remote())
-                tool_definitions.append(tool_def)
-
+        _tool_definitions = ray.get([actor.get_openai_tool_definitions.remote() for actor in self.tool_actors])
         self.tool_parser = create_tool_parser(
-            parser_type=self._tool_parser_type,
+            parser_type=tool_parser_type,
             tool_actors=self.tool_actors,
             tokenizer=self.llm_engine.tokenizer,
-            tool_definitions=tool_definitions,
+            tool_definitions=_tool_definitions,
         )
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:

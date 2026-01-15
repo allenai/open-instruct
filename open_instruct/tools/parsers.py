@@ -289,17 +289,17 @@ def create_tool_parser(
     parser_type: str,
     tokenizer: "PreTrainedTokenizer | PreTrainedTokenizerFast",
     tool_actors: list[ray.actor.ActorHandle],
-    output_wrap_name: str = "output",
+    output_wrap_name: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
 ) -> ToolParser:
     """Create a tool parser based on configuration.
 
     Args:
-        parser_type: Type of parser to use ('legacy', 'vllm_hermes', 'vllm_llama3_json', etc.).
-        tool_actors: List of Ray actor handles for tools (required for legacy parser).
-        output_wrap_name: Name to wrap tool outputs with (for legacy parser).
-        tokenizer: Tokenizer for the model (required for vllm_* parsers).
-        tool_definitions: Tool definitions in OpenAI format (optional, for vllm_* parsers).
+        parser_type: Type of parser to use.
+        tool_actors: List of Ray actor handles for tools.
+        output_wrap_name: Name to wrap tool outputs with (only used by some parsers).
+        tokenizer: Tokenizer for the model.
+        tool_definitions: Tool definitions in OpenAI format.
 
     Returns:
         A ToolParser instance.
@@ -308,10 +308,11 @@ def create_tool_parser(
         ValueError: If parser type is not supported or required arguments are missing.
     """
     if parser_type == "legacy":
-        return OpenInstructLegacyToolParser(tool_actors, output_wrap_name=output_wrap_name)
+        return OpenInstructLegacyToolParser(tool_actors, output_wrap_name="output")
 
     if parser_type in VLLM_PARSERS:
-        vllm_parser_name = parser_type
-        return create_vllm_parser(vllm_parser_name, tokenizer, tool_definitions=tool_definitions)
+        if output_wrap_name is not None:
+            raise ValueError("output_wrap_name is not supported for vLLM parsers")
+        return create_vllm_parser(parser_type, tokenizer, tool_definitions=tool_definitions)
 
     raise ValueError(f"Unknown parser type: '{parser_type}'. Available: {get_available_parsers()}")
