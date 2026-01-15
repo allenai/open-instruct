@@ -1327,7 +1327,7 @@ def rlvr_tokenize_v3(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
     system_prompt_override: Optional[str] = None,
-    tool_definitions: Optional[List[Dict[str, Any]]] = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
 ):
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
