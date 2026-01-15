@@ -124,7 +124,7 @@ class VllmToolParser(ToolParser):
 
     def __init__(
         self,
-        tool_parser: "VllmNativeToolParser",
+        tool_parser: VllmNativeToolParser,
         output_formatter: Callable[[str], str],
         stop_sequences: list[str] | None = None,
         tool_definitions: list[dict[str, Any]] | None = None,
