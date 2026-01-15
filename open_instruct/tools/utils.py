@@ -131,21 +131,22 @@ class ToolStatistics:
             return {}
 
         metrics: dict[str, float] = {}
-        total_c = total_f = 0
-        total_r = 0.0
+        total_calls = 0
+        total_failures = 0
+        total_runtime = 0.0
 
         for name in set(self._counts) | set(self.tool_names):
-            c, f, r = self._counts[name], self._failures[name], self._runtimes[name]
-            metrics[f"tools/{name}/avg_calls_per_rollout"] = c / self.num_rollouts
-            metrics[f"tools/{name}/failure_rate"] = f / c if c else 0.0
-            metrics[f"tools/{name}/avg_runtime"] = r / c if c else 0.0
-            total_c += c
-            total_f += f
-            total_r += r
+            calls, failures, runtime = self._counts[name], self._failures[name], self._runtimes[name]
+            metrics[f"tools/{name}/avg_calls_per_rollout"] = calls / self.num_rollouts
+            metrics[f"tools/{name}/failure_rate"] = failures / calls if calls else 0.0
+            metrics[f"tools/{name}/avg_runtime"] = runtime / calls if calls else 0.0
+            total_calls += calls
+            total_failures += failures
+            total_runtime += runtime
 
-        metrics["tools/aggregate/avg_calls_per_rollout"] = total_c / self.num_rollouts
-        metrics["tools/aggregate/failure_rate"] = total_f / total_c if total_c else 0.0
-        metrics["tools/aggregate/avg_runtime"] = total_r / total_c if total_c else 0.0
+        metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / self.num_rollouts
+        metrics["tools/aggregate/failure_rate"] = total_failures / total_calls if total_calls else 0.0
+        metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls if total_calls else 0.0
 
         return metrics
 
