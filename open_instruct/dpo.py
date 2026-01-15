@@ -597,7 +597,8 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_peak_flops = int(GPU_SPECS[device_name]["flops"])
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback(
-        num_flops_per_token=model.num_flops_per_token(args.max_seq_length), device_peak_flops=device_peak_flops
+        num_flops_per_token=model.num_flops_per_token(args.max_seq_length),
+        device_peak_flops_per_second=device_peak_flops,
     )
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
