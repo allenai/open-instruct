@@ -5,6 +5,32 @@ These tests require CUDA and will be skipped if not available.
 To run:
 
     ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
+
+Updating expected test data:
+
+When generation behavior changes (due to vLLM/model updates), the determinism tests
+will fail. To update the expected data:
+
+1. Delete the outdated expected file(s) from open_instruct/test_data/:
+       rm open_instruct/test_data/generation_with_tools_expected.json
+
+2. Commit the deletion:
+       git add -A && git commit -m "Remove outdated expected data for regeneration"
+
+3. Run the GPU tests on Beaker:
+       ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
+
+4. The test will generate new expected data and fail with "Re-run test to verify."
+   Get the result dataset ID from the experiment:
+       beaker experiment get <EXPERIMENT_ID> --format json | jq -r '.[] | .jobs[0].result.beaker'
+
+5. Fetch the generated file from the result dataset:
+       beaker dataset fetch <RESULT_DATASET_ID> --output /tmp/beaker-results
+       cp /tmp/beaker-results/test_data/generation_with_tools_expected.json open_instruct/test_data/
+
+6. Commit the new expected file and re-run tests to verify:
+       git add -A && git commit -m "Update expected test data"
+       ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
 """
 
 import json
