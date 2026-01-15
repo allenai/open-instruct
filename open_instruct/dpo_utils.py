@@ -204,12 +204,12 @@ class FlatArguments(
     """The priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
-        if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
+        if self.dataset_name is None and self.dataset_mixer is None and self.mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
         if (
-            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
+            (self.dataset_name is not None and (self.dataset_mixer is not None or self.mixer_list is not None))
             or (self.dataset_name is not None)
-            or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
+            or (self.dataset_mixer is not None and self.mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
@@ -233,18 +233,14 @@ def compute_reference_cache_hash(args: FlatArguments, tc: TokenizerConfig) -> st
     """Compute deterministic hash for reference logprobs cache from FlatArguments."""
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     dcs = load_dataset_configs(
-        args.dataset_mixer_list,
-        args.dataset_mixer_list_splits,
-        args.dataset_transform_fn,
-        transform_fn_args,
-        args.dataset_target_columns,
+        args.mixer_list, args.mixer_list_splits, args.transform_fn, transform_fn_args, args.target_columns
     )
-    dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
+    dataset_config_hash = args.config_hash or compute_config_hash(dcs, tc)
     config_str = json.dumps(
         {
             "concatenated_forward": args.concatenated_forward,
             "dataset_config_hash": dataset_config_hash,
-            "dpo_loss_type": args.dpo_loss_type,
+            "loss_type": args.loss_type,
             "max_train_samples": args.max_train_samples,
             "model_name_or_path": args.model_name_or_path,
             "model_revision": args.model_revision,
@@ -446,7 +442,7 @@ def compute_loss(
     policy_rejected_logps: torch.Tensor,
     reference_cache: model_utils.TensorCache | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    loss_type = args.dpo_loss_type
+    loss_type = args.loss_type
 
     if loss_type in (dpo_config_lib.DPOLossType.dpo, dpo_config_lib.DPOLossType.dpo_norm):
         assert reference_cache is not None
@@ -456,16 +452,16 @@ def compute_loss(
             policy_rejected_logps,
             ref_logps["chosen_logps"],
             ref_logps["rejected_logps"],
-            beta=args.dpo_beta,
-            label_smoothing=args.dpo_label_smoothing,
+            beta=args.beta,
+            label_smoothing=args.label_smoothing,
         )
     elif loss_type == dpo_config_lib.DPOLossType.simpo:
         return simpo_loss(
             policy_chosen_logps,
             policy_rejected_logps,
-            beta=args.dpo_beta,
-            gamma_beta_ratio=args.dpo_gamma_beta_ratio,
-            label_smoothing=args.dpo_label_smoothing,
+            beta=args.beta,
+            gamma_beta_ratio=args.gamma_beta_ratio,
+            label_smoothing=args.label_smoothing,
         )
     elif loss_type == dpo_config_lib.DPOLossType.wpo:
         assert reference_cache is not None
@@ -475,8 +471,8 @@ def compute_loss(
             policy_rejected_logps,
             ref_logps["chosen_logps"],
             ref_logps["rejected_logps"],
-            beta=args.dpo_beta,
-            label_smoothing=args.dpo_label_smoothing,
+            beta=args.beta,
+            label_smoothing=args.label_smoothing,
             chosen_loss_mask=batch["chosen_labels"] != -100,
             rejected_loss_mask=batch["rejected_labels"] != -100,
         )

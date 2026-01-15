@@ -48,13 +48,13 @@ class ExperimentConfig:
 class DPOHyperparamsConfig:
     """Configuration for DPO-specific hyperparameters."""
 
-    dpo_beta: float = 0.1
+    beta: float = 0.1
     """Beta parameter for DPO loss."""
-    dpo_loss_type: DPOLossType = DPOLossType.dpo
+    loss_type: DPOLossType = DPOLossType.dpo
     """Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."""
-    dpo_gamma_beta_ratio: float = 0.3
+    gamma_beta_ratio: float = 0.3
     """Gamma to beta ratio for SimPO loss. Not used for DPO loss."""
-    dpo_label_smoothing: float = 0.0
+    label_smoothing: float = 0.0
     """Label smoothing for DPO/SimPO loss. Default is 0 (no smoothing)."""
     load_balancing_loss: bool = False
     """Whether to include a load balancing loss (for OLMoE) or not."""
@@ -100,27 +100,25 @@ class TrainingConfig:
 class DatasetConfig:
     """Configuration for dataset loading and processing."""
 
-    dataset_mixer_list: list[str] = field(
-        default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
-    )
+    mixer_list: list[str] = field(default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"])
     """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
+    mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
-    dataset_transform_fn: list[str] = field(
+    transform_fn: list[str] = field(
         default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
     )
     """The list of transform functions to apply to the dataset."""
-    dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
+    target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
     """The columns to use for the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "local"
+    cache_mode: Literal["hf", "local"] = "local"
     """The mode to use for caching the dataset."""
-    dataset_local_cache_dir: str = "local_dataset_cache"
+    local_cache_dir: str = "local_dataset_cache"
     """The directory to save the local dataset cache to."""
-    dataset_skip_cache: bool = False
+    skip_cache: bool = False
     """Whether to skip the cache."""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    dataset_config_hash: str | None = None
+    config_hash: str | None = None
     """The hash of the dataset configuration."""
 
 
