@@ -1138,7 +1138,7 @@ class DataPreparationActor:
                 step_metrics.update(
                     compute_tool_metrics(
                         result.request_info.tool_call_stats,
-                        num_rollouts=len(result.request_info.num_calls),
+                        num_rollouts=batch_stats.total_prompts,
                         tool_names=self.tool_names,
                     )
                 )
