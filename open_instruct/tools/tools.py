@@ -447,20 +447,34 @@ class DrAgentMCPTool(Tool):
             return ToolOutput(output="", error="Empty input", called=True, timeout=False, runtime=0)
 
         start_time = time.time()
+        outputs: list[str] = []
+        errors: list[str] = []
+        any_timeout = False
+
         for mcp_tool in self.mcp_tools:
             if mcp_tool.tool_parser.has_calls(text, mcp_tool.name):
                 try:
                     output = await mcp_tool(text)
                     formatted = mcp_tool.tool_parser.format_result(mcp_tool._format_output(output), output)
-                    result = ToolOutput(
-                        output=formatted, called=True, error=output.error or "", timeout=output.timeout, runtime=output.runtime
-                    )
+                    outputs.append(formatted)
+                    if output.error:
+                        errors.append(output.error)
+                    if output.timeout:
+                        any_timeout = True
                 except Exception as e:
-                    result = ToolOutput(output=str(e), called=True, error=str(e), timeout=False, runtime=time.time() - start_time)
-                _log_tool_call(self.call_name, text, result)
-                return result
+                    outputs.append(str(e))
+                    errors.append(str(e))
 
-        result = ToolOutput(output="", called=False, error="No tool calls found", timeout=False, runtime=time.time() - start_time)
+        if not outputs:
+            result = ToolOutput(output="", called=False, error="No tool calls found", timeout=False, runtime=time.time() - start_time)
+        else:
+            result = ToolOutput(
+                output="\n".join(outputs),
+                called=True,
+                error="; ".join(errors) if errors else "",
+                timeout=any_timeout,
+                runtime=time.time() - start_time,
+            )
         _log_tool_call(self.call_name, text, result)
         return result
 
