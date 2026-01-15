@@ -838,10 +838,14 @@ torch==2.9.0+cu130 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     #   torchvision
     #   vllm
     #   xgrammar
-torchaudio==2.9.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via vllm
-torchvision==0.24.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via vllm
+torchaudio==2.9.0+cu130 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via
+    #   open-instruct
+    #   vllm
+torchvision==0.24.0+cu130 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via
+    #   open-instruct
+    #   vllm
 tqdm==4.67.1 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   datasets
