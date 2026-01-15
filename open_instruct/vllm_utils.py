@@ -58,7 +58,7 @@ from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
-from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
+from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.tools.parsers import ToolParser, create_tool_parser
@@ -124,6 +124,7 @@ class CompletionOutput:
     tool_output: str = ""
     tool_runtime: float = 0.0
     tool_called: bool = False
+    tool_call_stats: list[ToolCallStats] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -308,6 +309,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_outputs = [getattr(out, "tool_output", "") for out in final_output.outputs]
         tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in final_output.outputs]
         tool_calleds = [getattr(out, "tool_called", False) for out in final_output.outputs]
+        tool_call_stats = [out.tool_call_stats for out in final_output.outputs]
     else:
         # Use default values when tools are not used
         masks = [[1] * len(resp) for resp in response_ids]
@@ -317,6 +319,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_outputs = [""] * len(response_ids)
         tool_runtimes = [0.0] * len(response_ids)
         tool_calleds = [False] * len(response_ids)
+        tool_call_stats = [[] for _ in response_ids]
 
     result = GenerationResult(
         responses=response_ids,
@@ -329,6 +332,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
             tool_outputs=tool_outputs,
             tool_runtimes=tool_runtimes,
             tool_calleds=tool_calleds,
+            tool_call_stats=tool_call_stats,
         ),
         index=metadata["index"],
         prompt_id=metadata["prompt_id"],
@@ -560,14 +564,7 @@ class LLMRayActor:
     ):
         assert_threaded_actor(self)
         self._init_config(
-            tool_actors,
-            tool_parser_type,
-            max_tool_calls,
-            mask_tool_use,
-            inflight_updates,
-            reward_config,
-            train_dataset,
-            eval_dataset,
+            tool_actors, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -578,11 +575,12 @@ class LLMRayActor:
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
+        # comes after executor as it requires tokenizer access.
+        self._init_tool_parser(tool_parser_type)
 
     def _init_config(
         self,
         tool_actors: list[ray.actor.ActorHandle] | None,
-        tool_parser_type: str,
         max_tool_calls: int,
         mask_tool_use: bool,
         inflight_updates: bool,
@@ -614,11 +612,6 @@ class LLMRayActor:
             call_names = ray.get([actor.get_call_name.remote() for actor in self.tool_actors])
             self.tool_actor_map = dict(zip(call_names, self.tool_actors))
 
-        # Create tool parser inside the actor (avoids serialization issues)
-        self.tool_parser = None
-        if self.tool_actors:
-            self.tool_parser = create_tool_parser(parser_type=tool_parser_type, tool_actors=self.tool_actors)
-
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
         self.prompt_queue = prompt_queue
@@ -635,6 +628,17 @@ class LLMRayActor:
         self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
         self._prefetch_future = self.executor.submit(_prefetch_worker, self)
         self._process_future = self.executor.submit(self.process_from_queue)
+
+    def _init_tool_parser(self, tool_parser_type: str) -> None:
+        if not self.tool_actors:
+            return
+        _tool_definitions = ray.get([actor.get_openai_tool_definitions.remote() for actor in self.tool_actors])
+        self.tool_parser = create_tool_parser(
+            parser_type=tool_parser_type,
+            tool_actors=self.tool_actors,
+            tokenizer=self.llm_engine.tokenizer,
+            tool_definitions=_tool_definitions,
+        )
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
@@ -859,6 +863,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     tool_output = ""
     tool_runtime = 0.0
     tool_called = False
+    tool_call_stats: list[ToolCallStats] = []
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
     original_prompt = actor.request_metadata[base_request_id]["prompt_token_ids"]
@@ -918,6 +923,14 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             tool_runtime += tool_result.runtime
             outputs.append(tool_result.output)
 
+            tool_call_stats.append(
+                ToolCallStats(
+                    tool_name=tool_call.name,
+                    success=not tool_result.error and not tool_result.timeout,
+                    runtime=tool_result.runtime,
+                )
+            )
+
         tool_tokens, tool_logprobs, tool_masks, excess = process_tool_tokens(
             tool_outputs=outputs,
             tool_parser=actor.tool_parser,
@@ -959,6 +972,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         complete_output.tool_output = tool_output
         complete_output.tool_runtime = tool_runtime
         complete_output.tool_called = tool_called
+        complete_output.tool_call_stats = tool_call_stats
 
     actor.active_tasks.pop(sub_request_id, None)
 

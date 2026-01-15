@@ -1,12 +1,14 @@
 import asyncio
 import json
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 import aiohttp
 
 from open_instruct import logger_utils
+from open_instruct.data_types import ToolCallStats
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -40,7 +42,7 @@ class ToolsConfig:
     """JSON strings for configuring each tool. Must match length of tools. Use '{}' for defaults."""
 
     tool_parser_type: str = "legacy"
-    """Type of tool parser to use: 'legacy' is the only option for now."""
+    """Type of tool parser to use. See parsers.get_available_parsers() for valid options."""
 
     max_tool_calls: int = 5
     """Maximum number of tool calls allowed per generation."""
@@ -98,6 +100,73 @@ class ToolOutput:
     error: str
     timeout: bool
     runtime: float
+
+
+class ToolStatistics:
+    """Manages aggregated tool call statistics across rollouts.
+
+    Provides methods to add rollout stats and compute per-tool and aggregate metrics.
+    """
+
+    def __init__(self, tool_names: list[str] | None = None):
+        """Initialize tool statistics tracker.
+
+        Args:
+            tool_names: List of tool names to track. New tool names seen in add_rollout are added automatically.
+        """
+        self.tool_names: set[str] = set(tool_names) if tool_names else set()
+        self.num_rollouts = 0
+        self._counts: defaultdict[str, int] = defaultdict(int)
+        self._failures: defaultdict[str, int] = defaultdict(int)
+        self._runtimes: defaultdict[str, float] = defaultdict(float)
+
+    def add_rollout(self, tool_call_stats: list[ToolCallStats]) -> None:
+        """Add statistics from a single rollout.
+
+        Args:
+            tool_call_stats: List of ToolCallStats from a single rollout.
+        """
+        self.num_rollouts += 1
+        for s in tool_call_stats:
+            self.tool_names.add(s.tool_name)
+            self._counts[s.tool_name] += 1
+            self._failures[s.tool_name] += not s.success
+            self._runtimes[s.tool_name] += s.runtime
+
+    def compute_metrics(self) -> dict[str, float]:
+        """Compute per-tool and aggregate metrics.
+
+        Returns:
+            Dictionary with metrics for each tool and aggregate totals:
+            - tools/{name}/avg_calls_per_rollout
+            - tools/{name}/failure_rate
+            - tools/{name}/avg_runtime
+            - tools/aggregate/avg_calls_per_rollout
+            - tools/aggregate/failure_rate
+            - tools/aggregate/avg_runtime
+        """
+        if not self.num_rollouts or not self.tool_names:
+            return {}
+
+        metrics: dict[str, float] = {}
+        total_calls = 0
+        total_failures = 0
+        total_runtime = 0.0
+
+        for name in self.tool_names:
+            calls, failures, runtime = self._counts[name], self._failures[name], self._runtimes[name]
+            metrics[f"tools/{name}/avg_calls_per_rollout"] = calls / self.num_rollouts
+            metrics[f"tools/{name}/failure_rate"] = failures / calls if calls else 0.0
+            metrics[f"tools/{name}/avg_runtime"] = runtime / calls if calls else 0.0
+            total_calls += calls
+            total_failures += failures
+            total_runtime += runtime
+
+        metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / self.num_rollouts
+        metrics["tools/aggregate/failure_rate"] = total_failures / total_calls if total_calls else 0.0
+        metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls if total_calls else 0.0
+
+        return metrics
 
 
 @dataclass
