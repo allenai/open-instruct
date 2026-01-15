@@ -16,9 +16,10 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import ray
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 from open_instruct.logger_utils import setup_logger
 from open_instruct.tools.utils import ToolCall
@@ -34,9 +35,6 @@ except ImportError:
     VLLM_AVAILABLE = False
     ChatCompletionRequest = None  # type: ignore[misc, assignment]
     VllmNativeToolParser = None  # type: ignore[misc, assignment]
-
-if TYPE_CHECKING:
-    from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 logger = setup_logger(__name__)
 
@@ -135,7 +133,7 @@ class VllmToolParser(ToolParser):
 
     def __init__(
         self,
-        tool_parser: "VllmNativeToolParser",
+        tool_parser: VllmNativeToolParser,
         output_formatter: Callable[[str], str],
         stop_sequences: list[str] | None = None,
         tool_definitions: list[dict[str, Any]] | None = None,
@@ -248,7 +246,7 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
 
 def create_vllm_parser(
     parser_name: str,
-    tokenizer: "PreTrainedTokenizer | PreTrainedTokenizerFast",
+    tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
     output_template: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
 ) -> VllmToolParser:
@@ -425,7 +423,7 @@ def get_available_parsers() -> list[str]:
 
 def create_tool_parser(
     parser_type: str,
-    tokenizer: "PreTrainedTokenizer | PreTrainedTokenizerFast | None",
+    tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast | None,
     tool_actors: list[ray.actor.ActorHandle],
     tool_definitions: list[dict[str, Any]] | None = None,
     output_wrap_name: str = "output",
