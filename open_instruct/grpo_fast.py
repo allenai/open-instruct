@@ -452,17 +452,16 @@ class PolicyTrainerRayProcess(RayProcess):
         # note this returns None if sequence_parallel_size == 1
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=model_config.model_name_or_path,
-            core_attn_implementation="flash_attention_2",
+            core_attn_implementation=model_config.attn_implementation,
             sequence_parallel_size=args.sequence_parallel_size,
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
         )
-
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            attn_implementation=model_config.attn_implementation,
             use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
