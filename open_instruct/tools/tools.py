@@ -10,6 +10,8 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+import aiohttp
+
 from open_instruct import logger_utils
 from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, make_api_request
 
@@ -20,7 +22,6 @@ logger = logger_utils.setup_logger(__name__)
 # Optional imports for DR Agent MCP tools
 # =============================================================================
 try:
-    import aiohttp
     from dr_agent.tool_interface.mcp_tools import (
         Crawl4AIBrowseTool,
         MassiveServeSearchTool,
