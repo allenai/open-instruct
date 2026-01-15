@@ -207,10 +207,10 @@ class VllmParserConfig:
     """Import path for the parser class (e.g., 'vllm.entrypoints.openai.tool_parsers.hermes_tool_parser:Hermes2ProToolParser')."""
     output_template: str
     """Template for formatting each tool output, uses {} as placeholder."""
-    stop_sequences: list[str] = field(default_factory=list)
-    """Stop sequences to use for this parser. If empty, we rely on the model's native stop sequences."""
     output_postfix: str
     """Postfix to add after all tool outputs (includes generation prompt)."""
+    stop_sequences: list[str] = field(default_factory=list)
+    """Stop sequences to use for this parser. If empty, we rely on the model's native stop sequences."""
     output_prefix: str = ""
     """Prefix to add before all tool outputs (for grouped tool responses)."""
 
