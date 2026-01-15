@@ -39,7 +39,7 @@ gh pr list --head "$(git branch --show-current)" --json number,url --jq '.[0]'
 
 View current PR body:
 ```bash
-gh pr view 1372 --json body --jq '.body'
+gh pr view 1372 --json body --jq -r '.body'
 ```
 
 Update PR body with new content:
