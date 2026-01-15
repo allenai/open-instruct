@@ -72,8 +72,8 @@
 
   <think>I have enough to answer succinctly</think>
   <answer>
-  Global renewables expanded rapidly in 2024, <cite ids="S_p0Zr41Q,S_GxA2ZLh">driven primarily by the growth of solar and wind energy.</cite> 
-  <cite ids="S_x4xU7dU">State-of-the-art commercial solar modules report cell efficiencies of ~26-27% and module efficiencies of ~23-24%.</cite>
+  Global renewables expanded rapidly in 2024, <cite id="S_p0Zr41Q,S_GxA2ZLh">driven primarily by the growth of solar and wind energy.</cite> 
+  <cite id="S_x4xU7dU">State-of-the-art commercial solar modules report cell efficiencies of ~26-27% and module efficiencies of ~23-24%.</cite>
   \boxed{Solar leads 2024 renewables; top commercial module efficiency ~ 23-24%}
   </answer>
 
