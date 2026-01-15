@@ -36,7 +36,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
-from typing import Literal
 
 import datasets
 import torch
@@ -56,10 +55,10 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 from transformers.training_args import _convert_str_dict
 
+from open_instruct import dpo_config as dpo_config_lib
 from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
-    TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
     compute_config_hash,
     get_cached_dataset_tulu,
@@ -95,7 +94,18 @@ REFERENCE_LOGPROBS_CACHE_PATH = "/weka/oe-adapt-default/allennlp/deletable_refer
 
 
 @dataclass
-class FlatArguments:
+class FlatArguments(
+    dpo_config_lib.ExperimentConfig,
+    dpo_config_lib.ModelConfig,
+    dpo_config_lib.DPOHyperparamsConfig,
+    dpo_config_lib.TrainingConfig,
+    dpo_config_lib.DatasetConfig,
+    dpo_config_lib.LoRAConfig,
+    dpo_config_lib.LoggingConfig,
+    dpo_config_lib.HubConfig,
+    dpo_config_lib.CheckpointConfig,
+    dpo_config_lib.EvalConfig,
+):
     """
     Full arguments class for all fine-tuning jobs.
     """
@@ -107,89 +117,22 @@ class FlatArguments:
     _VALID_DICT_FIELDS = ["additional_model_arguments"]
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
-    """The name of this experiment"""
-    run_name: str | None = None
-    """A unique name of this run"""
-    add_seed_and_date_to_exp_name: bool = True
-    """Append the seed and date to exp_name"""
     do_not_randomize_output_dir: bool = False
     """By default the output directory will be randomized"""
-    model_name_or_path: str | None = field(
-        default=None,
-        metadata={
-            "help": (
-                "The model checkpoint for weights initialization. Don't set if you want to train a model from scratch."
-            )
-        },
-    )
     config_name: str | None = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
-    dpo_use_paged_optimizer: bool = field(
-        default=False,
-        metadata={
-            "help": "Use paged optimizer from bitsandbytes."
-            " Not compatible with deepspeed (use deepspeed config instead)."
-        },
-    )
-    dpo_beta: float = field(default=0.1, metadata={"help": "Beta parameter for DPO loss. Default is 0.1."})
-    dpo_loss_type: str = field(
-        default="dpo", metadata={"help": "Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."}
-    )
-    dpo_gamma_beta_ratio: float = field(
-        default=0.3, metadata={"help": "Gamma to beta ratio for SimPO loss. Default is 0.3. Not used for DPO loss."}
-    )
-    dpo_label_smoothing: float = field(
-        default=0.0, metadata={"help": "Label smoothing for DPO/SimPO loss. Default is 0 (no smoothing)."}
-    )
-    use_flash_attn: bool = field(
-        default=True, metadata={"help": "Whether to use flash attention in the model training"}
-    )
-    model_revision: str | None = field(
-        default=None,
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
     additional_model_arguments: dict | str | None = field(
         default_factory=dict, metadata={"help": "A dictionary of additional model args used to construct the model."}
     )
     sync_each_batch: bool = False
     """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
-    low_cpu_mem_usage: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "It is an option to create the model as an empty shell, "
-                "then only materialize its parameters when the pretrained weights are loaded. "
-                "set True will benefit LLM loading time and RAM consumption."
-            )
-        },
-    )
     dataset_name: str | None = field(
         default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
     )
     dataset_mixer: dict | None = field(
         default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
     )
-    dataset_mixer_list: list[str] = field(
-        default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
-    )
-    """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
-    """The dataset splits to use for training"""
-    dataset_transform_fn: list[str] = field(
-        default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
-    )
-    """The list of transform functions to apply to the dataset."""
-    dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
-    """The columns to use for the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "local"
-    """The mode to use for caching the dataset."""
-    dataset_local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
-    dataset_config_hash: str | None = None
-    """The hash of the dataset configuration."""
-    dataset_skip_cache: bool = False
-    """Whether to skip the cache."""
     dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
@@ -220,50 +163,10 @@ class FlatArguments:
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
     )
-    clip_grad_norm: float = field(
-        default=-1,
-        metadata={"help": "Clip gradient norm. Not compatible with deepspeed (use deepspeed config instead)."},
-    )
-    gradient_accumulation_steps: int = field(
-        default=1, metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."}
-    )
-    learning_rate: float = field(default=2e-5, metadata={"help": "The initial learning rate for AdamW optimizer."})
-    logging_steps: int | None = field(
-        default=None, metadata={"help": "Log the training loss and learning rate every logging_steps steps."}
-    )
-    lora_rank: int = field(default=64, metadata={"help": "The rank of lora."})
-    lora_alpha: float = field(default=16, metadata={"help": "The alpha parameter of lora."})
-    lora_dropout: float = field(default=0.1, metadata={"help": "The dropout rate of lora modules."})
-    lr_scheduler_type: str = field(
-        default="linear",
-        metadata={
-            "help": "The scheduler type to use for learning rate adjustment.",
-            "choices": ["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
-        },
-    )
-    num_train_epochs: int = field(default=2, metadata={"help": "Total number of training epochs to perform."})
-    output_dir: str = field(
-        default="output/",
-        metadata={"help": "The output directory where the model predictions and checkpoints will be written."},
-    )
-    per_device_train_batch_size: int = field(
-        default=8, metadata={"help": "Batch size per GPU/TPU core/CPU for training."}
-    )
-    use_lora: bool = field(
-        default=False,
-        metadata={"help": "If True, will use LORA (low-rank parameter-efficient training) to train the model."},
-    )
     use_qlora: bool = field(
         default=False,
         metadata={"help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."},
     )
-    use_8bit_optimizer: bool = field(
-        default=False, metadata={"help": "Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed."}
-    )
-    warmup_ratio: float = field(
-        default=0.03, metadata={"help": "Linear warmup over warmup_ratio fraction of total steps."}
-    )
-    weight_decay: float = field(default=0.0, metadata={"help": "Weight decay for AdamW if we apply some."})
     timeout: int = field(
         default=1800,
         metadata={
@@ -277,62 +180,15 @@ class FlatArguments:
     save_to_hub: str | None = field(
         default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
     )
-    gradient_checkpointing: bool = field(
-        default=False, metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."}
-    )
     use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
-    max_train_steps: int | None = field(
-        default=None,
-        metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
-    )
-    seed: int = field(default=42, metadata={"help": "Random seed for initialization and dataset shuffling."})
     checkpointing_steps: str | None = field(
         default=None,
         metadata={
             "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
         },
     )
-    keep_last_n_checkpoints: int = field(
-        default=3, metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."}
-    )
-    fused_optimizer: bool = field(default=True, metadata={"help": "Whether to use fused AdamW or not."})
-    load_balancing_loss: bool = field(
-        default=False, metadata={"help": "Whether to include a load balancing loss (for OLMoE) or not."}
-    )
-    load_balancing_weight: float = field(
-        default=0.001, metadata={"help": "Weight for load balancing loss if applicable."}
-    )
-    concatenated_forward: bool = True
-    """Whether to concatenate chosen and rejected for DPO training; True is good but you can set to False for saving memory."""
-
-    # Experiment tracking
-    with_tracking: bool = False
-    """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open_instruct_internal"
-    """The wandb's project name"""
-    wandb_entity: str | None = None
-    """The entity (team) of wandb's project"""
-    push_to_hub: bool = True
-    """Whether to upload the saved model to huggingface"""
-    hf_entity: str | None = None
-    """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: str | None = None
-    """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: str | None = None
-    """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: str | None = None
-    """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    try_launch_beaker_eval_jobs: bool = True
-    """Whether to launch beaker evaluation jobs after training"""
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
-
-    packing: bool = field(
-        default=False,
-        metadata={"help": "Whether to use packing/padding-free collation via DataCollatorWithFlatteningDPO"},
-    )
 
     zero_stage: int | None = field(
         default=None,
@@ -620,7 +476,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
         accelerator.init_trackers(
-            args.wandb_project_name,
+            args.wandb_project,
             experiment_config,
             init_kwargs={
                 "wandb": {
@@ -856,7 +712,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if args.max_train_steps is None:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+        args.max_train_steps = args.num_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
 
     # Create the learning rate scheduler.
@@ -890,9 +746,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+        args.max_train_steps = args.num_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
-    args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+    args.num_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
@@ -904,7 +760,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
-    logger.info(f"  Num Epochs = {args.num_train_epochs}")
+    logger.info(f"  Num Epochs = {args.num_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.per_device_train_batch_size}")
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
@@ -975,7 +831,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     episode = 0
     total_tokens_processed = 0
     mfu_interval_start = time.perf_counter()
-    for epoch in range(starting_epoch, args.num_train_epochs):
+    for epoch in range(starting_epoch, args.num_epochs):
         model.train()
         train_dataloader.set_epoch(epoch)
         if last_checkpoint_path and resume_step is not None:
@@ -1034,8 +890,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
-                if accelerator.sync_gradients and args.clip_grad_norm > 0:
-                    accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                if accelerator.sync_gradients and args.max_grad_norm > 0:
+                    accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()
