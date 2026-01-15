@@ -10,8 +10,6 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-import aiohttp
-
 from open_instruct import logger_utils
 from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, make_api_request
 
@@ -399,7 +397,6 @@ class DrAgentMCPTool(Tool):
         host: str | None = None,
         port: int | None = None,
         timeout: int = 180,
-        max_retries: int = 3,
         base_url: str | None = None,
         num_results: int = 10,
     ) -> None:
@@ -407,7 +404,6 @@ class DrAgentMCPTool(Tool):
             raise ImportError("MCP tools require dr_agent package. Install with: uv sync --extra dr-tulu")
 
         self.call_name = call_name
-        self.max_retries = max_retries
         self.mcp_tools: list[Any] = []
         self.stop_strings: list[str] = []
 
@@ -437,17 +433,6 @@ class DrAgentMCPTool(Tool):
     def get_stop_strings(self) -> list[str]:
         return self.stop_strings
 
-    async def _call_with_retry(self, mcp_tool: Any, text: str) -> Any:
-        last_error: Exception | None = None
-        for attempt in range(self.max_retries):
-            try:
-                return await mcp_tool(text)
-            except (aiohttp.ClientError, ConnectionError, TimeoutError, asyncio.TimeoutError) as e:
-                last_error = e
-                if attempt + 1 < self.max_retries:
-                    await asyncio.sleep(0.5 * (2**attempt))
-        raise last_error  # type: ignore[misc]
-
     async def execute(self, text: str) -> ToolOutput:
         if not text or not text.strip():
             return ToolOutput(output="", error="Empty input", called=True, timeout=False, runtime=0)
@@ -456,7 +441,7 @@ class DrAgentMCPTool(Tool):
         for mcp_tool in self.mcp_tools:
             if mcp_tool.tool_parser.has_calls(text, mcp_tool.name):
                 try:
-                    output = await self._call_with_retry(mcp_tool, text)
+                    output = await mcp_tool(text)
                     formatted = mcp_tool.tool_parser.format_result(mcp_tool._format_output(output), output)
                     result = ToolOutput(
                         output=formatted, called=True, error=output.error or "", timeout=output.timeout, runtime=output.runtime
@@ -483,7 +468,6 @@ class DrAgentMCPToolConfig(BaseToolConfig):
     host: str | None = None
     port: int | None = None
     timeout: int = 180
-    max_retries: int = 3
     base_url: str | None = None
     num_results: int = 10
 
