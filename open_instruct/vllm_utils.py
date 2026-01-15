@@ -898,7 +898,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             tool_runtime += tool_result.runtime
             outputs.append(tool_result.output)
 
-            # Track per-tool statistics
             tool_call_stats.append(
                 ToolCallStats(
                     tool_name=tool_call.name,

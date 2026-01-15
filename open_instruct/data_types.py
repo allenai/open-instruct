@@ -38,7 +38,6 @@ class RequestInfo:
     tool_outputs: list[str]
     tool_runtimes: list[float]
     tool_calleds: list[bool]
-    # Per-tool call statistics: list of ToolCallStats for each rollout
     tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
 
 
