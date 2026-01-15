@@ -2292,9 +2292,9 @@ def main(
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
 
-    # Only pass tool definitions to chat template if configured
-    chat_template_tools = tool_definitions if tools_config.pass_tools_to_chat_template else []
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config, chat_template_tools)
+    train_dataset, eval_dataset = setup_datasets(
+        args, tc, tokenizer, streaming_config, tool_definitions if tools_config.pass_tools_to_chat_template else []
+    )
 
     if len(train_dataset) < (
         needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
