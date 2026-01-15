@@ -1,40 +1,14 @@
 #!/bin/bash
 # Debug script for DR Tulu style tool use training (1-GPU configuration)
-#
-# This script demonstrates training with DR Tulu MCP tools for research assistance.
-# It uses the dr_agent package which provides access to various search tools.
-#
-# Prerequisites:
-#   1. Install dr_agent: uv sync --extra dr-tulu
-#   2. Set required API keys (see below)
-#   3. Start MCP server (done automatically by this script)
-#
-# API Keys needed (set these environment variables or use beaker secrets):
-#   - SERPER_API_KEY: For Google search via Serper API
-#   - S2_API_KEY: For Semantic Scholar snippet search
-#   - CRAWL4AI_API_KEY: For webpage browsing (optional)
-
 set -e
-
-# =============================================================================
-# Configuration
-# =============================================================================
 
 # MCP server configuration
 MCP_PORT=${MCP_PORT:-8000}
 MCP_HOST=${MCP_HOST:-0.0.0.0}
 
-# API Keys - uncomment and set your own, or use beaker secrets
-# export SERPER_API_KEY="your-serper-api-key"
-# export S2_API_KEY="your-semantic-scholar-api-key"
-
-# Optional: Beaker secret loading (AI2 internal)
-# export SERPER_API_KEY=$(beaker secret read hamishivi_SERPER_API_KEY --workspace ai2/dr-tulu-ablations)
-# export S2_API_KEY=$(beaker secret read hamishivi_S2_API_KEY --workspace ai2/dr-tulu-ablations)
-
-# =============================================================================
-# Setup
-# =============================================================================
+# Load API keys from beaker secrets (override with env vars if set)
+export SERPER_API_KEY=${SERPER_API_KEY:-$(beaker secret read hamishivi_SERPER_API_KEY --workspace ai2/dr-tulu-ablations)}
+export S2_API_KEY=${S2_API_KEY:-$(beaker secret read hamishivi_S2_API_KEY --workspace ai2/dr-tulu-ablations)}
 
 echo "Installing dr-tulu dependencies..."
 uv sync --extra dr-tulu
@@ -55,10 +29,6 @@ cleanup() {
     kill $MCP_PID 2>/dev/null || true
 }
 trap cleanup EXIT
-
-# =============================================================================
-# Training
-# =============================================================================
 
 echo "Starting DR Tulu training..."
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra dr-tulu open_instruct/grpo_fast.py \
