@@ -578,6 +578,7 @@ class LLMRayActor:
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
+        self._init_tool_parser()
 
     def _init_config(
         self,
@@ -614,10 +615,9 @@ class LLMRayActor:
             call_names = ray.get([actor.get_call_name.remote() for actor in self.tool_actors])
             self.tool_actor_map = dict(zip(call_names, self.tool_actors))
 
-        # Create tool parser inside the actor (avoids serialization issues)
+        # Store parser type for later initialization (after engine is started)
+        self._tool_parser_type = tool_parser_type
         self.tool_parser = None
-        if self.tool_actors:
-            self.tool_parser = create_tool_parser(parser_type=tool_parser_type, tool_actors=self.tool_actors)
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
@@ -635,6 +635,30 @@ class LLMRayActor:
         self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
         self._prefetch_future = self.executor.submit(_prefetch_worker, self)
         self._process_future = self.executor.submit(self.process_from_queue)
+
+    def _init_tool_parser(self) -> None:
+        """Initialize the tool parser after the engine is started.
+
+        This must be called after _setup_and_start_async_engine because vLLM parsers
+        require access to the tokenizer, which is only available after the engine starts.
+        """
+        if not self.tool_actors:
+            return
+
+        # Get tool definitions for vLLM parsers
+        tool_definitions = None
+        if self._tool_parser_type.startswith("vllm_"):
+            tool_definitions = []
+            for actor in self.tool_actors:
+                tool_def = ray.get(actor.get_openai_tool_definitions.remote())
+                tool_definitions.append(tool_def)
+
+        self.tool_parser = create_tool_parser(
+            parser_type=self._tool_parser_type,
+            tool_actors=self.tool_actors,
+            tokenizer=self.llm_engine.tokenizer if self._tool_parser_type.startswith("vllm_") else None,
+            tool_definitions=tool_definitions,
+        )
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
