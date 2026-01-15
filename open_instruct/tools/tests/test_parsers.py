@@ -3,7 +3,17 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from open_instruct.tools.parsers import OpenInstructLegacyToolParser, get_available_parsers
+from parameterized import parameterized
+
+from open_instruct.tools.parsers import (
+    VLLM_PARSERS,
+    OpenInstructLegacyToolParser,
+    VllmParserConfig,
+    VllmToolParser,
+    create_tool_parser,
+    get_available_parsers,
+)
+from open_instruct.utils import import_class_from_string
 
 
 class MockTool:
@@ -150,7 +160,7 @@ hello()"""
         mock_code = create_mock_tool_actor("code")
         parser = OpenInstructLegacyToolParser([mock_search, mock_code])
 
-        stop_seqs = parser.stop_sequences()
+        stop_seqs = parser.stop_sequences
 
         self.assertEqual(len(stop_seqs), 2)
         self.assertIn("</search>", stop_seqs)
@@ -245,6 +255,122 @@ class TestGetAvailableParsers(unittest.TestCase):
         """Test that legacy parser is available."""
         parsers = get_available_parsers()
         self.assertIn("legacy", parsers)
+
+    def test_contains_vllm_parsers(self):
+        """Test that vLLM parsers are available."""
+        parsers = get_available_parsers()
+        self.assertIn("vllm_hermes", parsers)
+        self.assertIn("vllm_llama3_json", parsers)
+        self.assertIn("vllm_olmo3", parsers)
+
+
+class TestVllmParserRegistry(unittest.TestCase):
+    """Tests for vLLM parser registry and helpers."""
+
+    @parameterized.expand(VLLM_PARSERS.items())
+    def test_vllm_parser_config(self, name, config):
+        """Test that a registered vLLM parser has valid configuration."""
+        # Check config type
+        self.assertIsInstance(config, VllmParserConfig)
+
+        # Verify import_path resolves to a callable class
+        self.assertTrue(config.import_path, "missing import_path")
+        parser_cls = import_class_from_string(config.import_path)
+        self.assertTrue(callable(parser_cls))
+
+        # Verify output_template is usable with .format()
+        self.assertTrue(config.output_template, "missing output_template")
+        formatted = config.output_template.format("test_output")
+        self.assertIn("test_output", formatted)
+
+        # Check stop_sequences is a sized iterable (list, tuple, set, etc.)
+        self.assertGreaterEqual(len(config.stop_sequences), 0, "stop_sequences must be a sized iterable")
+
+
+class TestVllmToolParser(unittest.TestCase):
+    """Tests for VllmToolParser class."""
+
+    def test_format_tool_outputs_single(self):
+        """Test formatting a single tool output."""
+        # Create a mock native parser (we don't need it for format tests)
+        mock_native = MagicMock()
+        parser = VllmToolParser(
+            tool_parser=mock_native,
+            output_formatter=lambda x: f"<result>{x}</result>",
+            stop_sequences=["</tool_call>"],
+            output_prefix="",
+            output_postfix="<|assistant|>",
+        )
+
+        result = parser.format_tool_outputs(["test output"])
+        self.assertEqual(result, "<result>test output</result><|assistant|>")
+
+    def test_format_tool_outputs_multiple(self):
+        """Test formatting multiple tool outputs."""
+        mock_native = MagicMock()
+        parser = VllmToolParser(
+            tool_parser=mock_native,
+            output_formatter=lambda x: f"<result>{x}</result>\n",
+            stop_sequences=[],
+            output_prefix="<|tools|>",
+            output_postfix="<|assistant|>",
+        )
+
+        result = parser.format_tool_outputs(["output1", "output2"])
+        self.assertEqual(result, "<|tools|><result>output1</result>\n<result>output2</result>\n<|assistant|>")
+
+    def test_stop_sequences_empty_by_default(self):
+        """Test that stop sequences can be empty for vLLM parsers."""
+        mock_native = MagicMock()
+        parser = VllmToolParser(tool_parser=mock_native, output_formatter=lambda x: x, stop_sequences=[])
+        self.assertEqual(parser.stop_sequences, [])
+
+    def test_stop_sequences_custom(self):
+        """Test custom stop sequences."""
+        mock_native = MagicMock()
+        parser = VllmToolParser(
+            tool_parser=mock_native, output_formatter=lambda x: x, stop_sequences=["</tool>", "<|end|>"]
+        )
+        self.assertEqual(parser.stop_sequences, ["</tool>", "<|end|>"])
+
+
+class TestCreateToolParser(unittest.TestCase):
+    """Tests for create_tool_parser factory function."""
+
+    def setUp(self):
+        """Set up mock actors for each test."""
+        self.patcher = patch("open_instruct.tools.parsers.ray")
+        self.mock_ray = self.patcher.start()
+        self.mock_ray.get.side_effect = lambda x: x
+
+    def tearDown(self):
+        """Stop the patcher."""
+        self.patcher.stop()
+
+    @parameterized.expand([(p,) for p in get_available_parsers()])
+    def test_create_parser(self, parser_type):
+        """Test creating each available parser type."""
+        mock_actor = create_mock_tool_actor("search")
+        mock_tokenizer = MagicMock()
+
+        if parser_type == "legacy":
+            parser = create_tool_parser(parser_type, tokenizer=mock_tokenizer, tool_actors=[mock_actor])
+            self.assertIsInstance(parser, OpenInstructLegacyToolParser)
+        else:
+            # Mock the vLLM parser class import for non-legacy parsers
+            with patch("open_instruct.tools.parsers.import_class_from_string") as mock_import:
+                mock_import.return_value = MagicMock()
+                parser = create_tool_parser(parser_type, tokenizer=mock_tokenizer, tool_actors=[mock_actor])
+                self.assertIsInstance(parser, VllmToolParser)
+
+    def test_unknown_parser_raises_error(self):
+        """Test that unknown parser types raise an error."""
+        mock_actor = create_mock_tool_actor("search")
+        mock_tokenizer = MagicMock()
+        with self.assertRaises(ValueError) as context:
+            create_tool_parser("unknown_parser", tokenizer=mock_tokenizer, tool_actors=[mock_actor])
+        self.assertIn("Unknown parser type", str(context.exception))
+        self.assertIn("Available:", str(context.exception))
 
 
 if __name__ == "__main__":

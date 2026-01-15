@@ -5,6 +5,32 @@ These tests require CUDA and will be skipped if not available.
 To run:
 
     ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
+
+Updating expected test data:
+
+When generation behavior changes (due to vLLM/model updates), the determinism tests
+will fail. To update the expected data:
+
+1. Delete the outdated expected file(s) from open_instruct/test_data/:
+       rm open_instruct/test_data/generation_with_tools_expected.json
+
+2. Commit the deletion:
+       git add -A && git commit -m "Remove outdated expected data for regeneration"
+
+3. Run the GPU tests on Beaker:
+       ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
+
+4. The test will generate new expected data and fail with "Re-run test to verify."
+   Get the result dataset ID from the experiment:
+       beaker experiment get <EXPERIMENT_ID> --format json | jq -r '.[] | .jobs[0].result.beaker'
+
+5. Fetch the generated file from the result dataset:
+       beaker dataset fetch <RESULT_DATASET_ID> --output /tmp/beaker-results
+       cp /tmp/beaker-results/test_data/generation_with_tools_expected.json open_instruct/test_data/
+
+6. Commit the new expected file and re-run tests to verify:
+       git add -A && git commit -m "Update expected test data"
+       ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
 """
 
 import json
@@ -18,6 +44,8 @@ import unittest
 os.environ["VLLM_BATCH_INVARIANT"] = "1"
 os.environ["VLLM_ATTENTION_BACKEND"] = "FLASH_ATTN"
 
+import inspect
+
 import datasets
 import ray
 import torch
@@ -26,15 +54,20 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
 
+import open_instruct.vllm_utils as vllm_utils_module
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.grpo_fast import create_tools
 from open_instruct.test_grpo_fast import TestGrpoFastBase
+from open_instruct.tools.utils import ParsedToolConfig
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+logger.info(f"vllm_utils module file: {vllm_utils_module.__file__}")
+logger.info(f"create_vllm_engines signature: {inspect.signature(create_vllm_engines)}")
 
 maybe_update_beaker_description()
 
@@ -133,7 +166,7 @@ class TestGeneration(TestGrpoFastBase):
         tokenizer_name = "Qwen/Qwen3-1.7B"
         tool_actors = (
             create_tools(
-                tools=["python"], tool_call_names=["code"], tool_configs=[{"api_endpoint": self.tool_api_endpoint}]
+                [ParsedToolConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})]
             )
             if use_tools
             else None
