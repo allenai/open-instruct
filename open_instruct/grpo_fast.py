@@ -2330,6 +2330,7 @@ def main(
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
 
+    # AFTER potentially adding tool stop sequences, create generation configs
     generation_configs = create_generation_configs(args, streaming_config)
 
     checkpoint_state = None
