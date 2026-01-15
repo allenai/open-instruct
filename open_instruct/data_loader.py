@@ -937,7 +937,7 @@ class DataPreparationActor:
         self.model_dims = model_dims
         self.verbose = verbose
         self.dataset = dataset
-        self.tool_names = tool_names
+        self.tool_names = tool_names or []
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
@@ -1139,7 +1139,7 @@ class DataPreparationActor:
                 tool_metrics = compute_tool_metrics(
                     result.request_info.tool_call_stats,
                     num_rollouts=len(result.request_info.num_calls),
-                    tool_names=self.tool_names or [],
+                    tool_names=self.tool_names,
                 )
                 step_metrics.update(tool_metrics)
 
