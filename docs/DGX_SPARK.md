@@ -83,32 +83,6 @@ export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 ```
 This is a known issue with vLLM v1 nightly builds.
 
-## Building vLLM from Source (Fallback)
-
-If the pinned wheel stops working, build vLLM from source:
-
-```bash
-# Install PyTorch cu130 first
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
-
-# Clone and build vLLM
-git clone https://github.com/vllm-project/vllm.git
-cd vllm
-git checkout v0.13.0  # or desired version
-
-# Set CUDA 13 environment
-export CUDA_HOME=/usr/local/cuda
-export TORCH_CUDA_ARCH_LIST="12.0"
-export TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
-
-# Build
-python use_existing_torch.py
-pip install -r requirements/build.txt
-pip install --no-build-isolation -e .
-```
-
-Build time: ~20-30 minutes.
-
 ## References
 
 - [vLLM Issue #31128: Blackwell SM121 Support](https://github.com/vllm-project/vllm/issues/31128)
