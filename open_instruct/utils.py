@@ -1032,6 +1032,8 @@ def maybe_update_beaker_description(
 ) -> None:
     """Update Beaker experiment description with training progress and/or wandb URL.
 
+    Only updates from rank 0 to avoid race conditions in distributed training.
+
     Args:
         current_step: Current training step (for progress tracking)
         total_steps: Total number of training steps (for progress tracking)
@@ -1039,6 +1041,9 @@ def maybe_update_beaker_description(
         wandb_url: Optional wandb URL to include
         original_descriptions: Cache of original descriptions for progress updates
     """
+    if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
+        return
+
     if not is_beaker_job():
         return
 
@@ -1058,8 +1063,6 @@ def maybe_update_beaker_description(
     try:
         # Get the workload first (experiment_id is actually BEAKER_WORKLOAD_ID)
         workload = client.workload.get(experiment_id)
-        # Then get the experiment spec from the workload
-        spec = client.experiment.get_spec(workload)
     except (beaker.exceptions.BeakerExperimentNotFound, ValueError):
         logger.warning(
             f"Failed to get Beaker experiment with ID: {experiment_id}"
@@ -1068,7 +1071,8 @@ def maybe_update_beaker_description(
         return
 
     if experiment_id not in original_descriptions:
-        raw_description = spec.description or ""
+        # Read from workload.description (what we update), not spec.description (immutable)
+        raw_description = workload.description or ""
         if "git_commit:" in raw_description:
             raw_description = raw_description.split("git_commit:")[0].strip()
         original_descriptions[experiment_id] = raw_description

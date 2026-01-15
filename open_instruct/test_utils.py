@@ -134,14 +134,10 @@ def setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_descrip
     mock_client = mock.MagicMock()
     mock_beaker_from_env.return_value = mock_client
 
-    # Mock the workload object
+    # Mock the workload object - this is what we read from and write to
     mock_workload = mock.MagicMock()
+    mock_workload.description = initial_description
     mock_client.workload.get.return_value = mock_workload
-
-    # Mock the spec object returned by experiment.get_spec
-    mock_spec = mock.MagicMock()
-    mock_spec.description = initial_description
-    mock_client.experiment.get_spec.return_value = mock_spec
 
     description_history = []
 
@@ -151,7 +147,7 @@ def setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_descrip
 
     mock_client.workload.update.side_effect = track_description
 
-    return mock_client, mock_spec, description_history
+    return mock_client, mock_workload, description_history
 
 
 class TestBeakerDescription(unittest.TestCase):
@@ -166,7 +162,7 @@ class TestBeakerDescription(unittest.TestCase):
         env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
         mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
 
-        mock_client, mock_spec, description_history = setup_beaker_mocks(
+        mock_client, mock_workload, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Beaker-Mason job."
         )
 
@@ -184,7 +180,7 @@ class TestBeakerDescription(unittest.TestCase):
                 original_descriptions=original_descriptions,
             )
             if description_history:
-                mock_spec.description = description_history[-1]
+                mock_workload.description = description_history[-1]
 
         self.assertEqual(len(description_history), 3)
 
@@ -230,7 +226,7 @@ class TestBeakerDescription(unittest.TestCase):
         }
         mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
 
-        mock_client, mock_spec, description_history = setup_beaker_mocks(
+        mock_client, mock_workload, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Initial job description"
         )
 
@@ -266,7 +262,7 @@ class TestBeakerDescription(unittest.TestCase):
             "https://wandb.ai/ai2-llm/open_instruct_internal/runs/n53oxnzb "
             "[5.0% complete (step 1/20), eta 0m]"
         )
-        mock_client, mock_spec, description_history = setup_beaker_mocks(
+        mock_client, mock_workload, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, previous_run_description
         )
 
@@ -315,7 +311,7 @@ class TestBeakerDescription(unittest.TestCase):
         }
         mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
 
-        mock_client, mock_spec, description_history = setup_beaker_mocks(
+        mock_client, mock_workload, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Beaker-Mason job."
         )
 
@@ -331,7 +327,7 @@ class TestBeakerDescription(unittest.TestCase):
                 original_descriptions=original_descriptions,
             )
             if description_history:
-                mock_spec.description = description_history[-1]
+                mock_workload.description = description_history[-1]
 
         original_descriptions = {}
         for step in [1501, 1510]:
@@ -343,7 +339,7 @@ class TestBeakerDescription(unittest.TestCase):
                 original_descriptions=original_descriptions,
             )
             if description_history:
-                mock_spec.description = description_history[-1]
+                mock_workload.description = description_history[-1]
 
         original_descriptions = {}
         for step in [1520]:
@@ -355,7 +351,7 @@ class TestBeakerDescription(unittest.TestCase):
                 original_descriptions=original_descriptions,
             )
             if description_history:
-                mock_spec.description = description_history[-1]
+                mock_workload.description = description_history[-1]
 
         final_description = description_history[-1]
 
