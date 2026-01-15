@@ -2,16 +2,42 @@
 Basic tools that are built-in to open-instruct.
 """
 
+import asyncio
+import inspect
 import os
 import time
 import urllib.parse
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from open_instruct import logger_utils
 from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, make_api_request
 
 logger = logger_utils.setup_logger(__name__)
+
+
+# =============================================================================
+# Optional imports for DR Agent MCP tools
+# =============================================================================
+try:
+    import aiohttp
+    from dr_agent.tool_interface.mcp_tools import (
+        Crawl4AIBrowseTool,
+        MassiveServeSearchTool,
+        SemanticScholarSnippetSearchTool,
+        SerperSearchTool as DrAgentSerperSearchTool,
+    )
+
+    DR_AGENT_MCP_AVAILABLE = True
+    DR_AGENT_MCP_TOOLS: dict[str, type] = {
+        "snippet_search": SemanticScholarSnippetSearchTool,
+        "google_search": DrAgentSerperSearchTool,
+        "massive_serve": MassiveServeSearchTool,
+        "browse_webpage": Crawl4AIBrowseTool,
+    }
+except ImportError:
+    DR_AGENT_MCP_AVAILABLE = False
+    DR_AGENT_MCP_TOOLS: dict[str, type] = {}
 
 
 def _truncate(text: str, max_length: int = 500) -> str:
@@ -354,10 +380,204 @@ class SerperSearchToolConfig(BaseToolConfig):
     """Timeout in seconds for the API request."""
 
 
+# =============================================================================
+# DrAgentMCPTool + Config (requires dr_agent package)
+# =============================================================================
+
+
+class DrAgentMCPTool(Tool):
+    """
+    Wrapper for MCP (Model Context Protocol) tools from dr_agent.
+
+    Routes calls to the appropriate underlying MCP tool based on the tool name
+    in the <call_tool name="..."> tag.
+
+    Requires the dr_agent package: uv sync --extra dr-tulu
+    """
+
+    config_name = "mcp"
+    description = "MCP tools wrapper supporting snippet_search, google_search, massive_serve, browse_webpage"
+    parameters = {
+        "type": "object",
+        "properties": {"text": {"type": "string", "description": "The full prompt text containing MCP tool call tags"}},
+        "required": ["text"],
+    }
+
+    def __init__(
+        self,
+        call_name: str,
+        tool_names: str = "snippet_search",
+        parser_name: str = "unified",
+        transport_type: str | None = None,
+        host: str | None = None,
+        port: int | None = None,
+        timeout: int = 180,
+        max_retries: int = 3,
+        base_url: str | None = None,
+        num_results: int = 10,
+    ) -> None:
+        if not DR_AGENT_MCP_AVAILABLE:
+            raise ImportError("MCP tools require dr_agent package. Install it with: uv sync --extra dr-tulu")
+
+        self.call_name = call_name
+        self.timeout = timeout
+        self.max_retries = max_retries
+        self.mcp_tools: list[Any] = []
+        self.stop_strings: list[str] = []
+
+        # Configure transport from params or environment
+        transport = transport_type or os.environ.get("MCP_TRANSPORT", "StreamableHttpTransport")
+        mcp_host = host or os.environ.get("MCP_TRANSPORT_HOST", "0.0.0.0")
+        mcp_port = port or os.environ.get("MCP_TRANSPORT_PORT", "8000")
+
+        os.environ["MCP_TRANSPORT_HOST"] = str(mcp_host)
+        os.environ["MCP_TRANSPORT_PORT"] = str(mcp_port)
+
+        # Parse comma-separated tool names
+        tool_name_list = [n.strip() for n in tool_names.split(",") if n.strip()]
+
+        for mcp_tool_name in tool_name_list:
+            if mcp_tool_name not in DR_AGENT_MCP_TOOLS:
+                raise ValueError(f"Unknown MCP tool: {mcp_tool_name}. Available: {list(DR_AGENT_MCP_TOOLS.keys())}")
+
+            mcp_tool_cls = DR_AGENT_MCP_TOOLS[mcp_tool_name]
+            sig = inspect.signature(mcp_tool_cls.__init__)
+            valid_params = set(sig.parameters.keys())
+
+            # Build kwargs based on what the tool accepts
+            tool_kwargs: dict[str, Any] = {}
+            if "base_url" in valid_params:
+                tool_kwargs["base_url"] = base_url
+            if "number_documents_to_search" in valid_params:
+                tool_kwargs["number_documents_to_search"] = num_results
+            if mcp_tool_name == "browse_webpage":
+                tool_kwargs["use_docker_version"] = True
+                tool_kwargs["use_ai2_config"] = True
+
+            self.mcp_tools.append(
+                mcp_tool_cls(
+                    timeout=timeout,
+                    name=mcp_tool_name,
+                    tool_parser=parser_name,
+                    transport_type=transport,
+                    **tool_kwargs,
+                )
+            )
+            self.stop_strings += self.mcp_tools[-1].tool_parser.stop_sequences
+
+        logger.info(f"DrAgentMCPTool: initialized with tools {tool_name_list}")
+
+    def get_stop_strings(self) -> list[str]:
+        """Return the stop strings for all MCP tools."""
+        return self.stop_strings
+
+    async def _call_with_retry(self, mcp_tool: Any, text: str) -> Any:
+        """Call an MCP tool with retry logic."""
+        last_error: Exception | None = None
+        retryable = (aiohttp.ClientError, ConnectionError, TimeoutError, asyncio.TimeoutError)
+
+        for attempt in range(self.max_retries):
+            try:
+                return await mcp_tool(text)
+            except retryable as e:
+                last_error = e
+                if attempt + 1 < self.max_retries:
+                    await asyncio.sleep(0.5 * (2**attempt))
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Retry logic error")
+
+    async def execute(self, text: str) -> ToolOutput:
+        """Execute the appropriate MCP tool based on the text content."""
+        if not text or not text.strip():
+            result = ToolOutput(
+                output="",
+                error="Empty text. Please provide text containing tool calls.",
+                called=True,
+                timeout=False,
+                runtime=0,
+            )
+            _log_tool_call(self.call_name, text or "", result)
+            return result
+
+        start_time = time.time()
+
+        # Find and execute the matching MCP tool
+        for mcp_tool in self.mcp_tools:
+            if mcp_tool.tool_parser.has_calls(text, mcp_tool.name):
+                try:
+                    mcp_output = await self._call_with_retry(mcp_tool, text)
+                    text_output = mcp_tool._format_output(mcp_output)
+                    text_output = mcp_tool.tool_parser.format_result(text_output, mcp_output)
+
+                    result = ToolOutput(
+                        output=text_output,
+                        called=True,
+                        error=mcp_output.error or "",
+                        timeout=mcp_output.timeout,
+                        runtime=mcp_output.runtime,
+                    )
+                    _log_tool_call(self.call_name, text, result)
+                    return result
+
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.warning(f"DrAgentMCPTool error: {error_msg}")
+                    result = ToolOutput(
+                        output=error_msg,
+                        called=True,
+                        error=error_msg,
+                        timeout=False,
+                        runtime=time.time() - start_time,
+                    )
+                    _log_tool_call(self.call_name, text, result)
+                    return result
+
+        # No matching tool found
+        error_msg = "No valid tool calls found in text."
+        result = ToolOutput(
+            output=error_msg, called=False, error=error_msg, timeout=False, runtime=time.time() - start_time
+        )
+        _log_tool_call(self.call_name, text, result)
+        return result
+
+
+@dataclass
+class DrAgentMCPToolConfig(BaseToolConfig):
+    """Configuration for MCP (Model Context Protocol) tools.
+
+    Requires the dr_agent package: uv sync --extra dr-tulu
+    """
+
+    tool_class: ClassVar[type[Tool]] = DrAgentMCPTool
+
+    tool_names: str = "snippet_search"
+    """Comma-separated list of MCP tool names.
+    Available: snippet_search, google_search, massive_serve, browse_webpage"""
+    parser_name: str = "unified"
+    """The parser name for MCP tools."""
+    transport_type: str | None = None
+    """Transport type for MCP (default: StreamableHttpTransport)."""
+    host: str | None = None
+    """Host for MCP transport (default: from MCP_TRANSPORT_HOST env var)."""
+    port: int | None = None
+    """Port for MCP transport (default: from MCP_TRANSPORT_PORT env var)."""
+    timeout: int = 180
+    """Timeout in seconds for MCP tool calls."""
+    max_retries: int = 3
+    """Maximum retries for transient errors."""
+    base_url: str | None = None
+    """Base URL for MCP tools."""
+    num_results: int = 10
+    """Number of results to retrieve."""
+
+
 # Tool Registry: Maps tool names to their config classes
 TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     PythonCodeToolConfig.tool_class.config_name: PythonCodeToolConfig,
     JinaBrowseToolConfig.tool_class.config_name: JinaBrowseToolConfig,
     S2SearchToolConfig.tool_class.config_name: S2SearchToolConfig,
     SerperSearchToolConfig.tool_class.config_name: SerperSearchToolConfig,
+    DrAgentMCPToolConfig.tool_class.config_name: DrAgentMCPToolConfig,
 }

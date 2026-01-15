@@ -5,6 +5,7 @@ Includes:
 - Base ToolParser ABC
 - VllmToolParser: Wraps vLLM's native tool parsers
 - OpenInstructLegacyToolParser: <tool_name>content</tool_name> style
+- DRTuluToolParser: <call_tool name="...">query</call_tool> style
 
 For vLLM parsers, add to VLLM_PARSERS!
 See: https://docs.vllm.ai/en/latest/features/tool_calling/
@@ -15,16 +16,27 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import ray
-from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
-from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
 
 from open_instruct.logger_utils import setup_logger
 from open_instruct.tools.utils import ToolCall
 from open_instruct.utils import import_class_from_string
+
+# Optional imports for vLLM (not available on macOS)
+try:
+    from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+    from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
+
+    VLLM_AVAILABLE = True
+except ImportError:
+    VLLM_AVAILABLE = False
+    ChatCompletionRequest = None  # type: ignore[misc, assignment]
+    VllmNativeToolParser = None  # type: ignore[misc, assignment]
+
+if TYPE_CHECKING:
+    from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 logger = setup_logger(__name__)
 
@@ -117,11 +129,13 @@ class VllmToolParser(ToolParser):
 
     This parser delegates to vLLM's native tool parsing implementations
     (e.g., Hermes, Llama3, Qwen3) while providing a consistent interface.
+
+    Requires vLLM to be installed.
     """
 
     def __init__(
         self,
-        tool_parser: VllmNativeToolParser,
+        tool_parser: "VllmNativeToolParser",
         output_formatter: Callable[[str], str],
         stop_sequences: list[str] | None = None,
         tool_definitions: list[dict[str, Any]] | None = None,
@@ -150,6 +164,8 @@ class VllmToolParser(ToolParser):
 
         Usually these only need the list of tools.
         """
+        if ChatCompletionRequest is None:
+            raise ImportError("vLLM is required to use VllmToolParser")
         return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
@@ -248,7 +264,14 @@ def create_vllm_parser(
 
     Returns:
         VllmToolParser configured for the specified model family.
+
+    Raises:
+        ImportError: If vLLM is not installed.
+        ValueError: If parser_name is not found in VLLM_PARSERS.
     """
+    if not VLLM_AVAILABLE:
+        raise ImportError("vLLM is required to use vLLM tool parsers. Install it with: pip install vllm")
+
     if parser_name not in VLLM_PARSERS:
         available = list(VLLM_PARSERS.keys())
         raise ValueError(f"Unknown parser: {parser_name}. Available: {available}")
@@ -269,24 +292,155 @@ def create_vllm_parser(
     )
 
 
+class DRTuluToolParser(ToolParser):
+    """
+    Tool parser for DR Tulu / MCP style tools.
+
+    Tools are invoked via <call_tool name="tool_name">content</call_tool> tags.
+    This parser extracts the tool name from the 'name' attribute and passes
+    the content to the tool's first required parameter.
+
+    Unlike OpenInstructLegacyToolParser which uses the tag name itself (e.g., <search>),
+    this parser uses a fixed <call_tool> tag with a name attribute to specify the tool.
+
+    Example:
+        <call_tool name="google_search">climate change effects</call_tool>
+    """
+
+    # Regex to match <call_tool name="...">content</call_tool>
+    CALL_TOOL_REGEX = re.compile(
+        r'<call_tool\s+name=["\']([^"\']+)["\']\s*(?:[^>]*)>(.*?)</call_tool>', re.DOTALL
+    )
+
+    def __init__(
+        self,
+        tool_actors: list[ray.actor.ActorHandle],
+        default_stop_string: str = "</call_tool>",
+        output_wrap_name: str = "tool_output",
+    ):
+        """Initialize the parser.
+
+        Args:
+            tool_actors: List of Ray actor handles for Tools.
+            default_stop_string: Fallback stop string if tools don't provide their own.
+            output_wrap_name: Name to wrap tool outputs with.
+        """
+        # Fetch metadata from actors
+        self.tool_names = [ray.get(actor.get_call_name.remote()) for actor in tool_actors]
+        self.tool_name_to_actor: dict[str, ray.actor.ActorHandle] = {
+            name: actor for name, actor in zip(self.tool_names, tool_actors)
+        }
+        self.output_wrap_name = output_wrap_name
+        assert len(self.tool_names) == len(set(self.tool_names)), "Tool names must be unique"
+
+        # Build param name mapping for each tool
+        self.tool_param_names: dict[str, str] = {}
+        for actor, tool_name in zip(tool_actors, self.tool_names):
+            params = ray.get(actor.get_parameters.remote())
+            required = params.get("required", [])
+            if required:
+                self.tool_param_names[tool_name] = required[0]
+            else:
+                properties = params.get("properties", {})
+                if properties:
+                    self.tool_param_names[tool_name] = next(iter(properties))
+                else:
+                    self.tool_param_names[tool_name] = "text"
+
+        # Collect stop strings from tools that support it, otherwise use default
+        self.stop_sequences: list[str] = []
+        for actor in tool_actors:
+            try:
+                # Check if tool has get_stop_strings method
+                tool_stops = ray.get(actor.get_stop_strings.remote())
+                if tool_stops:
+                    self.stop_sequences.extend(tool_stops)
+            except (AttributeError, ray.exceptions.RayActorError):
+                # Tool doesn't have get_stop_strings, use default
+                pass
+
+        # Deduplicate while preserving order
+        if self.stop_sequences:
+            seen: set[str] = set()
+            unique_stops: list[str] = []
+            for s in self.stop_sequences:
+                if s not in seen:
+                    seen.add(s)
+                    unique_stops.append(s)
+            self.stop_sequences = unique_stops
+        else:
+            # No tools provided stop strings, use the default
+            self.stop_sequences = [default_stop_string]
+
+        logger.info(
+            f"DRTuluToolParser: Initialized with {len(tool_actors)} tools: {self.tool_names}, "
+            f"stop_sequences={self.stop_sequences}"
+        )
+
+    def get_tool_calls(self, text: str) -> list[ToolCall]:
+        """Extract tool calls from model output.
+
+        Parses <call_tool name="...">content</call_tool> patterns and extracts
+        both the tool name and content.
+
+        Args:
+            text: The model output text to parse.
+
+        Returns:
+            List of ToolCall objects with name and args.
+        """
+        # Collect all matches with their positions for proper ordering
+        matches: list[tuple[int, str, str]] = []  # (position, tool_name, content)
+
+        for match in self.CALL_TOOL_REGEX.finditer(text):
+            tool_name = match.group(1).strip()
+            tool_content = match.group(2)
+            matches.append((match.start(), tool_name, tool_content))
+
+        # Sort by position in text to preserve order of tool calls
+        matches.sort(key=lambda x: x[0])
+
+        tool_calls: list[ToolCall] = []
+        for _, tool_name, tool_content in matches:
+            # Only create tool call if we recognize the tool
+            if tool_name in self.tool_names:
+                param_name = self.tool_param_names.get(tool_name, "text")
+                tool_calls.append(ToolCall(name=tool_name, args={param_name: tool_content}))
+            else:
+                logger.warning(f"DRTuluToolParser: Unknown tool name '{tool_name}', skipping")
+
+        return tool_calls
+
+    def _format_tool_output(self, tool_output: str) -> str:
+        return f"<{self.output_wrap_name}>\n{tool_output}\n</{self.output_wrap_name}>\n"
+
+    def format_tool_outputs(self, tool_outputs: list[str]) -> str:
+        return "\n".join(self._format_tool_output(tool_output) for tool_output in tool_outputs)
+
+
 def get_available_parsers() -> list[str]:
     """Return list of available parser types."""
-    return ["legacy"] + list(VLLM_PARSERS.keys())
+    return ["legacy", "dr_tulu"] + list(VLLM_PARSERS.keys())
 
 
 def create_tool_parser(
     parser_type: str,
-    tokenizer: "PreTrainedTokenizer | PreTrainedTokenizerFast",
+    tokenizer: "PreTrainedTokenizer | PreTrainedTokenizerFast | None",
     tool_actors: list[ray.actor.ActorHandle],
     tool_definitions: list[dict[str, Any]] | None = None,
+    output_wrap_name: str = "output",
+    **kwargs: Any,
 ) -> ToolParser:
     """Create a tool parser based on configuration.
 
     Args:
-        parser_type: Type of parser to use.
+        parser_type: Type of parser to use ('legacy', 'dr_tulu', 'vllm_hermes', etc.).
+        tokenizer: Tokenizer for the model (required for vLLM parsers).
         tool_actors: List of Ray actor handles for tools.
-        tokenizer: Tokenizer for the model.
-        tool_definitions: Tool definitions in OpenAI format.
+        tool_definitions: Tool definitions in OpenAI format (for vLLM parsers).
+        output_wrap_name: Name to wrap tool outputs with.
+        **kwargs: Additional parser-specific arguments.
+            For 'dr_tulu': default_stop_string (str) - fallback if tools don't provide stop strings.
 
     Returns:
         A ToolParser instance.
@@ -295,9 +449,19 @@ def create_tool_parser(
         ValueError: If parser type is not supported or required arguments are missing.
     """
     if parser_type == "legacy":
-        return OpenInstructLegacyToolParser(tool_actors, output_wrap_name="output")
+        return OpenInstructLegacyToolParser(tool_actors, output_wrap_name=output_wrap_name)
+
+    if parser_type == "dr_tulu":
+        default_stop_string = kwargs.get("default_stop_string", "</call_tool>")
+        return DRTuluToolParser(
+            tool_actors,
+            default_stop_string=default_stop_string,
+            output_wrap_name=output_wrap_name,
+        )
 
     if parser_type in VLLM_PARSERS:
+        if tokenizer is None:
+            raise ValueError(f"Tokenizer is required for vLLM parser '{parser_type}'")
         return create_vllm_parser(parser_type, tokenizer, tool_definitions=tool_definitions)
 
     raise ValueError(f"Unknown parser type: '{parser_type}'. Available: {get_available_parsers()}")
