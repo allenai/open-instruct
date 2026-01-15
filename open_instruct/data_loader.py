@@ -47,70 +47,27 @@ logger = logging.getLogger(__name__)
 
 
 def compute_tool_metrics(tool_call_stats: list[list[data_types.ToolCallStats]], num_rollouts: int) -> dict[str, float]:
-    """Compute per-tool and aggregate tool metrics.
+    """Compute per-tool and aggregate tool metrics (tools/{name}/avg_calls_per_rollout, success_rate, etc.)."""
+    all_stats = [stat for rollout in tool_call_stats for stat in rollout]
+    if not all_stats or num_rollouts == 0:
+        return {}
 
-    Args:
-        tool_call_stats: List of lists of ToolCallStats, one list per rollout.
-        num_rollouts: Total number of rollouts.
-
-    Returns:
-        Dictionary of tool metrics with keys like:
-        - tools/{tool_name}/avg_calls_per_rollout
-        - tools/{tool_name}/success_rate
-        - tools/{tool_name}/failure_rate
-        - tools/{tool_name}/avg_runtime
-        - tools/aggregate/avg_calls_per_rollout
-        - tools/aggregate/success_rate
-        - tools/aggregate/failure_rate
-        - tools/aggregate/avg_runtime
-    """
     metrics: dict[str, float] = {}
 
-    if not tool_call_stats or num_rollouts == 0:
-        return metrics
-
-    # Collect per-tool statistics
-    tool_stats: dict[str, dict[str, list]] = {}  # tool_name -> {calls: [], successes: [], runtimes: []}
-
-    # Also collect aggregate stats
-    all_successes: list[bool] = []
-    all_runtimes: list[float] = []
-    total_calls = 0
-
-    for rollout_stats in tool_call_stats:
-        for stat in rollout_stats:
-            if stat.tool_name not in tool_stats:
-                tool_stats[stat.tool_name] = {"calls": [], "successes": [], "runtimes": []}
-            tool_stats[stat.tool_name]["successes"].append(stat.success)
-            tool_stats[stat.tool_name]["runtimes"].append(stat.runtime)
-            all_successes.append(stat.success)
-            all_runtimes.append(stat.runtime)
-            total_calls += 1
-
-    # Count calls per rollout per tool
-    for tool_name in tool_stats:
-        tool_calls_per_rollout = []
-        for rollout_stats in tool_call_stats:
-            count = sum(1 for stat in rollout_stats if stat.tool_name == tool_name)
-            tool_calls_per_rollout.append(count)
-        tool_stats[tool_name]["calls"] = tool_calls_per_rollout
-
-    # Compute per-tool metrics
-    for tool_name, stats in tool_stats.items():
-        calls = stats["calls"]
-        successes = stats["successes"]
-        runtimes = stats["runtimes"]
-
-        metrics[f"tools/{tool_name}/avg_calls_per_rollout"] = float(np.mean(calls)) if calls else 0.0
-        metrics[f"tools/{tool_name}/success_rate"] = float(np.mean(successes)) if successes else 0.0
+    # Per-tool metrics
+    for tool_name in {s.tool_name for s in all_stats}:
+        tool_stats = [s for s in all_stats if s.tool_name == tool_name]
+        calls_per_rollout = [sum(1 for s in rollout if s.tool_name == tool_name) for rollout in tool_call_stats]
+        metrics[f"tools/{tool_name}/avg_calls_per_rollout"] = float(np.mean(calls_per_rollout))
+        metrics[f"tools/{tool_name}/success_rate"] = float(np.mean([s.success for s in tool_stats]))
         metrics[f"tools/{tool_name}/failure_rate"] = 1.0 - metrics[f"tools/{tool_name}/success_rate"]
-        metrics[f"tools/{tool_name}/avg_runtime"] = float(np.mean(runtimes)) if runtimes else 0.0
+        metrics[f"tools/{tool_name}/avg_runtime"] = float(np.mean([s.runtime for s in tool_stats]))
 
-    # Compute aggregate metrics
-    metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / num_rollouts if num_rollouts > 0 else 0.0
-    metrics["tools/aggregate/success_rate"] = float(np.mean(all_successes)) if all_successes else 0.0
+    # Aggregate metrics
+    metrics["tools/aggregate/avg_calls_per_rollout"] = len(all_stats) / num_rollouts
+    metrics["tools/aggregate/success_rate"] = float(np.mean([s.success for s in all_stats]))
     metrics["tools/aggregate/failure_rate"] = 1.0 - metrics["tools/aggregate/success_rate"]
-    metrics["tools/aggregate/avg_runtime"] = float(np.mean(all_runtimes)) if all_runtimes else 0.0
+    metrics["tools/aggregate/avg_runtime"] = float(np.mean([s.runtime for s in all_stats]))
 
     return metrics
 
