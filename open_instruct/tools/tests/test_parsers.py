@@ -3,6 +3,8 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from parameterized import parameterized
+
 from open_instruct.tools.parsers import (
     VLLM_PARSERS,
     OpenInstructLegacyToolParser,
@@ -264,14 +266,14 @@ class TestGetAvailableParsers(unittest.TestCase):
 class TestVllmParserRegistry(unittest.TestCase):
     """Tests for vLLM parser registry and helpers."""
 
-    def test_vllm_parsers_have_required_fields(self):
-        """Test that all registered vLLM parsers have required configuration."""
-        for name, config in VLLM_PARSERS.items():
-            self.assertIsInstance(config, VllmParserConfig, f"Parser {name} config is not VllmParserConfig")
-            self.assertTrue(config.import_path, f"Parser {name} missing import_path")
-            self.assertTrue(config.output_template, f"Parser {name} missing output_template")
-            self.assertIn("{}", config.output_template, f"Parser {name} output_template missing placeholder")
-            self.assertIsInstance(config.stop_sequences, list, f"Parser {name} stop_sequences is not a list")
+    @parameterized.expand(VLLM_PARSERS.items())
+    def test_vllm_parser_has_required_fields(self, name, config):
+        """Test that a registered vLLM parser has required configuration."""
+        self.assertIsInstance(config, VllmParserConfig)
+        self.assertTrue(config.import_path, "missing import_path")
+        self.assertTrue(config.output_template, "missing output_template")
+        self.assertIn("{}", config.output_template, "output_template missing placeholder")
+        self.assertIsInstance(config.stop_sequences, list, "stop_sequences is not a list")
 
 
 class TestVllmToolParser(unittest.TestCase):
