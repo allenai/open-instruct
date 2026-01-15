@@ -1,4 +1,4 @@
-"""Tests for new tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, and SerperSearchTool from new_tools.py)."""
+"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, and SerperSearchTool from tools.py)."""
 
 import asyncio
 import dataclasses
@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from open_instruct.tools.new_tools import (
+from open_instruct.tools.tools import (
     JinaBrowseTool,
     JinaBrowseToolConfig,
     PythonCodeTool,
@@ -123,7 +123,7 @@ class TestPythonCodeToolExecution:
         assert not result.timeout
         assert result.runtime == 0
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_successful_execution(self, mock_api_request, tool):
         """Test successful code execution."""
         from open_instruct.tools.utils import APIResponse
@@ -142,7 +142,7 @@ class TestPythonCodeToolExecution:
         assert not result.timeout
         assert result.runtime > 0
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_execution_with_error_response(self, mock_api_request, tool):
         """Test code execution that returns an error from the API."""
         from open_instruct.tools.utils import APIResponse
@@ -159,7 +159,7 @@ class TestPythonCodeToolExecution:
         assert result.error == "NameError: name 'undefined_var' is not defined"
         assert not result.timeout
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_timeout_handling(self, mock_api_request, tool):
         """Test timeout is handled correctly."""
         from open_instruct.tools.utils import APIResponse
@@ -175,7 +175,7 @@ class TestPythonCodeToolExecution:
         assert result.timeout
         assert "Timeout after 3 seconds" in result.output
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_api_connection_error(self, mock_api_request, tool):
         """Test handling of API connection errors."""
         from open_instruct.tools.utils import APIResponse
@@ -192,7 +192,7 @@ class TestPythonCodeToolExecution:
         assert "Connection error" in result.output
         assert "Connection refused" in result.output
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_execution_with_output_and_error(self, mock_api_request, tool):
         """Test execution that produces both output and an error."""
         from open_instruct.tools.utils import APIResponse
@@ -209,7 +209,7 @@ class TestPythonCodeToolExecution:
         assert "Some warning or error" in result.output
         assert result.error == "Some warning or error"
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_custom_timeout(self, mock_api_request):
         """Test that custom timeout is passed to API."""
         from open_instruct.tools.utils import APIResponse
@@ -382,7 +382,7 @@ class TestJinaBrowseToolExecution:
         ],
         ids=["with_title", "without_title"],
     )
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_successful_fetch(self, mock_api_request, tool, api_data, expected_in_output):
         """Test successful webpage fetch with various response types."""
         from open_instruct.tools.utils import APIResponse
@@ -401,7 +401,7 @@ class TestJinaBrowseToolExecution:
         assert result.called is True
         assert result.timeout is False
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_jina_api_error_response(self, mock_api_request, tool):
         """Test handling of Jina API error response (code != 200)."""
         from open_instruct.tools.utils import APIResponse
@@ -427,7 +427,7 @@ class TestJinaBrowseToolExecution:
         ],
         ids=["timeout", "connection_error", "http_error"],
     )
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_error_handling(self, mock_api_request, tool, api_response, expected_timeout, expected_error_contains):
         """Test error handling for various API error types."""
         from open_instruct.tools.utils import APIResponse
@@ -444,7 +444,7 @@ class TestJinaBrowseToolExecution:
         assert expected_error_contains in result.error
         assert expected_error_contains in result.output  # Error message also in output for model feedback
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_uses_get_method(self, mock_api_request, tool):
         """Test that JinaBrowseTool uses GET method."""
         from open_instruct.tools.utils import APIResponse
@@ -557,7 +557,7 @@ class TestS2SearchToolExecution:
         assert result.called is True
         assert result.timeout is False
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_successful_search(self, mock_api_request, tool):
         """Test successful search with results."""
         from open_instruct.tools.utils import APIResponse
@@ -583,7 +583,7 @@ class TestS2SearchToolExecution:
         assert result.called is True
         assert result.timeout is False
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_no_results_returns_error(self, mock_api_request, tool):
         """Test query with no results returns an error."""
         from open_instruct.tools.utils import APIResponse
@@ -609,7 +609,7 @@ class TestS2SearchToolExecution:
         ],
         ids=["timeout", "connection_error", "http_error"],
     )
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_error_handling(self, mock_api_request, tool, api_response, expected_timeout, expected_error_contains):
         """Test error handling for various API error types."""
         from open_instruct.tools.utils import APIResponse
@@ -626,7 +626,7 @@ class TestS2SearchToolExecution:
         assert expected_error_contains in result.error
         assert expected_error_contains in result.output  # Error message also in output for model feedback
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_uses_get_method(self, mock_api_request, tool):
         """Test that S2SearchTool uses GET method."""
         from open_instruct.tools.utils import APIResponse
@@ -774,7 +774,7 @@ class TestSerperSearchToolExecution:
         ],
         ids=["organic_results", "answer_box", "featured_snippet"],
     )
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_successful_search(self, mock_api_request, tool, api_data, expected_in_output):
         """Test successful search with various response types."""
         from open_instruct.tools.utils import APIResponse
@@ -802,7 +802,7 @@ class TestSerperSearchToolExecution:
         ],
         ids=["timeout", "connection_error", "http_error"],
     )
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_error_handling(self, mock_api_request, tool, api_response, expected_timeout, expected_error_contains):
         """Test error handling for various API error types."""
         from open_instruct.tools.utils import APIResponse
@@ -819,7 +819,7 @@ class TestSerperSearchToolExecution:
         assert expected_error_contains in result.error
         assert expected_error_contains in result.output  # Error message also in output for model feedback
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_no_results_returns_error(self, mock_api_request, tool):
         """Test query with no results returns an error."""
         from open_instruct.tools.utils import APIResponse
@@ -836,7 +836,7 @@ class TestSerperSearchToolExecution:
         assert result.output == result.error  # Error in output for model feedback
         assert result.timeout is False
 
-    @patch("open_instruct.tools.new_tools.make_api_request")
+    @patch("open_instruct.tools.tools.make_api_request")
     def test_results_without_snippets_filtered_out(self, mock_api_request, tool):
         """Test that results without snippets are filtered out."""
         from open_instruct.tools.utils import APIResponse
