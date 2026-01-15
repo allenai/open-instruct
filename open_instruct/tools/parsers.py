@@ -403,7 +403,7 @@ def get_available_parsers() -> list[str]:
 
 def create_tool_parser(
     parser_type: str,
-    tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast | None,
+    tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
     tool_actors: list[ray.actor.ActorHandle],
     tool_definitions: list[dict[str, Any]] | None = None,
     output_wrap_name: str = "output",
@@ -413,7 +413,7 @@ def create_tool_parser(
 
     Args:
         parser_type: Type of parser to use ('legacy', 'dr_tulu', 'vllm_hermes', etc.).
-        tokenizer: Tokenizer for the model (required for vLLM parsers).
+        tokenizer: Tokenizer for the model.
         tool_actors: List of Ray actor handles for tools.
         tool_definitions: Tool definitions in OpenAI format (for vLLM parsers).
         output_wrap_name: Name to wrap tool outputs with.
@@ -438,8 +438,6 @@ def create_tool_parser(
         )
 
     if parser_type in VLLM_PARSERS:
-        if tokenizer is None:
-            raise ValueError(f"Tokenizer is required for vLLM parser '{parser_type}'")
         return create_vllm_parser(parser_type, tokenizer, tool_definitions=tool_definitions)
 
     raise ValueError(f"Unknown parser type: '{parser_type}'. Available: {get_available_parsers()}")
