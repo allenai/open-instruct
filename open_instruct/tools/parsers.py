@@ -284,26 +284,38 @@ class DRTuluToolParser(ToolParser):
         tool_actors: list[ray.actor.ActorHandle],
         default_stop_string: str = "</call_tool>",
     ):
-        self.tool_names = [ray.get(actor.get_call_name.remote()) for actor in tool_actors]
+        # Fetch metadata in parallel
+        tool_names_futures = [actor.get_tool_names.remote() for actor in tool_actors]
+        params_futures = [actor.get_parameters.remote() for actor in tool_actors]
+        stop_strings_futures = [actor.get_stop_strings.remote() for actor in tool_actors]
+
+        all_tool_names = ray.get(tool_names_futures)
+        all_params = ray.get(params_futures)
+
+        # Flatten tool names (MCP tools return multiple names)
+        self.tool_names: list[str] = []
+        for names in all_tool_names:
+            self.tool_names.extend(names)
         assert len(self.tool_names) == len(set(self.tool_names)), "Tool names must be unique"
 
-        # Build param name mapping for each tool
+        # Build param name mapping - for MCP tools, all wrapped tools use "text"
         self.tool_param_names: dict[str, str] = {}
-        for actor, tool_name in zip(tool_actors, self.tool_names):
-            params = ray.get(actor.get_parameters.remote())
+        for names, params in zip(all_tool_names, all_params):
             required = params.get("required", [])
             if required:
-                self.tool_param_names[tool_name] = required[0]
+                param_name = required[0]
             elif params.get("properties"):
-                self.tool_param_names[tool_name] = next(iter(params["properties"]))
+                param_name = next(iter(params["properties"]))
             else:
-                self.tool_param_names[tool_name] = "text"
+                param_name = "text"
+            for name in names:
+                self.tool_param_names[name] = param_name
 
-        # Collect stop strings from tools, deduplicate preserving order
+        # Collect stop strings, handling tools that don't have the method
         stop_strings: list[str] = []
-        for actor in tool_actors:
+        for future in stop_strings_futures:
             try:
-                tool_stops = ray.get(actor.get_stop_strings.remote())
+                tool_stops = ray.get(future)
                 if tool_stops:
                     stop_strings.extend(tool_stops)
             except (AttributeError, ray.exceptions.RayActorError):
