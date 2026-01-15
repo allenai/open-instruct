@@ -28,7 +28,7 @@ import torch
 from dateutil import parser
 from parameterized import parameterized
 
-from open_instruct import data_types, grpo_fast, launch_utils, utils
+from open_instruct import data_types, launch_utils, utils
 from open_instruct.finetune import FlatArguments
 
 
@@ -214,6 +214,7 @@ class TestBeakerDescription(unittest.TestCase):
             self.assertIn("git_branch: main", desc)
             self.assertIn(wandb_url, desc)
             self.assertIn(f"% complete (step {(i + 1) * 10}/100)", desc)
+            self.assertNotIn("main_base:", desc)
 
     @mock.patch("os.environ.get")
     @mock.patch("beaker.Beaker.from_env")
@@ -221,7 +222,12 @@ class TestBeakerDescription(unittest.TestCase):
     def test_description_without_progress(self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get):
         """Test description updates without progress information."""
         # Configure os.environ.get mock
-        env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "def456", "GIT_BRANCH": "dev"}
+        env_values = {
+            "BEAKER_WORKLOAD_ID": "test-id-123",
+            "GIT_COMMIT": "def456",
+            "GIT_BRANCH": "dev",
+            "GIT_MAIN_BASE": "abc12345",
+        }
         mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
 
         mock_client, mock_spec, description_history = setup_beaker_mocks(
@@ -240,6 +246,7 @@ class TestBeakerDescription(unittest.TestCase):
         self.assertIn("Initial job description", desc)
         self.assertIn("git_commit: def456", desc)
         self.assertIn("git_branch: dev", desc)
+        self.assertIn("main_base: abc12345", desc)
         self.assertIn("https://wandb.ai/team/project/runs/xyz789", desc)
         self.assertNotIn("% complete", desc)
 
@@ -289,6 +296,89 @@ class TestBeakerDescription(unittest.TestCase):
         )
         self.assertEqual(wandb_count, 1, f"wandb URL should appear once, but appears {wandb_count} times in: {desc}")
         self.assertIn("Single GPU on Beaker with tool use test script.", desc)
+
+    @mock.patch("os.environ.get")
+    @mock.patch("beaker.Beaker.from_env")
+    @mock.patch("open_instruct.utils.is_beaker_job")
+    def test_description_no_duplication_on_preemption(
+        self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get
+    ):
+        """Test that description does NOT accumulate duplicates when job is preempted multiple times.
+
+        Simulates 2 preemptions where each restart creates a fresh original_descriptions dict.
+        Verifies that git_commit, git_branch, and wandb URL each appear exactly once.
+        """
+        env_values = {
+            "BEAKER_WORKLOAD_ID": "01KEWMVJR8V81FC4X4F1YF8YYJ",
+            "GIT_COMMIT": "f2475238",
+            "GIT_BRANCH": "add-sequence-parallel",
+        }
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
+
+        mock_client, mock_spec, description_history = setup_beaker_mocks(
+            mock_beaker_from_env, mock_is_beaker_job, "Beaker-Mason job."
+        )
+
+        wandb_url = "https://wandb.ai/ai2-llm/open_instruct_internal/runs/85ty3hyg"
+
+        original_descriptions = {}
+        for step in [1270, 1420]:
+            utils.maybe_update_beaker_description(
+                current_step=step,
+                total_steps=2001,
+                start_time=time.time() - 86400,
+                wandb_url=wandb_url,
+                original_descriptions=original_descriptions,
+            )
+            if description_history:
+                mock_spec.description = description_history[-1]
+
+        original_descriptions = {}
+        for step in [1501, 1510]:
+            utils.maybe_update_beaker_description(
+                current_step=step,
+                total_steps=2001,
+                start_time=time.time() - 43200,
+                wandb_url=wandb_url,
+                original_descriptions=original_descriptions,
+            )
+            if description_history:
+                mock_spec.description = description_history[-1]
+
+        original_descriptions = {}
+        for step in [1520]:
+            utils.maybe_update_beaker_description(
+                current_step=step,
+                total_steps=2001,
+                start_time=time.time() - 21600,
+                wandb_url=wandb_url,
+                original_descriptions=original_descriptions,
+            )
+            if description_history:
+                mock_spec.description = description_history[-1]
+
+        final_description = description_history[-1]
+
+        git_commit_count = final_description.count("git_commit:")
+        git_branch_count = final_description.count("git_branch:")
+        wandb_count = final_description.count("wandb.ai")
+
+        self.assertEqual(
+            git_commit_count,
+            1,
+            f"git_commit should appear once after preemptions, but got {git_commit_count} in: {final_description}",
+        )
+        self.assertEqual(
+            git_branch_count,
+            1,
+            f"git_branch should appear once after preemptions, but got {git_branch_count} in: {final_description}",
+        )
+        self.assertEqual(
+            wandb_count,
+            1,
+            f"wandb URL should appear once after preemptions, but got {wandb_count} in: {final_description}",
+        )
+        self.assertIn("Beaker-Mason job.", final_description)
 
 
 class TestSlackMessage(unittest.TestCase):
@@ -542,7 +632,7 @@ class TestModelDims(unittest.TestCase):
 
     @parameterized.expand(_load_mbu_test_cases())
     def test_mbu_reproduction(self, name, case_data):
-        metrics = grpo_fast.calculate_utilization_metrics(
+        metrics = utils.calculate_utilization_metrics(
             model_dims=MODEL_DIMS[case_data["model_name"]],
             prompt_lengths=case_data["prompt_lengths"],
             response_lengths=case_data["response_lengths"],
@@ -583,7 +673,7 @@ class TestModelDims(unittest.TestCase):
         prompt_lengths = [prompt_len] * num_prompts
         response_lengths = [int(response_len)] * (num_prompts * samples_per_prompt)
 
-        metrics = grpo_fast.calculate_utilization_metrics(
+        metrics = utils.calculate_utilization_metrics(
             model_dims=MODEL_DIMS[model_name],
             prompt_lengths=prompt_lengths,
             response_lengths=response_lengths,
@@ -608,34 +698,6 @@ class TestModelDims(unittest.TestCase):
             f"(num_engines={num_engines}, num_gpus_per_engine={num_gpus_per_engine})",
         )
         self.assertLessEqual(metrics["learner_mfu"], 100)
-
-    def test_model_dims_match_vllm_config(self):
-        expected_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
-
-        mock_hf_text_config = mock.Mock()
-        mock_hf_text_config.intermediate_size = 18944
-        mock_hf_text_config.sliding_window = None
-        mock_hf_text_config.num_attention_heads = 28
-        mock_hf_text_config.num_key_value_heads = 4
-
-        mock_model_config = mock.Mock()
-        mock_model_config.get_hidden_size.return_value = 3584
-        mock_model_config.get_num_layers.return_value = 28
-        mock_model_config.get_vocab_size.return_value = 152064
-        mock_model_config.get_head_size.return_value = 128
-        mock_model_config.hf_text_config = mock_hf_text_config
-
-        mock_vllm_config = mock.Mock()
-        mock_vllm_config.model_config = mock_model_config
-        mock_vllm_config.parallel_config = mock.Mock()
-
-        with (
-            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
-            mock.patch("torch.cuda.is_available", return_value=True),
-        ):
-            vllm_dims = utils.ModelDims.from_vllm_config(mock_vllm_config)
-
-        self.assertEqual(vllm_dims, expected_dims)
 
 
 class TestModelDimsFromHFConfig(unittest.TestCase):

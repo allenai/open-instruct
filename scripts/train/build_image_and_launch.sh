@@ -18,6 +18,12 @@ fi
 
 git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
+# Get merge-base with main (only meaningful if not on main)
+if [[ "$git_branch" != "main" ]]; then
+  git_main_base=$(git merge-base HEAD origin/main 2>/dev/null | cut -c1-8 || echo "")
+else
+  git_main_base=""
+fi
 # Sanitize the branch name to remove invalid characters for Beaker names
 # Beaker names can only contain letters, numbers, -_. and may not start with -
 sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
@@ -38,6 +44,7 @@ else
   docker buildx build --platform=linux/amd64 \
     --build-arg GIT_COMMIT="$git_hash" \
     --build-arg GIT_BRANCH="$git_branch" \
+    --build-arg GIT_MAIN_BASE="$git_main_base" \
     $CACHE_ARGS \
     --load \
     . -t "$image_name"

@@ -58,7 +58,6 @@ import ray
 import requests
 import torch
 import torch.nn.functional as F
-import vllm.config
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -1075,11 +1074,15 @@ def maybe_update_beaker_description(
         original_descriptions[experiment_id] = raw_description
 
     # Build description from scratch each time
+    git_branch = os.environ.get("GIT_BRANCH", "unknown")
     description_components = [
         original_descriptions[experiment_id],
         f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
-        f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
+        f"git_branch: {git_branch}",
     ]
+    git_main_base = os.environ.get("GIT_MAIN_BASE", "")
+    if git_main_base and git_branch != "main":
+        description_components.append(f"main_base: {git_main_base}")
 
     if wandb_url:
         description_components.append(wandb_url)
@@ -1788,40 +1791,6 @@ class ModelDims:
         lm_head_params = self.vocab_size * self.hidden_size
 
         return embedding_params + layer_params + lm_head_params
-
-    @classmethod
-    def from_vllm_config(cls, vllm_config: "vllm.config.VllmConfig") -> "ModelDims":
-        """Create ModelDims from a vLLM config object."""
-        model_config = vllm_config.model_config
-        hidden_size = model_config.get_hidden_size()
-
-        # Try to get intermediate_size, default to 4x hidden_size if not present
-        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
-
-        sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
-        num_layers = model_config.get_num_layers(vllm_config.parallel_config)
-        num_sliding_window_layers = 0
-
-        if sliding_window is not None:
-            layer_types = getattr(model_config.hf_text_config, "layer_types", None)
-            if layer_types is not None:
-                num_sliding_window_layers = layer_types.count("sliding_attention")
-            else:
-                # If "layer_types" is None, then we assume all layers are sliding layers.
-                num_sliding_window_layers = num_layers
-
-        return cls(
-            num_layers=num_layers,
-            hidden_size=hidden_size,
-            intermediate_size=intermediate_size,
-            vocab_size=model_config.get_vocab_size(),
-            num_attn_heads=model_config.hf_text_config.num_attention_heads,
-            num_kv_heads=model_config.hf_text_config.num_key_value_heads,
-            head_dim=model_config.get_head_size(),
-            sliding_window=sliding_window,
-            num_sliding_window_layers=num_sliding_window_layers,
-            device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
-        )
 
     @classmethod
     def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
@@ -2575,3 +2544,60 @@ def get_denominator(loss_denominator: str | float) -> float | str:
     if val <= 0:
         raise ValueError(f"loss_denominator must be greater than 0 if not 'token', got: {loss_denominator}")
     return val
+
+
+def calculate_utilization_metrics(
+    model_dims: ModelDims,
+    prompt_lengths: list[int],
+    response_lengths: list[int],
+    total_generation_time: float,
+    samples_per_prompt: int,
+    num_engines: int,
+    num_gpus_per_engine: int,
+    training_time: float,
+    num_training_gpus: int,
+) -> dict:
+    """Calculate MFU and MBU metrics for model inference and training.
+
+    Args:
+        model_dims: Model dimensions with device information
+        prompt_lengths: List of prompt lengths
+        response_lengths: List of response lengths
+        total_generation_time: Total time taken for generation (for actor metrics)
+        samples_per_prompt: Number of samples generated per prompt
+        num_engines: Number of vLLM engines for inference
+        num_gpus_per_engine: Number of GPUs assigned to each vLLM engine (tensor parallel size)
+        training_time: Time taken for training step (for learner metrics)
+        num_training_gpus: Number of GPUs used for training (for learner metrics)
+
+    Returns:
+        Dict with the following keys:
+            - actor_mfu: Model FLOPs utilization for inference (percentage)
+            - actor_mbu: Model bandwidth utilization for inference (percentage)
+            - learner_mfu: Model FLOPs utilization for training (percentage)
+    """
+    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+    )
+
+    actor_metrics = model_dims.calculate_actor_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        total_generation_time=total_generation_time,
+        samples_per_prompt=samples_per_prompt,
+        num_engines=num_engines,
+        num_gpus_per_engine=num_gpus_per_engine,
+    )
+
+    learner_metrics = model_dims.calculate_learner_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        training_time=training_time,
+        samples_per_prompt=samples_per_prompt,
+        num_training_gpus=num_training_gpus,
+    )
+
+    utilization_metrics = {f"actor_{k}": v for k, v in actor_metrics.items()}
+    utilization_metrics["learner_mfu"] = learner_metrics["mfu"]
+
+    return utilization_metrics

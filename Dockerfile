@@ -80,8 +80,10 @@ COPY open_instruct open_instruct
 COPY oe-eval-interna[l] oe-eval-internal/
 
 ARG GIT_COMMIT="" \
-    GIT_BRANCH=""
+    GIT_BRANCH="" \
+    GIT_MAIN_BASE=""
 
 ENV GIT_COMMIT=${GIT_COMMIT} \
     GIT_BRANCH=${GIT_BRANCH} \
+    GIT_MAIN_BASE=${GIT_MAIN_BASE} \
     PATH=/stage/.venv/bin:$PATH
