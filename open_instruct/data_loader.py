@@ -48,36 +48,30 @@ logger = logging.getLogger(__name__)
 
 
 def compute_tool_metrics(tool_call_stats: list[list[data_types.ToolCallStats]], num_rollouts: int) -> dict[str, float]:
-    """Compute per-tool and aggregate tool metrics (tools/{name}/avg_calls_per_rollout, success_rate, etc.)."""
-    # Single pass: accumulate counts and sums per tool
-    per_tool: dict[str, dict[str, float]] = defaultdict(lambda: {"count": 0, "success_sum": 0, "runtime_sum": 0.0})
+    """Compute per-tool and aggregate tool metrics (tools/{name}/avg_calls_per_rollout, failure_rate, avg_runtime)."""
+    per_tool: dict[str, dict[str, float]] = defaultdict(lambda: {"count": 0, "failure_sum": 0, "runtime_sum": 0.0})
     for rollout in tool_call_stats:
         for stat in rollout:
             per_tool[stat.tool_name]["count"] += 1
-            per_tool[stat.tool_name]["success_sum"] += stat.success
+            per_tool[stat.tool_name]["failure_sum"] += not stat.success
             per_tool[stat.tool_name]["runtime_sum"] += stat.runtime
 
-    # Compute metrics from accumulated stats
     metrics: dict[str, float] = {}
-    total_calls = total_successes = 0
+    total_calls = total_failures = 0
     total_runtime = 0.0
 
     for tool_name, stats in per_tool.items():
         count = stats["count"]
-        success_rate = stats["success_sum"] / count if count else 0.0
         metrics[f"tools/{tool_name}/avg_calls_per_rollout"] = count / num_rollouts if num_rollouts else 0.0
-        metrics[f"tools/{tool_name}/success_rate"] = success_rate
-        metrics[f"tools/{tool_name}/failure_rate"] = 1.0 - success_rate
+        metrics[f"tools/{tool_name}/failure_rate"] = stats["failure_sum"] / count if count else 0.0
         metrics[f"tools/{tool_name}/avg_runtime"] = stats["runtime_sum"] / count if count else 0.0
         total_calls += count
-        total_successes += stats["success_sum"]
+        total_failures += stats["failure_sum"]
         total_runtime += stats["runtime_sum"]
 
     if total_calls and num_rollouts:
-        agg_success_rate = total_successes / total_calls
         metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / num_rollouts
-        metrics["tools/aggregate/success_rate"] = agg_success_rate
-        metrics["tools/aggregate/failure_rate"] = 1.0 - agg_success_rate
+        metrics["tools/aggregate/failure_rate"] = total_failures / total_calls
         metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls
 
     return metrics
