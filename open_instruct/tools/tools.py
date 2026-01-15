@@ -393,8 +393,8 @@ class DrAgentMCPTool(Tool):
     def __init__(
         self,
         call_name: str,
-        tool_names: str = "snippet_search",
-        parser_name: str = "unified",
+        tool_names: str,
+        parser_name: str,
         transport_type: str | None = None,
         host: str | None = None,
         port: int | None = None,
@@ -477,8 +477,8 @@ class DrAgentMCPToolConfig(BaseToolConfig):
 
     tool_class: ClassVar[type[Tool]] = DrAgentMCPTool
 
-    tool_names: str = "snippet_search"
-    parser_name: str = "unified"
+    tool_names: str
+    parser_name: str
     transport_type: str | None = None
     host: str | None = None
     port: int | None = None
