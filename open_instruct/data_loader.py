@@ -1135,11 +1135,13 @@ class DataPreparationActor:
                     **batch_metrics_prefixed,
                 }
 
-                step_metrics.update(compute_tool_metrics(
-                    result.request_info.tool_call_stats,
-                    num_rollouts=len(result.request_info.num_calls),
-                    tool_names=self.tool_names,
-                ))
+                step_metrics.update(
+                    compute_tool_metrics(
+                        result.request_info.tool_call_stats,
+                        num_rollouts=len(result.request_info.num_calls),
+                        tool_names=self.tool_names,
+                    )
+                )
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
