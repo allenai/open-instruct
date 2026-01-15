@@ -2330,7 +2330,6 @@ def main(
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
 
-    # Tool initialization and stop sequences are handled by initialize_tools() earlier
     generation_configs = create_generation_configs(args, streaming_config)
 
     checkpoint_state = None
