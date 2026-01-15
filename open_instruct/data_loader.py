@@ -16,7 +16,6 @@ import logging
 import os
 import threading
 import time
-from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -42,46 +41,10 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.model_utils import Batch
 from open_instruct.rl_utils import PackedSequences, pack_sequences
+from open_instruct.tools.utils import ToolStatistics
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
-
-
-def compute_tool_metrics(
-    tool_call_stats: list[list[data_types.ToolCallStats]], num_rollouts: int, tool_names: list[str]
-) -> dict[str, float]:
-    """Compute per-tool and aggregate tool metrics (tools/{name}/avg_calls_per_rollout, failure_rate, avg_runtime)."""
-    if not num_rollouts or not tool_names:
-        return {}
-
-    counts: defaultdict[str, int] = defaultdict(int)
-    failures: defaultdict[str, int] = defaultdict(int)
-    runtimes: defaultdict[str, float] = defaultdict(float)
-
-    for rollout in tool_call_stats:
-        for s in rollout:
-            counts[s.tool_name] += 1
-            failures[s.tool_name] += not s.success
-            runtimes[s.tool_name] += s.runtime
-
-    metrics: dict[str, float] = {}
-    total_c = total_f = 0
-    total_r = 0.0
-
-    for name in set(counts) | set(tool_names):
-        c, f, r = counts[name], failures[name], runtimes[name]
-        metrics[f"tools/{name}/avg_calls_per_rollout"] = c / num_rollouts
-        metrics[f"tools/{name}/failure_rate"] = f / c if c else 0.0
-        metrics[f"tools/{name}/avg_runtime"] = r / c if c else 0.0
-        total_c += c
-        total_f += f
-        total_r += r
-
-    metrics["tools/aggregate/avg_calls_per_rollout"] = total_c / num_rollouts
-    metrics["tools/aggregate/failure_rate"] = total_f / total_c if total_c else 0.0
-    metrics["tools/aggregate/avg_runtime"] = total_r / total_c if total_c else 0.0
-
-    return metrics
 
 
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
@@ -1135,13 +1098,10 @@ class DataPreparationActor:
                     **batch_metrics_prefixed,
                 }
 
-                step_metrics.update(
-                    compute_tool_metrics(
-                        result.request_info.tool_call_stats,
-                        num_rollouts=len(result.request_info.tool_call_stats),
-                        tool_names=self.tool_names,
-                    )
-                )
+                tool_stats = ToolStatistics(tool_names=self.tool_names)
+                for rollout_stats in result.request_info.tool_call_stats:
+                    tool_stats.add_rollout(rollout_stats)
+                step_metrics.update(tool_stats.compute_metrics())
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens

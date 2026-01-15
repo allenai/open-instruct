@@ -1,12 +1,16 @@
 import asyncio
 import json
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import aiohttp
 
 from open_instruct import logger_utils
+
+if TYPE_CHECKING:
+    from open_instruct.data_types import ToolCallStats
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -81,6 +85,71 @@ class ToolOutput:
     error: str
     timeout: bool
     runtime: float
+
+
+class ToolStatistics:
+    """Manages aggregated tool call statistics across rollouts.
+
+    Provides methods to add rollout stats and compute per-tool and aggregate metrics.
+    """
+
+    def __init__(self, tool_names: list[str] | None = None):
+        """Initialize tool statistics tracker.
+
+        Args:
+            tool_names: List of tool names to track. If None, only tracks tools that are actually called.
+        """
+        self.tool_names = tool_names or []
+        self.num_rollouts = 0
+        self._counts: defaultdict[str, int] = defaultdict(int)
+        self._failures: defaultdict[str, int] = defaultdict(int)
+        self._runtimes: defaultdict[str, float] = defaultdict(float)
+
+    def add_rollout(self, tool_call_stats: list["ToolCallStats"]) -> None:
+        """Add statistics from a single rollout.
+
+        Args:
+            tool_call_stats: List of ToolCallStats from a single rollout.
+        """
+        self.num_rollouts += 1
+        for s in tool_call_stats:
+            self._counts[s.tool_name] += 1
+            self._failures[s.tool_name] += not s.success
+            self._runtimes[s.tool_name] += s.runtime
+
+    def compute_metrics(self) -> dict[str, float]:
+        """Compute per-tool and aggregate metrics.
+
+        Returns:
+            Dictionary with metrics for each tool and aggregate totals:
+            - tools/{name}/avg_calls_per_rollout
+            - tools/{name}/failure_rate
+            - tools/{name}/avg_runtime
+            - tools/aggregate/avg_calls_per_rollout
+            - tools/aggregate/failure_rate
+            - tools/aggregate/avg_runtime
+        """
+        if not self.num_rollouts or (not self.tool_names and not self._counts):
+            return {}
+
+        metrics: dict[str, float] = {}
+        total_c = total_f = 0
+        total_r = 0.0
+
+        for name in set(self._counts) | set(self.tool_names):
+            c, f, r = self._counts[name], self._failures[name], self._runtimes[name]
+            metrics[f"tools/{name}/avg_calls_per_rollout"] = c / self.num_rollouts
+            metrics[f"tools/{name}/failure_rate"] = f / c if c else 0.0
+            metrics[f"tools/{name}/avg_runtime"] = r / c if c else 0.0
+            total_c += c
+            total_f += f
+            total_r += r
+
+        metrics["tools/aggregate/avg_calls_per_rollout"] = total_c / self.num_rollouts
+        metrics["tools/aggregate/failure_rate"] = total_f / total_c if total_c else 0.0
+        metrics["tools/aggregate/avg_runtime"] = total_r / total_c if total_c else 0.0
+
+        return metrics
 
 
 @dataclass
