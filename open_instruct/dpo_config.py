@@ -4,10 +4,18 @@ This module contains base dataclasses that are shared between dpo.py (OLMo-core)
 and dpo_tune_cache.py (Accelerate/DeepSpeed) implementations.
 """
 
+import enum
 from dataclasses import dataclass, field
 from typing import Literal
 
 from open_instruct.dataset_transformation import TOKENIZED_PREFERENCE_DATASET_KEYS
+
+
+class DPOLossType(enum.StrEnum):
+    dpo = "dpo"
+    dpo_norm = "dpo_norm"
+    simpo = "simpo"
+    wpo = "wpo"
 
 
 @dataclass
@@ -44,7 +52,7 @@ class DPOHyperparamsConfig:
 
     dpo_beta: float = 0.1
     """Beta parameter for DPO loss."""
-    dpo_loss_type: str = "dpo"
+    dpo_loss_type: DPOLossType = DPOLossType.dpo
     """Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."""
     dpo_gamma_beta_ratio: float = 0.3
     """Gamma to beta ratio for SimPO loss. Not used for DPO loss."""
