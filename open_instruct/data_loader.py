@@ -48,10 +48,10 @@ logger = logging.getLogger(__name__)
 
 
 def compute_tool_metrics(
-    tool_call_stats: list[list[data_types.ToolCallStats]], num_rollouts: int, tool_names: list[str] | None = None
+    tool_call_stats: list[list[data_types.ToolCallStats]], num_rollouts: int, tool_names: list[str]
 ) -> dict[str, float]:
     """Compute per-tool and aggregate tool metrics (tools/{name}/avg_calls_per_rollout, failure_rate, avg_runtime)."""
-    if not num_rollouts:
+    if not num_rollouts or not tool_names:
         return {}
 
     counts: defaultdict[str, int] = defaultdict(int)
@@ -68,7 +68,7 @@ def compute_tool_metrics(
     total_c = total_f = 0
     total_r = 0.0
 
-    for name in set(counts) | set(tool_names or []):
+    for name in set(counts) | set(tool_names):
         c, f, r = counts[name], failures[name], runtimes[name]
         metrics[f"tools/{name}/avg_calls_per_rollout"] = c / num_rollouts
         metrics[f"tools/{name}/failure_rate"] = f / c if c else 0.0
@@ -1139,7 +1139,7 @@ class DataPreparationActor:
                 tool_metrics = compute_tool_metrics(
                     result.request_info.tool_call_stats,
                     num_rollouts=len(result.request_info.num_calls),
-                    tool_names=self.tool_names,
+                    tool_names=self.tool_names or [],
                 )
                 step_metrics.update(tool_metrics)
 
