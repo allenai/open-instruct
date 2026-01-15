@@ -55,18 +55,18 @@ flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 # pytorch related setups
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu130", marker = "platform_system != 'Darwin'"},
+  { index = "pytorch-cu129", marker = "platform_system != 'Darwin'"},
 ]
 torchvision = [
-  { index = "pytorch-cu130", marker = "platform_system != 'Darwin'"},
+  { index = "pytorch-cu129", marker = "platform_system != 'Darwin'"},
 ]
 torchaudio = [
-  { index = "pytorch-cu130", marker = "platform_system != 'Darwin'"},
+  { index = "pytorch-cu129", marker = "platform_system != 'Darwin'"},
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
 explicit = true
 
 [[tool.uv.index]]

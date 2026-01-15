@@ -425,34 +425,34 @@ numpy==1.26.4 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sy
     #   transformers
     #   vllm
     #   xgrammar
-nvidia-cublas==13.0.0.19 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cublas-cu12==12.9.1.4 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via
-    #   nvidia-cudnn-cu13
-    #   nvidia-cusolver
+    #   nvidia-cudnn-cu12
+    #   nvidia-cusolver-cu12
     #   torch
-nvidia-cuda-cupti==13.0.48 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cuda-cupti-cu12==12.9.79 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-cuda-nvrtc==13.0.48 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cuda-nvrtc-cu12==12.9.86 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-cuda-runtime==13.0.48 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cuda-runtime-cu12==12.9.79 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-cudnn-cu13==9.13.0.50 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cudnn-cu12==9.10.2.21 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
 nvidia-cudnn-frontend==1.17.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via flashinfer-python
-nvidia-cufft==12.0.0.15 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cufft-cu12==11.4.1.4 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-cufile==1.15.0.42 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cufile-cu12==1.14.1.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-curand==10.4.0.35 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-curand-cu12==10.3.10.19 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-cusolver==12.0.3.29 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cusolver-cu12==11.7.5.82 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-cusparse==12.6.2.49 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cusparse-cu12==12.5.10.65 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via
-    #   nvidia-cusolver
+    #   nvidia-cusolver-cu12
     #   torch
-nvidia-cusparselt-cu13==0.8.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cusparselt-cu12==0.7.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
 nvidia-cutlass-dsl==4.3.4 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via flashinfer-python
@@ -460,17 +460,17 @@ nvidia-ml-py==13.580.82 ; (platform_machine == 'x86_64' and sys_platform == 'lin
     # via
     #   flashinfer-python
     #   nvitop
-nvidia-nccl-cu13==2.27.7 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-nccl-cu12==2.27.5 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-nvjitlink==13.0.39 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-nvjitlink-cu12==12.9.86 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via
-    #   nvidia-cufft
-    #   nvidia-cusolver
-    #   nvidia-cusparse
+    #   nvidia-cufft-cu12
+    #   nvidia-cusolver-cu12
+    #   nvidia-cusparse-cu12
     #   torch
-nvidia-nvshmem-cu13==3.3.24 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-nvshmem-cu12==3.3.20 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-nvtx==13.0.39 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-nvtx-cu12==12.9.79 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
 nvitop==1.6.1 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
@@ -815,14 +815,7 @@ tokenizers==0.22.1 ; (platform_machine == 'x86_64' and sys_platform == 'linux') 
     #   litellm
     #   transformers
     #   vllm
-torch==2.9.0 ; sys_platform == 'darwin'
-    # via
-    #   accelerate
-    #   ai2-olmo-core
-    #   deepspeed
-    #   open-instruct
-    #   peft
-torch==2.9.0+cu130 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+torch==2.9.0+cu129 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via
     #   accelerate
     #   ai2-olmo-core
@@ -838,11 +831,18 @@ torch==2.9.0+cu130 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     #   torchvision
     #   vllm
     #   xgrammar
-torchaudio==2.9.0+cu130 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+torch==2.9.1 ; sys_platform == 'darwin'
+    # via
+    #   accelerate
+    #   ai2-olmo-core
+    #   deepspeed
+    #   open-instruct
+    #   peft
+torchaudio==2.9.0+cu129 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via
     #   open-instruct
     #   vllm
-torchvision==0.24.0+cu130 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+torchvision==0.24.0+cu129 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via
     #   open-instruct
     #   vllm
