@@ -17,6 +17,8 @@ import unittest
 
 os.environ["VLLM_BATCH_INVARIANT"] = "1"
 
+import inspect
+
 import datasets
 import ray
 import torch
@@ -25,6 +27,7 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
 
+import open_instruct.vllm_utils as vllm_utils_module
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
@@ -34,6 +37,9 @@ from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+logger.info(f"vllm_utils module file: {vllm_utils_module.__file__}")
+logger.info(f"create_vllm_engines signature: {inspect.signature(create_vllm_engines)}")
 
 maybe_update_beaker_description()
 
