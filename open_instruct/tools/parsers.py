@@ -189,7 +189,7 @@ class VllmToolParser(ToolParser):
             Formatted string with prefix, all tool outputs, and postfix.
         """
         formatted_parts = [self.output_formatter(output) for output in tool_outputs]
-        return self._output_prefix + "".join(formatted_parts) + self._output_postfix
+        return f"{self._output_prefix}{''.join(formatted_parts)}{self._output_postfix}"
 
 
 @dataclass
