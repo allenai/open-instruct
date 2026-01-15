@@ -103,7 +103,7 @@ from open_instruct.model_utils import (
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.tools.parsers import create_tool_parser
 from open_instruct.tools.tools import TOOL_REGISTRY
-from open_instruct.tools.utils import ParsedTool, ToolsConfig
+from open_instruct.tools.utils import ParsedToolConfig, ToolsConfig
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -1503,7 +1503,7 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def create_tools(parsed_tools: list[ParsedTool]) -> list[ray.actor.ActorHandle]:
+def create_tools(parsed_tools: list[ParsedToolConfig]) -> list[ray.actor.ActorHandle]:
     """Create tool actors based on tool configuration using the TOOL_REGISTRY.
 
     Args:

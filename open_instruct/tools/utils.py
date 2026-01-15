@@ -12,7 +12,7 @@ logger = logger_utils.setup_logger(__name__)
 
 
 @dataclass
-class ParsedTool:
+class ParsedToolConfig:
     """A parsed tool configuration combining name, call name, and config."""
 
     name: str
@@ -48,7 +48,7 @@ class ToolsConfig:
     only_reward_good_outputs: bool = False
     """Only apply rewards to outputs from tools that didn't error."""
 
-    _parsed_tools: list[ParsedTool] = field(default_factory=list, init=False)
+    _parsed_tools: list[ParsedToolConfig] = field(default_factory=list, init=False)
     """Parsed tool configurations. Populated during __post_init__."""
 
     def __post_init__(self):
@@ -83,7 +83,7 @@ class ToolsConfig:
                 config = json.loads(config_str)
             except Exception as e:
                 raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
-            self._parsed_tools.append(ParsedTool(name=tool_name, call_name=call_name, config=config))
+            self._parsed_tools.append(ParsedToolConfig(name=tool_name, call_name=call_name, config=config))
 
     @property
     def enabled(self) -> bool:

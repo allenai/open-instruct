@@ -29,7 +29,7 @@ from transformers import AutoTokenizer
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.grpo_fast import create_tools
-from open_instruct.tools.utils import ParsedTool
+from open_instruct.tools.utils import ParsedToolConfig
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
@@ -133,7 +133,7 @@ class TestGeneration(TestGrpoFastBase):
 
         tokenizer_name = "Qwen/Qwen3-1.7B"
         tool_actors = (
-            create_tools([ParsedTool(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})])
+            create_tools([ParsedToolConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})])
             if use_tools
             else None
         )

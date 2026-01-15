@@ -17,7 +17,7 @@ from open_instruct.tools.tools import (
     SerperSearchToolConfig,
     _truncate,
 )
-from open_instruct.tools.utils import ParsedTool, ToolOutput, ToolsConfig, get_openai_tool_definitions
+from open_instruct.tools.utils import ParsedToolConfig, ToolOutput, ToolsConfig, get_openai_tool_definitions
 
 
 class TestPythonCodeToolInit:
@@ -896,8 +896,8 @@ class TestToolsConfig:
         assert config.tools == ["python", "search"]
         assert config.tool_configs == ["{}", "{}"]
         assert config._parsed_tools == [
-            ParsedTool(name="python", call_name="python", config={}),
-            ParsedTool(name="search", call_name="search", config={}),
+            ParsedToolConfig(name="python", call_name="python", config={}),
+            ParsedToolConfig(name="search", call_name="search", config={}),
         ]
         assert config.tool_call_names == ["python", "search"]
         assert config.enabled is True
@@ -907,8 +907,8 @@ class TestToolsConfig:
         config = ToolsConfig(tools=["python", "search"], tool_configs=['{"timeout": 10}', '{"num_results": 5}'])
         assert config.tool_configs == ['{"timeout": 10}', '{"num_results": 5}']
         assert config._parsed_tools == [
-            ParsedTool(name="python", call_name="python", config={"timeout": 10}),
-            ParsedTool(name="search", call_name="search", config={"num_results": 5}),
+            ParsedToolConfig(name="python", call_name="python", config={"timeout": 10}),
+            ParsedToolConfig(name="search", call_name="search", config={"num_results": 5}),
         ]
 
     def test_tools_with_custom_call_names(self):
