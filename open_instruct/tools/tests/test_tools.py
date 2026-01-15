@@ -884,10 +884,10 @@ class TestToolsConfig:
     def test_no_tools_configured(self):
         """Test ToolsConfig works when no tools are configured."""
         config = ToolsConfig()
-        assert config.tools is None
+        assert config.tools == []
         assert config.tool_configs == []
         assert config._parsed_tool_configs == []
-        assert config.tool_call_names is None
+        assert config.tool_call_names == []
         assert config.enabled is False
 
     def test_tools_with_default_configs(self):

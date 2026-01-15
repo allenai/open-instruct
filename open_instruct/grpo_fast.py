@@ -1504,16 +1504,15 @@ def setup_datasets(
 
 
 def create_tools(
-    tools: list[str] | None, tool_call_names: list[str] | None = None, tool_configs: list[dict[str, Any]] | None = None
+    tools: list[str], tool_call_names: list[str], tool_configs: list[dict[str, Any]]
 ) -> list[ray.actor.ActorHandle]:
     """Create tool actors based on tool configuration using the TOOL_REGISTRY.
 
     Args:
         tools: List of tool names to enable (e.g., ["code", "search"]).
-        tool_call_names: Optional list of names to use in model output (e.g., ["python", "search"]).
-                        Must match length of tools. Defaults to tools if not specified.
-        tool_configs: List of JSON dictionaries for configuring each tool. Must match length of tools.
-                     Use '{}' for defaults. Example: ['{"api_endpoint": "http://..."}', '{}']
+        tool_call_names: List of names to use in model output (e.g., ["python", "search"]).
+                        Must match length of tools.
+        tool_configs: List of config dictionaries for each tool. Must match length of tools.
 
     Returns:
         A list of Ray actor handles for the requested tools.
