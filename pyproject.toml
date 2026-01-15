@@ -26,6 +26,7 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.9.0,<2.10",
+    "torchvision>=0.24.0; platform_system != 'Darwin'",
     "transformers>=4.57.0",
     "vllm==0.12.0; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     "vllm==0.13.0; platform_system != 'Darwin' and platform_machine == 'aarch64'",
@@ -54,6 +55,9 @@ flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 # pytorch related setups
 [tool.uv.sources]
 torch = [
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux'"},
+]
+torchvision = [
   { index = "pytorch-cu130", marker = "platform_system == 'Linux'"},
 ]
 # vLLM aarch64 (DGX Spark): PyPI lacks aarch64+cu130 wheels, so we pin to vLLM's nightly wheel server.
