@@ -27,6 +27,7 @@ uv run python mason.py \
     --output_dir output/dpo_qwen_debug/ \
     --logging_steps 1 \
     --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
+    --dataset_skip_cache \
     --seed 123 \
     --use_flash_attn \
     --gradient_checkpointing \
