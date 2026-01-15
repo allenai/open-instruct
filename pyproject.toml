@@ -166,6 +166,7 @@ include = [
     "open_instruct/dataset_processor.py",
     "open_instruct/data_loader.py",
     "open_instruct/data_types.py",
+    "open_instruct/dpo_utils.py",
     "open_instruct/logger_utils.py",
     "open_instruct/mix_data.py",
     "open_instruct/mix_data_preferences.py",

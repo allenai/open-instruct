@@ -48,7 +48,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
         super().setUpClass()
         cls.server_process = subprocess.Popen(
             ["uv", "run", "uvicorn", "tool_server:app", "--host", "0.0.0.0", "--port", "1213"],
-            cwd="open_instruct/tools/code_server",
+            cwd="open_instruct/tools/servers/python_server",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
@@ -204,7 +204,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             results_queue=inference_results_Q,
             eval_results_queue=eval_results_Q,
             tools=tools,
-            max_tool_calls=(3,),
+            max_tool_calls=3,
             reward_config=RewardConfig(),
             train_dataset=train_dataset,
         )
