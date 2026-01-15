@@ -337,17 +337,13 @@ def create_tool_parser(
     tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
     tool_actors: list[ray.actor.ActorHandle],
     tool_definitions: list[dict[str, Any]] | None = None,
-    **kwargs: Any,
 ) -> ToolParser:
     """Create a tool parser by type."""
     if parser_type == "legacy":
         return OpenInstructLegacyToolParser(tool_actors, output_wrap_name="output")
 
     if parser_type == "dr_tulu":
-        return DRTuluToolParser(
-            tool_actors,
-            default_stop_string=kwargs.get("default_stop_string", "</call_tool>"),
-        )
+        return DRTuluToolParser(tool_actors)
 
     if parser_type in VLLM_PARSERS:
         return create_vllm_parser(parser_type, tokenizer, tool_definitions=tool_definitions)
