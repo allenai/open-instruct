@@ -347,12 +347,21 @@ class TestCreateToolParser(unittest.TestCase):
         """Stop the patcher."""
         self.patcher.stop()
 
-    def test_create_legacy_parser(self):
-        """Test creating a legacy parser."""
+    @parameterized.expand([(p,) for p in get_available_parsers()])
+    def test_create_parser(self, parser_type):
+        """Test creating each available parser type."""
         mock_actor = create_mock_tool_actor("search")
         mock_tokenizer = MagicMock()
-        parser = create_tool_parser("legacy", tokenizer=mock_tokenizer, tool_actors=[mock_actor])
-        self.assertIsInstance(parser, OpenInstructLegacyToolParser)
+
+        if parser_type == "legacy":
+            parser = create_tool_parser(parser_type, tokenizer=mock_tokenizer, tool_actors=[mock_actor])
+            self.assertIsInstance(parser, OpenInstructLegacyToolParser)
+        else:
+            # Mock the vLLM parser class import for non-legacy parsers
+            with patch("open_instruct.tools.parsers.import_class_from_string") as mock_import:
+                mock_import.return_value = MagicMock()
+                parser = create_tool_parser(parser_type, tokenizer=mock_tokenizer, tool_actors=[mock_actor])
+                self.assertIsInstance(parser, VllmToolParser)
 
     def test_unknown_parser_raises_error(self):
         """Test that unknown parser types raise an error."""
