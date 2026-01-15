@@ -70,7 +70,8 @@ jobs:
           build-args: |
             GIT_COMMIT=${{ github.sha }}
             GIT_BRANCH=${{ github.head_ref || github.ref_name }}
-          no-cache: true
+          cache-from: type=registry,ref=ghcr.io/allenai/open-instruct:buildcache
+          cache-to: type=inline
 
       - name: Upload image to Beaker and run tests
         env:
