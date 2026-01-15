@@ -540,7 +540,7 @@ class TestGetAvailableParsers(unittest.TestCase):
         self.assertIn("dr_tulu", parsers)
 
     def test_contains_vllm_parsers(self):
-        """Test that vLLM parsers are in the list (even if vLLM isn't installed)."""
+        """Test that vLLM parsers are in the list."""
         parsers = get_available_parsers()
         self.assertIn("vllm_hermes", parsers)
         self.assertIn("vllm_llama3_json", parsers)
