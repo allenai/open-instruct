@@ -2239,10 +2239,7 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def initialize_tools(
-    tools_config: ToolsConfig,
-    tokenizer,
-) -> tuple[list, list, list[str]]:
+def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, list[str]]:
     """Initialize tool actors and get tool definitions and stop sequences.
 
     Args:
