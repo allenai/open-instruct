@@ -58,9 +58,7 @@ from open_instruct import dpo_utils, logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     TokenizerConfig,
-    compute_config_hash,
     get_cached_dataset_tulu,
-    load_dataset_configs,
     visualize_token,
 )
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
@@ -284,7 +282,7 @@ def build_deepspeed_config(
     return config
 
 
-def main(args: FlatArguments, tc: TokenizerConfig):
+def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -736,6 +734,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             forward_fn=forward_fn,
             full_dataset_size=original_dataset_size,
             use_lora=args.use_lora,
+<<<<<<< HEAD
             device=accelerator.device,
             cache_path=cache_path,
             disable_adapter_context=make_disable_adapter_context,
@@ -743,6 +742,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             all_reduce_fn=all_reduce_max,
             is_main_process=accelerator.is_main_process,
             show_progress=accelerator.is_local_main_process,
+=======
+            reference_cache_hash=dpo_utils.compute_reference_cache_hash(args, tc),
+>>>>>>> a4c32f047 (Move compute_reference_cache_hash to dpo_utils.py)
         )
         if dist.is_initialized():
             dist.barrier()

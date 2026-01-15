@@ -17,14 +17,10 @@ DPO utils
 Adapted from https://github.com/eric-mitchell/direct-preference-optimization/blob/main/trainers.py
 """
 
-import contextlib
-import enum
 import hashlib
 import json
-import pathlib
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -32,12 +28,13 @@ import torch.nn.functional as F
 from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 
-from open_instruct import logger_utils
-from open_instruct.model_utils import TensorCache, log_softmax_and_gather
+from open_instruct.dataset_transformation import TokenizerConfig, compute_config_hash, load_dataset_configs
+from open_instruct.model_utils import log_softmax_and_gather
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
-logger = logger_utils.setup_logger(__name__)
+if TYPE_CHECKING:
+    from open_instruct.dpo_tune_cache import FlatArguments
 
 torch.backends.cuda.matmul.allow_tf32 = True
 
@@ -49,129 +46,34 @@ class DPOLossType(enum.StrEnum):
     wpo = "wpo"
 
 
-def config_to_json_serializable(obj: Any) -> Any:
-    if isinstance(obj, dict):
-        return {k: config_to_json_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [config_to_json_serializable(v) for v in obj]
-    if isinstance(obj, enum.Enum):
-        return obj.value
-    return obj
-
-
-def compute_reference_logprobs_cache_hash(
-    model_name_or_path: str,
-    model_revision: str | None,
-    dpo_loss_type: str,
-    concatenated_forward: bool,
-    packing: bool,
-    use_lora: bool,
-    use_qlora: bool,
-    max_train_samples: int | None,
-    dataset_config_hash: str,
-) -> str:
-    """Compute deterministic hash for reference logprobs cache.
-
-    This unified function is used by both dpo.py (OLMo-core) and
-    dpo_tune_cache.py (Accelerate) to generate consistent cache keys.
-    """
-    cache_key = {
-        "concatenated_forward": concatenated_forward,
-        "dataset_config_hash": dataset_config_hash,
-        "dpo_loss_type": dpo_loss_type if isinstance(dpo_loss_type, str) else dpo_loss_type.value,
-        "max_train_samples": max_train_samples,
-        "model_name_or_path": model_name_or_path,
-        "model_revision": model_revision,
-        "packing": packing,
-        "use_lora": use_lora,
-        "use_qlora": use_qlora,
-    }
-    config_str = json.dumps(cache_key, sort_keys=True)
+def compute_reference_cache_hash(args: FlatArguments, tc: TokenizerConfig) -> str:
+    """Compute deterministic hash for reference logprobs cache from FlatArguments."""
+    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    dcs = load_dataset_configs(
+        args.dataset_mixer_list,
+        args.dataset_mixer_list_splits,
+        args.dataset_transform_fn,
+        transform_fn_args,
+        args.dataset_target_columns,
+    )
+    dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
+    average_log_prob = args.dpo_loss_type in ["simpo", "dpo_norm"]
+    config_str = json.dumps(
+        {
+            "average_log_prob": average_log_prob,
+            "concatenated_forward": args.concatenated_forward,
+            "dataset_config_hash": dataset_config_hash,
+            "dpo_loss_type": args.dpo_loss_type,
+            "max_train_samples": args.max_train_samples,
+            "model_name_or_path": args.model_name_or_path,
+            "model_revision": args.model_revision,
+            "packing": args.packing,
+            "use_lora": args.use_lora,
+            "use_qlora": args.use_qlora,
+        },
+        sort_keys=True,
+    )
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
-
-
-def build_reference_logprobs_cache(
-    model: nn.Module,
-    dataloader: Iterable,
-    average_log_prob: bool,
-    forward_fn: Callable,
-    full_dataset_size: int,
-    use_lora: bool,
-    device: torch.device,
-    cache_path: pathlib.Path | None,
-    disable_adapter_context: Callable[[], contextlib.AbstractContextManager],
-    is_distributed: Callable[[], bool],
-    all_reduce_fn: Callable[[torch.Tensor], None],
-    is_main_process: bool,
-    show_progress: bool = True,
-) -> TensorCache:
-    """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
-
-    This unified function works with both OLMo-core and Accelerate frameworks by accepting
-    framework-specific callbacks for distributed operations.
-
-    Args:
-        model: The model to compute logprobs with.
-        dataloader: Iterable yielding batches with "index", "chosen_input_ids", etc.
-        average_log_prob: Whether to average log probabilities.
-        forward_fn: Function(model, batch, average_log_prob) -> (chosen_logps, rejected_logps, aux).
-        full_dataset_size: Total number of samples in the dataset.
-        use_lora: Whether the model uses LoRA adapters.
-        device: Device to place tensors on.
-        cache_path: Path to save/load cache. If None, cache is not persisted.
-        disable_adapter_context: Callable returning context manager to disable LoRA adapters.
-        is_distributed: Callable returning True if distributed training is active.
-        all_reduce_fn: Callable that performs MAX all-reduce on a tensor in-place.
-        is_main_process: Whether this is the main process (for logging/saving).
-        show_progress: Whether to show progress bar.
-
-    Returns:
-        TensorCache with "chosen_logps" and "rejected_logps" tensors.
-
-    Raises:
-        RuntimeError: If any indices are missing after cache building.
-    """
-    if cache_path is not None and cache_path.exists():
-        logger.info(f"Loading reference logprobs cache from {cache_path}")
-        return TensorCache.from_disk(cache_path, device=device)
-
-    model.eval()
-    chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
-    rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
-
-    with torch.no_grad():
-        for batch in tqdm(dataloader, disable=not show_progress, desc="Caching reference logprobs"):
-            if use_lora:
-                with disable_adapter_context():
-                    chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
-            else:
-                chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
-
-            indices = batch["index"]
-            chosen_tensor[indices] = chosen_logps
-            rejected_tensor[indices] = rejected_logps
-
-    if is_distributed():
-        all_reduce_fn(chosen_tensor)
-        all_reduce_fn(rejected_tensor)
-
-    missing_chosen = torch.where(chosen_tensor == float("-inf"))[0]
-    missing_rejected = torch.where(rejected_tensor == float("-inf"))[0]
-    if len(missing_chosen) > 0 or len(missing_rejected) > 0:
-        missing_indices = torch.unique(torch.cat([missing_chosen, missing_rejected]))
-        raise RuntimeError(
-            f"Missing {len(missing_indices)} indices during reference logprobs caching. "
-            f"First 10: {missing_indices[:10].tolist()}"
-        )
-
-    model.train()
-    cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
-
-    if cache_path is not None and is_main_process:
-        logger.info(f"Saving reference logprobs cache to {cache_path}")
-        cache.to_disk(cache_path)
-
-    return cache
 
 
 def dpo_loss(
