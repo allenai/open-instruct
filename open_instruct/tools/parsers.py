@@ -240,7 +240,7 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
 
 def create_vllm_parser(
     parser_name: str,
-    tokenizer: "PreTrainedTokenizer | PreTrainedTokenizerFast | Any",
+    tokenizer: "PreTrainedTokenizer | PreTrainedTokenizerFast",
     output_template: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
 ) -> VllmToolParser:
