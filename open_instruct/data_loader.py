@@ -51,34 +51,35 @@ def compute_tool_metrics(
     tool_call_stats: list[list[data_types.ToolCallStats]], num_rollouts: int, tool_names: list[str] | None = None
 ) -> dict[str, float]:
     """Compute per-tool and aggregate tool metrics (tools/{name}/avg_calls_per_rollout, failure_rate, avg_runtime)."""
-    per_tool: dict[str, dict[str, float]] = defaultdict(lambda: {"count": 0, "failure_sum": 0, "runtime_sum": 0.0})
-    for rollout in tool_call_stats:
-        for stat in rollout:
-            per_tool[stat.tool_name]["count"] += 1
-            per_tool[stat.tool_name]["failure_sum"] += not stat.success
-            per_tool[stat.tool_name]["runtime_sum"] += stat.runtime
+    if not num_rollouts:
+        return {}
 
-    # Ensure all known tools have entries (defaulting to 0)
-    for name in tool_names or []:
-        _ = per_tool[name]  # triggers defaultdict to create entry if missing
+    counts: defaultdict[str, int] = defaultdict(int)
+    failures: defaultdict[str, int] = defaultdict(int)
+    runtimes: defaultdict[str, float] = defaultdict(float)
+
+    for rollout in tool_call_stats:
+        for s in rollout:
+            counts[s.tool_name] += 1
+            failures[s.tool_name] += not s.success
+            runtimes[s.tool_name] += s.runtime
 
     metrics: dict[str, float] = {}
-    total_calls = total_failures = 0
-    total_runtime = 0.0
+    total_c = total_f = 0
+    total_r = 0.0
 
-    for tool_name, stats in per_tool.items():
-        count = stats["count"]
-        metrics[f"tools/{tool_name}/avg_calls_per_rollout"] = count / num_rollouts if num_rollouts else 0.0
-        metrics[f"tools/{tool_name}/failure_rate"] = stats["failure_sum"] / count if count else 0.0
-        metrics[f"tools/{tool_name}/avg_runtime"] = stats["runtime_sum"] / count if count else 0.0
-        total_calls += count
-        total_failures += stats["failure_sum"]
-        total_runtime += stats["runtime_sum"]
+    for name in set(counts) | set(tool_names or []):
+        c, f, r = counts[name], failures[name], runtimes[name]
+        metrics[f"tools/{name}/avg_calls_per_rollout"] = c / num_rollouts
+        metrics[f"tools/{name}/failure_rate"] = f / c if c else 0.0
+        metrics[f"tools/{name}/avg_runtime"] = r / c if c else 0.0
+        total_c += c
+        total_f += f
+        total_r += r
 
-    if num_rollouts:
-        metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / num_rollouts
-        metrics["tools/aggregate/failure_rate"] = total_failures / total_calls if total_calls else 0.0
-        metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls if total_calls else 0.0
+    metrics["tools/aggregate/avg_calls_per_rollout"] = total_c / num_rollouts
+    metrics["tools/aggregate/failure_rate"] = total_f / total_c if total_c else 0.0
+    metrics["tools/aggregate/avg_runtime"] = total_r / total_c if total_c else 0.0
 
     return metrics
 
