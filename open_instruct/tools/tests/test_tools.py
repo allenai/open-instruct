@@ -18,7 +18,7 @@ from open_instruct.tools.tools import (
     SerperSearchToolConfig,
     _truncate,
 )
-from open_instruct.tools.utils import ToolOutput, ToolsConfig, get_openai_tool_definitions
+from open_instruct.tools.utils import ParsedToolConfig, ToolOutput, ToolsConfig, get_openai_tool_definitions
 
 
 class TestPythonCodeToolInit(unittest.TestCase):
@@ -848,10 +848,10 @@ class TestToolsConfig(unittest.TestCase):
     def test_no_tools_configured(self):
         """Test ToolsConfig works when no tools are configured."""
         config = ToolsConfig()
-        self.assertIsNone(config.tools)
+        self.assertEqual(config.tools, [])
         self.assertEqual(config.tool_configs, [])
-        self.assertEqual(config._parsed_tool_configs, [])
-        self.assertIsNone(config.tool_call_names)
+        self.assertEqual(config._parsed_tools, [])
+        self.assertEqual(config.tool_call_names, [])
         self.assertFalse(config.enabled)
 
     def test_tools_with_default_configs(self):
@@ -859,7 +859,13 @@ class TestToolsConfig(unittest.TestCase):
         config = ToolsConfig(tools=["python", "search"])
         self.assertEqual(config.tools, ["python", "search"])
         self.assertEqual(config.tool_configs, ["{}", "{}"])
-        self.assertEqual(config._parsed_tool_configs, [{}, {}])
+        self.assertEqual(
+            config._parsed_tools,
+            [
+                ParsedToolConfig(name="python", call_name="python", config={}),
+                ParsedToolConfig(name="search", call_name="search", config={}),
+            ],
+        )
         self.assertEqual(config.tool_call_names, ["python", "search"])
         self.assertTrue(config.enabled)
 
@@ -867,12 +873,20 @@ class TestToolsConfig(unittest.TestCase):
         """Test ToolsConfig parses custom tool_configs from JSON strings."""
         config = ToolsConfig(tools=["python", "search"], tool_configs=['{"timeout": 10}', '{"num_results": 5}'])
         self.assertEqual(config.tool_configs, ['{"timeout": 10}', '{"num_results": 5}'])
-        self.assertEqual(config._parsed_tool_configs, [{"timeout": 10}, {"num_results": 5}])
+        self.assertEqual(
+            config._parsed_tools,
+            [
+                ParsedToolConfig(name="python", call_name="python", config={"timeout": 10}),
+                ParsedToolConfig(name="search", call_name="search", config={"num_results": 5}),
+            ],
+        )
 
     def test_tools_with_custom_call_names(self):
         """Test ToolsConfig allows custom tool_call_names."""
         config = ToolsConfig(tools=["python", "search"], tool_call_names=["code", "web_search"])
         self.assertEqual(config.tool_call_names, ["code", "web_search"])
+        self.assertEqual(config._parsed_tools[0].call_name, "code")
+        self.assertEqual(config._parsed_tools[1].call_name, "web_search")
 
     def test_mismatched_tool_configs_length_raises(self):
         """Test ToolsConfig raises when tool_configs length doesn't match tools."""
