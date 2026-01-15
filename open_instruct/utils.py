@@ -92,11 +92,6 @@ def import_class_from_string(import_path: str) -> type:
 
     Returns:
         The imported class.
-
-    Raises:
-        ValueError: If the import path format is invalid.
-        ModuleNotFoundError: If the module cannot be found.
-        AttributeError: If the class doesn't exist in the module.
     """
     if ":" not in import_path:
         raise ValueError(f"Invalid import path '{import_path}'. Expected format: 'module.path:ClassName'")
