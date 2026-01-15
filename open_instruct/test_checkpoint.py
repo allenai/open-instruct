@@ -2,20 +2,17 @@
 """Tests for checkpoint functions in convert_sft_data_for_olmocore.py
 
 Run from project root:
-    pytest scripts/data/test_checkpoint.py -v
+    pytest open_instruct/test_checkpoint.py -v
 """
 
 import json
 import os
-import sys
 import tempfile
 
 import pytest
 
-# Add project root to path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# Import checkpoint functions directly (copy to avoid full module import)
+# Checkpoint functions copied here to avoid importing from convert_sft_data_for_olmocore.py
+# which has heavy dependencies (datasets, transformers, etc.)
 from typing import Any, Dict, Optional
 
 
@@ -170,6 +167,9 @@ class TestCheckpointFunctions:
         assert loaded["current_position"] == 1000
         assert loaded["num_samples_skipped"] == 5
         assert loaded["per_dataset_counts"] == {"dataset_a": 100, "dataset_b": 50}
+        assert loaded["per_dataset_tokens"] == {"dataset_a": 5000, "dataset_b": 2500}
+        assert loaded["per_dataset_trainable_tokens"] == {"dataset_a": 4000, "dataset_b": 2000}
+        assert loaded["per_dataset_filtered"] == {"dataset_a": 2, "dataset_b": 3}
 
     def test_document_boundaries_tuple_conversion(self, tmp_path):
         """Test that document boundaries are properly serialized (tuples become lists in JSON)."""

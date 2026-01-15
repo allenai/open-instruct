@@ -246,57 +246,68 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         print(f"Selecting {args.num_examples} examples for debugging")
         train_dataset = train_dataset.select(range(args.num_examples))
 
-    # Check for existing checkpoint to resume from
-    start_idx = 0
-    token_ids = []
-    labels_mask = []
-    document_boundaries = []
-    current_position = 0
-    num_samples_skipped = 0
-    per_dataset_counts = {}
-    per_dataset_tokens = {}
-    per_dataset_trainable_tokens = {}
-    per_dataset_filtered = {}
+    # Initialize state (centralized to avoid duplication)
+    state = {
+        "samples_processed": 0,
+        "token_ids": [],
+        "labels_mask": [],
+        "document_boundaries": [],
+        "current_position": 0,
+        "num_samples_skipped": 0,
+        "per_dataset_counts": {},
+        "per_dataset_tokens": {},
+        "per_dataset_trainable_tokens": {},
+        "per_dataset_filtered": {},
+    }
 
+    # Check for existing checkpoint to resume from
     checkpoint = load_checkpoint(output_dir) if args.resume else None
     if checkpoint:
-        start_idx = checkpoint["samples_processed"]
-        token_ids = checkpoint["token_ids"]
-        labels_mask = checkpoint["labels_mask"]
-        document_boundaries = [tuple(b) for b in checkpoint["document_boundaries"]]
-        current_position = checkpoint["current_position"]
-        num_samples_skipped = checkpoint["num_samples_skipped"]
-        per_dataset_counts = checkpoint["per_dataset_counts"]
-        per_dataset_tokens = checkpoint["per_dataset_tokens"]
-        per_dataset_trainable_tokens = checkpoint["per_dataset_trainable_tokens"]
-        per_dataset_filtered = checkpoint["per_dataset_filtered"]
+        state.update(checkpoint)
+        # JSON converts tuples to lists, convert back
+        state["document_boundaries"] = [tuple(b) for b in state["document_boundaries"]]
         print(f"=== RESUMING from checkpoint ===")
-        print(f"  Samples already processed: {start_idx:,}")
-        print(f"  Tokens collected: {len(token_ids):,}")
-        print(f"  Remaining samples: {len(train_dataset) - start_idx:,}")
+        print(f"  Samples already processed: {state['samples_processed']:,}")
+        print(f"  Tokens collected: {len(state['token_ids']):,}")
+        print(f"  Remaining samples: {len(train_dataset) - state['samples_processed']:,}")
         print(f"================================")
-    else:
-        if args.resume:
-            print("No checkpoint found, starting from beginning...")
+    elif args.resume:
+        print("No checkpoint found, starting from beginning...")
+
+    # Extract state into local variables for convenience
+    start_idx = state["samples_processed"]
+    token_ids = state["token_ids"]
+    labels_mask = state["labels_mask"]
+    document_boundaries = state["document_boundaries"]
+    current_position = state["current_position"]
+    num_samples_skipped = state["num_samples_skipped"]
+    per_dataset_counts = state["per_dataset_counts"]
+    per_dataset_tokens = state["per_dataset_tokens"]
+    per_dataset_trainable_tokens = state["per_dataset_trainable_tokens"]
+    per_dataset_filtered = state["per_dataset_filtered"]
 
     print("Collecting tokens from dataset...")
     sample: Mapping[str, Any]
     total_samples = len(train_dataset)
 
+    # Skip to resume point efficiently using dataset.select()
+    if start_idx > 0:
+        train_dataset_iter = train_dataset.select(range(start_idx, total_samples))
+    else:
+        train_dataset_iter = train_dataset
+
     for idx, sample in enumerate(
         tqdm(  # type: ignore
-            train_dataset,
+            train_dataset_iter,
             desc="Collecting tokens",
             file=sys.stdout,
             bar_format="{l_bar}{bar}{r_bar}\n",  # better printing in beaker
             mininterval=10.0,
             initial=start_idx,  # Start progress bar from resume point
             total=total_samples,
-        )
+        ),
+        start=start_idx,  # Enumerate from resume point
     ):
-        # Skip already-processed samples when resuming
-        if idx < start_idx:
-            continue
         sample_length = len(sample[INPUT_IDS_KEY])
         sample_tokens = sample[INPUT_IDS_KEY]
         sample_labels = sample[LABELS_KEY]
