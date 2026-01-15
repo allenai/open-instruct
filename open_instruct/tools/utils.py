@@ -93,7 +93,7 @@ class ToolCall:
 class APIResponse:
     """Response from an async API request."""
 
-    data: dict | None = None
+    data: dict = field(default_factory=dict)
     error: str = ""
     timed_out: bool = False
 
