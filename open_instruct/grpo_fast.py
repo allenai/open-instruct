@@ -1394,6 +1394,7 @@ def setup_datasets(
     tc: TokenizerConfig,
     tokenizer: PreTrainedTokenizer,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    tool_definitions: list[dict[str, Any]],
 ):
     """Set up training and evaluation datasets."""
     system_prompt_override = None
@@ -1404,7 +1405,7 @@ def setup_datasets(
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
     transform_fn_args = [
-        {"system_prompt_override": system_prompt_override},
+        {"system_prompt_override": system_prompt_override, "tool_definitions": tool_definitions},
         {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
@@ -2257,7 +2258,29 @@ def main(
 
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config)
+    # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
+    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
+
+    # Create tool actors and get their definitions for dataset tokenization
+    tool_actors = create_tools(
+        tools=tools_config.tools,
+        tool_call_names=tools_config.tool_call_names,
+        tool_configs=tools_config._parsed_tool_configs,
+    )
+    tool_definitions = (
+        ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
+    )
+
+    # Create parser temporarily to get stop sequences for generation config
+    # The actual parser used during generation will be created inside vLLM actors
+    if tool_actors:
+        parser_stop_seqs = create_tool_parser(
+            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
+        ).stop_sequences()
+        logger.info(f"Adding tool stop sequences to config: {parser_stop_seqs}")
+        streaming_config.stop_strings.extend(parser_stop_seqs)
+
+    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config, tool_definitions)
 
     if len(train_dataset) < (
         needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
@@ -2270,9 +2293,6 @@ def main(
         return
 
     pprint([args, model_config, streaming_config, vllm_config, tools_config])
-
-    # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
@@ -2296,18 +2316,6 @@ def main(
         additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
-
-    # Note that parser will be created inside vLLM actors to avoid serialization issues
-    tool_actors = create_tools(tools_config._parsed_tools)
-
-    # Create parser temporarily to get stop sequences for generation config
-    # The actual parser used during generation will be created inside vLLM actors
-    if tool_actors:
-        parser_stop_seqs = create_tool_parser(
-            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
-        ).stop_sequences()
-        logger.info(f"Adding tool stop sequences to config: {parser_stop_seqs}")
-        streaming_config.stop_strings.extend(parser_stop_seqs)
 
     # AFTER potentially adding tool stop sequences, create generation configs
     generation_configs = create_generation_configs(args, streaming_config)
