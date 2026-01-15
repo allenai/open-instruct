@@ -18,6 +18,7 @@ import peft
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import transformers
 from huggingface_hub import HfApi
 from olmo_core import config, train
 from olmo_core.config import DType
@@ -459,8 +460,10 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    logger.info(f"Building OLMo-core model with vocab_size={tokenizer.vocab_size}")
-    model_config = get_transformer_config(args.model_name_or_path, tokenizer.vocab_size, args.olmo_config_name)
+    hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
+    vocab_size = hf_config.vocab_size
+    logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
+    model_config = get_transformer_config(args.model_name_or_path, vocab_size, args.olmo_config_name)
     model = model_config.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
