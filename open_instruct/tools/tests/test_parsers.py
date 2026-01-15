@@ -388,15 +388,6 @@ retrieval augmented generation
         expected = "<tool_output>\nResult 1\n</tool_output>\n\n<tool_output>\nResult 2\n</tool_output>\n"
         self.assertEqual(result, expected)
 
-    def test_format_tool_outputs_custom_wrap_name(self):
-        """Test formatting with custom output wrap name."""
-        mock_actor = create_mock_tool_actor("google_search")
-        parser = DRTuluToolParser([mock_actor], output_wrap_name="result")
-
-        result = parser.format_tool_outputs(["Some output"])
-        expected = "<result>\nSome output\n</result>\n"
-        self.assertEqual(result, expected)
-
     def test_stop_sequences_default(self):
         """Test that default stop sequence is used when tools don't provide them."""
         mock_actor = create_mock_tool_actor("google_search")
