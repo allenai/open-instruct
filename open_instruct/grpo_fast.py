@@ -1600,8 +1600,8 @@ def create_model_and_optimizer(
         model_dims=model_dims,
         verbose=args.verbose,
         work_dir=args.output_dir,
-        initial_state=data_prep_actor_state,
         tool_names=tools_config.tool_call_names if tools_config else [],
+        initial_state=data_prep_actor_state,
     )
 
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).

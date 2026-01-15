@@ -138,6 +138,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             model_dims=self.create_llama7b_model_dims(),
             verbose=True,
             work_dir="/tmp",
+            tool_names=[],
         )
 
         loader = data_loader.StreamingDataLoader(
@@ -239,6 +240,7 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             model_dims=self.create_llama7b_model_dims(),
             verbose=True,
             work_dir="/tmp",
+            tool_names=list(tools.keys()),
         )
 
         loader = data_loader.StreamingDataLoader(

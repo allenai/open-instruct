@@ -920,8 +920,8 @@ class DataPreparationActor:
         model_dims: utils.ModelDims,
         verbose: bool,
         work_dir: str,
+        tool_names: list[str],
         initial_state: dict | None = None,
-        tool_names: list[str] | None = None,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
@@ -937,7 +937,7 @@ class DataPreparationActor:
         self.model_dims = model_dims
         self.verbose = verbose
         self.dataset = dataset
-        self.tool_names = tool_names or []
+        self.tool_names = tool_names
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
