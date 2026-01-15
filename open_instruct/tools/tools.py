@@ -409,8 +409,8 @@ class DrAgentMCPTool(Tool):
         self._tool_names: list[str] = []
 
         transport = transport_type or os.environ.get("MCP_TRANSPORT", "StreamableHttpTransport")
-        os.environ["MCP_TRANSPORT_HOST"] = str(host or os.environ.get("MCP_TRANSPORT_HOST", "0.0.0.0"))
-        os.environ["MCP_TRANSPORT_PORT"] = str(port or os.environ.get("MCP_TRANSPORT_PORT", "8000"))
+        resolved_host = host or os.environ.get("MCP_TRANSPORT_HOST", "0.0.0.0")
+        resolved_port = port or int(os.environ.get("MCP_TRANSPORT_PORT", "8000"))
 
         for name in [n.strip() for n in tool_names.split(",") if n.strip()]:
             if name not in DR_AGENT_MCP_TOOLS:
@@ -419,6 +419,10 @@ class DrAgentMCPTool(Tool):
             cls = DR_AGENT_MCP_TOOLS[name]
             valid_params = set(inspect.signature(cls.__init__).parameters.keys())
             kwargs: dict[str, Any] = {}
+            if "host" in valid_params:
+                kwargs["host"] = resolved_host
+            if "port" in valid_params:
+                kwargs["port"] = resolved_port
             if "base_url" in valid_params:
                 kwargs["base_url"] = base_url
             if "number_documents_to_search" in valid_params:
