@@ -39,15 +39,8 @@ uv run python -m accelerate.commands.launch \
 
 ### GRPO/RL (Single GPU)
 
-**Required environment variable:**
 ```bash
-export VLLM_ALLOW_INSECURE_SERIALIZATION=1
-```
-
-This is needed due to a vLLM v1 msgspec serialization bug on aarch64. See [huggingface/trl#3676](https://github.com/huggingface/trl/issues/3676).
-
-```bash
-uv run python open_instruct/grpo_fast.py \
+VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run python open_instruct/grpo_fast.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --attn_implementation sdpa \
     --vllm_enforce_eager \
@@ -75,13 +68,6 @@ Remove any CUDA 12 packages and reinstall with `uv sync`.
 
 ### "sm_121 not supported" warning
 Safe to ignore. sm_120 and sm_121 are binary compatible.
-
-### vLLM serialization errors
-If you see `torch.dtype is not serializable`, try:
-```bash
-export VLLM_ALLOW_INSECURE_SERIALIZATION=1
-```
-This is a known issue with vLLM v1 nightly builds.
 
 ## References
 
