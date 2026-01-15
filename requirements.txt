@@ -33,7 +33,9 @@ anyio==4.12.0 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sy
     # via
     #   anthropic
     #   httpx
+    #   mcp
     #   openai
+    #   sse-starlette
     #   starlette
     #   watchfiles
 apache-tvm-ffi==0.1.7 ; platform_machine == 'x86_64' and sys_platform == 'linux'
@@ -78,8 +80,10 @@ certifi==2025.11.12 ; (platform_machine == 'x86_64' and sys_platform == 'linux')
     #   httpx
     #   requests
     #   sentry-sdk
-cffi==2.0.0 ; implementation_name == 'pypy' and platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via pyzmq
+cffi==2.0.0 ; (implementation_name == 'pypy' and platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux')
+    # via
+    #   cryptography
+    #   pyzmq
 cfgv==3.5.0 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via pre-commit
 charset-normalizer==3.4.4 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -105,6 +109,8 @@ compressed-tensors==0.12.2 ; platform_machine == 'x86_64' and sys_platform == 'l
     # via vllm
 contourpy==1.3.3 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via matplotlib
+cryptography==46.0.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via pyjwt
 cuda-bindings==13.1.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via cuda-python
 cuda-pathfinder==1.3.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
@@ -250,8 +256,11 @@ httpx==0.28.1 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sy
     #   fastapi
     #   fastapi-cloud-cli
     #   litellm
+    #   mcp
     #   model-hosting-container-standards
     #   openai
+httpx-sse==0.4.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via mcp
 huggingface-hub==0.36.0 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   accelerate
@@ -269,6 +278,8 @@ idna==3.11 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_p
     #   httpx
     #   requests
     #   yarl
+ijson==3.4.0.post0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via vllm
 immutabledict==1.2.0 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
 importlib-metadata==8.7.0 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -302,6 +313,7 @@ joblib==1.5.3 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sy
 jsonschema==4.25.1 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   litellm
+    #   mcp
     #   mistral-common
     #   ray
 jsonschema-specifications==2025.9.1 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -339,6 +351,8 @@ markupsafe==3.0.3 ; (platform_machine == 'x86_64' and sys_platform == 'linux') o
     #   werkzeug
 matplotlib==3.10.8 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
+mcp==1.25.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via vllm
 mdurl==0.1.2 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via markdown-it-py
 mergedeep==1.3.4 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -590,7 +604,7 @@ pybase64==1.4.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via vllm
 pycountry==24.6.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via pydantic-extra-types
-pycparser==2.23 ; implementation_name == 'pypy' and platform_machine == 'x86_64' and sys_platform == 'linux'
+pycparser==2.23 ; (implementation_name != 'PyPy' and platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (implementation_name == 'pypy' and platform_machine == 'x86_64' and platform_python_implementation == 'PyPy' and sys_platform == 'linux')
     # via cffi
 pydantic==2.12.5 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -601,12 +615,14 @@ pydantic==2.12.5 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or
     #   fastapi-cloud-cli
     #   litellm
     #   lm-format-enforcer
+    #   mcp
     #   mistral-common
     #   model-hosting-container-standards
     #   open-instruct
     #   openai
     #   openai-harmony
     #   pydantic-extra-types
+    #   pydantic-settings
     #   ray
     #   vllm
     #   xgrammar
@@ -614,11 +630,15 @@ pydantic-core==2.41.5 ; (platform_machine == 'x86_64' and sys_platform == 'linux
     # via pydantic
 pydantic-extra-types==2.10.6 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via mistral-common
+pydantic-settings==2.12.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via mcp
 pygments==2.19.2 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   mkdocs-material
     #   pytest
     #   rich
+pyjwt==2.10.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via mcp
 pymdown-extensions==10.19.1 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mkdocs-material
 pyparsing==3.2.5 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -633,11 +653,14 @@ python-dateutil==2.9.0.post0 ; (platform_machine == 'x86_64' and sys_platform ==
 python-dotenv==1.2.1 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   litellm
+    #   pydantic-settings
     #   uvicorn
 python-json-logger==4.0.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via vllm
 python-multipart==0.0.20 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via fastapi
+    # via
+    #   fastapi
+    #   mcp
 pytz==2025.2 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via pandas
 pyyaml==6.0.3 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -763,11 +786,15 @@ sniffio==1.3.1 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or s
     # via
     #   anthropic
     #   openai
+sse-starlette==3.1.2 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via mcp
 starlette==0.50.0 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   fastapi
+    #   mcp
     #   model-hosting-container-standards
     #   prometheus-fastapi-instrumentator
+    #   sse-starlette
 supervisor==4.3.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via model-hosting-container-standards
 sympy==1.14.0 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -788,13 +815,6 @@ tokenizers==0.22.1 ; (platform_machine == 'x86_64' and sys_platform == 'linux') 
     #   litellm
     #   transformers
     #   vllm
-torch==2.9.0 ; sys_platform == 'darwin'
-    # via
-    #   accelerate
-    #   ai2-olmo-core
-    #   deepspeed
-    #   open-instruct
-    #   peft
 torch==2.9.0+cu129 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via
     #   accelerate
@@ -811,10 +831,21 @@ torch==2.9.0+cu129 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     #   torchvision
     #   vllm
     #   xgrammar
-torchaudio==2.9.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via vllm
-torchvision==0.24.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via vllm
+torch==2.9.1 ; sys_platform == 'darwin'
+    # via
+    #   accelerate
+    #   ai2-olmo-core
+    #   deepspeed
+    #   open-instruct
+    #   peft
+torchaudio==2.9.0+cu129 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via
+    #   open-instruct
+    #   vllm
+torchvision==0.24.0+cu129 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via
+    #   open-instruct
+    #   vllm
 tqdm==4.67.1 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   datasets
@@ -853,6 +884,7 @@ typing-extensions==4.15.0 ; (platform_machine == 'x86_64' and sys_platform == 'l
     #   fastapi
     #   grpcio
     #   huggingface-hub
+    #   mcp
     #   mistral-common
     #   nvidia-cutlass-dsl
     #   omegaconf
@@ -872,7 +904,10 @@ typing-extensions==4.15.0 ; (platform_machine == 'x86_64' and sys_platform == 'l
     #   vllm
     #   xgrammar
 typing-inspection==0.4.2 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via pydantic
+    # via
+    #   mcp
+    #   pydantic
+    #   pydantic-settings
 tzdata==2025.3 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via pandas
 urllib3==2.6.2 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -886,6 +921,7 @@ uvicorn==0.38.0 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or 
     #   fastapi
     #   fastapi-cli
     #   fastapi-cloud-cli
+    #   mcp
     #   open-instruct
 uvloop==0.22.1 ; platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux'
     # via uvicorn
@@ -893,7 +929,7 @@ virtualenv==20.35.4 ; (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   pre-commit
     #   ray
-vllm==0.12.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+vllm==0.13.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via open-instruct
 wandb==0.18.1 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct

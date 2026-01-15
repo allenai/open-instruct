@@ -26,8 +26,10 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.9.0,<2.10",
+    "torchvision>=0.24.0; platform_system != 'Darwin'",
+    "torchaudio>=2.9.0; platform_system != 'Darwin'",
     "transformers>=4.57.0",
-    "vllm==0.12.0; platform_system != 'Darwin'",
+    "vllm==0.13.0; platform_system != 'Darwin'",
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -53,6 +55,12 @@ flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 # pytorch related setups
 [tool.uv.sources]
 torch = [
+  { index = "pytorch-cu129", marker = "platform_system != 'Darwin'"},
+]
+torchvision = [
+  { index = "pytorch-cu129", marker = "platform_system != 'Darwin'"},
+]
+torchaudio = [
   { index = "pytorch-cu129", marker = "platform_system != 'Darwin'"},
 ]
 
