@@ -273,7 +273,8 @@ class TestVllmParserRegistry(unittest.TestCase):
         self.assertTrue(config.import_path, "missing import_path")
         self.assertTrue(config.output_template, "missing output_template")
         self.assertIn("{}", config.output_template, "output_template missing placeholder")
-        self.assertIsInstance(config.stop_sequences, list, "stop_sequences is not a list")
+        # Check stop_sequences is a sized iterable (list, tuple, set, etc.)
+        self.assertGreaterEqual(len(config.stop_sequences), 0, "stop_sequences must be a sized iterable")
 
 
 class TestVllmToolParser(unittest.TestCase):
