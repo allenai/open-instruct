@@ -711,8 +711,9 @@ def print_rich_single_line_metrics(metrics):
         values = grouped_metrics[category]
         value_strings = []
         for key, value in values:
-            # Use the last part of the key as the display name
-            display_name = key.split("/")[-1]
+            # Use everything after the first "/" as the display name
+            parts = key.split("/")
+            display_name = "/".join(parts[1:]) if len(parts) > 1 else key
             value_strings.append(f"{display_name}: {format_value(value)}")
 
         # Join all values for this category into a single string

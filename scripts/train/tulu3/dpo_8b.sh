@@ -27,7 +27,7 @@ python mason.py \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
-    --num_train_epochs 1 \
+    --num_epochs 1 \
     --dpo_loss_type dpo_norm \
     --dpo_beta 5 \
     --use_flash_attn \
