@@ -1422,6 +1422,28 @@ def setup_datasets(
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
 
+    # Split training data for validation holdout if requested
+    validation_dataset = None
+    if streaming_config.validation_holdout_ratio > 0:
+        original_size = len(train_dataset)
+        split = train_dataset.train_test_split(test_size=streaming_config.validation_holdout_ratio, seed=args.seed)
+        # Reset indices after split - the 'index' column must match row positions
+        # because dataset[result.index] is used in accumulate_inference_batches
+        train_dataset = split["train"].flatten_indices()
+        validation_dataset = split["test"].flatten_indices()
+
+        # Re-add 'index' column with correct sequential indices
+        train_dataset = train_dataset.remove_columns("index").add_column("index", list(range(len(train_dataset))))
+        validation_dataset = validation_dataset.remove_columns("index").add_column(
+            "index", list(range(len(validation_dataset)))
+        )
+
+        logger.info(
+            f"🎯 Validation holdout: split {original_size} samples into "
+            f"{len(train_dataset)} train + {len(validation_dataset)} validation "
+            f"(ratio={streaming_config.validation_holdout_ratio})"
+        )
+
     if len(streaming_config.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
             dataset_mixer_list=streaming_config.dataset_mixer_eval_list,
@@ -1443,7 +1465,7 @@ def setup_datasets(
 
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
 
-    return train_dataset, eval_dataset
+    return train_dataset, eval_dataset, validation_dataset
 
 
 def create_tools(parsed_tools: list[ParsedToolConfig]) -> list[ray.actor.ActorHandle]:
@@ -1458,6 +1480,10 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> list[ray.actor.ActorHa
     Raises:
         ValueError: If an unknown tool is requested, configs are invalid, or required fields are missing.
     """
+    # Return empty list if no tools configured
+    if not parsed_tools:
+        return []
+
     tool_actors = []
 
     for parsed_tool in parsed_tools:
@@ -2127,6 +2153,7 @@ def run_training(
         )
     else:
         eval_data_loader = None
+
     training_start_time = time.perf_counter()  # Track overall training start time
     maybe_update_beaker_description(
         current_step=resume_training_step - 1,
@@ -2292,7 +2319,25 @@ def main(
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
 
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config, tool_definitions)
+    train_dataset, eval_dataset, validation_dataset = setup_datasets(
+        args, tc, tokenizer, streaming_config, tool_definitions
+    )
+
+    # When validation holdout is enabled, use validation_dataset for evaluation tracking
+    # This allows tracking accuracy on held-out training data to detect overfitting
+    if validation_dataset is not None:
+        if eval_dataset is not None:
+            logger.warning(
+                "⚠️ Both validation_holdout_ratio and dataset_mixer_eval_list are specified. "
+                "Using validation holdout for 'eval/' metrics (to track overfitting). "
+                "The separate eval_dataset (test set) will not be used."
+            )
+        # Use validation holdout for evaluation metrics
+        eval_dataset = validation_dataset
+        logger.info(
+            f"🎯 Using validation holdout ({len(eval_dataset)} samples) for evaluation metrics. "
+            "This tracks accuracy on held-out training data to detect overfitting."
+        )
 
     if len(train_dataset) < (
         needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout

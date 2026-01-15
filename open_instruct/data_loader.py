@@ -315,6 +315,12 @@ class StreamingDataLoaderConfig:
     shuffle_eval_dataset: bool = False
     system_prompt_override_file: str | None = None
 
+    # Validation holdout from training data
+    validation_holdout_ratio: float = 0.0
+    """Ratio of training data to hold out for validation (0.0-0.5). 0 means no holdout.
+    Example: 0.1 means 10% of training data is held out for validation reward tracking.
+    This is separate from eval_dataset (which uses a different data split like test set)."""
+
     # Generation
     temperature: float = 0.7
     stop_strings: list[str] | None = None
@@ -380,6 +386,12 @@ class StreamingDataLoaderConfig:
             )
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
+
+        if not (0.0 <= self.validation_holdout_ratio < 0.5):
+            raise ValueError(
+                f"validation_holdout_ratio must be in [0.0, 0.5), got {self.validation_holdout_ratio}. "
+                "Values >= 0.5 would leave too little data for training."
+            )
 
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
