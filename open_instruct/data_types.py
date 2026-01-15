@@ -20,6 +20,15 @@ class TokenStatistics:
 
 
 @dataclass
+class ToolCallStats:
+    """Statistics for a single tool call."""
+
+    tool_name: str
+    success: bool
+    runtime: float
+
+
+@dataclass
 class RequestInfo:
     """Container for tool usage information used in queue payloads."""
 
@@ -29,6 +38,8 @@ class RequestInfo:
     tool_outputs: list[str]
     tool_runtimes: list[float]
     tool_calleds: list[bool]
+    # Per-tool call statistics: list of ToolCallStats for each rollout
+    tool_call_stats: list[list[ToolCallStats]] | None = None
 
 
 @dataclass

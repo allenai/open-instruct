@@ -46,6 +46,77 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 logger = logging.getLogger(__name__)
 
 
+def compute_tool_metrics(
+    tool_call_stats: list[list[data_types.ToolCallStats]] | None, num_rollouts: int
+) -> dict[str, float]:
+    """Compute per-tool and aggregate tool metrics.
+
+    Args:
+        tool_call_stats: List of lists of ToolCallStats, one list per rollout.
+        num_rollouts: Total number of rollouts.
+
+    Returns:
+        Dictionary of tool metrics with keys like:
+        - tools/{tool_name}/avg_calls_per_rollout
+        - tools/{tool_name}/success_rate
+        - tools/{tool_name}/failure_rate
+        - tools/{tool_name}/avg_runtime
+        - tools/aggregate/avg_calls_per_rollout
+        - tools/aggregate/success_rate
+        - tools/aggregate/failure_rate
+        - tools/aggregate/avg_runtime
+    """
+    metrics: dict[str, float] = {}
+
+    if not tool_call_stats or num_rollouts == 0:
+        return metrics
+
+    # Collect per-tool statistics
+    tool_stats: dict[str, dict[str, list]] = {}  # tool_name -> {calls: [], successes: [], runtimes: []}
+
+    # Also collect aggregate stats
+    all_successes: list[bool] = []
+    all_runtimes: list[float] = []
+    total_calls = 0
+
+    for rollout_stats in tool_call_stats:
+        for stat in rollout_stats:
+            if stat.tool_name not in tool_stats:
+                tool_stats[stat.tool_name] = {"calls": [], "successes": [], "runtimes": []}
+            tool_stats[stat.tool_name]["successes"].append(stat.success)
+            tool_stats[stat.tool_name]["runtimes"].append(stat.runtime)
+            all_successes.append(stat.success)
+            all_runtimes.append(stat.runtime)
+            total_calls += 1
+
+    # Count calls per rollout per tool
+    for tool_name in tool_stats:
+        tool_calls_per_rollout = []
+        for rollout_stats in tool_call_stats:
+            count = sum(1 for stat in rollout_stats if stat.tool_name == tool_name)
+            tool_calls_per_rollout.append(count)
+        tool_stats[tool_name]["calls"] = tool_calls_per_rollout
+
+    # Compute per-tool metrics
+    for tool_name, stats in tool_stats.items():
+        calls = stats["calls"]
+        successes = stats["successes"]
+        runtimes = stats["runtimes"]
+
+        metrics[f"tools/{tool_name}/avg_calls_per_rollout"] = float(np.mean(calls)) if calls else 0.0
+        metrics[f"tools/{tool_name}/success_rate"] = float(np.mean(successes)) if successes else 0.0
+        metrics[f"tools/{tool_name}/failure_rate"] = 1.0 - metrics[f"tools/{tool_name}/success_rate"]
+        metrics[f"tools/{tool_name}/avg_runtime"] = float(np.mean(runtimes)) if runtimes else 0.0
+
+    # Compute aggregate metrics
+    metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / num_rollouts if num_rollouts > 0 else 0.0
+    metrics["tools/aggregate/success_rate"] = float(np.mean(all_successes)) if all_successes else 0.0
+    metrics["tools/aggregate/failure_rate"] = 1.0 - metrics["tools/aggregate/success_rate"]
+    metrics["tools/aggregate/avg_runtime"] = float(np.mean(all_runtimes)) if all_runtimes else 0.0
+
+    return metrics
+
+
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
     """Move all tensors in a batch dictionary to the specified device.
 
@@ -673,6 +744,7 @@ def accumulate_inference_batches(
     combined_tool_outputs = []
     combined_tool_runtimes = []
     combined_tool_calleds = []
+    combined_tool_call_stats = []
     combined_logprobs = []
 
     earliest_start_time = float("inf")
@@ -693,6 +765,8 @@ def accumulate_inference_batches(
         combined_tool_outputs.extend(result.request_info.tool_outputs)
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
+        if result.request_info.tool_call_stats is not None:
+            combined_tool_call_stats.extend(result.request_info.tool_call_stats)
 
         combined_logprobs.extend(result.logprobs)
 
@@ -721,6 +795,7 @@ def accumulate_inference_batches(
         tool_outputs=combined_tool_outputs,
         tool_runtimes=combined_tool_runtimes,
         tool_calleds=combined_tool_calleds,
+        tool_call_stats=combined_tool_call_stats if combined_tool_call_stats else None,
     )
 
     combined_result = data_types.GenerationResult(
@@ -1088,16 +1163,15 @@ class DataPreparationActor:
                     "val/advantages_min": advantages.min(),
                     "val/advantages_max": advantages.max(),
                     "val/advantages_hist": advantages,
-                    "val/num_calls_rate": np.array(result.request_info.num_calls).mean(),
-                    "val/timeouts_rate": np.array(result.request_info.timeouts).mean(),
-                    "val/tool_errors_rate": np.array(
-                        [len(item) > 0 for item in result.request_info.tool_errors]
-                    ).mean(),
-                    "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
-                    "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
                     **reward_metrics,
                     **batch_metrics_prefixed,
                 }
+
+                # Add per-tool metrics
+                tool_metrics = compute_tool_metrics(
+                    result.request_info.tool_call_stats, num_rollouts=len(result.request_info.num_calls)
+                )
+                step_metrics.update(tool_metrics)
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
