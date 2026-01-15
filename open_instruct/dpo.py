@@ -5,15 +5,11 @@ This module provides DPO (Direct Preference Optimization) training using
 OLMo-core's native training infrastructure.
 """
 
-import enum
-import hashlib
-import json
-import logging
+import contextlib
 import os
 import pathlib
 import shutil
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, cast
@@ -39,7 +35,6 @@ from olmo_core.train.train_module.transformer import (
     TransformerDataParallelConfig,
     TransformerDataParallelWrappingStrategy,
 )
-from tqdm.auto import tqdm
 
 from open_instruct import dpo_config as dpo_config_lib
 from open_instruct import logger_utils
@@ -53,7 +48,11 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
+    DPOLossType,
+    build_reference_logprobs_cache,
+    compute_reference_logprobs_cache_hash,
     concatenated_forward_olmo,
+    config_to_json_serializable,
     dpo_loss,
     separate_forward_olmo,
     simpo_loss,
@@ -72,25 +71,7 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
 )
 
-
-class DPOLossType(enum.StrEnum):
-    dpo = "dpo"
-    dpo_norm = "dpo_norm"
-    simpo = "simpo"
-    wpo = "wpo"
-
-
-logger = logging.getLogger(__name__)
-
-
-def config_to_json_serializable(obj: Any) -> Any:
-    if isinstance(obj, dict):
-        return {k: config_to_json_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [config_to_json_serializable(v) for v in obj]
-    if isinstance(obj, enum.Enum):
-        return obj.value
-    return obj
+logger = logger_utils.setup_logger(__name__)
 
 
 OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
@@ -136,77 +117,6 @@ def get_transformer_config(
         )
     config_fn = getattr(TransformerConfig, config_name)
     return config_fn(vocab_size=vocab_size)
-
-
-def compute_reference_logprobs_cache_hash(
-    model_name_or_path: str,
-    model_revision: str | None,
-    dpo_loss_type: DPOLossType,
-    concatenated_forward: bool,
-    packing: bool,
-    use_lora: bool,
-    dataset_config_hash: str,
-) -> str:
-    """Compute deterministic hash for reference logprobs cache."""
-    cache_key = {
-        "model_name_or_path": model_name_or_path,
-        "model_revision": model_revision,
-        "dpo_loss_type": dpo_loss_type.value,
-        "concatenated_forward": concatenated_forward,
-        "packing": packing,
-        "use_lora": use_lora,
-        "dataset_config_hash": dataset_config_hash,
-    }
-    config_str = json.dumps(cache_key, sort_keys=True)
-    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
-
-
-def build_reference_logprobs_cache(
-    model: nn.Module,
-    dataloader: HFDataLoader,
-    average_log_prob: bool,
-    forward_fn: Callable,
-    full_dataset_size: int,
-    use_lora: bool = False,
-    device: torch.device | None = None,
-    cache_path: str | pathlib.Path | None = None,
-) -> TensorCache:
-    """Build a TensorCache with reference logprobs by computing logprobs once for all samples."""
-    if cache_path is not None:
-        cache_path = pathlib.Path(cache_path)
-        if cache_path.exists():
-            logger.info(f"Loading reference logprobs cache from {cache_path}")
-            return TensorCache.from_disk(cache_path)
-
-    model.eval()
-    chosen_tensor = torch.zeros(full_dataset_size, dtype=torch.float32, device=device)
-    rejected_tensor = torch.zeros(full_dataset_size, dtype=torch.float32, device=device)
-
-    with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Caching reference logprobs"):
-            if use_lora:
-                assert isinstance(model, peft.PeftModel)
-                with model.disable_adapter():
-                    chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
-            else:
-                chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
-
-            indices = batch["index"]
-            chosen_tensor[indices] = chosen_logps
-            rejected_tensor[indices] = rejected_logps
-
-    if distributed_utils.is_distributed():
-        dist.all_reduce(chosen_tensor, op=dist.ReduceOp.SUM)  # type: ignore[attr-defined]
-        dist.all_reduce(rejected_tensor, op=dist.ReduceOp.SUM)  # type: ignore[attr-defined]
-
-    model.train()
-    cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
-
-    if cache_path is not None:
-        logger.info(f"Saving reference logprobs cache to {cache_path}")
-        cache.to_disk(cache_path)
-
-    return cache
 
 
 @dataclass
@@ -435,10 +345,12 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     ref_cache_hash = compute_reference_logprobs_cache_hash(
         model_name_or_path=args.model_name_or_path,
         model_revision=args.model_revision,
-        dpo_loss_type=DPOLossType(args.dpo_loss_type),
+        dpo_loss_type=args.dpo_loss_type,
         concatenated_forward=args.concatenated_forward,
         packing=args.packing,
         use_lora=args.use_lora,
+        use_qlora=False,
+        max_train_samples=None,
         dataset_config_hash=dataset_config_hash,
     )
     reference_cache_path = pathlib.Path(args.reference_logprobs_cache_path) / f"{ref_cache_hash}.pt"
@@ -578,6 +490,16 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
     average_log_prob = args.dpo_config.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
 
     logger.info("Caching reference logprobs (before HSDP)...")
+
+    def make_disable_adapter_context() -> contextlib.AbstractContextManager:
+        if args.use_lora:
+            assert isinstance(model, peft.PeftModel)
+            return model.disable_adapter()
+        return contextlib.nullcontext()
+
+    def all_reduce_max(tensor: torch.Tensor) -> None:
+        dist.all_reduce(tensor, op=dist.ReduceOp.MAX)
+
     reference_cache = build_reference_logprobs_cache(
         model=model,
         dataloader=data_loader_instance,
@@ -587,6 +509,10 @@ def main(args: DPOExperimentConfig, tc: TokenizerConfig) -> None:
         use_lora=args.use_lora,
         device=device,
         cache_path=reference_cache_path,
+        disable_adapter_context=make_disable_adapter_context,
+        is_distributed=distributed_utils.is_distributed,
+        all_reduce_fn=all_reduce_max,
+        is_main_process=distributed_utils.get_rank() == 0,
     )
     logger.info("Reference logprobs cached.")
     data_loader_instance.reshuffle(epoch=0)

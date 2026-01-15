@@ -282,14 +282,17 @@ class VLLMConfig:
 
 @dataclass
 class StreamingDataLoaderConfig:
+    # Data loading/packing
     max_prompt_token_length: int = 256
     response_length: int = 256
     pack_length: int = 512
 
+    # Batching
     async_steps: int = 1
     num_samples_per_prompt_rollout: int = 4
     num_unique_prompts_rollout: int = 16
 
+    # GRPO sampling/filtering
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     no_resampling_pass_rate: float | None = None
@@ -297,6 +300,7 @@ class StreamingDataLoaderConfig:
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
 
+    # Dataset
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     dataset_mixer_eval_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
@@ -310,24 +314,29 @@ class StreamingDataLoaderConfig:
     shuffle_eval_dataset: bool = False
     system_prompt_override_file: str | None = None
 
+    # Generation
     temperature: float = 0.7
     stop_strings: list[str] | None = None
     inflight_updates: bool = False
 
+    # Reward - R1 style format reward
     apply_r1_style_format_reward: bool = False
     r1_style_format_reward: float = 1.0
     additive_format_reward: bool = False
 
+    # Reward - Verifiable reward
     apply_verifiable_reward: bool = True
     verification_reward: float = 10.0
     remap_verifier: str | None = None
 
+    # LLM judge verifier
     llm_judge_model: str = "azure/gpt-4o-mini-standard"
     llm_judge_max_tokens: int = 2048
     llm_judge_max_context_length: int = 8192
     llm_judge_temperature: float = 1.0
     llm_judge_timeout: int = 60
 
+    # Code verifier
     code_api_url: str = field(
         default_factory=lambda: os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
     )
@@ -335,8 +344,10 @@ class StreamingDataLoaderConfig:
     code_pass_rate_reward_threshold: float = 0.0
     code_apply_perf_penalty: bool = False
 
+    # Max length verifier
     max_length_verifier_max_length: int = 32768
 
+    # Non stop penalty
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
@@ -800,6 +811,7 @@ def prepare_collated_data_for_workers(
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
 
+        # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
         collated_query_responses = []
         collated_attention_masks = []

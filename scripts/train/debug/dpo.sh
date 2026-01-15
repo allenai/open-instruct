@@ -31,5 +31,4 @@ uv run python mason.py \
     --gradient_checkpointing \
     --logging_steps 10 \
     --with_tracking \
-    --push_to_hub False \
-    --reference_logprobs_cache_path /weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache/dpo_debug.pt
+    --push_to_hub False
