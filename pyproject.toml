@@ -26,7 +26,7 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.9.0,<2.10",
-    "torchvision>=0.24.0; platform_system != 'Darwin'",
+    "torchvision>=0.24.0; platform_system != 'Darwin'",  # TODO: As CUDA 13 stabilizes, consider removing (needed to force cu130 wheel index)
     "transformers>=4.57.0",
     "vllm==0.13.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
