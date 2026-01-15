@@ -281,7 +281,6 @@ class DRTuluToolParser(ToolParser):
         # Fetch metadata in parallel
         tool_names_futures = [actor.get_tool_names.remote() for actor in tool_actors]
         params_futures = [actor.get_parameters.remote() for actor in tool_actors]
-        stop_strings_futures = [actor.get_stop_strings.remote() for actor in tool_actors]
 
         all_tool_names = ray.get(tool_names_futures)
         all_params = ray.get(params_futures)
@@ -307,9 +306,9 @@ class DRTuluToolParser(ToolParser):
 
         # Collect stop strings, handling tools that don't have the method
         stop_strings: list[str] = []
-        for future in stop_strings_futures:
+        for actor in tool_actors:
             try:
-                tool_stops = ray.get(future)
+                tool_stops = ray.get(actor.get_stop_strings.remote())
                 if tool_stops:
                     stop_strings.extend(tool_stops)
             except (AttributeError, ray.exceptions.RayActorError):

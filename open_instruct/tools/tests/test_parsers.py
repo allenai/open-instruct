@@ -35,6 +35,9 @@ class MockTool:
     def get_call_name(self):
         return self.call_name
 
+    def get_tool_names(self):
+        return [self.call_name]
+
     def get_parameters(self):
         return {"required": self.required, "properties": {self.param_name: {"type": "string"}}}
 
@@ -51,6 +54,7 @@ def create_mock_tool_actor(
     mock_tool = MockTool(name, param_name, required, stop_strings)
     actor_handle = MagicMock()
     actor_handle.get_call_name.remote.return_value = mock_tool.get_call_name()
+    actor_handle.get_tool_names.remote.return_value = mock_tool.get_tool_names()
     actor_handle.get_parameters.remote.return_value = mock_tool.get_parameters()
 
     # Handle get_stop_strings - either return value or raise AttributeError
