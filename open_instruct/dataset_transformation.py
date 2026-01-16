@@ -928,8 +928,8 @@ def validate_dataset_tools(
 ) -> None:
     """Validate that configured tools match tools in dataset's 'tools' column.
 
-    When a dataset has a 'tools' column with per-sample tool definitions,
-    this function validates that:
+    The tools column is a list of tool call names (strings) that are active for each sample.
+    This function validates that:
     1. All configured tools are present in the dataset
     2. All tools in the dataset are configured (no unknown tools)
 
@@ -949,11 +949,9 @@ def validate_dataset_tools(
     tools_column = dataset[TOOLS_COLUMN_KEY]
     for tools in tools_column:
         if tools:
-            for tool_def in tools:
-                if isinstance(tool_def, dict) and "function" in tool_def:
-                    tool_name = tool_def["function"].get("name")
-                    if tool_name:
-                        dataset_tool_names.add(tool_name)
+            for tool_name in tools:
+                if tool_name:
+                    dataset_tool_names.add(tool_name)
 
     configured_set = set(configured_tool_names) if configured_tool_names else set()
 
@@ -979,24 +977,20 @@ def dataset_has_tools_column(dataset: Dataset) -> bool:
     return TOOLS_COLUMN_KEY in dataset.column_names
 
 
-def extract_tool_names_from_definitions(tool_definitions: list[dict] | None) -> list[str] | None:
-    """Extract tool names from OpenAI-format tool definitions.
+def get_active_tools_from_sample(sample_tools: list[str] | None) -> list[str] | None:
+    """Get active tool names from a sample's tools column.
+
+    The tools column is a list of tool call names that are active for this sample.
 
     Args:
-        tool_definitions: List of tool definitions in OpenAI format, or None.
+        sample_tools: List of tool names from the sample's tools column, or None.
 
     Returns:
-        List of tool names, or None if no definitions provided.
+        The list of tool names, or None if not provided.
     """
-    if not tool_definitions:
+    if not sample_tools:
         return None
-    tool_names = []
-    for tool_def in tool_definitions:
-        if isinstance(tool_def, dict) and "function" in tool_def:
-            tool_name = tool_def["function"].get("name")
-            if tool_name:
-                tool_names.append(tool_name)
-    return tool_names if tool_names else None
+    return list(sample_tools)
 
 
 # Preference dataset
@@ -1413,11 +1407,8 @@ def rlvr_tokenize_v3(
 ):
     """Tokenize a row for RLVR training.
 
-    Tool handling logic:
-    - If pass_tools_to_chat_template=False: no tools are passed to chat template (overrides per-sample tools)
-    - If pass_tools_to_chat_template=True:
-        - If row has a 'tools' column: use per-sample tools from that column
-        - Otherwise: use global tool_definitions
+    Note: The 'tools' column in the dataset is a list of active tool names (strings),
+    NOT tool definitions. Tool definitions for the chat template come from tool_definitions.
     """
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
@@ -1431,11 +1422,8 @@ def rlvr_tokenize_v3(
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     chat_template_kwargs = {"add_generation_prompt": True}
-    if pass_tools_to_chat_template:
-        if TOOLS_COLUMN_KEY in row and row[TOOLS_COLUMN_KEY]:
-            chat_template_kwargs["tools"] = row[TOOLS_COLUMN_KEY]
-        elif tool_definitions:
-            chat_template_kwargs["tools"] = tool_definitions
+    if pass_tools_to_chat_template and tool_definitions:
+        chat_template_kwargs["tools"] = tool_definitions
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:

@@ -909,6 +909,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             break
 
         tool_calls = actor.tool_parser.get_tool_calls(output.text)
+        # Sometimes the model will make a tool call that *looks* valid,
+        # but actually that tool doesn't exist for it! So we filter these out.
+        # In future, we could instead add an error message to the model output to indicate that the tool call is invalid.
         tool_calls = [tc for tc in tool_calls if tc.name in allowed_tools]
         if not tool_calls:
             break
