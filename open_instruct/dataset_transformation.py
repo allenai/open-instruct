@@ -930,7 +930,9 @@ def validate_dataset_tools(
     """Validate that configured tools match tools in dataset's 'tools' column.
 
     When a dataset has a 'tools' column with per-sample tool definitions,
-    this function validates that all configured tools are present in the dataset.
+    this function validates that:
+    1. All configured tools are present in the dataset
+    2. All tools in the dataset are configured (no unknown tools)
 
     Args:
         dataset: The dataset to validate.
@@ -939,13 +941,10 @@ def validate_dataset_tools(
         dataset_name: Name of the dataset for error messages.
 
     Raises:
-        ValueError: If configured tools are not found in the dataset's tools column.
+        ValueError: If there's a mismatch between configured tools and dataset tools.
     """
     if TOOLS_COLUMN_KEY not in dataset.column_names:
         return  # No tools column, nothing to validate
-
-    if not configured_tool_names:
-        return  # No tools configured, nothing to validate
 
     # Access column directly for efficiency (avoid per-sample iteration overhead)
     dataset_tool_names: set[str] = set()
@@ -958,10 +957,19 @@ def validate_dataset_tools(
                     if tool_name:
                         dataset_tool_names.add(tool_name)
 
-    # Check that all configured tools are present in the dataset
-    configured_set = set(configured_tool_names)
-    missing_tools = configured_set - dataset_tool_names
+    configured_set = set(configured_tool_names) if configured_tool_names else set()
 
+    # Check that all tools in dataset are configured
+    unconfigured_tools = dataset_tool_names - configured_set
+    if unconfigured_tools:
+        raise ValueError(
+            f"Dataset '{dataset_name}' contains tools {sorted(unconfigured_tools)} that are not configured. "
+            f"Configured tools: {sorted(configured_set)}. "
+            f"All tools in the dataset must be configured for execution."
+        )
+
+    # Check that all configured tools are present in the dataset
+    missing_tools = configured_set - dataset_tool_names
     if missing_tools:
         raise ValueError(
             f"Configured tools {sorted(missing_tools)} are not found in {dataset_name}'s "
