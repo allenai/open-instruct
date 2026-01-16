@@ -457,6 +457,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),
         "start_time": time.perf_counter(),
+        "active_tools": request.active_tools,  # Per-sample active tools (None means all tools active)
     }
 
     for j in range(request.generation_config.n):
@@ -866,7 +867,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     tool_call_stats: list[ToolCallStats] = []
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
-    original_prompt = actor.request_metadata[base_request_id]["prompt_token_ids"]
+    request_metadata = actor.request_metadata[base_request_id]
+    original_prompt = request_metadata["prompt_token_ids"]
+    active_tools = request_metadata.get("active_tools")  # None means all tools are active
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
@@ -903,10 +906,13 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             break
 
         tool_calls = actor.tool_parser.get_tool_calls(output.text)
-        # sometimes the model will make a tool call that *looks* valid,
-        # but actually that tool doesn't exist for it! So we filter these out.
-        # in future, we could instead add an error message to the model output to indicate that the tool call is invalid.
+        # Filter tool calls to only include tools that:
+        # 1. Exist in the tool actor map (tool is configured)
+        # 2. Are in the active_tools list for this sample (if active_tools is set)
         tool_calls = [tc for tc in tool_calls if tc.name in actor.tool_actor_map]
+        if active_tools is not None:
+            # Only execute tools that are in the active_tools list for this sample
+            tool_calls = [tc for tc in tool_calls if tc.name in active_tools]
         if not tool_calls:
             break
 

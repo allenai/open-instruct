@@ -918,6 +918,68 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
     return dataset
 
 
+# Tools column keys for per-sample tool definitions and active tools
+TOOLS_COLUMN_KEY = "tools"
+ACTIVE_TOOLS_COLUMN_KEY = "active_tools"
+
+
+def validate_dataset_tools(
+    dataset: Dataset,
+    configured_tool_names: list[str],
+    dataset_name: str = "dataset",
+) -> None:
+    """Validate that configured tools match tools in dataset's 'tools' column.
+
+    When a dataset has a 'tools' column with per-sample tool definitions,
+    this function validates that all configured tools are present in the dataset.
+
+    Args:
+        dataset: The dataset to validate.
+        configured_tool_names: List of tool names configured in the launch job
+            (e.g., ["python", "search"]).
+        dataset_name: Name of the dataset for error messages.
+
+    Raises:
+        ValueError: If configured tools are not found in the dataset's tools column.
+    """
+    if TOOLS_COLUMN_KEY not in dataset.column_names:
+        return  # No tools column, nothing to validate
+
+    if not configured_tool_names:
+        return  # No tools configured, nothing to validate
+
+    # Check all samples to collect all tool names used in the dataset
+    dataset_tool_names: set[str] = set()
+    for sample in dataset:
+        if sample.get(TOOLS_COLUMN_KEY):
+            for tool_def in sample[TOOLS_COLUMN_KEY]:
+                if isinstance(tool_def, dict) and "function" in tool_def:
+                    tool_name = tool_def["function"].get("name")
+                    if tool_name:
+                        dataset_tool_names.add(tool_name)
+
+    # Check that all configured tools are present in the dataset
+    configured_set = set(configured_tool_names)
+    missing_tools = configured_set - dataset_tool_names
+
+    if missing_tools:
+        raise ValueError(
+            f"Configured tools {sorted(missing_tools)} are not found in {dataset_name}'s "
+            f"'{TOOLS_COLUMN_KEY}' column. Tools found in dataset: {sorted(dataset_tool_names)}. "
+            f"When using per-sample tools, all configured tools must be present in the dataset."
+        )
+
+
+def dataset_has_tools_column(dataset: Dataset) -> bool:
+    """Check if a dataset has a 'tools' column for per-sample tool definitions."""
+    return TOOLS_COLUMN_KEY in dataset.column_names
+
+
+def dataset_has_active_tools_column(dataset: Dataset) -> bool:
+    """Check if a dataset has an 'active_tools' column for per-sample active tool lists."""
+    return ACTIVE_TOOLS_COLUMN_KEY in dataset.column_names
+
+
 # Preference dataset
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `CHOSEN_ATTENTION_MASK_KEY` and `REJECTED_ATTENTION_MASK_KEY`
@@ -1328,7 +1390,16 @@ def rlvr_tokenize_v3(
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
     system_prompt_override: Optional[str] = None,
     tool_definitions: list[dict[str, Any]] | None = None,
+    pass_tools_to_chat_template: bool = True,
 ):
+    """Tokenize a row for RLVR training.
+
+    Tool handling logic:
+    - If pass_tools_to_chat_template=False: no tools are passed to chat template (overrides per-sample tools)
+    - If pass_tools_to_chat_template=True:
+        - If row has a 'tools' column: use per-sample tools from that column
+        - Otherwise: use global tool_definitions
+    """
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
@@ -1341,8 +1412,15 @@ def rlvr_tokenize_v3(
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     chat_template_kwargs = {"add_generation_prompt": True}
-    if tool_definitions:
-        chat_template_kwargs["tools"] = tool_definitions
+
+    # Determine which tools to use for chat template
+    if pass_tools_to_chat_template:
+        # Check for per-sample tools first, then fall back to global tool_definitions
+        if TOOLS_COLUMN_KEY in row and row[TOOLS_COLUMN_KEY]:
+            chat_template_kwargs["tools"] = row[TOOLS_COLUMN_KEY]
+        elif tool_definitions:
+            chat_template_kwargs["tools"] = tool_definitions
+
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
@@ -1556,6 +1634,12 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Always preserve dataset_source if it exists
         if DATASET_ORIGIN_KEY in dataset.column_names and DATASET_ORIGIN_KEY not in target_columns:
             target_columns = target_columns + [DATASET_ORIGIN_KEY]
+        # Always preserve tools column if it exists (for per-sample tool definitions)
+        if TOOLS_COLUMN_KEY in dataset.column_names and TOOLS_COLUMN_KEY not in target_columns:
+            target_columns = target_columns + [TOOLS_COLUMN_KEY]
+        # Always preserve active_tools column if it exists (for per-sample active tool lists)
+        if ACTIVE_TOOLS_COLUMN_KEY in dataset.column_names and ACTIVE_TOOLS_COLUMN_KEY not in target_columns:
+            target_columns = target_columns + [ACTIVE_TOOLS_COLUMN_KEY]
 
         if fn_type == "map":
             dataset = dataset.map(

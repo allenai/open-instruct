@@ -510,6 +510,8 @@ def add_prompt_to_generator(
     example: dict[str, Any], epoch_number: int, param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
 ) -> None:
     index = example["index"]
+    # Get active_tools from the example if it exists (for per-sample active tool lists)
+    active_tools = example.get("active_tools", None)
     param_prompt_Q.put(
         data_types.PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
@@ -517,6 +519,7 @@ def add_prompt_to_generator(
             index=index,
             prompt_id=f"{epoch_number}_{index}",
             is_eval=is_eval,
+            active_tools=active_tools,
         )
     )
 
