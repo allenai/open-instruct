@@ -27,7 +27,7 @@
 - If you are given a Beaker URL (beaker\.allen\.ai.*) use the Beaker CLI tool to interact with it.
 
 # Coding conventions
-- Use `logger = logger_utils.setup_logger(__name__)` for logging, not `get_logger` from accelerate.
+- Always use `logger = logger_utils.setup_logger(__name__)` for logging.
 
 # Documentation
 To verify that documentation changes don't alter the generated output:
