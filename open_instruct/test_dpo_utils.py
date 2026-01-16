@@ -37,8 +37,8 @@ class TestDPOLoss(unittest.TestCase):
         )
 
         self.assertEqual(losses.shape, (3,))
-        self.assertEqual(chosen_rewards.shape, (3,))
-        self.assertEqual(rejected_rewards.shape, (3,))
+        self.assertEqual(chosen_rewards.shape, ())
+        self.assertEqual(rejected_rewards.shape, ())
 
     def test_chosen_preferred_gives_lower_loss(self):
         policy_chosen = torch.tensor([0.0])
@@ -99,8 +99,8 @@ class TestSimPOLoss(unittest.TestCase):
         )
 
         self.assertEqual(losses.shape, (3,))
-        self.assertEqual(chosen_rewards.shape, (3,))
-        self.assertEqual(rejected_rewards.shape, (3,))
+        self.assertEqual(chosen_rewards.shape, ())
+        self.assertEqual(rejected_rewards.shape, ())
 
     def test_gamma_affects_loss(self):
         policy_chosen = torch.tensor([0.0])
@@ -135,8 +135,8 @@ class TestWPOLoss(unittest.TestCase):
         )
 
         self.assertEqual(losses.shape, (1, 3))
-        self.assertEqual(chosen_rewards.shape, (1, 3))
-        self.assertEqual(rejected_rewards.shape, (1, 3))
+        self.assertEqual(chosen_rewards.shape, ())
+        self.assertEqual(rejected_rewards.shape, ())
 
 
 class TestComputeReferenceCacheHash(unittest.TestCase):

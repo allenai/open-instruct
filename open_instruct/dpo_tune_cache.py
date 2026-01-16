@@ -569,14 +569,13 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
                     average_log_prob=args.dpo_loss_type.is_average_loss,
                     output_router_logits=args.load_balancing_loss,
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
-                losses, _, _ = dpo_utils.compute_loss(
+                losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
                     args,
                     batch,
                     policy_chosen_logps,
                     policy_rejected_logps,
                     reference_cache if args.dpo_loss_type.needs_reference_model else None,
                 )
-                # TODO: metric logging
                 loss = losses.mean()
                 if args.load_balancing_loss:
                     weighted_aux_loss = args.load_balancing_weight * aux_loss
@@ -593,14 +592,9 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
                 with torch.no_grad():
                     local_metrics["train_loss"] += loss
                     if args.dpo_loss_type.computes_reward_metrics:
-                        ref_logps = reference_cache[batch["index"]]
-                        chosen_rewards = (args.dpo_beta * (policy_chosen_logps - ref_logps["chosen_logps"])).mean()
-                        rejected_rewards = (
-                            args.dpo_beta * (policy_rejected_logps - ref_logps["rejected_logps"])
-                        ).mean()
                         average_rewards = (chosen_rewards + rejected_rewards) / 2
-                        accuracy = (chosen_rewards > rejected_rewards).float().mean()
-                        margin = (chosen_rewards - rejected_rewards).mean()
+                        accuracy = (chosen_rewards > rejected_rewards).float()
+                        margin = chosen_rewards - rejected_rewards
                         local_metrics["rewards/chosen"] += chosen_rewards
                         local_metrics["rewards/rejected"] += rejected_rewards
                         local_metrics["rewards/average"] += average_rewards

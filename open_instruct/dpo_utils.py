@@ -343,10 +343,7 @@ def dpo_loss(
             and implicitly use a reference model that assigns equal probability to all responses.
 
     Returns:
-        A tuple of three tensors: (losses, chosen_rewards, rejected_rewards).
-        The losses tensor contains the DPO loss for each example in the batch.
-        The chosen_rewards and rejected_rewards tensors contain the rewards
-            for the chosen and rejected responses, respectively.
+        A tuple of three tensors: (losses, mean_chosen_rewards, mean_rejected_rewards).
     """
     pi_logratios = policy_chosen_logps - policy_rejected_logps
     ref_logratios = reference_chosen_logps - reference_rejected_logps
@@ -357,8 +354,8 @@ def dpo_loss(
     logits = pi_logratios - ref_logratios
 
     losses = -F.logsigmoid(beta * logits) * (1 - label_smoothing) - F.logsigmoid(-beta * logits) * label_smoothing
-    chosen_rewards = beta * (policy_chosen_logps - reference_chosen_logps).detach()
-    rejected_rewards = beta * (policy_rejected_logps - reference_rejected_logps).detach()
+    chosen_rewards = (beta * (policy_chosen_logps - reference_chosen_logps)).detach().mean()
+    rejected_rewards = (beta * (policy_rejected_logps - reference_rejected_logps)).detach().mean()
 
     return losses, chosen_rewards, rejected_rewards
 
@@ -390,7 +387,7 @@ def wpo_loss(
         rejected_loss_mask: Boolean mask for rejected response tokens.
 
     Returns:
-        A tuple of (losses, chosen_rewards, rejected_rewards).
+        A tuple of (losses, mean_chosen_rewards, mean_rejected_rewards).
     """
     pi_logratios = policy_chosen_logps - policy_rejected_logps
     ref_logratios = reference_chosen_logps - reference_rejected_logps
@@ -407,8 +404,8 @@ def wpo_loss(
         - F.logsigmoid(-beta * logits) * label_smoothing * policy_weights
     )
 
-    chosen_rewards = beta * (policy_chosen_logps - reference_chosen_logps).detach()
-    rejected_rewards = beta * (policy_rejected_logps - reference_rejected_logps).detach()
+    chosen_rewards = (beta * (policy_chosen_logps - reference_chosen_logps)).detach().mean()
+    rejected_rewards = (beta * (policy_rejected_logps - reference_rejected_logps)).detach().mean()
 
     return losses, chosen_rewards, rejected_rewards
 
@@ -428,9 +425,7 @@ def simpo_loss(
         policy_rejected_logps: Log probabilities of the policy model for the rejected responses. Shape: (batch_size,)
 
     Returns:
-        A tuple of three tensors: (losses, chosen_rewards, rejected_rewards).
-        The losses tensor contains the SimPO loss for each example in the batch.
-        The chosen_rewards and rejected_rewards tensors contain the rewards for the chosen and rejected responses, respectively.
+        A tuple of (losses, mean_chosen_rewards, mean_rejected_rewards).
     """
     pi_logratios = policy_chosen_logps - policy_rejected_logps
     logits = pi_logratios - gamma_beta_ratio
@@ -438,8 +433,8 @@ def simpo_loss(
     # sigmoid loss type from SimPO.
     losses = -F.logsigmoid(beta * logits) * (1 - label_smoothing) - F.logsigmoid(-beta * logits) * label_smoothing
 
-    chosen_rewards = beta * policy_chosen_logps.detach()
-    rejected_rewards = beta * policy_rejected_logps.detach()
+    chosen_rewards = (beta * policy_chosen_logps).detach().mean()
+    rejected_rewards = (beta * policy_rejected_logps).detach().mean()
 
     return losses, chosen_rewards, rejected_rewards
 
