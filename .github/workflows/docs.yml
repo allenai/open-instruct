@@ -15,6 +15,9 @@ jobs:
     name: Check diff
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -101,6 +104,9 @@ jobs:
     name: Deploy
     if: github.event_name == 'push' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
     steps:
       - uses: actions/checkout@v4
       - name: Configure Git Credentials

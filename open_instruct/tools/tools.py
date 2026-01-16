@@ -187,7 +187,6 @@ class JinaBrowseTool(Tool):
             content = inner_data.get("content") or ""
             title = inner_data.get("title") or ""
 
-            # Format output with title if available
             if title and content:
                 content = f"# {title}\n\n{content}"
         else:
@@ -375,6 +374,146 @@ class SerperSearchToolConfig(BaseToolConfig):
     """Timeout in seconds for the API request."""
 
 
+def _parse_crawl4ai_response(data: dict, include_html: bool, max_content_length: int | None) -> tuple[str, str]:
+    """Parse Crawl4AI API response and extract content.
+
+    Returns:
+        Tuple of (content, error). If successful, error is empty.
+    """
+    results = data.get("results", [])
+    if not results:
+        return "", f"Crawl4AI error: {data.get('error', 'No results returned')}"
+
+    result_data = results[0]
+    if not result_data.get("success", False):
+        error_msg = result_data.get("error_message", result_data.get("error", "Unknown error"))
+        return "", f"Crawl4AI error: {error_msg}"
+
+    # Prefer fit_markdown (pruned), then markdown, then html
+    markdown_data = result_data.get("markdown", "")
+    if isinstance(markdown_data, dict):
+        content = markdown_data.get("fit_markdown") or markdown_data.get("raw_markdown") or ""
+    else:
+        content = markdown_data or ""
+
+    if not content and include_html:
+        content = result_data.get("html") or result_data.get("cleaned_html") or ""
+
+    metadata = result_data.get("metadata", {})
+    title = metadata.get("title", "") if isinstance(metadata, dict) else ""
+    if title and content:
+        content = f"# {title}\n\n{content}"
+
+    if max_content_length and len(content) > max_content_length:
+        content = content[:max_content_length] + "\n\n[Content truncated]"
+
+    return content, ""
+
+
+class Crawl4AIBrowseTool(Tool):
+    """
+    Tool for fetching webpage content using Crawl4AI Docker API.
+    Requires CRAWL4AI_API_URL, CRAWL4AI_API_KEY, and CRAWL4AI_BLOCKLIST_PATH environment variables.
+
+    This tool uses the Docker version with AI2 configuration by default.
+    Based on: https://github.com/rlresearch/dr-tulu/blob/main/agent/dr_agent/tool_interface/mcp_tools.py
+    """
+
+    config_name = "crawl4ai_browse"
+    description = "Fetches and converts webpage content to clean markdown using Crawl4AI"
+    parameters = {
+        "type": "object",
+        "properties": {"url": {"type": "string", "description": "The URL of the webpage to fetch"}},
+        "required": ["url"],
+    }
+
+    def __init__(
+        self,
+        call_name: str,
+        timeout: int = 180,
+        ignore_links: bool = True,
+        bypass_cache: bool = False,
+        include_html: bool = False,
+        max_content_length: int | None = 5000,
+    ) -> None:
+        self.call_name = call_name
+        self.timeout = timeout
+        self.ignore_links = ignore_links
+        self.bypass_cache = bypass_cache
+        self.include_html = include_html
+        self.max_content_length = max_content_length
+
+        self.api_url = os.environ.get("CRAWL4AI_API_URL")
+        if not self.api_url:
+            raise ValueError("Missing CRAWL4AI_API_URL environment variable.")
+        self.api_key = os.environ.get("CRAWL4AI_API_KEY")
+        if not self.api_key:
+            raise ValueError("Missing CRAWL4AI_API_KEY environment variable.")
+
+        blocklist_path = os.environ.get("CRAWL4AI_BLOCKLIST_PATH")
+        if not blocklist_path:
+            raise ValueError("Missing CRAWL4AI_BLOCKLIST_PATH environment variable.")
+        if not os.path.exists(blocklist_path):
+            raise FileNotFoundError(f"Blocklist file not found: {blocklist_path}")
+        with open(blocklist_path, encoding="utf-8") as f:
+            self.blocklist = [line.strip() for line in f if line.strip()]
+
+    async def execute(self, url: str) -> ToolOutput:
+        """Fetch webpage content via Crawl4AI Docker API."""
+        if not url or not url.strip():
+            result = ToolOutput(
+                output="", error="Empty URL. Please provide a URL to fetch.", called=True, timeout=False, runtime=0
+            )
+            _log_tool_call(self.call_name, url or "", result)
+            return result
+
+        start_time = time.time()
+
+        # Build request payload matching Crawl4AI Docker API format
+        # See: https://docs.crawl4ai.com/core/docker-deployment/
+        crawler_params: dict = {
+            "cache_mode": "bypass" if self.bypass_cache else "enabled",
+            "word_count_threshold": 10,
+            "exclude_social_media_links": True,
+            "excluded_tags": ["form", "header", "footer", "nav"],
+            "page_timeout": (self.timeout - 1) * 1000,  # Convert to ms, leave 1s buffer
+            "exclude_domains": self.blocklist,
+        }
+
+        if self.ignore_links:
+            crawler_params["exclude_external_links"] = True
+
+        payload = {
+            "urls": [url.strip()],
+            "browser_config": {"type": "BrowserConfig", "params": {"headless": True}},
+            "crawler_config": {"type": "CrawlerRunConfig", "params": crawler_params},
+        }
+
+        headers = {"Content-Type": "application/json", "x-api-key": self.api_key}
+
+        crawl_endpoint = f"{self.api_url.rstrip('/')}/crawl"
+        api_response = await make_api_request(
+            url=crawl_endpoint, timeout_seconds=self.timeout, json_payload=payload, headers=headers
+        )
+
+        if api_response.error:
+            result = ToolOutput(
+                output=api_response.error,
+                called=True,
+                error=api_response.error,
+                timeout=api_response.timed_out,
+                runtime=time.time() - start_time,
+            )
+            _log_tool_call(self.call_name, url, result)
+            return result
+
+        content, error = _parse_crawl4ai_response(api_response.data, self.include_html, self.max_content_length)
+        output = error if error else content
+        result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
+        _log_tool_call(self.call_name, url, result)
+        return result
+
+
 class DrAgentMCPTool(Tool):
     """Wrapper for MCP tools from dr_agent. Requires: uv sync --extra dr-tulu"""
 
@@ -475,6 +614,24 @@ class DrAgentMCPTool(Tool):
 
 
 @dataclass
+class Crawl4AIBrowseToolConfig(BaseToolConfig):
+    """Configuration for the Crawl4AI browse tool."""
+
+    tool_class: ClassVar[type[Tool]] = Crawl4AIBrowseTool
+
+    timeout: int = 180
+    """Timeout in seconds for webpage fetching."""
+    ignore_links: bool = True
+    """Whether to exclude external and social media links from the content."""
+    bypass_cache: bool = False
+    """Whether to bypass the cache and fetch fresh content."""
+    include_html: bool = False
+    """Whether to include HTML content as fallback if markdown is unavailable."""
+    max_content_length: int | None = 5000
+    """Maximum content length in characters. None means no limit."""
+
+
+@dataclass
 class DrAgentMCPToolConfig(BaseToolConfig):
     """Config for MCP tools. Requires: uv sync --extra dr-tulu"""
 
@@ -496,5 +653,6 @@ TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     JinaBrowseToolConfig.tool_class.config_name: JinaBrowseToolConfig,
     S2SearchToolConfig.tool_class.config_name: S2SearchToolConfig,
     SerperSearchToolConfig.tool_class.config_name: SerperSearchToolConfig,
+    Crawl4AIBrowseToolConfig.tool_class.config_name: Crawl4AIBrowseToolConfig,
     DrAgentMCPToolConfig.tool_class.config_name: DrAgentMCPToolConfig,
 }
