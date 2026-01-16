@@ -90,7 +90,6 @@ class ToolsConfig:
                 raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
             self._parsed_tools.append(ParsedToolConfig(name=tool_name, call_name=call_name, config=config))
 
-
     @property
     def enabled(self) -> bool:
         """Return True if any tools are configured."""
