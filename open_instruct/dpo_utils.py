@@ -18,87 +18,135 @@ Adapted from https://github.com/eric-mitchell/direct-preference-optimization/blo
 """
 
 import contextlib
+import functools
 import hashlib
 import json
+import os
 import pathlib
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
-from enum import Enum
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
+from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils
+from open_instruct import dpo_config as dpo_config_lib
+from open_instruct import logger_utils, model_utils
 from open_instruct.dataset_transformation import TokenizerConfig, compute_config_hash, load_dataset_configs
-from open_instruct.dpo_config import DPOConfigProtocol, DPOLossType
-from open_instruct.model_utils import TensorCache, log_softmax_and_gather
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
-__all__ = ["DPOLossType"]
-
 logger = logger_utils.setup_logger(__name__)
+
+REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
+    "REFERENCE_LOGPROBS_CACHE_PATH", "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
+)
 
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-def config_to_json_serializable(obj: Any) -> Any:
-    if isinstance(obj, dict):
-        return {k: config_to_json_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [config_to_json_serializable(v) for v in obj]
-    if isinstance(obj, Enum):
-        return obj.value
-    return obj
+@dataclass
+class ModelConfig:
+    """Configuration for model loading."""
+
+    model_name_or_path: str | None = None
+    use_flash_attn: bool = True
+    model_revision: str | None = None
+    low_cpu_mem_usage: bool = False
+    concatenated_forward: bool = True
+    packing: bool = False
+
+    @property
+    def forward_fn(self) -> Callable:
+        fn = concatenated_forward if self.concatenated_forward else separate_forward
+        if self.packing:
+            if not self.concatenated_forward:
+                raise NotImplementedError("separate forward not implemented for packing/padding-free")
+            fn = functools.partial(fn, packing=True)
+        return fn
 
 
-def compute_reference_logprobs_cache_hash(
-    model_name_or_path: str,
-    model_revision: str | None,
-    dpo_loss_type: str,
-    concatenated_forward: bool,
-    packing: bool,
-    use_lora: bool,
-    use_qlora: bool,
-    max_train_samples: int | None,
-    dataset_config_hash: str,
-) -> str:
-    """Compute deterministic hash for reference logprobs cache.
+@dataclass
+class FlatArguments(
+    dpo_config_lib.ExperimentConfig,
+    ModelConfig,
+    dpo_config_lib.DPOHyperparamsConfig,
+    dpo_config_lib.TrainingConfig,
+    dpo_config_lib.DatasetConfig,
+    dpo_config_lib.LoRAConfig,
+    dpo_config_lib.LoggingConfig,
+    dpo_config_lib.HubConfig,
+    dpo_config_lib.CheckpointConfig,
+    dpo_config_lib.EvalConfig,
+):
+    """Full arguments class for DPO fine-tuning jobs."""
 
-    This unified function is used by both dpo.py (OLMo-core) and
-    dpo_tune_cache.py (Accelerate) to generate consistent cache keys.
-    """
-    cache_key = {
-        "concatenated_forward": concatenated_forward,
-        "dataset_config_hash": dataset_config_hash,
-        "dpo_loss_type": dpo_loss_type if isinstance(dpo_loss_type, str) else dpo_loss_type.value,
-        "max_train_samples": max_train_samples,
-        "model_name_or_path": model_name_or_path,
-        "model_revision": model_revision,
-        "packing": packing,
-        "use_lora": use_lora,
-        "use_qlora": use_qlora,
-    }
-    config_str = json.dumps(cache_key, sort_keys=True)
-    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
+    _VALID_DICT_FIELDS = ["additional_model_arguments"]
+
+    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    do_not_randomize_output_dir: bool = False
+    config_name: str | None = field(default=None)
+    additional_model_arguments: dict | str | None = field(default_factory=dict)
+    sync_each_batch: bool = False
+    dataset_name: str | None = field(default=None)
+    dataset_mixer: dict | None = field(default=None)
+    dataset_mix_dir: str | None = field(default=None)
+    dataset_config_name: str | None = field(default=None)
+    max_train_samples: int | None = field(default=None)
+    preprocessing_num_workers: int | None = field(default=None)
+    max_seq_length: int | None = field(default=None)
+    overwrite_cache: bool = field(default=False)
+    use_qlora: bool = field(default=False)
+    timeout: int = field(default=1800)
+    resume_from_checkpoint: str | None = field(default=None)
+    save_to_hub: str | None = field(default=None)
+    use_liger_kernel: bool = field(default=False)
+    checkpointing_steps: str | None = field(default=None)
+    hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
+    zero_stage: int | None = field(default=None)
+    offload_optimizer: bool = field(default=False)
+    offload_param: bool = field(default=False)
+    zero_hpz_partition_size: int = field(default=8)
+    try_auto_save_to_beaker: bool = True
+    gs_bucket_path: str | None = None
+    oe_eval_tasks: list[str] | None = None
+    oe_eval_max_length: int = 4096
+    oe_eval_gpu_multiplier: int | None = None
+    eval_workspace: str | None = "ai2/tulu-3-results"
+    eval_priority: str | None = "high"
+
+    def __post_init__(self):
+        if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
+            raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
+        if (
+            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
+            or (self.dataset_name is not None)
+            or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
+        ):
+            raise ValueError("Cannot provide two dataset selection mechanisms.")
+        if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
+            raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
+
+        for dict_feld in self._VALID_DICT_FIELDS:
+            passed_value = getattr(self, dict_feld)
+            if isinstance(passed_value, str) and passed_value.startswith("{"):
+                loaded_dict = json.loads(passed_value)
+                loaded_dict = _convert_str_dict(loaded_dict)
+                setattr(self, dict_feld, loaded_dict)
+
+        if self.zero_stage is not None:
+            if self.zero_stage not in [0, 1, 2, 3]:
+                raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
+            if self.offload_param and self.zero_stage != 3:
+                raise ValueError("offload_param can only be used with zero_stage 3")
 
 
-def compute_reference_cache_hash(args: DPOConfigProtocol, tc: TokenizerConfig) -> str:
-    """Compute deterministic hash for reference logprobs cache from config object.
-
-    This convenience wrapper extracts the required fields from a DPO config object
-    and delegates to compute_reference_logprobs_cache_hash. Both DPOExperimentConfig
-    (OLMo-core) and FlatArguments (Accelerate) satisfy DPOConfigProtocol.
-    """
-    assert args.model_name_or_path is not None, "model_name_or_path is required"
-    assert args.dataset_mixer_list is not None, "dataset_mixer_list is required"
-    assert args.dataset_mixer_list_splits is not None, "dataset_mixer_list_splits is required"
-    assert args.dataset_transform_fn is not None, "dataset_transform_fn is required"
-
+def compute_reference_cache_hash(args: FlatArguments, tc: TokenizerConfig) -> str:
+    """Compute deterministic hash for reference logprobs cache from FlatArguments."""
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     dcs = load_dataset_configs(
         args.dataset_mixer_list,
@@ -108,17 +156,21 @@ def compute_reference_cache_hash(args: DPOConfigProtocol, tc: TokenizerConfig) -
         args.dataset_target_columns,
     )
     dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
-    return compute_reference_logprobs_cache_hash(
-        model_name_or_path=args.model_name_or_path,
-        model_revision=args.model_revision,
-        dpo_loss_type=args.dpo_loss_type,
-        concatenated_forward=args.concatenated_forward,
-        packing=args.packing,
-        use_lora=args.use_lora,
-        use_qlora=args.use_qlora,
-        max_train_samples=args.max_train_samples,
-        dataset_config_hash=dataset_config_hash,
+    config_str = json.dumps(
+        {
+            "concatenated_forward": args.concatenated_forward,
+            "dataset_config_hash": dataset_config_hash,
+            "dpo_loss_type": args.dpo_loss_type,
+            "max_train_samples": args.max_train_samples,
+            "model_name_or_path": args.model_name_or_path,
+            "model_revision": args.model_revision,
+            "packing": args.packing,
+            "use_lora": args.use_lora,
+            "use_qlora": args.use_qlora,
+        },
+        sort_keys=True,
     )
+    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
 def build_reference_logprobs_cache(
@@ -135,7 +187,7 @@ def build_reference_logprobs_cache(
     all_reduce_fn: Callable[[torch.Tensor], None],
     is_main_process: bool,
     show_progress: bool = True,
-) -> TensorCache:
+) -> model_utils.TensorCache:
     """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
 
     This unified function works with both OLMo-core and Accelerate frameworks by accepting
@@ -164,7 +216,7 @@ def build_reference_logprobs_cache(
     """
     if cache_path is not None and cache_path.exists():
         logger.info(f"Loading reference logprobs cache from {cache_path}")
-        return TensorCache.from_disk(cache_path, device=device)
+        return model_utils.TensorCache.from_disk(cache_path, device=device)
 
     model.eval()
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
@@ -196,11 +248,14 @@ def build_reference_logprobs_cache(
         )
 
     model.train()
-    cache = TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
+    cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
 
     if cache_path is not None and is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
+
+    if is_distributed():
+        dist.barrier()
 
     return cache
 
@@ -231,10 +286,7 @@ def dpo_loss(
             and implicitly use a reference model that assigns equal probability to all responses.
 
     Returns:
-        A tuple of three tensors: (losses, chosen_rewards, rejected_rewards).
-        The losses tensor contains the DPO loss for each example in the batch.
-        The chosen_rewards and rejected_rewards tensors contain the rewards
-            for the chosen and rejected responses, respectively.
+        A tuple of three tensors: (losses, mean_chosen_rewards, mean_rejected_rewards).
     """
     pi_logratios = policy_chosen_logps - policy_rejected_logps
     ref_logratios = reference_chosen_logps - reference_rejected_logps
@@ -245,8 +297,8 @@ def dpo_loss(
     logits = pi_logratios - ref_logratios
 
     losses = -F.logsigmoid(beta * logits) * (1 - label_smoothing) - F.logsigmoid(-beta * logits) * label_smoothing
-    chosen_rewards = beta * (policy_chosen_logps - reference_chosen_logps).detach()
-    rejected_rewards = beta * (policy_rejected_logps - reference_rejected_logps).detach()
+    chosen_rewards = (beta * (policy_chosen_logps - reference_chosen_logps)).detach().mean()
+    rejected_rewards = (beta * (policy_rejected_logps - reference_rejected_logps)).detach().mean()
 
     return losses, chosen_rewards, rejected_rewards
 
@@ -278,7 +330,7 @@ def wpo_loss(
         rejected_loss_mask: Boolean mask for rejected response tokens.
 
     Returns:
-        A tuple of (losses, chosen_rewards, rejected_rewards).
+        A tuple of (losses, mean_chosen_rewards, mean_rejected_rewards).
     """
     pi_logratios = policy_chosen_logps - policy_rejected_logps
     ref_logratios = reference_chosen_logps - reference_rejected_logps
@@ -295,8 +347,8 @@ def wpo_loss(
         - F.logsigmoid(-beta * logits) * label_smoothing * policy_weights
     )
 
-    chosen_rewards = beta * (policy_chosen_logps - reference_chosen_logps).detach()
-    rejected_rewards = beta * (policy_rejected_logps - reference_rejected_logps).detach()
+    chosen_rewards = (beta * (policy_chosen_logps - reference_chosen_logps)).detach().mean()
+    rejected_rewards = (beta * (policy_rejected_logps - reference_rejected_logps)).detach().mean()
 
     return losses, chosen_rewards, rejected_rewards
 
@@ -316,9 +368,7 @@ def simpo_loss(
         policy_rejected_logps: Log probabilities of the policy model for the rejected responses. Shape: (batch_size,)
 
     Returns:
-        A tuple of three tensors: (losses, chosen_rewards, rejected_rewards).
-        The losses tensor contains the SimPO loss for each example in the batch.
-        The chosen_rewards and rejected_rewards tensors contain the rewards for the chosen and rejected responses, respectively.
+        A tuple of (losses, mean_chosen_rewards, mean_rejected_rewards).
     """
     pi_logratios = policy_chosen_logps - policy_rejected_logps
     logits = pi_logratios - gamma_beta_ratio
@@ -326,10 +376,54 @@ def simpo_loss(
     # sigmoid loss type from SimPO.
     losses = -F.logsigmoid(beta * logits) * (1 - label_smoothing) - F.logsigmoid(-beta * logits) * label_smoothing
 
-    chosen_rewards = beta * policy_chosen_logps.detach()
-    rejected_rewards = beta * policy_rejected_logps.detach()
+    chosen_rewards = (beta * policy_chosen_logps).detach().mean()
+    rejected_rewards = (beta * policy_rejected_logps).detach().mean()
 
     return losses, chosen_rewards, rejected_rewards
+
+
+def compute_loss(
+    args: dpo_config_lib.DPOHyperparamsConfig,
+    batch: dict[str, torch.Tensor],
+    policy_chosen_logps: torch.Tensor,
+    policy_rejected_logps: torch.Tensor,
+    reference_cache: model_utils.TensorCache | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    loss_type = args.dpo_loss_type
+
+    if loss_type in (dpo_config_lib.DPOLossType.dpo, dpo_config_lib.DPOLossType.dpo_norm):
+        assert reference_cache is not None
+        ref_logps = reference_cache[batch["index"]]
+        return dpo_loss(
+            policy_chosen_logps,
+            policy_rejected_logps,
+            ref_logps["chosen_logps"],
+            ref_logps["rejected_logps"],
+            beta=args.dpo_beta,
+            label_smoothing=args.dpo_label_smoothing,
+        )
+    elif loss_type == dpo_config_lib.DPOLossType.simpo:
+        return simpo_loss(
+            policy_chosen_logps,
+            policy_rejected_logps,
+            beta=args.dpo_beta,
+            gamma_beta_ratio=args.dpo_gamma_beta_ratio,
+            label_smoothing=args.dpo_label_smoothing,
+        )
+    elif loss_type == dpo_config_lib.DPOLossType.wpo:
+        assert reference_cache is not None
+        ref_logps = reference_cache[batch["index"]]
+        return wpo_loss(
+            policy_chosen_logps,
+            policy_rejected_logps,
+            ref_logps["chosen_logps"],
+            ref_logps["rejected_logps"],
+            beta=args.dpo_beta,
+            label_smoothing=args.dpo_label_smoothing,
+            chosen_loss_mask=batch["chosen_labels"] != -100,
+            rejected_loss_mask=batch["rejected_labels"] != -100,
+        )
+    raise ValueError(f"Unknown loss type: {loss_type}")
 
 
 def _get_batch_logps(logits: torch.Tensor, labels: torch.Tensor, average_log_prob: bool = False) -> torch.Tensor:
@@ -356,7 +450,7 @@ def _get_batch_logps(logits: torch.Tensor, labels: torch.Tensor, average_log_pro
     # dummy token; we'll ignore the losses on these tokens later
     labels[labels == -100] = 0
 
-    per_token_logps = log_softmax_and_gather(logits, labels)
+    per_token_logps = model_utils.log_softmax_and_gather(logits, labels)
 
     if average_log_prob:
         return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)

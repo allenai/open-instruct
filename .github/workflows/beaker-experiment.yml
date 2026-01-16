@@ -18,6 +18,9 @@ jobs:
     name: Launch Beaker Experiment
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
 
     steps:
       - name: Checkout repository
@@ -106,8 +109,6 @@ jobs:
           FINETUNE_CHANGED: ${{ steps.changed-files.outputs.finetune_changed }}
           GRPO_CHANGED: ${{ steps.changed-files.outputs.grpo_changed }}
         run: |
-          set -euo pipefail
-
           echo "Building Docker image and launching experiments..."
           echo "Git commit: $(git rev-parse --short HEAD)"
 
@@ -155,10 +156,10 @@ jobs:
             fi
 
             echo "=== Launching ${EXP_NAME} ==="
-            if ! launch_and_capture "$EXP_SCRIPT" "$EXP_NAME"; then
+            launch_and_capture "$EXP_SCRIPT" "$EXP_NAME" || {
               EXIT_CODE=$?
               exit $EXIT_CODE
-            fi
+            }
           done
 
           if [ ${#EXPERIMENT_IDS[@]} -eq 0 ]; then
@@ -204,8 +205,6 @@ jobs:
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: |
-          set -euo pipefail
-
           EXPERIMENT_IDS=(${{ steps.launch.outputs.experiment_ids }})
           EXPERIMENT_NAMES=(${{ steps.launch.outputs.experiment_names }})
 
@@ -275,8 +274,6 @@ jobs:
           BEAKER_TARGET_IMAGE: open_instruct_auto
           SOURCE_IMAGE: ${{ steps.launch.outputs.integration_image }}
         run: |
-          set -euo pipefail
-
           SHORT_SHA=$(git rev-parse --short HEAD)
           DESCRIPTION="Created from commit: ${SHORT_SHA} (GitHub run ${GITHUB_RUN_ID})"
           BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
