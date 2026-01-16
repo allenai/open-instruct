@@ -26,10 +26,8 @@
 - Launch the GPU tests with `./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_tests.sh`.
 - If you are given a Beaker URL (beaker\.allen\.ai.*) use the Beaker CLI tool to interact with it.
 
-# Coding Standards
+# Coding conventions
 - Use `logger = logger_utils.setup_logger(__name__)` for logging, not `get_logger` from accelerate.
-- Use the `parameterized` library for parameterized tests
-- Keep tests using unittest style (not pytest style)
 
 # Documentation
 To verify that documentation changes don't alter the generated output:
