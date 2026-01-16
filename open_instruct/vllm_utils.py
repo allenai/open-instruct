@@ -905,7 +905,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         response_masks.extend([1] * len(model_tokens))
 
         # check if we have tools to check for
-        if not actor.tool_actors or actor.tool_parser is None:
+        # allowed_tools is empty if active_tools=[] for this sample (no tools active)
+        if not actor.tool_actors or actor.tool_parser is None or not allowed_tools:
             break
 
         tool_calls = actor.tool_parser.get_tool_calls(output.text)
