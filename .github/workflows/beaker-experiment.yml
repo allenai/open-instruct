@@ -156,10 +156,10 @@ jobs:
             fi
 
             echo "=== Launching ${EXP_NAME} ==="
-            if ! launch_and_capture "$EXP_SCRIPT" "$EXP_NAME"; then
+            launch_and_capture "$EXP_SCRIPT" "$EXP_NAME" || {
               EXIT_CODE=$?
               exit $EXIT_CODE
-            fi
+            }
           done
 
           if [ ${#EXPERIMENT_IDS[@]} -eq 0 ]; then
