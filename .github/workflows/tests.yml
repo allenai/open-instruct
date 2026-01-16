@@ -57,13 +57,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run GPU tests on Beaker
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: open-instruct-gpu-tests:latest
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            GIT_BRANCH=${{ github.head_ref || github.ref_name }}
+          cache-from: type=registry,ref=ghcr.io/allenai/open-instruct:buildcache
+          cache-to: type=inline
+
+      - name: Upload image to Beaker and run tests
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
           DOCKER_CACHE_PUSH: "1"
           DOCKER_CACHE_REPO: ghcr.io/${{ github.repository }}:buildcache
         run: |
-          output=$(./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh 2>&1)
+          beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
+          short_sha="${GITHUB_SHA::8}"
+          image_name="open-instruct-gpu-tests-${short_sha}"
+
+          beaker image create open-instruct-gpu-tests:latest -n "$image_name" -w "ai2/$beaker_user" --description "Git commit: ${{ github.sha }}"
+
+          uv sync --frozen
+          output=$(bash scripts/train/debug/run_gpu_pytest.sh "$beaker_user/$image_name" 2>&1)
           echo "$output"
 
           exp_url=$(echo "$output" | grep -oP 'https://beaker.org/ex/[^\s]+' | head -1)

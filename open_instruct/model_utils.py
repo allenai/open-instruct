@@ -16,6 +16,8 @@
 
 import asyncio
 import itertools
+import pathlib
+import tempfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -40,6 +42,32 @@ from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
+
+
+@dataclass
+class TensorCache:
+    """A cache for tensors indexed by dataset indices."""
+
+    tensors: dict[str, torch.Tensor]
+
+    def __getitem__(self, indices: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Get cached tensors for the given indices."""
+        return {k: v[indices.long()] for k, v in self.tensors.items()}
+
+    def to_disk(self, path: str | pathlib.Path) -> None:
+        """Save the cache to disk atomically using temp file and rename."""
+        path = pathlib.Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        cpu_tensors = {k: v.cpu() for k, v in self.tensors.items()}
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False, suffix=".tmp") as tmp:
+            tmp_path = pathlib.Path(tmp.name)
+            torch.save(cpu_tensors, tmp_path)
+        tmp_path.rename(path)
+
+    @classmethod
+    def from_disk(cls, path: str | pathlib.Path, device: torch.device) -> "TensorCache":
+        """Load a cache from disk."""
+        return cls(tensors=torch.load(path, weights_only=True, map_location=device))
 
 
 @dataclass
@@ -101,9 +129,10 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
-    attn_implementation: Literal["flash_attention_2"] | None = None
-    """Which attention implementation to use; you can run --attn_implementation=flash_attention_2, in which case
-    you must install this manually by running `pip install flash-attn --no-build-isolation`"""
+    attn_implementation: Literal["flash_attention_2", "sdpa"] = "flash_attention_2"
+    """Which attention implementation to use.
+    flash_attention_2: Requires flash-attn package (default)
+    sdpa: Uses PyTorch's native scaled_dot_product_attention (no flash-attn required)"""
     use_cache: bool | None = None
     """Whether to use cache in the model."""
     gradient_checkpointing: bool = False
@@ -192,6 +221,7 @@ def load_ref_policy(
     device: torch.device,
     rank: int,
     checkpoint_path: str | None = None,
+    mpu: torch.distributed.distributed_c10d.ProcessGroup | None = None,
     ref_policy_update_freq: int | None = None,
     alpha: float = 0.0,
 ) -> transformers.PreTrainedModel:
@@ -205,6 +235,7 @@ def load_ref_policy(
         device: Target device for loading checkpoint.
         rank: Global process rank for logging.
         checkpoint_path: Optional path to model checkpoint to load.
+        mpu: Optional model parallel unit for sequence parallelism.
         ref_policy_update_freq: Frequency of reference policy updates. If None, no updates occur.
         alpha: Alpha value for polyak updates. If 0, no updates occur.
 
@@ -217,12 +248,12 @@ def load_ref_policy(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
         dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
+        attn_implementation=model_config.attn_implementation,
         use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
     disable_dropout_in_model(ref_policy)
-    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config)
+    ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
     ref_policy.eval()
 
     if checkpoint_path:
@@ -681,8 +712,9 @@ def print_rich_single_line_metrics(metrics):
         values = grouped_metrics[category]
         value_strings = []
         for key, value in values:
-            # Use the last part of the key as the display name
-            display_name = key.split("/")[-1]
+            # Use everything after the first "/" as the display name
+            parts = key.split("/")
+            display_name = "/".join(parts[1:]) if len(parts) > 1 else key
             value_strings.append(f"{display_name}: {format_value(value)}")
 
         # Join all values for this category into a single string

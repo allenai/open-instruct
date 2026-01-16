@@ -25,9 +25,10 @@ with contextlib.suppress(Exception):
     import deepspeed
 
 # isort: on
+import hashlib
 import json
 import math
-import os
+import pathlib
 import random
 import shutil
 import time
@@ -35,10 +36,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
-from typing import Literal
 
 import datasets
 import torch
+import torch.distributed as dist
 import torch.utils
 import torch.utils.data
 import transformers
@@ -54,12 +55,14 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, utils
+from open_instruct import dpo_config as dpo_config_lib
+from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
-    TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
+    compute_config_hash,
     get_cached_dataset_tulu,
+    load_dataset_configs,
     visualize_token,
 )
 from open_instruct.dpo_utils import (
@@ -70,13 +73,6 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
-from open_instruct.launch_utils import (
-    is_beaker_job,
-    launch_ai2_evals_on_weka,
-    maybe_get_beaker_config,
-    maybe_update_beaker_description,
-)
-from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -84,15 +80,34 @@ from open_instruct.utils import (
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
     get_wandb_tags,
+    is_beaker_job,
+    launch_ai2_evals_on_weka,
+    maybe_get_beaker_config,
+    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
 )
 
 logger = get_logger(__name__)
 
+REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
+    "REFERENCE_LOGPROBS_CACHE_PATH", "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
+)
+
 
 @dataclass
-class FlatArguments:
+class FlatArguments(
+    dpo_config_lib.ExperimentConfig,
+    dpo_config_lib.ModelConfig,
+    dpo_config_lib.DPOHyperparamsConfig,
+    dpo_config_lib.TrainingConfig,
+    dpo_config_lib.DatasetConfig,
+    dpo_config_lib.LoRAConfig,
+    dpo_config_lib.LoggingConfig,
+    dpo_config_lib.HubConfig,
+    dpo_config_lib.CheckpointConfig,
+    dpo_config_lib.EvalConfig,
+):
     """
     Full arguments class for all fine-tuning jobs.
     """
@@ -104,89 +119,22 @@ class FlatArguments:
     _VALID_DICT_FIELDS = ["additional_model_arguments"]
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
-    """The name of this experiment"""
-    run_name: str | None = None
-    """A unique name of this run"""
-    add_seed_and_date_to_exp_name: bool = True
-    """Append the seed and date to exp_name"""
     do_not_randomize_output_dir: bool = False
     """By default the output directory will be randomized"""
-    model_name_or_path: str | None = field(
-        default=None,
-        metadata={
-            "help": (
-                "The model checkpoint for weights initialization. Don't set if you want to train a model from scratch."
-            )
-        },
-    )
     config_name: str | None = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
-    dpo_use_paged_optimizer: bool = field(
-        default=False,
-        metadata={
-            "help": "Use paged optimizer from bitsandbytes."
-            " Not compatible with deepspeed (use deepspeed config instead)."
-        },
-    )
-    dpo_beta: float = field(default=0.1, metadata={"help": "Beta parameter for DPO loss. Default is 0.1."})
-    dpo_loss_type: str = field(
-        default="dpo", metadata={"help": "Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."}
-    )
-    dpo_gamma_beta_ratio: float = field(
-        default=0.3, metadata={"help": "Gamma to beta ratio for SimPO loss. Default is 0.3. Not used for DPO loss."}
-    )
-    dpo_label_smoothing: float = field(
-        default=0.0, metadata={"help": "Label smoothing for DPO/SimPO loss. Default is 0 (no smoothing)."}
-    )
-    use_flash_attn: bool = field(
-        default=True, metadata={"help": "Whether to use flash attention in the model training"}
-    )
-    model_revision: str | None = field(
-        default=None,
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
     additional_model_arguments: dict | str | None = field(
         default_factory=dict, metadata={"help": "A dictionary of additional model args used to construct the model."}
     )
     sync_each_batch: bool = False
     """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
-    low_cpu_mem_usage: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "It is an option to create the model as an empty shell, "
-                "then only materialize its parameters when the pretrained weights are loaded. "
-                "set True will benefit LLM loading time and RAM consumption."
-            )
-        },
-    )
     dataset_name: str | None = field(
         default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
     )
     dataset_mixer: dict | None = field(
         default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
     )
-    dataset_mixer_list: list[str] = field(
-        default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
-    )
-    """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
-    """The dataset splits to use for training"""
-    dataset_transform_fn: list[str] = field(
-        default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
-    )
-    """The list of transform functions to apply to the dataset."""
-    dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
-    """The columns to use for the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "local"
-    """The mode to use for caching the dataset."""
-    dataset_local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
-    dataset_config_hash: str | None = None
-    """The hash of the dataset configuration."""
-    dataset_skip_cache: bool = False
-    """Whether to skip the cache."""
     dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
@@ -217,50 +165,10 @@ class FlatArguments:
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
     )
-    clip_grad_norm: float = field(
-        default=-1,
-        metadata={"help": "Clip gradient norm. Not compatible with deepspeed (use deepspeed config instead)."},
-    )
-    gradient_accumulation_steps: int = field(
-        default=1, metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."}
-    )
-    learning_rate: float = field(default=2e-5, metadata={"help": "The initial learning rate for AdamW optimizer."})
-    logging_steps: int | None = field(
-        default=None, metadata={"help": "Log the training loss and learning rate every logging_steps steps."}
-    )
-    lora_rank: int = field(default=64, metadata={"help": "The rank of lora."})
-    lora_alpha: float = field(default=16, metadata={"help": "The alpha parameter of lora."})
-    lora_dropout: float = field(default=0.1, metadata={"help": "The dropout rate of lora modules."})
-    lr_scheduler_type: str = field(
-        default="linear",
-        metadata={
-            "help": "The scheduler type to use for learning rate adjustment.",
-            "choices": ["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
-        },
-    )
-    num_train_epochs: int = field(default=2, metadata={"help": "Total number of training epochs to perform."})
-    output_dir: str = field(
-        default="output/",
-        metadata={"help": "The output directory where the model predictions and checkpoints will be written."},
-    )
-    per_device_train_batch_size: int = field(
-        default=8, metadata={"help": "Batch size per GPU/TPU core/CPU for training."}
-    )
-    use_lora: bool = field(
-        default=False,
-        metadata={"help": "If True, will use LORA (low-rank parameter-efficient training) to train the model."},
-    )
     use_qlora: bool = field(
         default=False,
         metadata={"help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."},
     )
-    use_8bit_optimizer: bool = field(
-        default=False, metadata={"help": "Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed."}
-    )
-    warmup_ratio: float = field(
-        default=0.03, metadata={"help": "Linear warmup over warmup_ratio fraction of total steps."}
-    )
-    weight_decay: float = field(default=0.0, metadata={"help": "Weight decay for AdamW if we apply some."})
     timeout: int = field(
         default=1800,
         metadata={
@@ -271,74 +179,18 @@ class FlatArguments:
     resume_from_checkpoint: str | None = field(
         default=None, metadata={"help": "If the training should continue from a checkpoint folder."}
     )
-    report_to: str | list[str] = field(
-        default="all",
-        metadata={
-            "help": "The integration(s) to report results and logs to. "
-            "Can be a single string or a list of strings. "
-            "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'. "
-            "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
-        },
-    )
     save_to_hub: str | None = field(
         default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
     )
-    gradient_checkpointing: bool = field(
-        default=False, metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."}
-    )
     use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
-    max_train_steps: int | None = field(
-        default=None,
-        metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
-    )
-    seed: int = field(default=42, metadata={"help": "Random seed for initialization and dataset shuffling."})
     checkpointing_steps: str | None = field(
         default=None,
         metadata={
             "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
         },
     )
-    keep_last_n_checkpoints: int = field(
-        default=3, metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."}
-    )
-    fused_optimizer: bool = field(default=True, metadata={"help": "Whether to use fused AdamW or not."})
-    load_balancing_loss: bool = field(
-        default=False, metadata={"help": "Whether to include a load balancing loss (for OLMoE) or not."}
-    )
-    load_balancing_weight: float = field(
-        default=0.001, metadata={"help": "Weight for load balancing loss if applicable."}
-    )
-    concatenated_forward: bool = True
-    """Whether to concatenate chosen and rejected for DPO training; True is good but you can set to False for saving memory."""
-
-    # Experiment tracking
-    with_tracking: bool = False
-    """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open_instruct_internal"
-    """The wandb's project name"""
-    wandb_entity: str | None = None
-    """The entity (team) of wandb's project"""
-    push_to_hub: bool = True
-    """Whether to upload the saved model to huggingface"""
-    hf_entity: str | None = None
-    """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: str | None = None
-    """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: str | None = None
-    """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: str | None = None
-    """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    try_launch_beaker_eval_jobs: bool = True
-    """Whether to launch beaker evaluation jobs after training"""
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
-
-    packing: bool = field(
-        default=False,
-        metadata={"help": "Whether to use packing/padding-free collation via DataCollatorWithFlatteningDPO"},
-    )
 
     zero_stage: int | None = field(
         default=None,
@@ -444,46 +296,98 @@ def build_deepspeed_config(
     return config
 
 
-def get_cache_ref_logprobs(
+def compute_reference_cache_hash(args: FlatArguments, tc: TokenizerConfig) -> str:
+    """Compute deterministic hash for reference logprobs cache from FlatArguments."""
+    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    dcs = load_dataset_configs(
+        args.dataset_mixer_list,
+        args.dataset_mixer_list_splits,
+        args.dataset_transform_fn,
+        transform_fn_args,
+        args.dataset_target_columns,
+    )
+    dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
+    average_log_prob = args.dpo_loss_type in ["simpo", "dpo_norm"]
+    config_str = json.dumps(
+        {
+            "average_log_prob": average_log_prob,
+            "concatenated_forward": args.concatenated_forward,
+            "dataset_config_hash": dataset_config_hash,
+            "dpo_loss_type": args.dpo_loss_type,
+            "max_train_samples": args.max_train_samples,
+            "model_name_or_path": args.model_name_or_path,
+            "model_revision": args.model_revision,
+            "packing": args.packing,
+            "use_lora": args.use_lora,
+            "use_qlora": args.use_qlora,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
+
+
+def build_reference_logprobs_cache(
     model: torch.nn.Module,
-    active_dataloader: torch.utils.data.DataLoader,
+    dataloader: torch.utils.data.DataLoader,
     accelerator: Accelerator,
     average_log_prob: bool,
-    last_checkpoint_path: str | None,
-    resume_step: int,
-    epoch_range: range,
     forward_fn: Callable,
-):
-    epoch_cached_reference_chosen_logps = []
-    epoch_cached_reference_rejected_logps = []
-    for epoch in epoch_range:
-        active_dataloader.set_epoch(epoch)
-        if last_checkpoint_path and resume_step is not None:
-            # We skip the first `n` batches in the dataloader when resuming from a checkpoint
-            active_dataloader = accelerator.skip_first_batches(active_dataloader, resume_step)
-        cached_reference_chosen_logps = []
-        cached_reference_rejected_logps = []
-        with torch.no_grad():
-            for batch in tqdm(
-                active_dataloader,
-                disable=not accelerator.is_local_main_process,
-                desc=f"Generating reference cache (epoch {epoch})",
-                bar_format="{l_bar}{bar}{r_bar}\n",
-            ):
-                if args.use_lora:
-                    with accelerator.unwrap_model(model).disable_adapter():
-                        reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
-                            model, batch, average_log_prob=average_log_prob
-                        )
-                else:
-                    reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
-                        model, batch, average_log_prob=average_log_prob
-                    )
-                cached_reference_chosen_logps.append(reference_chosen_logps.cpu())
-                cached_reference_rejected_logps.append(reference_rejected_logps.cpu())
-        epoch_cached_reference_chosen_logps.append(cached_reference_chosen_logps)
-        epoch_cached_reference_rejected_logps.append(cached_reference_rejected_logps)
-    return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
+    full_dataset_size: int,
+    reference_cache_hash: str,
+    use_lora: bool = False,
+) -> model_utils.TensorCache:
+    """Build a TensorCache with reference logprobs by computing logprobs once for all samples."""
+    cache_path = pathlib.Path(REFERENCE_LOGPROBS_CACHE_PATH) / f"{reference_cache_hash}.pt"
+    if cache_path.exists():
+        logger.info(f"Loading reference logprobs cache from {cache_path}")
+        return model_utils.TensorCache.from_disk(cache_path, device=accelerator.device)
+
+    model.eval()
+    device = accelerator.device
+    chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
+    rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
+
+    with torch.no_grad():
+        for batch in tqdm(
+            dataloader, disable=not accelerator.is_local_main_process, desc="Caching reference logprobs"
+        ):
+            if use_lora:
+                with accelerator.unwrap_model(model).disable_adapter():
+                    chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+            else:
+                chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+
+            chosen_tensor[batch["index"]] = chosen_logps
+            rejected_tensor[batch["index"]] = rejected_logps
+
+    # Use MAX instead of SUM because Accelerate's distributed sampler can duplicate
+    # examples across ranks when even_batches=True. MAX works because duplicate
+    # indices compute identical logprobs, so MAX of identical values is correct.
+    # TODO(finbarr): Refactor to use HFDataLoader and explicitly shard the dataset to prevent duplicates.
+    if dist.is_initialized():
+        dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
+        dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
+
+    missing_chosen = torch.where(chosen_tensor == float("-inf"))[0]
+    missing_rejected = torch.where(rejected_tensor == float("-inf"))[0]
+    if len(missing_chosen) > 0 or len(missing_rejected) > 0:
+        missing_indices = torch.unique(torch.cat([missing_chosen, missing_rejected]))
+        raise RuntimeError(
+            f"Missing {len(missing_indices)} indices during reference logprobs caching. "
+            f"First 10: {missing_indices[:10].tolist()}"
+        )
+
+    model.train()
+    cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
+
+    if accelerator.is_main_process:
+        logger.info(f"Saving reference logprobs cache to {cache_path}")
+        cache.to_disk(cache_path)
+
+    if dist.is_initialized():
+        dist.barrier()
+
+    return cache
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
@@ -493,7 +397,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # in the environment
     accelerator_log_kwargs = {}
     if args.with_tracking:
-        accelerator_log_kwargs["log_with"] = args.report_to
+        accelerator_log_kwargs["log_with"] = "wandb"
         accelerator_log_kwargs["project_dir"] = args.output_dir
     # if you get timeouts (e.g. due to long tokenization) increase this.
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
@@ -574,7 +478,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
         accelerator.init_trackers(
-            args.wandb_project_name,
+            args.wandb_project,
             experiment_config,
             init_kwargs={
                 "wandb": {
@@ -585,9 +489,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             },
         )
 
-    if accelerator.is_main_process:
+    if args.with_tracking:
         wandb_tracker = accelerator.get_tracker("wandb")
-        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None)
+        if accelerator.is_main_process:
+            maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
+    else:
+        wandb_tracker = None
+
+    if accelerator.is_main_process:
         pprint([args, tc])
 
     init_gpu_memory = None
@@ -714,7 +623,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         return model
 
     model = load_model()
-    print("=============model loaded")
+    logger.info("=============model loaded")
     print_gpu_stats(init_gpu_memory)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
@@ -755,7 +664,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
     )
 
-    # debugging tool for fewer samples
+    # Capture full dataset size by getting it from the dataset. Sharding happens inside the dataloaders, not the dataset, so we're fine to do this.
+    # This is used to allocate tensors for the logprobs cache.
+    original_dataset_size = len(train_dataset)
     if args.max_train_samples is not None:
         max_train_samples = min(len(train_dataset), args.max_train_samples)
         logger.info(f"Limiting training samples to {max_train_samples} from {len(train_dataset)}.")
@@ -797,13 +708,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
     else:
         optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
-    print("=============optimizer loaded")
+    logger.info("=============optimizer loaded")
     print_gpu_stats(init_gpu_memory)
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if args.max_train_steps is None:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+        args.max_train_steps = args.num_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
 
     # Create the learning rate scheduler.
@@ -831,15 +742,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
-    print("=============accelerate prepared")
+    logger.info("=============accelerate prepared")
     print_gpu_stats(init_gpu_memory)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+        args.max_train_steps = args.num_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
-    args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+    args.num_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
@@ -851,7 +762,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
-    logger.info(f"  Num Epochs = {args.num_train_epochs}")
+    logger.info(f"  Num Epochs = {args.num_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.per_device_train_batch_size}")
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
@@ -880,9 +791,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             completed_steps = resume_step // args.gradient_accumulation_steps
             resume_step -= starting_epoch * len(train_dataloader)
 
-    print(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
+    logger.info(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
 
-    print("=============before cache logprobs")
+    logger.info("=============before cache logprobs")
     print_gpu_stats(init_gpu_memory)
 
     # Cache the logprobs
@@ -893,23 +804,23 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         if not args.concatenated_forward:
             raise NotImplementedError("seperate forward not implemented for packing/padding-free")
         forward_fn = partial(forward_fn, packing=True)
-    if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
-            model,
-            train_dataloader,
-            accelerator,
-            average_log_prob,
-            last_checkpoint_path,
-            resume_step,
-            range(starting_epoch, args.num_train_epochs),
-            forward_fn,
+    if args.dpo_loss_type in ["dpo", "dpo_norm", "wpo"]:
+        reference_cache = build_reference_logprobs_cache(
+            model=model,
+            dataloader=train_dataloader,
+            accelerator=accelerator,
+            average_log_prob=average_log_prob,
+            forward_fn=forward_fn,
+            full_dataset_size=original_dataset_size,
+            use_lora=args.use_lora,
+            reference_cache_hash=compute_reference_cache_hash(args, tc),
         )
-        print("=============after cache logprobs")
+        logger.info("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
-        torch.cuda.empty_cache()  # clear cache
+        torch.cuda.empty_cache()
+        logger.info("=============after cache logprobs; clear cache")
+        print_gpu_stats(init_gpu_memory)
 
-    print("=============after cache logprobs; clear cache")
-    print_gpu_stats(init_gpu_memory)
     # Only show the progress bar once on each machine.
     start_time = time.perf_counter()
     progress_bar = tqdm(
@@ -922,7 +833,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     episode = 0
     total_tokens_processed = 0
     mfu_interval_start = time.perf_counter()
-    for epoch in range(starting_epoch, args.num_train_epochs):
+    for epoch in range(starting_epoch, args.num_epochs):
         model.train()
         train_dataloader.set_epoch(epoch)
         if last_checkpoint_path and resume_step is not None:
@@ -931,7 +842,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         else:
             active_dataloader = train_dataloader
         # we need to average the log probs for simpo loss
-        for step, batch in enumerate(active_dataloader):
+        for batch in active_dataloader:
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
             with accelerator.accumulate(model):
@@ -939,9 +850,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-                    p_device = policy_chosen_logps.device
-                    reference_chosen_logps = epoch_cached_reference_chosen_logps[epoch][step].to(p_device)
-                    reference_rejected_logps = epoch_cached_reference_rejected_logps[epoch][step].to(p_device)
+                    ref_logps = reference_cache[batch["index"]]
+                    reference_chosen_logps = ref_logps["chosen_logps"]
+                    reference_rejected_logps = ref_logps["rejected_logps"]
                     losses, _, _ = dpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
@@ -959,6 +870,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         label_smoothing=args.dpo_label_smoothing,
                     )
                 elif args.dpo_loss_type == "wpo":
+                    ref_logps = reference_cache[batch["index"]]
+                    reference_chosen_logps = ref_logps["chosen_logps"]
+                    reference_rejected_logps = ref_logps["rejected_logps"]
                     losses, _, _ = wpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
@@ -978,8 +892,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
-                if accelerator.sync_gradients and args.clip_grad_norm > 0:
-                    accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                if accelerator.sync_gradients and args.max_grad_norm > 0:
+                    accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()
@@ -1076,7 +990,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                             current_step=completed_steps,
                             total_steps=args.max_train_steps,
                             start_time=start_time,
-                            wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
+                            wandb_url=None if wandb_tracker is None else wandb_tracker.run.get_url(),
                         )
                     # Reset the local metrics
                     local_metrics.metrics.zero_()
@@ -1110,7 +1024,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             accelerator.wait_for_everyone()
 
     if args.output_dir is not None:
-        save_with_accelerate(
+        model_utils.save_with_accelerate(
             accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
         )
 
@@ -1140,7 +1054,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
         )
     if args.push_to_hub and accelerator.is_main_process:
-        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+        model_utils.push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     accelerator.wait_for_everyone()
     if args.with_tracking:
         accelerator.end_training()
@@ -1150,9 +1064,9 @@ def print_gpu_stats(init_gpu_memory: int | None):
     if torch.cuda.is_available():
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
         peak_memory = init_gpu_memory - free_gpu_memory
-        print(f"Peak memory usage: {peak_memory / 1024**3:.2f} GB")
-        print(f"Total memory usage: {total_gpu_memory / 1024**3:.2f} GB")
-        print(f"Free memory: {free_gpu_memory / 1024**3:.2f} GB")
+        logger.info(f"Peak memory usage: {peak_memory / 1024**3:.2f} GB")
+        logger.info(f"Total memory usage: {total_gpu_memory / 1024**3:.2f} GB")
+        logger.info(f"Free memory: {free_gpu_memory / 1024**3:.2f} GB")
 
 
 if __name__ == "__main__":

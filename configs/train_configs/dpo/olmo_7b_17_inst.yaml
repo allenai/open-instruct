@@ -13,10 +13,8 @@ dpo_beta: 0.1
 lr_scheduler_type: linear
 warmup_ratio: 0.1
 weight_decay: 0.0
-num_train_epochs: 3
+num_epochs: 3
 output_dir: output/olmo_instruct_dpo/
 with_tracking: true
-report_to:
-  - wandb
 logging_steps: 1
 add_bos: true

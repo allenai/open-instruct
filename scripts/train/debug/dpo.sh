@@ -5,13 +5,14 @@ uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
     --description "Single GPU DPO run, for debugging purposes." \
-    --workspace ai2/tulu-thinker \
-    --priority high \
+    --workspace ai2/open-instruct-dev \
+    --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
+    --no_auto_dataset_cache \
     --gpus 1 -- accelerate launch \
     --mixed_precision bf16 \
     --num_processes 1 \
@@ -26,12 +27,12 @@ uv run python mason.py \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
-    --num_train_epochs 3 \
+    --num_epochs 3 \
     --output_dir output/dpo_pythia_14m/ \
-    --report_to wandb \
     --logging_steps 1 \
     --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --add_bos \
     --chat_template_name olmo \
     --seed 123 \
+    --try_launch_beaker_eval_jobs false \
     --with_tracking

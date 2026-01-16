@@ -20,6 +20,7 @@ os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
     from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+    import deepspeed.comm as dist
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
@@ -30,6 +31,7 @@ except Exception:
 # isort: on
 import dataclasses
 import functools
+import importlib
 import json
 import logging
 import math
@@ -39,6 +41,7 @@ import random
 import re
 import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -50,30 +53,51 @@ from dataclasses import dataclass
 from multiprocessing import resource_tracker as _rt
 from typing import Any, NewType
 
+import beaker
 import numpy as np
 import ray
 import requests
 import torch
-import vllm.config
+import torch.nn.functional as F
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
+from dateutil import parser
 from huggingface_hub import HfApi
 from ray.util import state as ray_state
+from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import launch_utils, logger_utils
+from open_instruct import data_types, logger_utils
+from open_instruct.launch_utils import GCP_CLUSTERS, gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 DISK_USAGE_WARNING_THRESHOLD = 0.85
 CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://", "/filestore")
+INVALID_LOGPROB = 1.0  # Sentinel value for masked/invalid log probabilities
 
 logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+def import_class_from_string(import_path: str) -> type:
+    """Dynamically import a class from a 'module.path:ClassName' string.
+
+    Args:
+        import_path: Import path in format 'module.submodule:ClassName'.
+
+    Returns:
+        The imported class.
+    """
+    if ":" not in import_path:
+        raise ValueError(f"Invalid import path '{import_path}'. Expected format: 'module.path:ClassName'")
+    module_name, class_name = import_path.rsplit(":", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)
 
 
 def warn_if_low_disk_space(
@@ -892,6 +916,348 @@ def calibrate_checkpoint_state_dir(checkpoint_state_dir: str) -> None:
 
 
 # ----------------------------------------------------------------------------
+# Ai2 user utilities
+@dataclass
+class BeakerRuntimeConfig:
+    beaker_workload_id: str
+    beaker_node_hostname: list[str] | None = None
+    beaker_experiment_url: list[str] | None = None
+    beaker_dataset_ids: list[str] | None = None
+    beaker_dataset_id_urls: list[str] | None = None
+
+
+def is_beaker_job() -> bool:
+    return "BEAKER_JOB_ID" in os.environ
+
+
+def get_beaker_experiment_info(experiment_id: str) -> dict | None:
+    get_experiment_command = f"beaker experiment get {experiment_id} --format json"
+    process = subprocess.Popen(["bash", "-c", get_experiment_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    if process.returncode != 0:
+        print(f"Failed to get Beaker experiment: {stderr}")
+        return None
+    return json.loads(stdout)[0]
+
+
+def beaker_experiment_succeeded(experiment_id: str) -> bool:
+    experiment = get_beaker_experiment_info(experiment_id)
+    num_replicas = experiment["jobs"][0]["execution"]["spec"].get("replicas", 1)
+    if not experiment:
+        return False
+    pprint(experiment)
+    finalizeds = [
+        "finalized" in job["status"] and "exitCode" in job["status"] and job["status"]["exitCode"] == 0
+        for job in experiment["jobs"]
+    ]
+    pprint(finalizeds)
+    return sum(finalizeds) == num_replicas
+
+
+@dataclass
+class DatasetInfo:
+    id: str
+    committed: Any
+    non_empty: bool
+
+
+def get_beaker_dataset_ids(experiment_id: str, sort=False) -> list[str] | None:
+    """if sort is True, the non-empty latest dataset will be availble at the end of the list"""
+    experiment = get_beaker_experiment_info(experiment_id)
+    if not experiment:
+        return None
+    result_ids = [job["result"]["beaker"] for job in experiment["jobs"]]
+    dataset_infos = []
+    for result_id in result_ids:
+        get_dataset_command = f"beaker dataset get {result_id} --format json"
+        process = subprocess.Popen(["bash", "-c", get_dataset_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        if process.returncode != 0:
+            print(f"Failed to get Beaker dataset: {stderr}")
+            return None
+        datasets = json.loads(stdout)
+        dataset_infos.extend(
+            [
+                DatasetInfo(
+                    id=dataset["id"],
+                    committed=dataset["committed"],
+                    non_empty=(
+                        False if dataset["storage"]["totalSize"] is None else dataset["storage"]["totalSize"] > 0
+                    ),
+                )
+                for dataset in datasets
+            ]
+        )
+    if sort:
+        # sort based on empty, then commited
+        dataset_infos.sort(key=lambda x: (x.non_empty, parser.parse(x.committed)))
+    pprint(dataset_infos)
+    return [dataset.id for dataset in dataset_infos]
+
+
+@functools.lru_cache(maxsize=1)
+def get_beaker_whoami() -> str | None:
+    get_beaker_whoami_command = "beaker account whoami --format json"
+    process = subprocess.Popen(
+        ["bash", "-c", get_beaker_whoami_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    stdout, stderr = process.communicate()
+    if process.returncode != 0:
+        print(f"Failed to get Beaker account: {stderr}")
+        return None
+    accounts = json.loads(stdout)
+    return accounts[0]["name"]
+
+
+def maybe_get_beaker_config():
+    beaker_dataset_ids = get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"])
+    # fix condition on basic interactive jobs
+    if beaker_dataset_ids is None:
+        beaker_dataset_id_urls = []
+    else:
+        beaker_dataset_id_urls = [f"https://beaker.org/ds/{dataset_id}" for dataset_id in beaker_dataset_ids]
+    return BeakerRuntimeConfig(
+        beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
+        beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],
+        beaker_experiment_url=f"https://beaker.org/ex/{os.environ['BEAKER_WORKLOAD_ID']}/",
+        beaker_dataset_ids=get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"]),
+        beaker_dataset_id_urls=beaker_dataset_id_urls,
+    )
+
+
+def format_eta(seconds: float) -> str:
+    """Format ETA in a human-readable format."""
+    seconds = int(seconds)
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m"
+    elif hours > 0:
+        return f"{hours}h {minutes}m"
+    else:
+        return f"{minutes}m"
+
+
+def maybe_update_beaker_description(
+    current_step: int | None = None,
+    total_steps: int | None = None,
+    start_time: float | None = None,
+    wandb_url: str | None = None,
+    original_descriptions: dict[str, str] = {},  # noqa: B006
+) -> None:
+    """Update Beaker experiment description with training progress and/or wandb URL.
+
+    Args:
+        current_step: Current training step (for progress tracking)
+        total_steps: Total number of training steps (for progress tracking)
+        start_time: Training start time (from time.time()) (for progress tracking)
+        wandb_url: Optional wandb URL to include
+        original_descriptions: Cache of original descriptions for progress updates
+    """
+    if not is_beaker_job():
+        return
+
+    experiment_id = os.environ.get("BEAKER_WORKLOAD_ID")
+    if not experiment_id:
+        logger.warning(
+            f"BEAKER_WORKLOAD_ID not found in environment. Available env vars: {', '.join(sorted([k for k in os.environ if 'BEAKER' in k]))}"
+        )
+        return
+
+    try:
+        client = beaker.Beaker.from_env()
+    except beaker.exceptions.BeakerConfigurationError as e:
+        logger.warning(f"Failed to initialize Beaker client: {e}")
+        return
+
+    try:
+        # Get the workload first (experiment_id is actually BEAKER_WORKLOAD_ID)
+        workload = client.workload.get(experiment_id)
+        # Then get the experiment spec from the workload
+        spec = client.experiment.get_spec(workload)
+    except (beaker.exceptions.BeakerExperimentNotFound, ValueError):
+        logger.warning(
+            f"Failed to get Beaker experiment with ID: {experiment_id}"
+            "This might be fine if you are e.g. running in an interactive job."
+        )
+        return
+
+    if experiment_id not in original_descriptions:
+        raw_description = spec.description or ""
+        if "git_commit:" in raw_description:
+            raw_description = raw_description.split("git_commit:")[0].strip()
+        original_descriptions[experiment_id] = raw_description
+
+    # Build description from scratch each time
+    description_components = [
+        original_descriptions[experiment_id],
+        f"git_commit: {os.environ.get('GIT_COMMIT', 'unknown')}",
+        f"git_branch: {os.environ.get('GIT_BRANCH', 'unknown')}",
+    ]
+
+    if wandb_url:
+        description_components.append(wandb_url)
+
+    if current_step is not None:
+        progress_pct = (current_step / total_steps) * 100
+        elapsed_time = time.perf_counter() - start_time
+
+        if current_step >= total_steps:
+            time_str = format_eta(elapsed_time)
+            time_label = "finished in"
+        else:
+            if current_step > 0:
+                time_per_step = elapsed_time / current_step
+                remaining_steps = total_steps - current_step
+                eta_seconds = time_per_step * remaining_steps
+                time_str = format_eta(eta_seconds)
+            else:
+                time_str = "calculating..."
+            time_label = "eta"
+
+        progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), {time_label} {time_str}]"
+        description_components.append(progress_bar)
+    new_description = " ".join(description_components)
+    try:
+        # Update the workload description using the workload object we got earlier
+        client.workload.update(workload, description=new_description)
+    except requests.exceptions.HTTPError as e:
+        logger.warning(
+            f"Failed to update Beaker description due to HTTP error: {e}"
+            "Continuing without updating description - this is likely a temporary Beaker service issue"
+        )
+
+
+def sync_gs_bucket(src_path: str, dest_path: str) -> None:
+    cmd = [
+        "gsutil",
+        "-o",
+        "GSUtil:parallel_composite_upload_threshold=150M",
+        "-m",
+        "rsync",
+        "-r",
+        "-d",
+        src_path,
+        dest_path,
+    ]
+    print(f"Copying model to GS bucket with command: {cmd}")
+    live_subprocess_output(cmd)
+
+
+def download_latest_checkpoint_from_gs(gs_checkpoint_state_dir: str, checkpoint_state_dir: str) -> None:
+    """Download the latest checkpoint from GCS and update the latest file."""
+    if gs_folder_exists(gs_checkpoint_state_dir):
+        os.makedirs(checkpoint_state_dir, exist_ok=True)
+        print(f"Downloading model checkpoint from GCS to {checkpoint_state_dir}")
+        sync_gs_bucket(gs_checkpoint_state_dir, checkpoint_state_dir)
+
+
+def launch_ai2_evals_on_weka(
+    path: str,
+    leaderboard_name: str,
+    oe_eval_max_length: int | None = None,
+    wandb_url: str | None = None,
+    training_step: int | None = None,
+    oe_eval_tasks: list[str] | None = None,
+    stop_strings: list[str] | None = None,
+    gs_bucket_path: str | None = None,
+    eval_priority: str | None = "normal",
+    eval_workspace: str | None = "ai2/tulu-3-results",
+    beaker_image: str | None = None,
+    oe_eval_gpu_multiplier: int | None = None,
+) -> None:
+    beaker_users = get_beaker_whoami()
+
+    if gs_bucket_path is not None:
+        cluster_str = f"--cluster {' '.join(GCP_CLUSTERS)}"
+        if beaker_users is not None:
+            gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
+        else:
+            gs_saved_path = f"{gs_bucket_path}/{path}"
+        # save the model to the gs bucket first
+        # TODO: use upload_to_gs_bucket instead
+        gs_command = f"""gsutil \\
+            -o "GSUtil:parallel_composite_upload_threshold=150M" \\
+            cp -r {path} \\
+            {gs_saved_path}"""
+        print(f"Copying model to GS bucket with command: {gs_command}")
+        process = subprocess.Popen(["bash", "-c", gs_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        print(f"GS bucket copy stdout:\n{stdout.decode()}")
+        print(f"GS bucket copy stderr:\n{stderr.decode()}")
+        print(f"GS bucket copy process return code: {process.returncode}")
+
+        # Update path to use the GS bucket path for evaluation
+        path = gs_saved_path
+    else:
+        cluster_str = ""
+    command = f"""\
+python scripts/submit_eval_jobs.py \
+--model_name {leaderboard_name} \
+--location {path} {cluster_str} \
+--is_tuned \
+--workspace {eval_workspace} \
+--priority {eval_priority} \
+--preemptible \
+--use_hf_tokenizer_template \
+--run_oe_eval_experiments \
+--skip_oi_evals"""
+    if wandb_url is not None:
+        command += f" --run_id {wandb_url}"
+        wandb_run_path = wandb_url_to_run_path(wandb_url)
+        command += f" --wandb_run_path {wandb_run_path}"
+    if oe_eval_max_length is not None:
+        command += f" --oe_eval_max_length {oe_eval_max_length}"
+    if training_step is not None:
+        command += f" --step {training_step}"
+    if gs_bucket_path is None:
+        command += " --evaluate_on_weka"
+    if oe_eval_tasks is not None:
+        command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
+    if stop_strings is not None:
+        command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
+    if beaker_image is not None:
+        command += f" --beaker_image {beaker_image}"
+    if oe_eval_gpu_multiplier is not None:
+        command += f" --gpu_multiplier {oe_eval_gpu_multiplier}"
+    print(f"Launching eval jobs with command: {command}")
+    process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+    print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+    print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
+
+def wandb_url_to_run_path(url: str) -> str:
+    """
+    Convert a wandb URL to a wandb run path.
+
+    Args:
+        url (str): wandb URL in format https://wandb.ai/entity/project/runs/run_id
+
+    Returns:
+        str: wandb run path in format entity/project/run_id
+
+    >>> wandb_url_to_run_path("https://wandb.ai/org/project/runs/runid")
+    org/project/runid
+
+    >>> wandb_url_to_run_path("https://wandb.ai/ai2-llm/open_instruct_internal/runs/5nigq0mz")
+    ai2-llm/open_instruct_internal/5nigq0mz
+    """
+    # Remove the base URL and split by '/'
+    path_parts = url.replace("https://wandb.ai/", "").split("/")
+
+    # Extract entity, project, and run_id
+    entity = path_parts[0]
+    project = path_parts[1]
+    run_id = path_parts[3]  # Skip 'runs' at index 2
+
+    return f"{entity}/{project}/{run_id}"
+
+
+# ----------------------------------------------------------------------------
 # HF utilities
 
 
@@ -992,6 +1358,7 @@ def get_train_ds_config(
     zpg=8,
     grad_accum_dtype=None,
     disable_trace_cache=False,
+    sequence_parallel_size=1,
 ):
     device = "cpu" if offload else "none"
     zero_opt_dict = {
@@ -1022,6 +1389,7 @@ def get_train_ds_config(
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
         "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
+        "sequence_parallel_size": sequence_parallel_size,
     }
 
 
@@ -1381,6 +1749,9 @@ GPU_SPECS = {
     "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
     # Specs from https://www.techpowerup.com/gpu-specs/geforce-rtx-4090-mobile.c3949.
     "4090 laptop": {"flops": 32.98e12, "memory_size": 24e9, "memory_bandwidth": 576e9},
+    # DGX Spark GB10 (Blackwell) - unified LPDDR5X memory with CPU
+    # Specs from https://www.nvidia.com/en-us/products/workstations/dgx-spark/
+    "gb10": {"flops": 104e12, "memory_size": 128e9, "memory_bandwidth": 273e9},  # 273 GB/s LPDDR5X unified
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
@@ -1436,40 +1807,6 @@ class ModelDims:
         lm_head_params = self.vocab_size * self.hidden_size
 
         return embedding_params + layer_params + lm_head_params
-
-    @classmethod
-    def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
-        """Create ModelDims from a vLLM config object."""
-        model_config = vllm_config.model_config
-        hidden_size = model_config.get_hidden_size()
-
-        # Try to get intermediate_size, default to 4x hidden_size if not present
-        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
-
-        sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
-        num_layers = model_config.get_num_layers(vllm_config.parallel_config)
-        num_sliding_window_layers = 0
-
-        if sliding_window is not None:
-            layer_types = getattr(model_config.hf_text_config, "layer_types", None)
-            if layer_types is not None:
-                num_sliding_window_layers = layer_types.count("sliding_attention")
-            else:
-                # If "layer_types" is None, then we assume all layers are sliding layers.
-                num_sliding_window_layers = num_layers
-
-        return cls(
-            num_layers=num_layers,
-            hidden_size=hidden_size,
-            intermediate_size=intermediate_size,
-            vocab_size=model_config.get_vocab_size(),
-            num_attn_heads=model_config.hf_text_config.num_attention_heads,
-            num_kv_heads=model_config.hf_text_config.num_key_value_heads,
-            head_dim=model_config.get_head_size(),
-            sliding_window=sliding_window,
-            num_sliding_window_layers=num_sliding_window_layers,
-            device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
-        )
 
     @classmethod
     def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
@@ -2033,6 +2370,44 @@ def get_device_name(device_name: str) -> str:
     )
 
 
+def calculate_utilization_metrics(
+    model_dims: ModelDims,
+    prompt_lengths: list[int],
+    response_lengths: list[int],
+    total_generation_time: float,
+    samples_per_prompt: int,
+    num_engines: int,
+    num_gpus_per_engine: int,
+    training_time: float,
+    num_training_gpus: int,
+) -> dict:
+    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+    )
+
+    actor_metrics = model_dims.calculate_actor_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        total_generation_time=total_generation_time,
+        samples_per_prompt=samples_per_prompt,
+        num_engines=num_engines,
+        num_gpus_per_engine=num_gpus_per_engine,
+    )
+
+    learner_metrics = model_dims.calculate_learner_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        training_time=training_time,
+        samples_per_prompt=samples_per_prompt,
+        num_training_gpus=num_training_gpus,
+    )
+
+    utilization_metrics = {f"actor_{k}": v for k, v in actor_metrics.items()}
+    utilization_metrics["learner_mfu"] = learner_metrics["mfu"]
+
+    return utilization_metrics
+
+
 def check_calculation(
     percentage: float,
     metric_name: str,
@@ -2138,7 +2513,7 @@ def send_slack_message(message: str) -> None:
         logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
         return
 
-    beaker_url = launch_utils.get_beaker_experiment_url()
+    beaker_url = get_beaker_experiment_url()
     beaker_suffix = f" Check it out: {beaker_url}" if beaker_url else ""
 
     payload = {"text": f"{message}{beaker_suffix}"}
@@ -2148,6 +2523,68 @@ def send_slack_message(message: str) -> None:
             logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
     except requests.RequestException as exc:
         logger.warning("Failed to send Slack alert due to network error: %s", exc)
+
+
+def get_beaker_experiment_url() -> str | None:
+    """If the env var BEAKER_WORKLOAD_ID is set, gets the current experiment URL."""
+    try:
+        beaker_client = beaker.Beaker.from_env()
+        workload = beaker_client.workload.get(os.environ["BEAKER_WORKLOAD_ID"])
+        url = beaker_client.experiment.url(workload.experiment)
+        return url
+    except Exception:
+        return None
+
+
+@dataclass
+class UlyssesSPSplitter:
+    """Splits CollatedBatchData for Ulysses sequence parallelism.
+
+    Adapted from the UlyssesSPDataLoaderAdapter
+    (https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py#L427)
+    Rather than wrapping a dataloader, we just want to split a given batch into the shards across sp group.
+    """
+
+    sp_rank: int
+    sp_group: "torch.distributed.distributed_c10d.ProcessGroup"
+    sp_world_size: int
+    device: torch.device
+    pad_token_id: int
+
+    def split_collated_batch(self, data: data_types.CollatedBatchData) -> data_types.CollatedBatchData:
+        """Get this rank's shard of a CollatedBatchData for sequence parallelism."""
+        # Find max sequence length across all ranks to ensure consistent padding
+        local_max = max(t.shape[-1] for t in data.query_responses)
+        local_seqlen = torch.tensor([local_max], dtype=torch.int64, device=self.device)
+        seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
+        dist.all_gather(seqlens, local_seqlen, group=self.sp_group)
+        max_seqlen = max(x.item() for x in seqlens)
+
+        # Round up to be divisible by sp_world_size
+        max_seqlen = ((max_seqlen + self.sp_world_size - 1) // self.sp_world_size) * self.sp_world_size
+        chunk_len = max_seqlen // self.sp_world_size
+
+        # Compute start and end indices for this rank's chunk
+        start_idx = chunk_len * self.sp_rank
+        end_idx = chunk_len * (self.sp_rank + 1)
+
+        # slice and pad tensors for this sp rank
+        kwargs = {}
+        for field in dataclasses.fields(data):
+            if field.name == "query_responses":
+                pad_value = self.pad_token_id
+            elif field.name == "vllm_logprobs":
+                pad_value = INVALID_LOGPROB
+            else:
+                pad_value = 0
+            sharded = []
+            for t in getattr(data, field.name):
+                # For all tensors in batch, pad tensor to max_seqlen, then slice to get this SP rank's chunk
+                padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
+                sharded.append(padded_sliced)
+            kwargs[field.name] = sharded
+
+        return data_types.CollatedBatchData(**kwargs)
 
 
 def get_denominator(loss_denominator: str | float) -> float | str:

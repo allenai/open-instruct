@@ -1,8 +1,11 @@
 #!/bin/bash
-uv run open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 64 \
+# Local debug script for testing GRPO with tool use
+# Note: Currently only 'code' tool is supported with new tools system
+# Search tool implementation is pending (see create_tools() in grpo_fast.py)
+VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
+    --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 64 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 16 \
+    --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 4 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 512 \
     --response_length 512 \
@@ -14,7 +17,7 @@ uv run open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
-    --chat_template_name r1_simple_chat_postpend_think_tools \
+    --chat_template_name r1_simple_chat_postpend_think_tool_vllm \
     --learning_rate 3e-7 \
     --total_episodes 200 \
     --deepspeed_stage 2 \
@@ -30,7 +33,10 @@ uv run open_instruct/grpo_fast.py \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
-    --tools search code \
-    --search_api_endpoint "http://saturn-cs-aus-232.reviz.ai2.in:44177/search" \
-    --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
+    --tools python \
+    --verbose true \
+    --tool_call_names code \
+    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "timeout": 3}' \
+    --tool_parser_type legacy \
+    --max_tool_calls 5 \
     --push_to_hub false
