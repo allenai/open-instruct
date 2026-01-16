@@ -918,7 +918,6 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
     return dataset
 
 
-# Tools column key for per-sample tool definitions
 TOOLS_COLUMN_KEY = "tools"
 
 
@@ -944,9 +943,8 @@ def validate_dataset_tools(
         ValueError: If there's a mismatch between configured tools and dataset tools.
     """
     if TOOLS_COLUMN_KEY not in dataset.column_names:
-        return  # No tools column, nothing to validate
+        return
 
-    # Access column directly for efficiency (avoid per-sample iteration overhead)
     dataset_tool_names: set[str] = set()
     tools_column = dataset[TOOLS_COLUMN_KEY]
     for tools in tools_column:
@@ -959,7 +957,6 @@ def validate_dataset_tools(
 
     configured_set = set(configured_tool_names) if configured_tool_names else set()
 
-    # Check that all tools in dataset are configured
     unconfigured_tools = dataset_tool_names - configured_set
     if unconfigured_tools:
         raise ValueError(
@@ -968,7 +965,6 @@ def validate_dataset_tools(
             f"All tools in the dataset must be configured for execution."
         )
 
-    # Check that all configured tools are present in the dataset
     missing_tools = configured_set - dataset_tool_names
     if missing_tools:
         raise ValueError(
@@ -1435,10 +1431,7 @@ def rlvr_tokenize_v3(
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     chat_template_kwargs = {"add_generation_prompt": True}
-
-    # Determine which tools to use for chat template
     if pass_tools_to_chat_template:
-        # Check for per-sample tools first, then fall back to global tool_definitions
         if TOOLS_COLUMN_KEY in row and row[TOOLS_COLUMN_KEY]:
             chat_template_kwargs["tools"] = row[TOOLS_COLUMN_KEY]
         elif tool_definitions:
@@ -1657,7 +1650,6 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Always preserve dataset_source if it exists
         if DATASET_ORIGIN_KEY in dataset.column_names and DATASET_ORIGIN_KEY not in target_columns:
             target_columns = target_columns + [DATASET_ORIGIN_KEY]
-        # Always preserve tools column if it exists (for per-sample tool definitions)
         if TOOLS_COLUMN_KEY in dataset.column_names and TOOLS_COLUMN_KEY not in target_columns:
             target_columns = target_columns + [TOOLS_COLUMN_KEY]
 

@@ -512,8 +512,6 @@ def add_prompt_to_generator(
     example: dict[str, Any], epoch_number: int, param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
 ) -> None:
     index = example["index"]
-    # Extract active tool names from the per-sample tools column if it exists
-    # This determines which tools can be executed for this sample
     active_tools = extract_tool_names_from_definitions(example.get(TOOLS_COLUMN_KEY))
     param_prompt_Q.put(
         data_types.PromptRequest(

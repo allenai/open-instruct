@@ -457,7 +457,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),
         "start_time": time.perf_counter(),
-        "active_tools": request.active_tools,  # Per-sample active tools (None means all tools active)
+        "active_tools": request.active_tools,
     }
 
     for j in range(request.generation_config.n):
@@ -869,12 +869,11 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     base_request_id = split_request_id(sub_request_id)["base_id"]
     request_metadata = actor.request_metadata[base_request_id]
     original_prompt = request_metadata["prompt_token_ids"]
-    active_tools = request_metadata.get("active_tools")  # None means all tools are active
+    active_tools = request_metadata.get("active_tools")
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
 
-    # Compute allowed tools once: intersection of configured tools and active tools for this sample
     configured_tools = set(actor.tool_actor_map.keys())
     allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
 
@@ -910,7 +909,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             break
 
         tool_calls = actor.tool_parser.get_tool_calls(output.text)
-        # Filter tool calls to only include allowed tools (configured AND active for this sample)
         tool_calls = [tc for tc in tool_calls if tc.name in allowed_tools]
         if not tool_calls:
             break
