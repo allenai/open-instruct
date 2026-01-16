@@ -39,6 +39,8 @@ class RequestInfo:
     tool_runtimes: list[float]
     tool_calleds: list[bool]
     tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
+    excess_tool_calls: list[dict[str, int]] = field(default_factory=list)
+    """Per-sample dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
 
 
 @dataclass
