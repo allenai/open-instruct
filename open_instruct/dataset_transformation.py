@@ -1418,9 +1418,7 @@ def rlvr_tokenize_v3(
         if sample_active_tools is not None:
             # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
-            filtered_tools = [
-                t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names
-            ]
+            filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
             if filtered_tools:
                 chat_template_kwargs["tools"] = filtered_tools
         else:
