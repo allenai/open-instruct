@@ -21,6 +21,14 @@ class DPOLossType(enum.StrEnum):
     def is_average_loss(self) -> bool:
         return self in (DPOLossType.simpo, DPOLossType.dpo_norm)
 
+    @property
+    def needs_reference_model(self) -> bool:
+        return self in (DPOLossType.dpo, DPOLossType.dpo_norm, DPOLossType.wpo)
+
+    @property
+    def computes_reward_metrics(self) -> bool:
+        return self in (DPOLossType.dpo, DPOLossType.dpo_norm)
+
 
 @dataclass
 class ExperimentConfig:

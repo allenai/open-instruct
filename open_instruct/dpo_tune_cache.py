@@ -55,7 +55,6 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.dpo_config import DPOLossType
 from open_instruct.dpo_utils import FlatArguments
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
@@ -528,7 +527,7 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
         if not args.concatenated_forward:
             raise NotImplementedError("seperate forward not implemented for packing/padding-free")
         forward_fn = partial(forward_fn, packing=True)
-    if args.dpo_loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm, DPOLossType.wpo):
+    if args.dpo_loss_type.needs_reference_model:
         reference_cache = dpo_utils.build_reference_logprobs_cache(
             model=model,
             dataloader=train_dataloader,
@@ -576,42 +575,13 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
                     average_log_prob=args.dpo_loss_type.is_average_loss,
                     output_router_logits=args.load_balancing_loss,
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
-                if args.dpo_loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm):
-                    ref_logps = reference_cache[batch["index"]]
-                    reference_chosen_logps = ref_logps["chosen_logps"]
-                    reference_rejected_logps = ref_logps["rejected_logps"]
-                    losses, _, _ = dpo_utils.dpo_loss(
-                        policy_chosen_logps,
-                        policy_rejected_logps,
-                        reference_chosen_logps,
-                        reference_rejected_logps,
-                        beta=args.dpo_beta,
-                        label_smoothing=args.dpo_label_smoothing,
-                    )
-                elif args.dpo_loss_type == DPOLossType.simpo:
-                    losses, _, _ = dpo_utils.simpo_loss(
-                        policy_chosen_logps,
-                        policy_rejected_logps,
-                        beta=args.dpo_beta,
-                        gamma_beta_ratio=args.dpo_gamma_beta_ratio,
-                        label_smoothing=args.dpo_label_smoothing,
-                    )
-                elif args.dpo_loss_type == DPOLossType.wpo:
-                    ref_logps = reference_cache[batch["index"]]
-                    reference_chosen_logps = ref_logps["chosen_logps"]
-                    reference_rejected_logps = ref_logps["rejected_logps"]
-                    losses, _, _ = dpo_utils.wpo_loss(
-                        policy_chosen_logps,
-                        policy_rejected_logps,
-                        reference_chosen_logps,
-                        reference_rejected_logps,
-                        beta=args.dpo_beta,
-                        label_smoothing=args.dpo_label_smoothing,
-                        chosen_loss_mask=batch["chosen_labels"] != -100,
-                        rejected_loss_mask=batch["rejected_labels"] != -100,
-                    )
-                else:
-                    raise ValueError(f"Invalid dpo loss type {args.dpo_loss_type}.")
+                losses, _, _ = dpo_utils.compute_loss(
+                    args,
+                    batch,
+                    policy_chosen_logps,
+                    policy_rejected_logps,
+                    reference_cache if args.dpo_loss_type.needs_reference_model else None,
+                )
                 # TODO: metric logging
                 loss = losses.mean()
                 if args.load_balancing_loss:
@@ -628,9 +598,12 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
                 # We keep track of the loss at each logged step
                 with torch.no_grad():
                     local_metrics["train_loss"] += loss
-                    if args.dpo_loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm):
-                        chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
-                        rejected_rewards = (args.dpo_beta * (policy_rejected_logps - reference_rejected_logps)).mean()
+                    if args.dpo_loss_type.computes_reward_metrics:
+                        ref_logps = reference_cache[batch["index"]]
+                        chosen_rewards = (args.dpo_beta * (policy_chosen_logps - ref_logps["chosen_logps"])).mean()
+                        rejected_rewards = (
+                            args.dpo_beta * (policy_rejected_logps - ref_logps["rejected_logps"])
+                        ).mean()
                         average_rewards = (chosen_rewards + rejected_rewards) / 2
                         accuracy = (chosen_rewards > rejected_rewards).float().mean()
                         margin = (chosen_rewards - rejected_rewards).mean()
@@ -685,7 +658,7 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
                         "logps/chosen": global_metrics["logps/chosen"],
                         "logps/rejected": global_metrics["logps/rejected"],
                     }
-                    if args.dpo_loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm):
+                    if args.dpo_loss_type.computes_reward_metrics:
                         metrics_to_log.update(
                             {
                                 "rewards/chosen": global_metrics["rewards/chosen"],

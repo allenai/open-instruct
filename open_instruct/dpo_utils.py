@@ -415,6 +415,50 @@ def simpo_loss(
     return losses, chosen_rewards, rejected_rewards
 
 
+def compute_loss(
+    args: dpo_config_lib.DPOHyperparamsConfig,
+    batch: dict[str, torch.Tensor],
+    policy_chosen_logps: torch.Tensor,
+    policy_rejected_logps: torch.Tensor,
+    reference_cache: model_utils.TensorCache | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    loss_type = args.dpo_loss_type
+
+    if loss_type in (dpo_config_lib.DPOLossType.dpo, dpo_config_lib.DPOLossType.dpo_norm):
+        assert reference_cache is not None
+        ref_logps = reference_cache[batch["index"]]
+        return dpo_loss(
+            policy_chosen_logps,
+            policy_rejected_logps,
+            ref_logps["chosen_logps"],
+            ref_logps["rejected_logps"],
+            beta=args.dpo_beta,
+            label_smoothing=args.dpo_label_smoothing,
+        )
+    elif loss_type == dpo_config_lib.DPOLossType.simpo:
+        return simpo_loss(
+            policy_chosen_logps,
+            policy_rejected_logps,
+            beta=args.dpo_beta,
+            gamma_beta_ratio=args.dpo_gamma_beta_ratio,
+            label_smoothing=args.dpo_label_smoothing,
+        )
+    elif loss_type == dpo_config_lib.DPOLossType.wpo:
+        assert reference_cache is not None
+        ref_logps = reference_cache[batch["index"]]
+        return wpo_loss(
+            policy_chosen_logps,
+            policy_rejected_logps,
+            ref_logps["chosen_logps"],
+            ref_logps["rejected_logps"],
+            beta=args.dpo_beta,
+            label_smoothing=args.dpo_label_smoothing,
+            chosen_loss_mask=batch["chosen_labels"] != -100,
+            rejected_loss_mask=batch["rejected_labels"] != -100,
+        )
+    raise ValueError(f"Unknown loss type: {loss_type}")
+
+
 def _get_batch_logps(logits: torch.Tensor, labels: torch.Tensor, average_log_prob: bool = False) -> torch.Tensor:
     """Compute the log probabilities of the given labels under the given logits.
 
