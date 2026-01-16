@@ -65,7 +65,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra dr-tulu open_instruct/grpo_fa
     --system_prompt_override_file scripts/train/debug/tools/dr_tulu_system_prompt.txt \
     --tools dr_agent_mcp \
     --tool_parser dr_tulu \
-    --tool_configs '{"tool_names": "snippet_search,google_search", "parser_name": "unified", "host": "'"$MCP_HOST"'", "port": '"$MCP_PORT"'}' \
+    --tool_configs '{"tool_names": "snippet_search,google_search,browse_webpage", "parser_name": "v20250824", "host": "'"$MCP_HOST"'", "port": '"$MCP_PORT"'}' \
     --max_tool_calls 5 \
     --pass_tools_to_chat_template false \
     --push_to_hub false
