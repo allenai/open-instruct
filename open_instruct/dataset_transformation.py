@@ -1400,11 +1400,6 @@ def rlvr_tokenize_v3(
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
 ):
-    """Tokenize a row for RLVR training.
-
-    Note: The 'tools' column in the dataset is a list of active tool names (strings),
-    NOT tool definitions. Tool definitions for the chat template come from tool_definitions.
-    """
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
