@@ -66,8 +66,10 @@ from transformers import (
 )
 from transformers.utils.hub import extract_commit_hash
 
-from open_instruct import launch_utils
+from open_instruct import launch_utils, logger_utils
 from open_instruct.utils import hf_whoami, max_num_processes
+
+logger = logger_utils.setup_logger(__name__)
 
 
 # ----------------------------------------------------------------------------
@@ -925,9 +927,8 @@ def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], d
     """Validate that configured tools match tools in dataset's 'tools' column.
 
     The tools column is a list of tool call names (strings) that are active for each sample.
-    This function validates that:
-    1. All configured tools are present in the dataset
-    2. All tools in the dataset are configured (no unknown tools)
+    This function validates that all tools in the dataset are configured (no unknown tools).
+    Extraneous configured tools (not in dataset) are allowed but logged as a warning.
 
     Args:
         dataset: The dataset to validate.
@@ -936,7 +937,7 @@ def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], d
         dataset_name: Name of the dataset for error messages.
 
     Raises:
-        ValueError: If there's a mismatch between configured tools and dataset tools.
+        ValueError: If dataset contains tools that are not configured.
     """
     if TOOLS_COLUMN_KEY not in dataset.column_names:
         return
@@ -954,12 +955,12 @@ def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], d
             f"All tools in the dataset must be configured for execution."
         )
 
-    missing_tools = configured_set - dataset_tool_names
-    if missing_tools:
-        raise ValueError(
-            f"Configured tools {sorted(missing_tools)} are not found in {dataset_name}'s "
+    extraneous_tools = configured_set - dataset_tool_names
+    if extraneous_tools:
+        logger.warning(
+            f"Configured tools {sorted(extraneous_tools)} are not found in {dataset_name}'s "
             f"'{TOOLS_COLUMN_KEY}' column. Tools found in dataset: {sorted(dataset_tool_names)}. "
-            f"When using per-sample tools, all configured tools must be present in the dataset."
+            f"These tools will be available but never used by this dataset."
         )
 
 
