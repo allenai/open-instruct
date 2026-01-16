@@ -90,7 +90,6 @@ class ToolsConfig:
                 raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
             self._parsed_tools.append(ParsedToolConfig(name=tool_name, call_name=call_name, config=config))
 
-        # Validate dr_tulu parser/mcp tool pairing
         has_mcp_tool = "dr_agent_mcp" in self.tools
         is_dr_tulu_parser = self.tool_parser_type == "dr_tulu"
         if is_dr_tulu_parser and not has_mcp_tool:

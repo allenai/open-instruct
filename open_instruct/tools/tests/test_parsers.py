@@ -496,7 +496,6 @@ class TestCreateToolParser(unittest.TestCase):
         mock_actor = create_mock_tool_actor("search")
         mock_tokenizer = MagicMock()
 
-        # Mock the vLLM parser class import
         with patch("open_instruct.tools.parsers.import_class_from_string") as mock_import:
             mock_import.return_value = MagicMock()
             parser = create_tool_parser(parser_type, tokenizer=mock_tokenizer, tool_actors=[mock_actor])

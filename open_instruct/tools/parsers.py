@@ -276,25 +276,19 @@ class DRTuluToolParser(ToolParser):
     Only detects that a tool call occurred (via stop strings) and passes text to the tool.
     """
 
-    def __init__(self, tool_actors: list[ray.actor.ActorHandle], default_stop_string: str = "</call_tool>"):
-        # Get tool call name (expects single dr_agent_mcp tool)
+    def __init__(self, tool_actors: list[ray.actor.ActorHandle]):
         call_names = ray.get([actor.get_call_name.remote() for actor in tool_actors])
         self.tool_call_name = call_names[0] if call_names else "dr_agent_mcp"
 
-        # Get all stop strings as flat list, fallback to default
         all_stop_strings = ray.get([actor.get_stop_strings.remote() for actor in tool_actors])
         self.stop_sequences = list(set(stop for tool_stops in all_stop_strings if tool_stops for stop in tool_stops))
-        if not self.stop_sequences:
-            self.stop_sequences = [default_stop_string]
 
-        # For DR Tulu Parser, only tool should be the mcp tool.
         if len(tool_actors) > 1:
             logger.warning(
                 f"DRTuluToolParser: Using only one dr_agent_mcp tool is supported, found {len(tool_actors)} tools."
             )
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
-        # Check if any stop sequence is present (indicating a tool call)
         for stop in self.stop_sequences:
             if stop in text:
                 return [ToolCall(name=self.tool_call_name, args={"text": text})]
