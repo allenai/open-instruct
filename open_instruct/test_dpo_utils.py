@@ -18,6 +18,7 @@ def make_test_args(**overrides) -> FlatArguments:
     defaults = {
         "model_name_or_path": "allenai/OLMo-2-1124-7B",
         "dataset_mixer_list": ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"],
+        "dataset_config_hash": "test_dataset_config_hash",
     }
     defaults.update(overrides)
     return FlatArguments(**defaults)

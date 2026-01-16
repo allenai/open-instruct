@@ -1,7 +1,6 @@
 import os
 import subprocess
 
-import huggingface_hub
 from transformers.utils import hub as transformers_hub
 
 WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
@@ -23,9 +22,7 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str = N
             repo_type=repo_type,
         )
         if not isinstance(resolved_file, str):
-            resolved_file = huggingface_hub.hf_hub_download(
-                model_name_or_path, filename, revision=revision, repo_type=repo_type
-            )
+            return None
         return resolved_file
 
 
