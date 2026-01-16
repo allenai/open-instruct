@@ -1479,27 +1479,26 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.A
         except Exception as e:
             raise ValueError(f"Invalid config for tool '{parsed_tool.name}': {e}") from e
 
-        # Handle GenericMCPToolConfig auto-expansion
-        # If tool_name is None, discover all tools from the MCP server and create actors for each
+        # Collect (config, call_name, tool_class) tuples to process
+        # For GenericMCPToolConfig without tool_name, expand to discover all tools from MCP server
+        configs_to_create: list[tuple[GenericMCPToolConfig, str, type]] = []
+
         if isinstance(config, GenericMCPToolConfig) and config.tool_name is None:
             logger.info(f"Auto-discovering tools from MCP server for '{parsed_tool.name}'...")
             expanded_configs = config.expand_tools()
             for expanded_config in expanded_configs:
-                _kwarg_dict = asdict(expanded_config) | {"call_name": expanded_config.tool_name}
-                tool_actors.append(
-                    ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**_kwarg_dict)
-                )
-                tool_call_names.append(expanded_config.tool_name)
+                configs_to_create.append((expanded_config, expanded_config.tool_name, tool_config_class.tool_class))
             logger.info(
-                f"Created {len(expanded_configs)} tools from MCP server: {[c.tool_name for c in expanded_configs]}"
+                f"Discovered {len(expanded_configs)} tools from MCP server: {[c.tool_name for c in expanded_configs]}"
             )
         else:
-            # Standard tool creation
-            _kwarg_dict = asdict(config) | {"call_name": parsed_tool.call_name}
-            tool_actors.append(
-                ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**_kwarg_dict)
-            )
-            tool_call_names.append(parsed_tool.call_name)
+            configs_to_create.append((config, parsed_tool.call_name, tool_config_class.tool_class))
+
+        # Create actors for all collected configs
+        for cfg, call_name, tool_class in configs_to_create:
+            _kwarg_dict = asdict(cfg) | {"call_name": call_name}
+            tool_actors.append(ray.remote(tool_class).options(max_concurrency=512).remote(**_kwarg_dict))
+            tool_call_names.append(call_name)
 
     return tool_actors, tool_call_names
 
