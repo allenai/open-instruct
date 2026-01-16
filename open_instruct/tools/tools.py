@@ -8,7 +8,7 @@ import inspect
 import os
 import time
 import urllib.parse
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, ClassVar
 
@@ -1071,22 +1071,7 @@ class GenericMCPToolConfig(BaseToolConfig):
         tool_names = self.discover_tool_names()
         logger.info(f"MCP server discovered {len(tool_names)} tools: {tool_names}")
 
-        configs = []
-        for name in tool_names:
-            configs.append(
-                GenericMCPToolConfig(
-                    server_url=self.server_url,
-                    transport=self.transport,
-                    command=self.command,
-                    args=self.args,
-                    env=self.env,
-                    timeout=self.timeout,
-                    max_retries=self.max_retries,
-                    retry_backoff=self.retry_backoff,
-                    tool_name=name,
-                )
-            )
-        return configs
+        return [replace(self, tool_name=name) for name in tool_names]
 
 
 # Tool Registry: Maps tool names to their config classes
