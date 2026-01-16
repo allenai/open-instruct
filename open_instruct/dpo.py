@@ -38,7 +38,6 @@ from olmo_core.train.train_module.transformer import (
 )
 
 from open_instruct import data_loader, dataset_transformation, dpo_utils, logger_utils, model_utils, utils
-from open_instruct import dpo_config as dpo_config_lib
 from open_instruct.beaker_callback import BeakerCallbackV2
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
@@ -259,33 +258,19 @@ class DPOTrainModule(TrainModule):
 
 
 @dataclass
-class DPOExperimentConfig(
-    dpo_config_lib.ExperimentConfig,
-    dpo_config_lib.ModelConfig,
-    dpo_config_lib.DPOHyperparamsConfig,
-    dpo_config_lib.TrainingConfig,
-    dpo_config_lib.DatasetConfig,
-    dpo_config_lib.LoRAConfig,
-    dpo_config_lib.LoggingConfig,
-    dpo_config_lib.HubConfig,
-    dpo_config_lib.CheckpointConfig,
-    dpo_config_lib.EvalConfig,
-    dpo_config_lib.Ai2EvalConfig,
-    config.Config,
-):
+class DPOExperimentConfig(dpo_utils.ExperimentConfig, config.Config):
     """Configuration for a DPO training experiment."""
 
-    dpo_loss_type: dpo_utils.DPOLossType = dpo_utils.DPOLossType.dpo
     olmo_config_name: str | None = None
     """Override for OLMo-core TransformerConfig name (e.g., 'olmo2_7B'). If not set, auto-detected from model_name_or_path."""
 
     @property
     def dpo_config(self) -> DPOConfig:
         return DPOConfig(
-            dpo_beta=self.dpo_beta,
-            dpo_loss_type=dpo_utils.DPOLossType(self.dpo_loss_type),
-            dpo_gamma_beta_ratio=self.dpo_gamma_beta_ratio,
-            dpo_label_smoothing=self.dpo_label_smoothing,
+            dpo_beta=self.beta,
+            dpo_loss_type=dpo_utils.DPOLossType(self.loss_type),
+            dpo_gamma_beta_ratio=self.gamma_beta_ratio,
+            dpo_label_smoothing=self.label_smoothing,
             load_balancing_loss=self.load_balancing_loss,
             load_balancing_weight=self.load_balancing_weight,
             concatenated_forward=self.concatenated_forward,
@@ -313,9 +298,9 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
     )
     tokenizer = tc.tokenizer
 
-    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    args.local_cache_dir = os.path.abspath(args.local_cache_dir)
     if utils.is_beaker_job():
-        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     ref_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
@@ -324,17 +309,17 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
 
     if args.cache_dataset_only:
         dataset = dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=args.dataset_mixer_list,
-            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            dataset_mixer_list=args.mixer_list,
+            dataset_mixer_list_splits=args.mixer_list_splits,
             tc=tc,
-            dataset_transform_fn=args.dataset_transform_fn,
+            dataset_transform_fn=args.transform_fn,
             transform_fn_args=transform_fn_args,
-            target_columns=args.dataset_target_columns,
-            dataset_cache_mode=args.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_hash,
+            target_columns=args.target_columns,
+            dataset_cache_mode=args.cache_mode,
+            dataset_config_hash=args.config_hash,
             hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.dataset_local_cache_dir,
-            dataset_skip_cache=args.dataset_skip_cache,
+            dataset_local_cache_dir=args.local_cache_dir,
+            dataset_skip_cache=args.skip_cache,
         )
         logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
         return
@@ -346,17 +331,17 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
 
     if is_main_process:
         dataset = dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=args.dataset_mixer_list,
-            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            dataset_mixer_list=args.mixer_list,
+            dataset_mixer_list_splits=args.mixer_list_splits,
             tc=tc,
-            dataset_transform_fn=args.dataset_transform_fn,
+            dataset_transform_fn=args.transform_fn,
             transform_fn_args=transform_fn_args,
-            target_columns=args.dataset_target_columns,
-            dataset_cache_mode=args.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_hash,
+            target_columns=args.target_columns,
+            dataset_cache_mode=args.cache_mode,
+            dataset_config_hash=args.config_hash,
             hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.dataset_local_cache_dir,
-            dataset_skip_cache=args.dataset_skip_cache,
+            dataset_local_cache_dir=args.local_cache_dir,
+            dataset_skip_cache=args.skip_cache,
         )
 
     if distributed_utils.is_distributed():
@@ -364,17 +349,17 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
 
     if not is_main_process:
         dataset = dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=args.dataset_mixer_list,
-            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            dataset_mixer_list=args.mixer_list,
+            dataset_mixer_list_splits=args.mixer_list_splits,
             tc=tc,
-            dataset_transform_fn=args.dataset_transform_fn,
+            dataset_transform_fn=args.transform_fn,
             transform_fn_args=transform_fn_args,
-            target_columns=args.dataset_target_columns,
-            dataset_cache_mode=args.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_hash,
+            target_columns=args.target_columns,
+            dataset_cache_mode=args.cache_mode,
+            dataset_config_hash=args.config_hash,
             hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.dataset_local_cache_dir,
-            dataset_skip_cache=args.dataset_skip_cache,
+            dataset_local_cache_dir=args.local_cache_dir,
+            dataset_skip_cache=args.skip_cache,
         )
 
     dataset = dataset.shuffle(seed=args.seed)

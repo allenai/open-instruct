@@ -350,9 +350,6 @@ class ExperimentConfig(
                 raise ValueError("offload_param can only be used with zero_stage 3")
 
 
-FlatArguments = ExperimentConfig
-
-
 def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) -> str:
     """Compute deterministic hash for reference logprobs cache from ExperimentConfig."""
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
