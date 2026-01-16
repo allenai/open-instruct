@@ -2,6 +2,11 @@
 # Local debug script for testing GRPO with tool use
 # Uses hamishivi/tulu_3_rewritten_tools_test which has a 'tools' column
 # for per-sample active tool configuration (search, code, browse)
+
+# Load API keys from beaker secrets
+export SERPER_API_KEY=$(beaker secret read hamishivi_SERPER_API_KEY --workspace ai2/dr-tulu-ablations)
+export JINA_API_KEY=$(beaker secret read hamishivi_JINA_API_KEY --workspace ai2/dr-tulu-ablations)
+
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_tools_test 64 \
     --dataset_mixer_list_splits train \
@@ -33,10 +38,10 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
-    --tools python \
+    --tools python serper_search jina_browse \
     --verbose true \
-    --tool_call_names code \
-    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "timeout": 3}' \
+    --tool_call_names code search browse \
+    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "timeout": 3}' '{}' '{}' \
     --tool_parser_type legacy \
     --max_tool_calls 5 \
     --push_to_hub false
