@@ -1099,7 +1099,7 @@ class DataPreparationActor:
                 }
 
                 tool_stats = ToolStatistics(tool_names=self.tool_names)
-                excess_calls = result.request_info.excess_tool_calls or [{}] * len(result.request_info.tool_call_stats)
+                excess_calls = result.request_info.excess_tool_calls or [{} for _ in range(len(result.request_info.tool_call_stats))]
                 for rollout_stats, excess in zip(result.request_info.tool_call_stats, excess_calls):
                     tool_stats.add_rollout(rollout_stats, excess)
                 step_metrics.update(tool_stats.compute_metrics())
