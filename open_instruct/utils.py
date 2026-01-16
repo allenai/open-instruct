@@ -1463,6 +1463,28 @@ def get_optimizer_grouped_parameters(
     return optimizer_grouped_parameters
 
 
+def freeze_non_expert_params(model: torch.nn.Module) -> tuple[int, int]:
+    """Freeze all parameters except MoE experts and router.
+
+    Returns:
+        Tuple of (frozen_params, trainable_params) counts.
+    """
+    trainable_patterns = [".mlp.experts.", ".mlp.gate."]
+
+    frozen_count = 0
+    trainable_count = 0
+
+    for name, param in model.named_parameters():
+        if any(pattern in name for pattern in trainable_patterns):
+            param.requires_grad = True
+            trainable_count += param.numel()
+        else:
+            param.requires_grad = False
+            frozen_count += param.numel()
+
+    return frozen_count, trainable_count
+
+
 def _z3_params_to_fetch(param_list):
     return [p for p in param_list if hasattr(p, "ds_id") and p.ds_status == ZeroParamStatus.NOT_AVAILABLE]
 

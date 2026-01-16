@@ -114,6 +114,7 @@ from open_instruct.utils import (
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
     download_latest_checkpoint_from_gs,
+    freeze_non_expert_params,
     get_beaker_whoami,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
@@ -161,6 +162,8 @@ class Args:
     """Whether to set weight decay on bias and norm layers"""
     fused_optimizer: bool = False
     """Whether to use fused optimizer"""
+    freeze_non_experts: bool = False
+    """Freeze all parameters except MoE experts and router. Useful for OLMoE annealing."""
 
     # Batch sizes
     per_device_train_batch_size: int = 1
@@ -467,11 +470,14 @@ class PolicyTrainerRayProcess(RayProcess):
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         disable_dropout_in_model(self.policy)
+        if args.freeze_non_experts:
+            frozen, trainable = freeze_non_expert_params(self.policy)
+            logger.info(f"Froze {frozen:,} params, training {trainable:,} params (experts + router only)")
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
-            optim_params = self.policy.parameters()
+            optim_params = [p for p in self.policy.parameters() if p.requires_grad]
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
