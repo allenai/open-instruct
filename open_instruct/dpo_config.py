@@ -17,6 +17,10 @@ class DPOLossType(enum.StrEnum):
     simpo = "simpo"
     wpo = "wpo"
 
+    @property
+    def is_average_loss(self) -> bool:
+        return self in (DPOLossType.simpo, DPOLossType.dpo_norm)
+
 
 @dataclass
 class ExperimentConfig:

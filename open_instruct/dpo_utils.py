@@ -36,14 +36,15 @@ from transformers.training_args import _convert_str_dict
 from open_instruct import dpo_config as dpo_config_lib
 from open_instruct import logger_utils, model_utils
 from open_instruct.dataset_transformation import TokenizerConfig, compute_config_hash, load_dataset_configs
-from open_instruct.dpo_config import DPOLossType
 from open_instruct.model_utils import log_softmax_and_gather
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
 logger = logger_utils.setup_logger(__name__)
 
-REFERENCE_LOGPROBS_CACHE_PATH = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
+REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
+    "REFERENCE_LOGPROBS_CACHE_PATH", "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
+)
 
 torch.backends.cuda.matmul.allow_tf32 = True
 
@@ -210,10 +211,8 @@ def compute_reference_cache_hash(args: FlatArguments, tc: TokenizerConfig) -> st
         args.dataset_target_columns,
     )
     dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
-    average_log_prob = args.dpo_loss_type in (DPOLossType.simpo, DPOLossType.dpo_norm)
     config_str = json.dumps(
         {
-            "average_log_prob": average_log_prob,
             "concatenated_forward": args.concatenated_forward,
             "dataset_config_hash": dataset_config_hash,
             "dpo_loss_type": args.dpo_loss_type,

@@ -74,10 +74,6 @@ from open_instruct.utils import (
 
 logger = get_logger(__name__)
 
-REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
-    "REFERENCE_LOGPROBS_CACHE_PATH", "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
-)
-
 
 def build_deepspeed_config(
     zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, zero_hpz_partition_size: int = 8
@@ -527,8 +523,6 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
     print_gpu_stats(init_gpu_memory)
 
     # Cache the logprobs
-    average_log_prob_loss_types = [DPOLossType.simpo, DPOLossType.dpo_norm]
-    average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
     forward_fn = dpo_utils.concatenated_forward if args.concatenated_forward else dpo_utils.separate_forward
     if args.packing:
         if not args.concatenated_forward:
@@ -539,7 +533,7 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
             model=model,
             dataloader=train_dataloader,
             accelerator=accelerator,
-            average_log_prob=average_log_prob,
+            average_log_prob=args.dpo_loss_type.is_average_loss,
             forward_fn=forward_fn,
             full_dataset_size=original_dataset_size,
             reference_cache_hash=dpo_utils.compute_reference_cache_hash(args, tc),
@@ -577,7 +571,10 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
             # dpo forward pass & loss
             with accelerator.accumulate(model):
                 policy_chosen_logps, policy_rejected_logps, aux_loss = forward_fn(
-                    model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
+                    model,
+                    batch,
+                    average_log_prob=args.dpo_loss_type.is_average_loss,
+                    output_router_logits=args.load_balancing_loss,
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
                 if args.dpo_loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm):
                     ref_logps = reference_cache[batch["index"]]
