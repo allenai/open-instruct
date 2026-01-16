@@ -22,7 +22,13 @@ from open_instruct.tools.tools import (
     SerperSearchToolConfig,
     _truncate,
 )
-from open_instruct.tools.utils import ParsedToolConfig, ToolOutput, ToolsConfig, get_openai_tool_definitions
+from open_instruct.tools.utils import (
+    ParsedToolConfig,
+    ToolOutput,
+    ToolsConfig,
+    ToolStatistics,
+    get_openai_tool_definitions,
+)
 
 
 class TestPythonCodeToolInit(unittest.TestCase):
@@ -1222,6 +1228,98 @@ class TestCrawl4AIBrowseToolConfig(unittest.TestCase):
     def test_tool_class_attribute(self):
         """Test tool_class is set to Crawl4AIBrowseTool."""
         self.assertEqual(Crawl4AIBrowseToolConfig.tool_class, Crawl4AIBrowseTool)
+
+
+class TestToolStatistics(unittest.TestCase):
+    """Tests for ToolStatistics class."""
+
+    def test_add_rollout_without_excess_calls(self):
+        """Test add_rollout works without excess_tool_calls."""
+        from open_instruct.data_types import ToolCallStats
+
+        stats = ToolStatistics()
+        stats.add_rollout([ToolCallStats(tool_name="python", success=True, runtime=0.5)])
+        stats.add_rollout([ToolCallStats(tool_name="python", success=False, runtime=0.3)])
+
+        self.assertEqual(stats.num_rollouts, 2)
+        self.assertIn("python", stats.tool_names)
+        self.assertEqual(stats._counts["python"], 2)
+        self.assertEqual(stats._failures["python"], 1)
+        self.assertEqual(stats._excess_calls["python"], 0)
+
+    def test_add_rollout_with_excess_calls(self):
+        """Test add_rollout correctly tracks excess_tool_calls."""
+        from open_instruct.data_types import ToolCallStats
+
+        stats = ToolStatistics()
+        stats.add_rollout(
+            [ToolCallStats(tool_name="python", success=True, runtime=0.5)],
+            excess_tool_calls={"python": 2, "search": 1},
+        )
+
+        self.assertEqual(stats.num_rollouts, 1)
+        self.assertIn("python", stats.tool_names)
+        self.assertIn("search", stats.tool_names)
+        self.assertEqual(stats._excess_calls["python"], 2)
+        self.assertEqual(stats._excess_calls["search"], 1)
+
+    def test_compute_metrics_includes_excess_calls(self):
+        """Test compute_metrics includes avg_excess_calls_per_rollout."""
+        from open_instruct.data_types import ToolCallStats
+
+        stats = ToolStatistics()
+        # Rollout 1: 1 successful call, 2 excess python calls
+        stats.add_rollout(
+            [ToolCallStats(tool_name="python", success=True, runtime=0.5)], excess_tool_calls={"python": 2}
+        )
+        # Rollout 2: 1 failed call, 1 excess python call
+        stats.add_rollout(
+            [ToolCallStats(tool_name="python", success=False, runtime=0.3)], excess_tool_calls={"python": 1}
+        )
+
+        metrics = stats.compute_metrics()
+
+        # 3 total excess calls / 2 rollouts = 1.5
+        self.assertEqual(metrics["tools/python/avg_excess_calls_per_rollout"], 1.5)
+        self.assertEqual(metrics["tools/aggregate/avg_excess_calls_per_rollout"], 1.5)
+
+    def test_compute_metrics_multiple_tools_with_excess(self):
+        """Test compute_metrics with multiple tools having excess calls."""
+        from open_instruct.data_types import ToolCallStats
+
+        stats = ToolStatistics()
+        stats.add_rollout(
+            [
+                ToolCallStats(tool_name="python", success=True, runtime=0.5),
+                ToolCallStats(tool_name="search", success=True, runtime=0.2),
+            ],
+            excess_tool_calls={"python": 3, "search": 1},
+        )
+        stats.add_rollout(
+            [ToolCallStats(tool_name="python", success=True, runtime=0.4)], excess_tool_calls={"python": 1}
+        )
+
+        metrics = stats.compute_metrics()
+
+        # python: 4 excess / 2 rollouts = 2.0
+        self.assertEqual(metrics["tools/python/avg_excess_calls_per_rollout"], 2.0)
+        # search: 1 excess / 2 rollouts = 0.5
+        self.assertEqual(metrics["tools/search/avg_excess_calls_per_rollout"], 0.5)
+        # aggregate: 5 excess / 2 rollouts = 2.5
+        self.assertEqual(metrics["tools/aggregate/avg_excess_calls_per_rollout"], 2.5)
+
+    def test_compute_metrics_no_excess_calls(self):
+        """Test compute_metrics when no excess calls occurred."""
+        from open_instruct.data_types import ToolCallStats
+
+        stats = ToolStatistics()
+        stats.add_rollout([ToolCallStats(tool_name="python", success=True, runtime=0.5)])
+        stats.add_rollout([ToolCallStats(tool_name="python", success=True, runtime=0.3)])
+
+        metrics = stats.compute_metrics()
+
+        self.assertEqual(metrics["tools/python/avg_excess_calls_per_rollout"], 0.0)
+        self.assertEqual(metrics["tools/aggregate/avg_excess_calls_per_rollout"], 0.0)
 
 
 class TestToolsConfig(unittest.TestCase):
