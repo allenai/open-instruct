@@ -48,7 +48,14 @@ jobs:
         run: uv sync --frozen
 
       - name: Install Beaker CLI
-        run: curl -s https://beaker.org/install | sudo bash
+        run: |
+          set -euo pipefail
+          curl -s https://beaker.org/install | sudo bash
+          if ! command -v beaker &> /dev/null; then
+            echo "ERROR: beaker command not found after installation"
+            exit 1
+          fi
+          beaker --version
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
