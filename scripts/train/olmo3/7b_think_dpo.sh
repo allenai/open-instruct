@@ -22,7 +22,7 @@ uv run python mason.py \
     --model_name_or_path $MODEL_NAME \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
-    --dataset_mixer_list scottgeng00/olmo-3-preference-mix-deltas_reasoning-yolo_scottmix-DECON 1.0 \
+    --mixer_list scottgeng00/olmo-3-preference-mix-deltas_reasoning-yolo_scottmix-DECON 1.0 \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
@@ -32,8 +32,8 @@ uv run python mason.py \
     --weight_decay 0.0 \
     --num_epochs 1 \
     --logging_steps 1 \
-    --dpo_loss_type dpo_norm \
-    --dpo_beta 5 \
+    --loss_type dpo_norm \
+    --beta 5 \
     --use_flash_attn \
     --gradient_checkpointing \
     --chat_template_name olmo_thinker \

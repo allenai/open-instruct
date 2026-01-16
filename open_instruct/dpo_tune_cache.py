@@ -26,7 +26,6 @@ with contextlib.suppress(Exception):
 
 # isort: on
 import math
-import pathlib
 import random
 import shutil
 import time
@@ -34,13 +33,11 @@ from datetime import timedelta
 
 import datasets
 import torch
-import torch.distributed as dist
 import torch.utils
 import torch.utils.data
 import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
-from accelerate.logging import get_logger
 from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
@@ -71,7 +68,7 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
 )
 
-logger = get_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 def build_deepspeed_config(
@@ -115,7 +112,7 @@ def build_deepspeed_config(
     return config
 
 
-def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
+def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -171,9 +168,9 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
     if not args.do_not_randomize_output_dir:
         args.output_dir = os.path.join(args.output_dir, args.exp_name)
     logger.info("using the output directory: %s", args.output_dir)
-    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    args.local_cache_dir = os.path.abspath(args.local_cache_dir)
     if is_beaker_job():
-        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     if args.push_to_hub and accelerator.is_main_process:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -248,21 +245,21 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
     accelerator.wait_for_everyone()
 
     if args.dataset_mixer is not None:
-        args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
+        args.mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
         transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
         train_dataset = get_cached_dataset_tulu(
-            dataset_mixer_list=args.dataset_mixer_list,
-            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            dataset_mixer_list=args.mixer_list,
+            dataset_mixer_list_splits=args.mixer_list_splits,
             tc=tc,
-            dataset_transform_fn=args.dataset_transform_fn,
+            dataset_transform_fn=args.transform_fn,
             transform_fn_args=transform_fn_args,
-            target_columns=args.dataset_target_columns,
-            dataset_cache_mode=args.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_hash,
+            target_columns=args.target_columns,
+            dataset_cache_mode=args.cache_mode,
+            dataset_config_hash=args.config_hash,
             hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.dataset_local_cache_dir,
-            dataset_skip_cache=args.dataset_skip_cache,
+            dataset_local_cache_dir=args.local_cache_dir,
+            dataset_skip_cache=args.skip_cache,
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
@@ -522,32 +519,17 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
     print_gpu_stats(init_gpu_memory)
 
     # Cache the logprobs
-    if args.dpo_loss_type.needs_reference_model:
+    if args.loss_type.needs_reference_model:
         reference_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
-        cache_path = pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{reference_cache_hash}.pt"
-
-        def make_disable_adapter_context():
-            if args.use_lora:
-                return accelerator.unwrap_model(model).disable_adapter()
-            return contextlib.nullcontext()
-
-        def all_reduce_max(tensor: torch.Tensor) -> None:
-            dist.all_reduce(tensor, op=dist.ReduceOp.MAX)
-
         reference_cache = dpo_utils.build_reference_logprobs_cache(
             model=model,
             dataloader=train_dataloader,
-            average_log_prob=args.dpo_loss_type.is_average_loss,
+            accelerator=accelerator,
+            average_log_prob=args.loss_type.is_average_loss,
             forward_fn=args.forward_fn,
             full_dataset_size=original_dataset_size,
+            reference_cache_hash=reference_cache_hash,
             use_lora=args.use_lora,
-            device=accelerator.device,
-            cache_path=cache_path,
-            disable_adapter_context=make_disable_adapter_context,
-            is_distributed=dist.is_initialized,
-            all_reduce_fn=all_reduce_max,
-            is_main_process=accelerator.is_main_process,
-            show_progress=accelerator.is_local_main_process,
         )
         logger.info("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
@@ -583,7 +565,7 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
                 policy_chosen_logps, policy_rejected_logps, aux_loss = args.forward_fn(
                     model,
                     batch,
-                    average_log_prob=args.dpo_loss_type.is_average_loss,
+                    average_log_prob=args.loss_type.is_average_loss,
                     output_router_logits=args.load_balancing_loss,
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
                 losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
@@ -591,7 +573,7 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
                     batch,
                     policy_chosen_logps,
                     policy_rejected_logps,
-                    reference_cache if args.dpo_loss_type.needs_reference_model else None,
+                    reference_cache if args.loss_type.needs_reference_model else None,
                 )
                 loss = losses.mean()
                 if args.load_balancing_loss:
@@ -608,12 +590,12 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
                 # We keep track of the loss at each logged step
                 with torch.no_grad():
                     local_metrics["train_loss"] += loss
-                    if args.dpo_loss_type.computes_reward_metrics:
-                        average_rewards = (chosen_rewards + rejected_rewards) / 2
-                        accuracy = (chosen_rewards > rejected_rewards).float()
-                        margin = chosen_rewards - rejected_rewards
-                        local_metrics["rewards/chosen"] += chosen_rewards
-                        local_metrics["rewards/rejected"] += rejected_rewards
+                    if args.loss_type.computes_reward_metrics:
+                        average_rewards = ((chosen_rewards + rejected_rewards) / 2).mean()
+                        accuracy = (chosen_rewards > rejected_rewards).float().mean()
+                        margin = (chosen_rewards - rejected_rewards).mean()
+                        local_metrics["rewards/chosen"] += chosen_rewards.mean()
+                        local_metrics["rewards/rejected"] += rejected_rewards.mean()
                         local_metrics["rewards/average"] += average_rewards
                         local_metrics["rewards/accuracy"] += accuracy
                         local_metrics["rewards/margin"] += margin
@@ -663,7 +645,7 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
                         "logps/chosen": global_metrics["logps/chosen"],
                         "logps/rejected": global_metrics["logps/rejected"],
                     }
-                    if args.dpo_loss_type.computes_reward_metrics:
+                    if args.loss_type.computes_reward_metrics:
                         metrics_to_log.update(
                             {
                                 "rewards/chosen": global_metrics["rewards/chosen"],
@@ -775,6 +757,6 @@ def print_gpu_stats(init_gpu_memory: int | None):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((dpo_utils.FlatArguments, TokenizerConfig))
+    parser = ArgumentParserPlus((dpo_utils.ExperimentConfig, TokenizerConfig))
     args, tc = parser.parse_args_into_dataclasses()
     main(args, tc)

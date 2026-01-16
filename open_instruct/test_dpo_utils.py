@@ -7,21 +7,20 @@ import torch
 
 from open_instruct import dpo_utils
 from open_instruct.dataset_transformation import TokenizerConfig
-from open_instruct.dpo_config import DPOLossType
-from open_instruct.dpo_utils import FlatArguments
+from open_instruct.dpo_utils import DPOLossType, ExperimentConfig
 
 logging.basicConfig(level=logging.INFO)
 
 
-def make_test_args(**overrides) -> FlatArguments:
-    """Create a FlatArguments with test defaults."""
+def make_test_args(**overrides) -> ExperimentConfig:
+    """Create an ExperimentConfig with test defaults."""
     defaults = {
         "model_name_or_path": "allenai/OLMo-2-1124-7B",
-        "dataset_mixer_list": ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"],
-        "dataset_config_hash": "test_dataset_config_hash",
+        "mixer_list": ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"],
+        "config_hash": "test_dataset_config_hash",
     }
     defaults.update(overrides)
-    return FlatArguments(**defaults)
+    return ExperimentConfig(**defaults)
 
 
 class TestDPOLoss(unittest.TestCase):
@@ -38,8 +37,8 @@ class TestDPOLoss(unittest.TestCase):
         )
 
         self.assertEqual(losses.shape, (3,))
-        self.assertEqual(chosen_rewards.shape, ())
-        self.assertEqual(rejected_rewards.shape, ())
+        self.assertEqual(chosen_rewards.shape, (3,))
+        self.assertEqual(rejected_rewards.shape, (3,))
 
     def test_chosen_preferred_gives_lower_loss(self):
         policy_chosen = torch.tensor([0.0])
@@ -100,8 +99,8 @@ class TestSimPOLoss(unittest.TestCase):
         )
 
         self.assertEqual(losses.shape, (3,))
-        self.assertEqual(chosen_rewards.shape, ())
-        self.assertEqual(rejected_rewards.shape, ())
+        self.assertEqual(chosen_rewards.shape, (3,))
+        self.assertEqual(rejected_rewards.shape, (3,))
 
     def test_gamma_affects_loss(self):
         policy_chosen = torch.tensor([0.0])
@@ -136,8 +135,8 @@ class TestWPOLoss(unittest.TestCase):
         )
 
         self.assertEqual(losses.shape, (1, 3))
-        self.assertEqual(chosen_rewards.shape, ())
-        self.assertEqual(rejected_rewards.shape, ())
+        self.assertEqual(chosen_rewards.shape, (1, 3))
+        self.assertEqual(rejected_rewards.shape, (1, 3))
 
 
 class TestComputeReferenceCacheHash(unittest.TestCase):
@@ -167,8 +166,8 @@ class TestComputeReferenceCacheHash(unittest.TestCase):
     def test_different_loss_type_different_hash(self):
         tc = TokenizerConfig(tokenizer_name_or_path="allenai/OLMo-2-1124-7B")
 
-        args1 = make_test_args(dpo_loss_type=DPOLossType.dpo)
-        args2 = make_test_args(dpo_loss_type=DPOLossType.simpo)
+        args1 = make_test_args(loss_type=DPOLossType.dpo)
+        args2 = make_test_args(loss_type=DPOLossType.simpo)
 
         hash1 = dpo_utils.compute_reference_cache_hash(args1, tc)
         hash2 = dpo_utils.compute_reference_cache_hash(args2, tc)
