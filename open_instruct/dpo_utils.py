@@ -17,6 +17,7 @@ DPO utils
 Adapted from https://github.com/eric-mitchell/direct-preference-optimization/blob/main/trainers.py
 """
 
+import contextlib
 import enum
 import functools
 import hashlib
@@ -31,7 +32,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from accelerate import Accelerator
 from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
@@ -41,7 +41,7 @@ from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
     compute_config_hash,
-    load_dataset_configs,
+    load_dataset_configs_from_args,
 )
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
@@ -350,68 +350,78 @@ class ExperimentConfig(
                 raise ValueError("offload_param can only be used with zero_stage 3")
 
 
-def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) -> str:
-    """Compute deterministic hash for reference logprobs cache from ExperimentConfig."""
-    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
-    dcs = load_dataset_configs(
-        args.mixer_list, args.mixer_list_splits, args.transform_fn, transform_fn_args, args.target_columns
-    )
-    dataset_config_hash = args.config_hash or compute_config_hash(dcs, tc)
-    config_str = json.dumps(
-        {
-            "concatenated_forward": args.concatenated_forward,
-            "dataset_config_hash": dataset_config_hash,
-            "loss_type": args.loss_type,
-            "max_train_samples": args.max_train_samples,
-            "model_name_or_path": args.model_name_or_path,
-            "model_revision": args.model_revision,
-            "packing": args.packing,
-            "use_lora": args.use_lora,
-            "use_qlora": args.use_qlora,
-        },
-        sort_keys=True,
-    )
+def compute_reference_cache_hash(
+    config_dict: dict, tc: TokenizerConfig, dataset_args: DatasetConfig, max_seq_length: int
+) -> str:
+    """Compute deterministic hash for reference logprobs cache.
+
+    Args:
+        config_dict: Dictionary containing model/training config (concatenated_forward,
+            dpo_loss_type, max_train_samples, model_name_or_path, model_revision,
+            packing, use_lora, use_qlora)
+        tc: TokenizerConfig
+        dataset_args: Dataset configuration with mixer_list, mixer_list_splits,
+            transform_fn, target_columns, and optionally config_hash
+        max_seq_length: Maximum sequence length for tokenization
+    """
+    transform_fn_args = [{"max_seq_length": max_seq_length}, {}]
+    dcs = load_dataset_configs_from_args(dataset_args, transform_fn_args)
+    dataset_config_hash = dataset_args.config_hash or compute_config_hash(dcs, tc)
+    config_str = json.dumps(config_dict | {"dataset_config_hash": dataset_config_hash}, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
 def build_reference_logprobs_cache(
     model: torch.nn.Module,
     dataloader: torch.utils.data.DataLoader,
-    accelerator: Accelerator,
     average_log_prob: bool,
     forward_fn: Callable,
     full_dataset_size: int,
-    reference_cache_hash: str,
     use_lora: bool = False,
+    device: torch.device | None = None,
+    cache_path: pathlib.Path | None = None,
+    disable_adapter_context: Callable[[], contextlib.AbstractContextManager] | None = None,
+    is_distributed: Callable[[], bool] | None = None,
+    all_reduce_fn: Callable[[torch.Tensor], None] | None = None,
+    is_main_process: bool = True,
 ) -> model_utils.TensorCache:
-    """Build a TensorCache with reference logprobs by computing logprobs once for all samples."""
-    cache_path = pathlib.Path(REFERENCE_LOGPROBS_CACHE_PATH) / f"{reference_cache_hash}.pt"
-    if not cache_path.exists():
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        test_file = cache_path.parent / f".write_test_{reference_cache_hash}"
-        try:
+    """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
+
+    Args:
+        model: The model to compute logprobs with
+        dataloader: DataLoader providing batches with 'index' key
+        average_log_prob: Whether to average log probabilities
+        forward_fn: Function to compute forward pass
+        full_dataset_size: Total number of samples in dataset
+        use_lora: Whether LoRA adapters are being used
+        device: Device to place tensors on
+        cache_path: Path to save/load the cache
+        disable_adapter_context: Callable returning context manager to disable LoRA adapters
+        is_distributed: Callable returning whether distributed training is active
+        all_reduce_fn: Function to all-reduce tensors across workers
+        is_main_process: Whether this is the main process
+    """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    if cache_path is not None:
+        if not cache_path.exists():
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            test_file = cache_path.parent / f".write_test_{cache_path.stem}"
             test_file.touch()
             test_file.unlink()
-        except (OSError, PermissionError) as e:
-            raise RuntimeError(
-                f"Cannot write to cache directory {cache_path.parent}: {e}. "
-                f"Set REFERENCE_LOGPROBS_CACHE_PATH to a writable location."
-            ) from e
-    if cache_path.exists():
-        logger.info(f"Loading reference logprobs cache from {cache_path}")
-        return model_utils.TensorCache.from_disk(cache_path, device=accelerator.device)
+        if cache_path.exists():
+            logger.info(f"Loading reference logprobs cache from {cache_path}")
+            return model_utils.TensorCache.from_disk(cache_path, device=device)
 
     model.eval()
-    device = accelerator.device
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
     rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
 
     with torch.no_grad():
-        for batch in tqdm(
-            dataloader, disable=not accelerator.is_local_main_process, desc="Caching reference logprobs"
-        ):
-            if use_lora:
-                with accelerator.unwrap_model(model).disable_adapter():
+        for batch in tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs"):
+            if use_lora and disable_adapter_context is not None:
+                with disable_adapter_context():
                     chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
             else:
                 chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
@@ -419,9 +429,9 @@ def build_reference_logprobs_cache(
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
 
-    if dist.is_initialized():
-        dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
-        dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
+    if is_distributed is not None and is_distributed() and all_reduce_fn is not None:
+        all_reduce_fn(chosen_tensor)
+        all_reduce_fn(rejected_tensor)
 
     missing_chosen = torch.where(chosen_tensor == float("-inf"))[0]
     missing_rejected = torch.where(rejected_tensor == float("-inf"))[0]
@@ -435,11 +445,11 @@ def build_reference_logprobs_cache(
     model.train()
     cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
 
-    if accelerator.is_main_process:
+    if cache_path is not None and is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
 
-    if dist.is_initialized():
+    if is_distributed is not None and is_distributed():
         dist.barrier()
 
     return cache

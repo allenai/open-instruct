@@ -26,6 +26,7 @@ with contextlib.suppress(Exception):
 
 # isort: on
 import math
+import pathlib
 import random
 import shutil
 import time
@@ -33,6 +34,7 @@ from datetime import timedelta
 
 import datasets
 import torch
+import torch.distributed as dist
 import torch.utils
 import torch.utils.data
 import transformers
@@ -522,15 +524,35 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # Cache the logprobs
     if args.dpo_loss_type.needs_reference_model:
+        config_dict = {
+            "concatenated_forward": args.concatenated_forward,
+            "dpo_loss_type": str(args.loss_type),
+            "max_train_samples": args.max_train_samples,
+            "model_name_or_path": args.model_name_or_path,
+            "model_revision": args.model_revision,
+            "packing": args.packing,
+            "use_lora": args.use_lora,
+            "use_qlora": args.use_qlora,
+        }
+        ref_cache_hash = dpo_utils.compute_reference_cache_hash(config_dict, tc, args, args.max_seq_length)
+        reference_cache_path = pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt"
+
+        def make_disable_adapter_context():
+            return accelerator.unwrap_model(model).disable_adapter()
+
         reference_cache = dpo_utils.build_reference_logprobs_cache(
             model=model,
             dataloader=train_dataloader,
-            accelerator=accelerator,
             average_log_prob=args.dpo_loss_type.is_average_loss,
             forward_fn=args.forward_fn,
             full_dataset_size=original_dataset_size,
-            reference_cache_hash=dpo_utils.compute_reference_cache_hash(args, tc),
             use_lora=args.use_lora,
+            device=accelerator.device,
+            cache_path=reference_cache_path,
+            disable_adapter_context=make_disable_adapter_context,
+            is_distributed=dist.is_initialized,
+            all_reduce_fn=lambda t: dist.all_reduce(t, op=dist.ReduceOp.MAX),
+            is_main_process=accelerator.is_main_process,
         )
         logger.info("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)

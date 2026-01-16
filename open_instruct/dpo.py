@@ -303,7 +303,17 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
         args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
-    ref_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
+    config_dict = {
+        "concatenated_forward": args.concatenated_forward,
+        "dpo_loss_type": str(args.loss_type),
+        "max_train_samples": None,
+        "model_name_or_path": args.model_name_or_path,
+        "model_revision": args.model_revision,
+        "packing": args.packing,
+        "use_lora": args.use_lora,
+        "use_qlora": args.use_qlora,
+    }
+    ref_cache_hash = dpo_utils.compute_reference_cache_hash(config_dict, tc, args, args.max_seq_length)
     reference_cache_path = pathlib.Path(args.reference_logprobs_cache_path) / f"{ref_cache_hash}.pt"
     logger.info(f"Reference logprobs cache path: {reference_cache_path}")
 

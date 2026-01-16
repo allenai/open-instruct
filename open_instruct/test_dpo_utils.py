@@ -139,15 +139,32 @@ class TestWPOLoss(unittest.TestCase):
         self.assertEqual(rejected_rewards.shape, (1, 3))
 
 
+def make_config_dict(**overrides) -> dict:
+    """Create a config dict for compute_reference_cache_hash."""
+    defaults = {
+        "concatenated_forward": True,
+        "dpo_loss_type": str(DPOLossType.dpo),
+        "max_train_samples": None,
+        "model_name_or_path": "allenai/OLMo-2-1124-7B",
+        "model_revision": None,
+        "packing": False,
+        "use_lora": False,
+        "use_qlora": False,
+    }
+    defaults.update(overrides)
+    return defaults
+
+
 class TestComputeReferenceCacheHash(unittest.TestCase):
     """Tests for compute_reference_cache_hash function."""
 
     def test_deterministic_hash(self):
         args = make_test_args()
+        config_dict = make_config_dict()
         tc = TokenizerConfig(tokenizer_name_or_path="allenai/OLMo-2-1124-7B")
 
-        hash1 = dpo_utils.compute_reference_cache_hash(args, tc)
-        hash2 = dpo_utils.compute_reference_cache_hash(args, tc)
+        hash1 = dpo_utils.compute_reference_cache_hash(config_dict, tc, args, 2048)
+        hash2 = dpo_utils.compute_reference_cache_hash(config_dict, tc, args, 2048)
 
         self.assertEqual(hash1, hash2)
         self.assertEqual(len(hash1), 16)
@@ -155,33 +172,36 @@ class TestComputeReferenceCacheHash(unittest.TestCase):
     def test_different_model_different_hash(self):
         tc = TokenizerConfig(tokenizer_name_or_path="allenai/OLMo-2-1124-7B")
 
-        args1 = make_test_args(model_name_or_path="allenai/OLMo-2-1124-7B")
-        args2 = make_test_args(model_name_or_path="allenai/OLMo-2-1124-13B")
+        args = make_test_args()
+        config_dict1 = make_config_dict(model_name_or_path="allenai/OLMo-2-1124-7B")
+        config_dict2 = make_config_dict(model_name_or_path="allenai/OLMo-2-1124-13B")
 
-        hash1 = dpo_utils.compute_reference_cache_hash(args1, tc)
-        hash2 = dpo_utils.compute_reference_cache_hash(args2, tc)
+        hash1 = dpo_utils.compute_reference_cache_hash(config_dict1, tc, args, 2048)
+        hash2 = dpo_utils.compute_reference_cache_hash(config_dict2, tc, args, 2048)
 
         self.assertNotEqual(hash1, hash2)
 
     def test_different_loss_type_different_hash(self):
         tc = TokenizerConfig(tokenizer_name_or_path="allenai/OLMo-2-1124-7B")
 
-        args1 = make_test_args(loss_type=DPOLossType.dpo)
-        args2 = make_test_args(loss_type=DPOLossType.simpo)
+        args = make_test_args()
+        config_dict1 = make_config_dict(dpo_loss_type=str(DPOLossType.dpo))
+        config_dict2 = make_config_dict(dpo_loss_type=str(DPOLossType.simpo))
 
-        hash1 = dpo_utils.compute_reference_cache_hash(args1, tc)
-        hash2 = dpo_utils.compute_reference_cache_hash(args2, tc)
+        hash1 = dpo_utils.compute_reference_cache_hash(config_dict1, tc, args, 2048)
+        hash2 = dpo_utils.compute_reference_cache_hash(config_dict2, tc, args, 2048)
 
         self.assertNotEqual(hash1, hash2)
 
     def test_different_packing_different_hash(self):
         tc = TokenizerConfig(tokenizer_name_or_path="allenai/OLMo-2-1124-7B")
 
-        args1 = make_test_args(packing=False)
-        args2 = make_test_args(packing=True)
+        args = make_test_args()
+        config_dict1 = make_config_dict(packing=False)
+        config_dict2 = make_config_dict(packing=True)
 
-        hash1 = dpo_utils.compute_reference_cache_hash(args1, tc)
-        hash2 = dpo_utils.compute_reference_cache_hash(args2, tc)
+        hash1 = dpo_utils.compute_reference_cache_hash(config_dict1, tc, args, 2048)
+        hash2 = dpo_utils.compute_reference_cache_hash(config_dict2, tc, args, 2048)
 
         self.assertNotEqual(hash1, hash2)
 
