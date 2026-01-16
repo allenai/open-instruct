@@ -204,6 +204,9 @@ class FlatArguments(
     """The priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
+        if isinstance(self.loss_type, str):
+            self.loss_type = dpo_config_lib.DPOLossType(self.loss_type)
+
         if self.dataset_name is None and self.dataset_mixer is None and self.mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
         if (
