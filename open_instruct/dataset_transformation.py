@@ -921,11 +921,7 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
 TOOLS_COLUMN_KEY = "tools"
 
 
-def validate_dataset_tools(
-    dataset: Dataset,
-    configured_tool_names: list[str],
-    dataset_name: str = "dataset",
-) -> None:
+def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
     """Validate that configured tools match tools in dataset's 'tools' column.
 
     The tools column is a list of tool call names (strings) that are active for each sample.

@@ -1466,7 +1466,9 @@ def setup_datasets(
 
         # Validate eval dataset tools as well
         if dataset_has_tools_column(eval_dataset) and configured_tool_call_names:
-            logger.info(f"Eval dataset has '{TOOLS_COLUMN_KEY}' column - validating configured tools against dataset tools")
+            logger.info(
+                f"Eval dataset has '{TOOLS_COLUMN_KEY}' column - validating configured tools against dataset tools"
+            )
             validate_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
             logger.info(f"Eval dataset has '{TOOLS_COLUMN_KEY}' column - per-sample tool activation enabled")
 
