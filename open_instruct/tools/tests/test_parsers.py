@@ -35,9 +35,6 @@ class MockTool:
     def get_call_name(self):
         return self.call_name
 
-    def get_tool_names(self):
-        return [self.call_name]
-
     def get_parameters(self):
         return {"required": self.required, "properties": {self.param_name: {"type": "string"}}}
 
@@ -54,10 +51,7 @@ def create_mock_tool_actor(
     mock_tool = MockTool(name, param_name, required, stop_strings)
     actor_handle = MagicMock()
     actor_handle.get_call_name.remote.return_value = mock_tool.get_call_name()
-    actor_handle.get_tool_names.remote.return_value = mock_tool.get_tool_names()
     actor_handle.get_parameters.remote.return_value = mock_tool.get_parameters()
-
-    # Handle get_stop_strings - return value or None (real Ray doesn't raise on .remote())
     actor_handle.get_stop_strings.remote.return_value = stop_strings
 
     return actor_handle
@@ -267,64 +261,37 @@ hello()"""
 
 
 class TestDRTuluToolParser(unittest.TestCase):
-    """Tests for DRTuluToolParser."""
+    """Tests for DRTuluToolParser.
+
+    The DRTuluToolParser delegates actual parsing to the tool itself.
+    It only detects that a tool call occurred (via stop strings) and passes the full text.
+    """
 
     def setUp(self):
         """Set up mock actors for each test."""
         self.patcher = patch("open_instruct.tools.parsers.ray")
         self.mock_ray = self.patcher.start()
-        # Make ray.get return the value directly (simulating sync behavior)
-        self.mock_ray.get.side_effect = lambda x: x
-        # Mock exceptions module
-        self.mock_ray.exceptions.RayActorError = Exception
+        self.mock_ray.get.side_effect = lambda x: x if not isinstance(x, list) else [v for v in x]
 
     def tearDown(self):
         """Stop the patcher."""
         self.patcher.stop()
 
-    def test_single_tool_extraction(self):
-        """Test extracting a single tool call with name attribute."""
-        mock_actor = create_mock_tool_actor("google_search", param_name="query")
+    def test_detects_tool_call_with_stop_string(self):
+        """Test that parser detects tool call when stop string is present."""
+        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>"])
         parser = DRTuluToolParser([mock_actor])
 
-        text = 'I need to search. <call_tool name="google_search">python tutorials</call_tool>'
+        text = '<call_tool name="google_search">python tutorials</call_tool>'
         tool_calls = parser.get_tool_calls(text)
 
         self.assertEqual(len(tool_calls), 1)
-        self.assertEqual(tool_calls[0].name, "google_search")
-        self.assertEqual(tool_calls[0].args, {"query": "python tutorials"})
+        self.assertEqual(tool_calls[0].name, "mcp")
+        self.assertEqual(tool_calls[0].args, {"text": text})
 
-    def test_single_quotes_in_name_attribute(self):
-        """Test extracting tool call with single quotes around name."""
-        mock_actor = create_mock_tool_actor("google_search", param_name="query")
-        parser = DRTuluToolParser([mock_actor])
-
-        text = "Search: <call_tool name='google_search'>climate change</call_tool>"
-        tool_calls = parser.get_tool_calls(text)
-
-        self.assertEqual(len(tool_calls), 1)
-        self.assertEqual(tool_calls[0].name, "google_search")
-        self.assertEqual(tool_calls[0].args, {"query": "climate change"})
-
-    def test_multiple_tools_extraction(self):
-        """Test extracting multiple different tool calls."""
-        mock_search = create_mock_tool_actor("google_search", param_name="query")
-        mock_browse = create_mock_tool_actor("browse_webpage", param_name="url")
-        parser = DRTuluToolParser([mock_search, mock_browse])
-
-        text = """<call_tool name="google_search">AI research</call_tool>
-        Found a link. <call_tool name="browse_webpage">https://example.com</call_tool>"""
-        tool_calls = parser.get_tool_calls(text)
-
-        self.assertEqual(len(tool_calls), 2)
-        self.assertEqual(tool_calls[0].name, "google_search")
-        self.assertEqual(tool_calls[0].args["query"], "AI research")
-        self.assertEqual(tool_calls[1].name, "browse_webpage")
-        self.assertEqual(tool_calls[1].args["url"], "https://example.com")
-
-    def test_no_tool_calls(self):
-        """Test that no tool calls are returned when none exist."""
-        mock_actor = create_mock_tool_actor("google_search")
+    def test_no_tool_call_without_stop_string(self):
+        """Test that no tool call is returned when stop string is absent."""
+        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>"])
         parser = DRTuluToolParser([mock_actor])
 
         text = "This is just regular text without any tool calls."
@@ -332,45 +299,21 @@ class TestDRTuluToolParser(unittest.TestCase):
 
         self.assertEqual(len(tool_calls), 0)
 
-    def test_multiline_content(self):
-        """Test extracting tool calls with multiline content."""
-        mock_actor = create_mock_tool_actor("snippet_search", param_name="query")
+    def test_passes_full_text_to_tool(self):
+        """Test that the full text is passed as the argument."""
+        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>"])
         parser = DRTuluToolParser([mock_actor])
 
-        query_content = """machine learning
-retrieval augmented generation
-2024 papers"""
-        text = f'<call_tool name="snippet_search">{query_content}</call_tool>'
+        text = """<think>I need to search</think>
+<call_tool name="google_search">query here</call_tool>"""
         tool_calls = parser.get_tool_calls(text)
 
         self.assertEqual(len(tool_calls), 1)
-        self.assertEqual(tool_calls[0].name, "snippet_search")
-        self.assertEqual(tool_calls[0].args["query"], query_content)
-
-    def test_partial_tag_not_matched(self):
-        """Test that incomplete tags are not matched."""
-        mock_actor = create_mock_tool_actor("google_search")
-        parser = DRTuluToolParser([mock_actor])
-
-        # Missing closing tag
-        text = '<call_tool name="google_search">query without closing'
-        tool_calls = parser.get_tool_calls(text)
-
-        self.assertEqual(len(tool_calls), 0)
-
-    def test_unknown_tool_name_skipped(self):
-        """Test that unknown tool names are skipped with a warning."""
-        mock_actor = create_mock_tool_actor("google_search", param_name="query")
-        parser = DRTuluToolParser([mock_actor])
-
-        text = '<call_tool name="unknown_tool">some query</call_tool>'
-        tool_calls = parser.get_tool_calls(text)
-
-        self.assertEqual(len(tool_calls), 0)
+        self.assertEqual(tool_calls[0].args["text"], text)
 
     def test_format_tool_outputs_single(self):
         """Test formatting a single tool output."""
-        mock_actor = create_mock_tool_actor("google_search")
+        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>"])
         parser = DRTuluToolParser([mock_actor])
 
         result = parser.format_tool_outputs(["Search result: Found 5 items"])
@@ -379,7 +322,7 @@ retrieval augmented generation
 
     def test_format_tool_outputs_multiple(self):
         """Test formatting multiple tool outputs."""
-        mock_actor = create_mock_tool_actor("google_search")
+        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>"])
         parser = DRTuluToolParser([mock_actor])
 
         result = parser.format_tool_outputs(["Result 1", "Result 2"])
@@ -388,14 +331,14 @@ retrieval augmented generation
 
     def test_stop_sequences_default(self):
         """Test that default stop sequence is used when tools don't provide them."""
-        mock_actor = create_mock_tool_actor("google_search")
+        mock_actor = create_mock_tool_actor("mcp")
         parser = DRTuluToolParser([mock_actor])
 
         self.assertEqual(parser.stop_sequences, ["</call_tool>"])
 
     def test_stop_sequences_from_tools(self):
         """Test that stop sequences are collected from tools that provide them."""
-        mock_actor = create_mock_tool_actor("mcp", param_name="text", stop_strings=["</call_tool>", "</tool>"])
+        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>", "</tool>"])
         parser = DRTuluToolParser([mock_actor])
 
         self.assertEqual(parser.stop_sequences, ["</call_tool>", "</tool>"])
@@ -409,105 +352,16 @@ retrieval augmented generation
         # Should be deduplicated while preserving order
         self.assertEqual(parser.stop_sequences, ["</call_tool>", "</tool>", "</other>"])
 
-    def test_empty_content(self):
-        """Test tool call with empty content between tags."""
-        mock_actor = create_mock_tool_actor("google_search", param_name="query")
+    def test_uses_first_tool_call_name(self):
+        """Test that parser uses the first tool's call name for routing."""
+        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>"])
         parser = DRTuluToolParser([mock_actor])
 
-        text = '<call_tool name="google_search"></call_tool>'
+        self.assertEqual(parser.tool_call_name, "mcp")
+
+        text = '<call_tool name="google_search">query</call_tool>'
         tool_calls = parser.get_tool_calls(text)
-
-        self.assertEqual(len(tool_calls), 1)
-        self.assertEqual(tool_calls[0].args["query"], "")
-
-    def test_whitespace_only_content(self):
-        """Test tool call with whitespace-only content."""
-        mock_actor = create_mock_tool_actor("google_search", param_name="query")
-        parser = DRTuluToolParser([mock_actor])
-
-        text = '<call_tool name="google_search">   \n\t  </call_tool>'
-        tool_calls = parser.get_tool_calls(text)
-
-        self.assertEqual(len(tool_calls), 1)
-        self.assertEqual(tool_calls[0].args["query"], "   \n\t  ")
-
-    def test_tool_without_required_params_uses_first_property(self):
-        """Test that tools without required params use first property name."""
-        mock_actor = create_mock_tool_actor("google_search", param_name="query", required=[])
-        parser = DRTuluToolParser([mock_actor])
-
-        text = '<call_tool name="google_search">test query</call_tool>'
-        tool_calls = parser.get_tool_calls(text)
-
-        self.assertEqual(len(tool_calls), 1)
-        self.assertEqual(tool_calls[0].args["query"], "test query")
-
-    def test_multiple_calls_same_tool_extracted(self):
-        """Test that all occurrences of the same tool type are extracted."""
-        mock_actor = create_mock_tool_actor("google_search", param_name="query")
-        parser = DRTuluToolParser([mock_actor])
-
-        text = """<call_tool name="google_search">first query</call_tool>
-        <call_tool name="google_search">second query</call_tool>"""
-        tool_calls = parser.get_tool_calls(text)
-
-        self.assertEqual(len(tool_calls), 2)
-        self.assertEqual(tool_calls[0].args["query"], "first query")
-        self.assertEqual(tool_calls[1].args["query"], "second query")
-
-    def test_tool_calls_preserve_text_order(self):
-        """Test that tool calls are returned in the order they appear in text."""
-        mock_search = create_mock_tool_actor("google_search", param_name="query")
-        mock_browse = create_mock_tool_actor("browse_webpage", param_name="url")
-        mock_snippet = create_mock_tool_actor("snippet_search", param_name="query")
-        parser = DRTuluToolParser([mock_search, mock_browse, mock_snippet])
-
-        # Interleaved tool calls
-        text = """<call_tool name="google_search">first</call_tool>
-        <call_tool name="browse_webpage">https://example.com</call_tool>
-        <call_tool name="google_search">second</call_tool>"""
-        tool_calls = parser.get_tool_calls(text)
-
-        self.assertEqual(len(tool_calls), 3)
-        self.assertEqual(tool_calls[0].name, "google_search")
-        self.assertEqual(tool_calls[0].args["query"], "first")
-        self.assertEqual(tool_calls[1].name, "browse_webpage")
-        self.assertEqual(tool_calls[1].args["url"], "https://example.com")
-        self.assertEqual(tool_calls[2].name, "google_search")
-        self.assertEqual(tool_calls[2].args["query"], "second")
-
-    def test_extra_attributes_in_tag(self):
-        """Test that extra attributes in the call_tool tag are handled."""
-        mock_actor = create_mock_tool_actor("snippet_search", param_name="query")
-        parser = DRTuluToolParser([mock_actor])
-
-        # DR Tulu format supports extra attributes like limit, year, etc.
-        text = '<call_tool name="snippet_search" limit="5" year="2024">machine learning</call_tool>'
-        tool_calls = parser.get_tool_calls(text)
-
-        self.assertEqual(len(tool_calls), 1)
-        self.assertEqual(tool_calls[0].name, "snippet_search")
-        self.assertEqual(tool_calls[0].args["query"], "machine learning")
-
-    def test_realistic_dr_tulu_format(self):
-        """Test with realistic DR Tulu format including think tags."""
-        mock_search = create_mock_tool_actor("google_search", param_name="query")
-        mock_snippet = create_mock_tool_actor("snippet_search", param_name="query")
-        parser = DRTuluToolParser([mock_search, mock_snippet])
-
-        text = """<think>I need to find information about climate change effects.</think>
-<call_tool name="google_search">climate change effects 2024</call_tool>
-
-<think>Now I need to find scientific papers on this topic.</think>
-<call_tool name="snippet_search" limit="5" year="2023-2024">climate change impact on agriculture</call_tool>"""
-
-        tool_calls = parser.get_tool_calls(text)
-
-        self.assertEqual(len(tool_calls), 2)
-        self.assertEqual(tool_calls[0].name, "google_search")
-        self.assertEqual(tool_calls[0].args["query"], "climate change effects 2024")
-        self.assertEqual(tool_calls[1].name, "snippet_search")
-        self.assertEqual(tool_calls[1].args["query"], "climate change impact on agriculture")
+        self.assertEqual(tool_calls[0].name, "mcp")
 
 
 class TestGetAvailableParsers(unittest.TestCase):

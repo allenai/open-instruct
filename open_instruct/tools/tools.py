@@ -405,7 +405,6 @@ class DrAgentMCPTool(Tool):
         self.call_name = call_name
         self.mcp_tools: list[Any] = []
         self.stop_strings: list[str] = []
-        self._tool_names: list[str] = []
 
         transport = transport_type or os.environ.get("MCP_TRANSPORT", "StreamableHttpTransport")
         resolved_host = host or os.environ.get("MCP_TRANSPORT_HOST", "0.0.0.0")
@@ -433,10 +432,6 @@ class DrAgentMCPTool(Tool):
             tool = cls(timeout=timeout, name=name, tool_parser=parser_name, transport_type=transport, **kwargs)
             self.mcp_tools.append(tool)
             self.stop_strings.extend(tool.tool_parser.stop_sequences)
-            self._tool_names.append(name)
-
-    def get_tool_names(self) -> list[str]:
-        return self._tool_names
 
     def get_stop_strings(self) -> list[str]:
         return self.stop_strings

@@ -284,14 +284,6 @@ class Tool(ABC):
         """Get the tool's call name (used when function calling)."""
         return self.call_name
 
-    def get_tool_names(self) -> list[str]:
-        """Get list of tool names this tool responds to.
-
-        For simple tools, returns [call_name]. Wrapper tools (e.g., MCP) override
-        this to return the underlying tool names they handle.
-        """
-        return [self.call_name]
-
     def get_description(self) -> str:
         """Get the tool's description."""
         return self.description

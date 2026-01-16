@@ -272,41 +272,17 @@ def create_vllm_parser(
 
 class DRTuluToolParser(ToolParser):
     """
-    Parser for <call_tool name="tool_name">content</call_tool> style tool calls.
+    Parser for DR Tulu style tool calls. Delegates actual parsing to the tool itself.
+    Only detects that a tool call occurred (via stop strings) and passes text to the tool.
     """
 
-    CALL_TOOL_REGEX = re.compile(r'<call_tool\s+name=["\']([^"\']+)["\']\s*(?:[^>]*)>(.*?)</call_tool>', re.DOTALL)
-
     def __init__(self, tool_actors: list[ray.actor.ActorHandle], default_stop_string: str = "</call_tool>"):
-        # Fetch metadata in parallel
-        tool_names_futures = [actor.get_tool_names.remote() for actor in tool_actors]
-        params_futures = [actor.get_parameters.remote() for actor in tool_actors]
+        # Get tool call names for routing
+        call_names = ray.get([actor.get_call_name.remote() for actor in tool_actors])
+        self.tool_call_name = call_names[0] if call_names else "mcp"
 
-        all_tool_names = ray.get(tool_names_futures)
-        all_params = ray.get(params_futures)
-
-        # Flatten tool names (MCP tools return multiple names)
-        self.tool_names: list[str] = []
-        for names in all_tool_names:
-            self.tool_names.extend(names)
-        assert len(self.tool_names) == len(set(self.tool_names)), "Tool names must be unique"
-
-        # Build param name mapping - for MCP tools, all wrapped tools use "text"
-        self.tool_param_names: dict[str, str] = {}
-        for names, params in zip(all_tool_names, all_params):
-            required = params.get("required", [])
-            if required:
-                param_name = required[0]
-            elif params.get("properties"):
-                param_name = next(iter(params["properties"]))
-            else:
-                param_name = "text"
-            for name in names:
-                self.tool_param_names[name] = param_name
-
-        # Collect stop strings in parallel
-        stop_strings_futures = [actor.get_stop_strings.remote() for actor in tool_actors]
-        all_stop_strings = ray.get(stop_strings_futures)
+        # Collect stop strings
+        all_stop_strings = ray.get([actor.get_stop_strings.remote() for actor in tool_actors])
         stop_strings: list[str] = []
         for tool_stops in all_stop_strings:
             if tool_stops:
@@ -314,13 +290,11 @@ class DRTuluToolParser(ToolParser):
         self.stop_sequences = list(dict.fromkeys(stop_strings)) or [default_stop_string]
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
-        tool_calls: list[ToolCall] = []
-        for match in self.CALL_TOOL_REGEX.finditer(text):
-            tool_name = match.group(1).strip()
-            if tool_name in self.tool_names:
-                param_name = self.tool_param_names.get(tool_name, "text")
-                tool_calls.append(ToolCall(name=tool_name, args={param_name: match.group(2)}))
-        return tool_calls
+        # Check if any stop sequence is present (indicating a tool call)
+        for stop in self.stop_sequences:
+            if stop in text:
+                return [ToolCall(name=self.tool_call_name, args={"text": text})]
+        return []
 
     def format_tool_outputs(self, tool_outputs: list[str]) -> str:
         return "\n".join(f"<tool_output>\n{output}\n</tool_output>\n" for output in tool_outputs)
