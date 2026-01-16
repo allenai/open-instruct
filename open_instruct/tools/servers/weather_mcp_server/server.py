@@ -116,7 +116,7 @@ def compare_weather(
         f"  Condition: {weather2['condition']}\n"
         f"  Humidity: {weather2['humidity']}%\n"
         f"  Wind: {weather2['wind_mph']} mph\n\n"
-        f"Summary: {warmer} is {temp_diff}°F warmer."
+        f"Summary: {'Both cities have the same temperature.' if temp_diff == 0 else f'{warmer} is {temp_diff}°F warmer.'}"
     )
 
 
