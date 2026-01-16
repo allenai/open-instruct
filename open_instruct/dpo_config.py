@@ -184,16 +184,10 @@ class CheckpointConfig:
 
 @dataclass
 class EvalConfig:
-    """Configuration for evaluation jobs."""
+    """Configuration for evaluation and deployment."""
 
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
-
-
-@dataclass
-class Ai2EvalConfig:
-    """AI2-specific configuration for evaluation and deployment."""
-
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
     gs_bucket_path: str | None = None
