@@ -918,14 +918,12 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
         # Execute tool calls
         outputs: list[str] = []
-        max_calls_exceeded = False
         for tool_call in tool_calls:
             tool_called = True
             num_calls += 1
 
             # Check if we've exceeded max tool calls
             if num_calls > actor.max_tool_calls:
-                max_calls_exceeded = True
                 exceeded_message = "Max tool calls exceeded"
                 tool_error += exceeded_message
                 outputs.append(exceeded_message)
