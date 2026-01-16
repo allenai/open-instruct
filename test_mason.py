@@ -2,8 +2,9 @@ import unittest
 from argparse import Namespace
 
 import beaker
-import mason
 import parameterized
+
+import mason
 
 
 class TestBuildCommandWithoutArgs(unittest.TestCase):

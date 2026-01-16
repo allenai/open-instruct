@@ -53,12 +53,6 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.launch_utils import (
-    is_beaker_job,
-    launch_ai2_evals_on_weka,
-    maybe_get_beaker_config,
-    maybe_update_beaker_description,
-)
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 from open_instruct.utils import (
@@ -66,6 +60,10 @@ from open_instruct.utils import (
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
     get_wandb_tags,
+    is_beaker_job,
+    launch_ai2_evals_on_weka,
+    maybe_get_beaker_config,
+    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
 )

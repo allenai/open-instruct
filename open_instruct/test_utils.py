@@ -293,7 +293,7 @@ class TestBeakerDescription(unittest.TestCase):
 
 class TestSlackMessage(unittest.TestCase):
     @responses.activate
-    @mock.patch("open_instruct.launch_utils.get_beaker_experiment_url")
+    @mock.patch("open_instruct.utils.get_beaker_experiment_url")
     @mock.patch("os.environ.get")
     def test_send_slack_message_with_beaker_url(self, mock_environ_get, mock_get_beaker_url):
         webhook_url = "https://hooks.slack.com/services/test"
@@ -342,7 +342,7 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
 
     @responses.activate
     @mock.patch("shutil.disk_usage")
-    @mock.patch("open_instruct.launch_utils.get_beaker_experiment_url")
+    @mock.patch("open_instruct.utils.get_beaker_experiment_url")
     @mock.patch("os.environ.get")
     def test_slack_alert_sent_when_enabled(self, mock_environ_get, mock_get_beaker_url, mock_disk_usage):
         webhook_url = "https://hooks.slack.com/services/test"
