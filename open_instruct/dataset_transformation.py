@@ -947,11 +947,12 @@ def validate_dataset_tools(
     if not configured_tool_names:
         return  # No tools configured, nothing to validate
 
-    # Check all samples to collect all tool names used in the dataset
+    # Access column directly for efficiency (avoid per-sample iteration overhead)
     dataset_tool_names: set[str] = set()
-    for sample in dataset:
-        if sample.get(TOOLS_COLUMN_KEY):
-            for tool_def in sample[TOOLS_COLUMN_KEY]:
+    tools_column = dataset[TOOLS_COLUMN_KEY]
+    for tools in tools_column:
+        if tools:
+            for tool_def in tools:
                 if isinstance(tool_def, dict) and "function" in tool_def:
                     tool_name = tool_def["function"].get("name")
                     if tool_name:
