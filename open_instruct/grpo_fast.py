@@ -2288,7 +2288,9 @@ def main(
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     tool_actors, tool_definitions, tool_stop_sequences = initialize_tools(tools_config, tokenizer)
-    logger.info(f"Initialized {len(tool_actors)} tool actors with definitions: {[d['function']['name'] for d in tool_definitions]}")
+    logger.info(
+        f"Initialized {len(tool_actors)} tool actors with definitions: {[d['function']['name'] for d in tool_definitions]}"
+    )
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)

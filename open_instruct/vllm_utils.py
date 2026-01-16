@@ -909,7 +909,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         # in future, we could instead add an error message to the model output to indicate that the tool call is invalid.
         tool_calls = [tc for tc in tool_calls if tc.name in actor.tool_actor_map]
         if not tool_calls:
-            logger.debug(f"No valid tool calls after filtering. tool_actor_map keys: {list(actor.tool_actor_map.keys())}")
+            logger.debug(
+                f"No valid tool calls after filtering. tool_actor_map keys: {list(actor.tool_actor_map.keys())}"
+            )
             break
 
         # Execute tool calls

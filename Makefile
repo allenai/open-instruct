@@ -1,4 +1,4 @@
-.PHONY: style quality check
+.PHONY: style quality
 
 # make sure to test the local checkout in scripts and not the pre-installed one (don't use quotes!)
 export PYTHONPATH = open_instruct
@@ -20,5 +20,3 @@ quality-check: ## *fail* if any rewrite was needed
 	uv run ruff check --exit-non-zero-on-fix $(check_dirs)
 	uv run ty check
 	uv run python -m compileall -qq $(check_dirs)
-
-check: style-check quality-check  ## run all checks (format + lint + type)
