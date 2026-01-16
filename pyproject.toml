@@ -161,8 +161,10 @@ case-sensitive = false
 split-on-trailing-comma = false
 
 # Ignore unresolved imports because some packages (e.g. vllm) are not available on macOS
+# Ignore possibly-missing-attribute for torch.distributed which has incomplete type stubs
 [tool.ty.rules]
 unresolved-import = "ignore"
+possibly-missing-attribute = "ignore"
 
 [tool.ty.src]
 include = [
