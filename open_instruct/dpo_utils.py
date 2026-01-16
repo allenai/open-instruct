@@ -104,10 +104,6 @@ class DPOConfig:
     """Whether to include a load balancing loss (for OLMoE) or not."""
     load_balancing_weight: float = 0.001
     """Weight for load balancing loss if applicable."""
-    concatenated_forward: bool = True
-    """Whether to concatenate chosen and rejected for DPO training."""
-    packing: bool = False
-    """Whether to use packing/padding-free collation."""
 
 
 @dataclass
