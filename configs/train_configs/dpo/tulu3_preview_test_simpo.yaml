@@ -18,6 +18,6 @@ output_dir: /output
 with_tracking: true
 logging_steps: 1
 use_lora: false
-dpo_loss_type: simpo
-dpo_gamma_beta_ratio: 0.3
-dpo_beta: 10
+loss_type: simpo
+gamma_beta_ratio: 0.3
+beta: 10

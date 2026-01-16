@@ -32,10 +32,10 @@ uv run python -m accelerate.commands.launch \
     --weight_decay 0.0 \
     --num_train_epochs 1 \
     --logging_steps 10 \
-    --dataset_mixer_list argilla/ultrafeedback-binarized-preferences-cleaned 1.0 \
+    --mixer_list argilla/ultrafeedback-binarized-preferences-cleaned 1.0 \
     --add_bos \
-    --dpo_loss_type dpo_norm \
-    --dpo_beta 5 \
+    --loss_type dpo_norm \
+    --beta 5 \
     --seed 42 \
     --output_dir /tmp/dpo_qwen3_ultrafeedback \
     --gradient_checkpointing \

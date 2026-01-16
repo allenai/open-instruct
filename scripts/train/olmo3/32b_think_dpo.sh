@@ -32,9 +32,9 @@ do
         --model_name_or_path $MODEL_NAME \
         --tokenizer_name $MODEL_NAME \
         --use_slow_tokenizer False \
-        --dataset_mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-ftd-topic-ftd-dedup5_take2 1.0 \
+        --mixer_list allenai/olmo-3-preference-mix-deltas_reasoning-scottmix-DECON-keyword-ftd-topic-ftd-dedup5_take2 1.0 \
         --max_train_samples 200000 \
-        --dataset_skip_cache \
+        --skip_cache \
         --zero_stage 3 \
         --max_seq_length 8192 \
         --per_device_train_batch_size 1 \
@@ -45,8 +45,8 @@ do
         --weight_decay 0.0 \
         --num_epochs 1 \
         --logging_steps 1 \
-        --dpo_loss_type dpo_norm \
-        --dpo_beta 5 \
+        --loss_type dpo_norm \
+        --beta 5 \
         --use_flash_attn \
         --gradient_checkpointing \
         --chat_template_name olmo123 \
