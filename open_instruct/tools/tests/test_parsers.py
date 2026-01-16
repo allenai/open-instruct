@@ -279,19 +279,19 @@ class TestDRTuluToolParser(unittest.TestCase):
 
     def test_detects_tool_call_with_stop_string(self):
         """Test that parser detects tool call when stop string is present."""
-        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>"])
+        mock_actor = create_mock_tool_actor("dr_agent_mcp", stop_strings=["</call_tool>"])
         parser = DRTuluToolParser([mock_actor])
 
         text = '<call_tool name="google_search">python tutorials</call_tool>'
         tool_calls = parser.get_tool_calls(text)
 
         self.assertEqual(len(tool_calls), 1)
-        self.assertEqual(tool_calls[0].name, "mcp")
+        self.assertEqual(tool_calls[0].name, "dr_agent_mcp")
         self.assertEqual(tool_calls[0].args, {"text": text})
 
     def test_no_tool_call_without_stop_string(self):
         """Test that no tool call is returned when stop string is absent."""
-        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>"])
+        mock_actor = create_mock_tool_actor("dr_agent_mcp", stop_strings=["</call_tool>"])
         parser = DRTuluToolParser([mock_actor])
 
         text = "This is just regular text without any tool calls."
@@ -301,7 +301,7 @@ class TestDRTuluToolParser(unittest.TestCase):
 
     def test_passes_full_text_to_tool(self):
         """Test that the full text is passed as the argument."""
-        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>"])
+        mock_actor = create_mock_tool_actor("dr_agent_mcp", stop_strings=["</call_tool>"])
         parser = DRTuluToolParser([mock_actor])
 
         text = """<think>I need to search</think>
@@ -313,7 +313,7 @@ class TestDRTuluToolParser(unittest.TestCase):
 
     def test_format_tool_outputs_single(self):
         """Test formatting a single tool output."""
-        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>"])
+        mock_actor = create_mock_tool_actor("dr_agent_mcp", stop_strings=["</call_tool>"])
         parser = DRTuluToolParser([mock_actor])
 
         result = parser.format_tool_outputs(["Search result: Found 5 items"])
@@ -322,7 +322,7 @@ class TestDRTuluToolParser(unittest.TestCase):
 
     def test_format_tool_outputs_multiple(self):
         """Test formatting multiple tool outputs."""
-        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>"])
+        mock_actor = create_mock_tool_actor("dr_agent_mcp", stop_strings=["</call_tool>"])
         parser = DRTuluToolParser([mock_actor])
 
         result = parser.format_tool_outputs(["Result 1", "Result 2"])
@@ -331,36 +331,45 @@ class TestDRTuluToolParser(unittest.TestCase):
 
     def test_stop_sequences_default(self):
         """Test that empty list is used when tools don't provide stop strings."""
-        mock_actor = create_mock_tool_actor("mcp")
+        mock_actor = create_mock_tool_actor("dr_agent_mcp")
         parser = DRTuluToolParser([mock_actor])
 
         self.assertEqual(parser.stop_sequences, [])
 
     def test_stop_sequences_from_tools(self):
         """Test that stop sequences are collected from tools that provide them."""
-        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>", "</tool>"])
+        mock_actor = create_mock_tool_actor("dr_agent_mcp", stop_strings=["</call_tool>", "</tool>"])
         parser = DRTuluToolParser([mock_actor])
 
         self.assertEqual(parser.stop_sequences, ["</call_tool>", "</tool>"])
 
-    def test_stop_sequences_deduplicated(self):
-        """Test that duplicate stop sequences are removed."""
-        mock_actor1 = create_mock_tool_actor("tool1", stop_strings=["</call_tool>", "</tool>"])
-        mock_actor2 = create_mock_tool_actor("tool2", stop_strings=["</call_tool>", "</other>"])
-        parser = DRTuluToolParser([mock_actor1, mock_actor2])
+    def test_rejects_multiple_tools(self):
+        """Test that parser rejects multiple tools."""
+        mock_actor1 = create_mock_tool_actor("dr_agent_mcp", stop_strings=["</call_tool>"])
+        mock_actor2 = create_mock_tool_actor("dr_agent_mcp", stop_strings=["</call_tool>"])
 
-        self.assertEqual(set(parser.stop_sequences), {"</call_tool>", "</tool>", "</other>"})
+        with self.assertRaises(ValueError) as context:
+            DRTuluToolParser([mock_actor1, mock_actor2])
+        self.assertIn("exactly one tool", str(context.exception))
 
-    def test_uses_first_tool_call_name(self):
-        """Test that parser uses the first tool's call name for routing."""
-        mock_actor = create_mock_tool_actor("mcp", stop_strings=["</call_tool>"])
+    def test_uses_tool_call_name(self):
+        """Test that parser uses the tool's call name for routing."""
+        mock_actor = create_mock_tool_actor("dr_agent_mcp", stop_strings=["</call_tool>"])
         parser = DRTuluToolParser([mock_actor])
 
-        self.assertEqual(parser.tool_call_name, "mcp")
+        self.assertEqual(parser.tool_call_name, "dr_agent_mcp")
 
         text = '<call_tool name="google_search">query</call_tool>'
         tool_calls = parser.get_tool_calls(text)
-        self.assertEqual(tool_calls[0].name, "mcp")
+        self.assertEqual(tool_calls[0].name, "dr_agent_mcp")
+
+    def test_rejects_wrong_tool(self):
+        """Test that parser rejects tools that aren't dr_agent_mcp."""
+        mock_actor = create_mock_tool_actor("python", stop_strings=["</code>"])
+
+        with self.assertRaises(ValueError) as context:
+            DRTuluToolParser([mock_actor])
+        self.assertIn("dr_agent_mcp", str(context.exception))
 
 
 class TestGetAvailableParsers(unittest.TestCase):

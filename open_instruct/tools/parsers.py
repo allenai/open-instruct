@@ -277,16 +277,17 @@ class DRTuluToolParser(ToolParser):
     """
 
     def __init__(self, tool_actors: list[ray.actor.ActorHandle]):
+        if len(tool_actors) != 1:
+            raise ValueError(f"DRTuluToolParser requires exactly one tool (dr_agent_mcp), got {len(tool_actors)}")
+
         call_names = ray.get([actor.get_call_name.remote() for actor in tool_actors])
-        self.tool_call_name = call_names[0] if call_names else "dr_agent_mcp"
+        self.tool_call_name = call_names[0]
+
+        if self.tool_call_name != "dr_agent_mcp":
+            raise ValueError(f"DRTuluToolParser requires dr_agent_mcp tool, got {self.tool_call_name}")
 
         all_stop_strings = ray.get([actor.get_stop_strings.remote() for actor in tool_actors])
         self.stop_sequences = list(set(stop for tool_stops in all_stop_strings if tool_stops for stop in tool_stops))
-
-        if len(tool_actors) > 1:
-            logger.warning(
-                f"DRTuluToolParser: Using only one dr_agent_mcp tool is supported, found {len(tool_actors)} tools."
-            )
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
         for stop in self.stop_sequences:
