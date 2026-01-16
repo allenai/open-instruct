@@ -941,14 +941,9 @@ def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], d
     if TOOLS_COLUMN_KEY not in dataset.column_names:
         return
 
-    dataset_tool_names: set[str] = set()
-    tools_column = dataset[TOOLS_COLUMN_KEY]
-    for tools in tools_column:
-        if tools:
-            for tool_name in tools:
-                if tool_name:
-                    dataset_tool_names.add(tool_name)
-
+    dataset_tool_names = {
+        tool_name for tools in dataset[TOOLS_COLUMN_KEY] if tools for tool_name in tools if tool_name
+    }
     configured_set = set(configured_tool_names) if configured_tool_names else set()
 
     unconfigured_tools = dataset_tool_names - configured_set
