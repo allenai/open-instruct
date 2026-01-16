@@ -4,10 +4,30 @@ This module contains base dataclasses that are shared between dpo.py (OLMo-core)
 and dpo_tune_cache.py (Accelerate/DeepSpeed) implementations.
 """
 
+import enum
 from dataclasses import dataclass, field
 from typing import Literal
 
 from open_instruct.dataset_transformation import TOKENIZED_PREFERENCE_DATASET_KEYS
+
+
+class DPOLossType(enum.StrEnum):
+    dpo = "dpo"
+    dpo_norm = "dpo_norm"
+    simpo = "simpo"
+    wpo = "wpo"
+
+    @property
+    def is_average_loss(self) -> bool:
+        return self in (DPOLossType.simpo, DPOLossType.dpo_norm)
+
+    @property
+    def needs_reference_model(self) -> bool:
+        return self in (DPOLossType.dpo, DPOLossType.dpo_norm, DPOLossType.wpo)
+
+    @property
+    def computes_reward_metrics(self) -> bool:
+        return self in (DPOLossType.dpo, DPOLossType.dpo_norm)
 
 
 @dataclass
@@ -25,26 +45,12 @@ class ExperimentConfig:
 
 
 @dataclass
-class ModelConfig:
-    """Configuration for model loading."""
-
-    model_name_or_path: str | None = None
-    """The model checkpoint for weights initialization."""
-    use_flash_attn: bool = True
-    """Whether to use flash attention in the model training"""
-    model_revision: str | None = None
-    """The specific model version to use (can be a branch name, tag name or commit id)."""
-    low_cpu_mem_usage: bool = False
-    """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
-
-
-@dataclass
 class DPOHyperparamsConfig:
     """Configuration for DPO-specific hyperparameters."""
 
     dpo_beta: float = 0.1
     """Beta parameter for DPO loss."""
-    dpo_loss_type: str = "dpo"
+    dpo_loss_type: DPOLossType = DPOLossType.dpo
     """Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."""
     dpo_gamma_beta_ratio: float = 0.3
     """Gamma to beta ratio for SimPO loss. Not used for DPO loss."""
@@ -54,10 +60,6 @@ class DPOHyperparamsConfig:
     """Whether to include a load balancing loss (for OLMoE) or not."""
     load_balancing_weight: float = 0.001
     """Weight for load balancing loss if applicable."""
-    concatenated_forward: bool = True
-    """Whether to concatenate chosen and rejected for DPO training."""
-    packing: bool = False
-    """Whether to use packing/padding-free collation."""
 
 
 @dataclass
