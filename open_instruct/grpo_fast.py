@@ -1966,6 +1966,8 @@ def maybe_evaluate(
         table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
         table["scores"] = eval_batch.scores
         table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
+        if eval_batch.active_tools is not None:
+            table["active_tools"] = [str(tools) if tools is not None else "all" for tools in eval_batch.active_tools]
         df = pd.DataFrame(table)
 
         if args.with_tracking:
