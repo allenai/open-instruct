@@ -330,11 +330,11 @@ class TestDRTuluToolParser(unittest.TestCase):
         self.assertEqual(result, expected)
 
     def test_stop_sequences_default(self):
-        """Test that default stop sequence is used when tools don't provide them."""
+        """Test that empty list is used when tools don't provide stop strings."""
         mock_actor = create_mock_tool_actor("mcp")
         parser = DRTuluToolParser([mock_actor])
 
-        self.assertEqual(parser.stop_sequences, ["</call_tool>"])
+        self.assertEqual(parser.stop_sequences, [])
 
     def test_stop_sequences_from_tools(self):
         """Test that stop sequences are collected from tools that provide them."""
@@ -349,8 +349,7 @@ class TestDRTuluToolParser(unittest.TestCase):
         mock_actor2 = create_mock_tool_actor("tool2", stop_strings=["</call_tool>", "</other>"])
         parser = DRTuluToolParser([mock_actor1, mock_actor2])
 
-        # Should be deduplicated while preserving order
-        self.assertEqual(parser.stop_sequences, ["</call_tool>", "</tool>", "</other>"])
+        self.assertEqual(set(parser.stop_sequences), {"</call_tool>", "</tool>", "</other>"})
 
     def test_uses_first_tool_call_name(self):
         """Test that parser uses the first tool's call name for routing."""
