@@ -123,5 +123,10 @@ def compare_weather(
 if __name__ == "__main__":
     import sys
 
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
+    port = 8765
+    if len(sys.argv) > 1:
+        try:
+            port = int(sys.argv[1])
+        except ValueError:
+            print(f"Error: Invalid port '{sys.argv[1]}'. Using default port {port}.")
     mcp.run(transport="http", host="0.0.0.0", port=port)
