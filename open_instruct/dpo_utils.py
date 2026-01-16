@@ -470,6 +470,17 @@ def build_reference_logprobs_cache(
 ) -> model_utils.TensorCache:
     """Build a TensorCache with reference logprobs by computing logprobs once for all samples."""
     cache_path = pathlib.Path(REFERENCE_LOGPROBS_CACHE_PATH) / f"{reference_cache_hash}.pt"
+    if not cache_path.exists():
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        test_file = cache_path.parent / f".write_test_{reference_cache_hash}"
+        try:
+            test_file.touch()
+            test_file.unlink()
+        except (OSError, PermissionError) as e:
+            raise RuntimeError(
+                f"Cannot write to cache directory {cache_path.parent}: {e}. "
+                f"Set REFERENCE_LOGPROBS_CACHE_PATH to a writable location."
+            ) from e
     if cache_path.exists():
         logger.info(f"Loading reference logprobs cache from {cache_path}")
         return model_utils.TensorCache.from_disk(cache_path, device=accelerator.device)
