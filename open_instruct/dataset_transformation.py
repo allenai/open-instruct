@@ -982,9 +982,9 @@ def get_active_tools_from_sample(sample_tools: list[str] | None) -> list[str] | 
         sample_tools: List of tool names from the sample's tools column, or None.
 
     Returns:
-        The list of tool names, or None if not provided.
+        The list of tool names (empty list means no tools active), or None if not provided.
     """
-    if not sample_tools:
+    if sample_tools is None:
         return None
     return list(sample_tools)
 
