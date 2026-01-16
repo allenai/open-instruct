@@ -4,10 +4,38 @@ This module contains base dataclasses that are shared between dpo.py (OLMo-core)
 and dpo_tune_cache.py (Accelerate/DeepSpeed) implementations.
 """
 
+import enum
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Protocol, runtime_checkable
 
 from open_instruct.dataset_transformation import TOKENIZED_PREFERENCE_DATASET_KEYS
+
+
+class DPOLossType(enum.StrEnum):
+    dpo = "dpo"
+    dpo_norm = "dpo_norm"
+    simpo = "simpo"
+    wpo = "wpo"
+
+
+@runtime_checkable
+class DPOConfigProtocol(Protocol):
+    """Protocol for DPO config types used by compute_reference_cache_hash."""
+
+    dataset_mixer_list: list[str] | None
+    dataset_mixer_list_splits: list[str] | None
+    dataset_transform_fn: list[str] | None
+    dataset_target_columns: list[str] | None
+    dataset_config_hash: str | None
+    model_name_or_path: str | None
+    model_revision: str | None
+    dpo_loss_type: str | DPOLossType
+    concatenated_forward: bool
+    packing: bool
+    max_seq_length: int
+    use_lora: bool
+    max_train_samples: int | None
+    use_qlora: bool
 
 
 @dataclass
@@ -120,6 +148,8 @@ class DatasetConfig:
     """Immediately exit after caching the dataset"""
     dataset_config_hash: str | None = None
     """The hash of the dataset configuration."""
+    max_train_samples: int | None = None
+    """For debugging, truncate the number of training examples."""
 
 
 @dataclass
@@ -128,6 +158,8 @@ class LoRAConfig:
 
     use_lora: bool = False
     """If True, will use LORA to train the model."""
+    use_qlora: bool = False
+    """Use qLoRA training - initializes model in quantized form."""
     lora_rank: int = 64
     """The rank of lora."""
     lora_alpha: float = 16

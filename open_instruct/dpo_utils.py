@@ -18,12 +18,12 @@ Adapted from https://github.com/eric-mitchell/direct-preference-optimization/blo
 """
 
 import contextlib
-import enum
 import hashlib
 import json
 import pathlib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 import torch
@@ -33,20 +33,17 @@ from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 
 from open_instruct import logger_utils
+from open_instruct.dataset_transformation import TokenizerConfig, compute_config_hash, load_dataset_configs
+from open_instruct.dpo_config import DPOConfigProtocol, DPOLossType
 from open_instruct.model_utils import TensorCache, log_softmax_and_gather
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
+__all__ = ["DPOLossType"]
+
 logger = logger_utils.setup_logger(__name__)
 
 torch.backends.cuda.matmul.allow_tf32 = True
-
-
-class DPOLossType(enum.StrEnum):
-    dpo = "dpo"
-    dpo_norm = "dpo_norm"
-    simpo = "simpo"
-    wpo = "wpo"
 
 
 def config_to_json_serializable(obj: Any) -> Any:
@@ -54,7 +51,7 @@ def config_to_json_serializable(obj: Any) -> Any:
         return {k: config_to_json_serializable(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [config_to_json_serializable(v) for v in obj]
-    if isinstance(obj, enum.Enum):
+    if isinstance(obj, Enum):
         return obj.value
     return obj
 
@@ -88,6 +85,40 @@ def compute_reference_logprobs_cache_hash(
     }
     config_str = json.dumps(cache_key, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
+
+
+def compute_reference_cache_hash(args: DPOConfigProtocol, tc: TokenizerConfig) -> str:
+    """Compute deterministic hash for reference logprobs cache from config object.
+
+    This convenience wrapper extracts the required fields from a DPO config object
+    and delegates to compute_reference_logprobs_cache_hash. Both DPOExperimentConfig
+    (OLMo-core) and FlatArguments (Accelerate) satisfy DPOConfigProtocol.
+    """
+    assert args.model_name_or_path is not None, "model_name_or_path is required"
+    assert args.dataset_mixer_list is not None, "dataset_mixer_list is required"
+    assert args.dataset_mixer_list_splits is not None, "dataset_mixer_list_splits is required"
+    assert args.dataset_transform_fn is not None, "dataset_transform_fn is required"
+
+    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    dcs = load_dataset_configs(
+        args.dataset_mixer_list,
+        args.dataset_mixer_list_splits,
+        args.dataset_transform_fn,
+        transform_fn_args,
+        args.dataset_target_columns,
+    )
+    dataset_config_hash = args.dataset_config_hash or compute_config_hash(dcs, tc)
+    return compute_reference_logprobs_cache_hash(
+        model_name_or_path=args.model_name_or_path,
+        model_revision=args.model_revision,
+        dpo_loss_type=args.dpo_loss_type,
+        concatenated_forward=args.concatenated_forward,
+        packing=args.packing,
+        use_lora=args.use_lora,
+        use_qlora=args.use_qlora,
+        max_train_samples=args.max_train_samples,
+        dataset_config_hash=dataset_config_hash,
+    )
 
 
 def build_reference_logprobs_cache(
