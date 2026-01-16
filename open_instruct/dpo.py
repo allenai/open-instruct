@@ -95,20 +95,6 @@ def get_transformer_config(
     return config_fn(vocab_size=vocab_size)
 
 
-@dataclass
-class DPOConfig(config.Config):
-    """Configuration for DPO-specific settings."""
-
-    dpo_beta: float = 0.1
-    dpo_loss_type: dpo_utils.DPOLossType = dpo_utils.DPOLossType.dpo
-    dpo_gamma_beta_ratio: float = 0.3
-    dpo_label_smoothing: float = 0.0
-    load_balancing_loss: bool = False
-    load_balancing_weight: float = 1e-3
-    concatenated_forward: bool = True
-    packing: bool = False
-
-
 class DPOTrainModule(TrainModule):
     """Training module for DPO with OLMo-core's Trainer.
 
@@ -119,9 +105,11 @@ class DPOTrainModule(TrainModule):
         self,
         model: nn.Module,
         optim: torch.optim.Optimizer,
-        dpo_config: DPOConfig,
+        dpo_config: dpo_utils.DPOConfig,
         reference_cache: model_utils.TensorCache,
         scheduler: Scheduler,
+        concatenated_forward: bool = True,
+        packing: bool = False,
         device: torch.device | None = None,
         max_grad_norm: float | None = None,
     ) -> None:
@@ -133,14 +121,10 @@ class DPOTrainModule(TrainModule):
         self.scheduler = scheduler
         self.device = device
         self.max_grad_norm = max_grad_norm
-        self.average_log_prob = dpo_config.dpo_loss_type in (
-            dpo_utils.DPOLossType.simpo,
-            dpo_utils.DPOLossType.dpo_norm,
-        )
 
-        if dpo_config.packing:
+        if packing:
             self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
-        elif dpo_config.concatenated_forward:
+        elif concatenated_forward:
             self._forward_fn = dpo_utils.concatenated_forward_olmo
         else:
             self._forward_fn = dpo_utils.separate_forward_olmo
@@ -192,42 +176,17 @@ class DPOTrainModule(TrainModule):
         policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
             self.model,
             batch,
-            average_log_prob=self.average_log_prob,
+            average_log_prob=self.dpo_config.loss_type.is_average_loss,
             output_router_logits=self.dpo_config.load_balancing_loss,
         )
 
-        if self.dpo_config.dpo_loss_type in (dpo_utils.DPOLossType.dpo, dpo_utils.DPOLossType.dpo_norm):
-            ref_logps = self.reference_cache[batch["index"]]
-            losses, chosen_rewards, rejected_rewards = dpo_utils.dpo_loss(
-                policy_chosen_logps,
-                policy_rejected_logps,
-                ref_logps["chosen_logps"],
-                ref_logps["rejected_logps"],
-                beta=self.dpo_config.dpo_beta,
-                label_smoothing=self.dpo_config.dpo_label_smoothing,
-            )
-        elif self.dpo_config.dpo_loss_type == dpo_utils.DPOLossType.simpo:
-            losses, chosen_rewards, rejected_rewards = dpo_utils.simpo_loss(
-                policy_chosen_logps,
-                policy_rejected_logps,
-                beta=self.dpo_config.dpo_beta,
-                gamma_beta_ratio=self.dpo_config.dpo_gamma_beta_ratio,
-                label_smoothing=self.dpo_config.dpo_label_smoothing,
-            )
-        elif self.dpo_config.dpo_loss_type == dpo_utils.DPOLossType.wpo:
-            ref_logps = self.reference_cache[batch["index"]]
-            losses, chosen_rewards, rejected_rewards = dpo_utils.wpo_loss(
-                policy_chosen_logps,
-                policy_rejected_logps,
-                ref_logps["chosen_logps"],
-                ref_logps["rejected_logps"],
-                beta=self.dpo_config.dpo_beta,
-                label_smoothing=self.dpo_config.dpo_label_smoothing,
-                chosen_loss_mask=batch["chosen_labels"] != -100,
-                rejected_loss_mask=batch["rejected_labels"] != -100,
-            )
-        else:
-            raise ValueError(f"Unknown DPO loss type: {self.dpo_config.dpo_loss_type}")
+        losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
+            self.dpo_config,
+            batch,
+            policy_chosen_logps,
+            policy_rejected_logps,
+            self.reference_cache if self.dpo_config.loss_type.needs_reference_model else None,
+        )
 
         loss = losses.mean()
 
@@ -239,11 +198,7 @@ class DPOTrainModule(TrainModule):
             self.record_metric("train/logps_chosen", policy_chosen_logps.mean().detach(), ReduceType.mean)
             self.record_metric("train/logps_rejected", policy_rejected_logps.mean().detach(), ReduceType.mean)
 
-            if self.dpo_config.dpo_loss_type in (
-                dpo_utils.DPOLossType.dpo,
-                dpo_utils.DPOLossType.dpo_norm,
-                dpo_utils.DPOLossType.wpo,
-            ):
+            if self.dpo_config.loss_type.computes_reward_metrics:
                 accuracy = (chosen_rewards > rejected_rewards).float().mean()
                 margin = (chosen_rewards - rejected_rewards).mean()
                 self.record_metric("train/rewards_chosen", chosen_rewards.mean().detach(), ReduceType.mean)
@@ -264,17 +219,14 @@ class DPOExperimentConfig(dpo_utils.ExperimentConfig, config.Config):
     olmo_config_name: str | None = None
     """Override for OLMo-core TransformerConfig name (e.g., 'olmo2_7B'). If not set, auto-detected from model_name_or_path."""
 
-    @property
-    def dpo_config(self) -> DPOConfig:
-        return DPOConfig(
-            dpo_beta=self.beta,
-            dpo_loss_type=dpo_utils.DPOLossType(self.loss_type),
-            dpo_gamma_beta_ratio=self.gamma_beta_ratio,
-            dpo_label_smoothing=self.label_smoothing,
+    def get_dpo_config(self) -> dpo_utils.DPOConfig:
+        return dpo_utils.DPOConfig(
+            beta=self.beta,
+            loss_type=dpo_utils.DPOLossType(self.loss_type),
+            gamma_beta_ratio=self.gamma_beta_ratio,
+            label_smoothing=self.label_smoothing,
             load_balancing_loss=self.load_balancing_loss,
             load_balancing_weight=self.load_balancing_weight,
-            concatenated_forward=self.concatenated_forward,
-            packing=self.packing,
         )
 
     checkpointing_steps: int = 250
@@ -430,7 +382,7 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
         logger.info("Enabling activation checkpointing...")
         model.apply_activation_checkpointing(TransformerActivationCheckpointingMode.full)
 
-    if args.dpo_config.packing:
+    if args.packing:
         collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
         collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
@@ -447,14 +399,10 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
         device=device,
     )
 
-    forward_fn = (
-        dpo_utils.concatenated_forward_olmo
-        if args.dpo_config.concatenated_forward
-        else dpo_utils.separate_forward_olmo
-    )
-    if args.dpo_config.packing:
+    forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
+    if args.packing:
         forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
-    average_log_prob = args.dpo_config.dpo_loss_type in (dpo_utils.DPOLossType.simpo, dpo_utils.DPOLossType.dpo_norm)
+    average_log_prob = args.loss_type.is_average_loss
 
     logger.info("Caching reference logprobs (before HSDP)...")
 
@@ -534,11 +482,13 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
     train_module = DPOTrainModule(
         model=model,
         optim=optim,
-        dpo_config=args.dpo_config,
+        dpo_config=args.get_dpo_config(),
         reference_cache=reference_cache,
-        max_grad_norm=args.max_grad_norm,
-        device=device,
         scheduler=scheduler,
+        concatenated_forward=args.concatenated_forward,
+        packing=args.packing,
+        device=device,
+        max_grad_norm=args.max_grad_norm,
     )
 
     json_config = dpo_utils.config_to_json_serializable(args.as_dict())

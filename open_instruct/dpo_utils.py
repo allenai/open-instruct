@@ -32,6 +32,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from olmo_core import config
 from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
@@ -100,7 +101,7 @@ class TrackingConfig:
 
 
 @dataclass
-class DPOConfig:
+class DPOConfig(config.Config):
     """Configuration for DPO-specific hyperparameters."""
 
     beta: float = 0.1
