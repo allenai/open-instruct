@@ -257,6 +257,10 @@ class ModelConfig:
     model_revision: str | None = None
     low_cpu_mem_usage: bool = False
     """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
+    concatenated_forward: bool = True
+    """Whether to concatenate chosen and rejected for DPO training."""
+    packing: bool = False
+    """Whether to use packing/padding-free collation."""
 
     @property
     def forward_fn(self) -> Callable:
