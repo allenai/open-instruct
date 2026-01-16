@@ -17,7 +17,7 @@ The server exposes three weather tools:
 ```bash
 # Using uvicorn directly
 cd open_instruct/tools/servers/weather_mcp_server
-uv run uvicorn server:app --host 0.0.0.0 --port 8765
+uv run uvicorn server:mcp --host 0.0.0.0 --port 8765
 
 # Or run the script directly
 cd open_instruct/tools/servers/weather_mcp_server
