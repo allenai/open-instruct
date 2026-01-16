@@ -17,6 +17,7 @@ DPO utils
 Adapted from https://github.com/eric-mitchell/direct-preference-optimization/blob/main/trainers.py
 """
 
+import enum
 import functools
 import hashlib
 import json
@@ -24,6 +25,7 @@ import os
 import pathlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 import torch
 import torch.distributed as dist
@@ -34,14 +36,215 @@ from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import dpo_config as dpo_config_lib
 from open_instruct import logger_utils, model_utils
-from open_instruct.dataset_transformation import TokenizerConfig, compute_config_hash, load_dataset_configs
+from open_instruct.dataset_transformation import (
+    TOKENIZED_PREFERENCE_DATASET_KEYS,
+    TokenizerConfig,
+    compute_config_hash,
+    load_dataset_configs,
+)
 from open_instruct.model_utils import log_softmax_and_gather
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
 logger = logger_utils.setup_logger(__name__)
+
+
+class DPOLossType(enum.StrEnum):
+    dpo = "dpo"
+    dpo_norm = "dpo_norm"
+    simpo = "simpo"
+    wpo = "wpo"
+
+    @property
+    def is_average_loss(self) -> bool:
+        return self in (DPOLossType.simpo, DPOLossType.dpo_norm)
+
+    @property
+    def needs_reference_model(self) -> bool:
+        return self in (DPOLossType.dpo, DPOLossType.dpo_norm, DPOLossType.wpo)
+
+    @property
+    def computes_reward_metrics(self) -> bool:
+        return self in (DPOLossType.dpo, DPOLossType.dpo_norm)
+
+
+@dataclass
+class TrackingConfig:
+    """Base configuration for experiment tracking."""
+
+    exp_name: str = "dpo_experiment"
+    """The name of this experiment"""
+    run_name: str | None = None
+    """A unique name of this run"""
+    seed: int = 42
+    """Random seed for initialization and dataset shuffling."""
+    add_seed_and_date_to_exp_name: bool = True
+    """Append the seed and date to exp_name"""
+
+
+@dataclass
+class DPOConfig:
+    """Configuration for DPO-specific hyperparameters."""
+
+    beta: float = 0.1
+    """Beta parameter for DPO loss."""
+    loss_type: DPOLossType = DPOLossType.dpo
+    """Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."""
+    gamma_beta_ratio: float = 0.3
+    """Gamma to beta ratio for SimPO loss. Not used for DPO loss."""
+    label_smoothing: float = 0.0
+    """Label smoothing for DPO/SimPO loss. Default is 0 (no smoothing)."""
+    load_balancing_loss: bool = False
+    """Whether to include a load balancing loss (for OLMoE) or not."""
+    load_balancing_weight: float = 0.001
+    """Weight for load balancing loss if applicable."""
+    concatenated_forward: bool = True
+    """Whether to concatenate chosen and rejected for DPO training."""
+    packing: bool = False
+    """Whether to use packing/padding-free collation."""
+
+
+@dataclass
+class TrainingConfig:
+    """Configuration for training hyperparameters."""
+
+    num_epochs: int = 2
+    """Total number of training epochs to perform."""
+    per_device_train_batch_size: int = 8
+    """Batch size per GPU/TPU core/CPU for training."""
+    gradient_accumulation_steps: int = 1
+    """Number of updates steps to accumulate before performing a backward/update pass."""
+    learning_rate: float = 2e-5
+    """The initial learning rate for AdamW optimizer."""
+    warmup_ratio: float = 0.03
+    """Linear warmup over warmup_ratio fraction of total steps."""
+    weight_decay: float = 0.0
+    """Weight decay for AdamW if we apply some."""
+    max_grad_norm: float = -1
+    """Maximum gradient norm for clipping. -1 means no clipping."""
+    max_seq_length: int = 2048
+    """The maximum total input sequence length after tokenization."""
+    lr_scheduler_type: str = "linear"
+    """The scheduler type to use for learning rate adjustment."""
+    max_train_steps: int | None = None
+    """If set, overrides the number of training steps. Otherwise, num_epochs is used."""
+    gradient_checkpointing: bool = False
+    """Turn on gradient checkpointing. Saves memory but slows training."""
+    use_8bit_optimizer: bool = False
+    """Use 8bit optimizer from bitsandbytes."""
+    dpo_use_paged_optimizer: bool = False
+    """Use paged optimizer from bitsandbytes."""
+    fused_optimizer: bool = True
+    """Whether to use fused AdamW or not."""
+
+
+@dataclass
+class DatasetConfig:
+    """Configuration for dataset loading and processing."""
+
+    mixer_list: list[str] = field(default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"])
+    """A list of datasets (local or HF) to sample from."""
+    mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
+    """The dataset splits to use for training"""
+    transform_fn: list[str] = field(
+        default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
+    )
+    """The list of transform functions to apply to the dataset."""
+    target_columns: list[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
+    """The columns to use for the dataset."""
+    cache_mode: Literal["hf", "local"] = "local"
+    """The mode to use for caching the dataset."""
+    local_cache_dir: str = "local_dataset_cache"
+    """The directory to save the local dataset cache to."""
+    skip_cache: bool = False
+    """Whether to skip the cache."""
+    cache_dataset_only: bool = False
+    """Immediately exit after caching the dataset"""
+    config_hash: str | None = None
+    """The hash of the dataset configuration."""
+
+
+@dataclass
+class LoRAConfig:
+    """Configuration for LoRA (Low-Rank Adaptation) training."""
+
+    use_lora: bool = False
+    """If True, will use LORA to train the model."""
+    lora_rank: int = 64
+    """The rank of lora."""
+    lora_alpha: float = 16
+    """The alpha parameter of lora."""
+    lora_dropout: float = 0.1
+    """The dropout rate of lora modules."""
+
+
+@dataclass
+class LoggingConfig:
+    """Configuration for logging and experiment tracking."""
+
+    logging_steps: int | None = None
+    """Log the training loss and learning rate every logging_steps steps."""
+    with_tracking: bool = False
+    """If toggled, this experiment will be tracked with Weights and Biases"""
+    wandb_project: str = "open_instruct_internal"
+    """The wandb project name"""
+    wandb_entity: str | None = None
+    """The entity (team) of wandb's project"""
+    report_to: str | list[str] = "all"
+    """The integration(s) to report results and logs to."""
+
+
+@dataclass
+class HubConfig:
+    """Configuration for Hugging Face Hub integration."""
+
+    push_to_hub: bool = True
+    """Whether to upload the saved model to huggingface"""
+    hf_entity: str | None = None
+    """The user or org name of the model repository from the Hugging Face Hub"""
+    hf_repo_id: str | None = None
+    """The id of the saved model in the Hugging Face Hub"""
+    hf_repo_revision: str | None = None
+    """The revision of the saved model in the Hugging Face Hub"""
+    hf_repo_url: str | None = None
+    """The url of the saved model in the Hugging Face Hub"""
+
+
+@dataclass
+class CheckpointConfig:
+    """Configuration for checkpointing."""
+
+    output_dir: str = "output/"
+    """The output directory where the model predictions and checkpoints will be written."""
+    checkpointing_steps: int | str | None = None
+    """Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."""
+    keep_last_n_checkpoints: int = 3
+    """How many checkpoints to keep in the output directory. -1 for all."""
+    resume_from_checkpoint: str | None = None
+    """If the training should continue from a checkpoint folder."""
+
+
+@dataclass
+class EvalConfig:
+    """Configuration for evaluation and deployment."""
+
+    try_launch_beaker_eval_jobs: bool = True
+    """Whether to launch beaker evaluation jobs after training"""
+    try_auto_save_to_beaker: bool = True
+    """Whether to try to save the model to Beaker dataset `/output` after training"""
+    gs_bucket_path: str | None = None
+    """The path to the gs bucket to save the model to"""
+    oe_eval_tasks: list[str] | None = None
+    """The beaker evaluation tasks to launch"""
+    oe_eval_max_length: int = 4096
+    """The max generation length for evaluation for oe-eval"""
+    oe_eval_gpu_multiplier: int | None = None
+    """The multiplier for the number of GPUs for evaluation"""
+    eval_workspace: str | None = "ai2/tulu-3-results"
+    """The workspace to launch evaluation jobs on"""
+    eval_priority: Literal["low", "normal", "high"] | None = "high"
+    """The priority of auto-launched evaluation jobs"""
 
 
 @dataclass
@@ -56,19 +259,6 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     low_cpu_mem_usage: bool = False
     """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
-    concatenated_forward: bool = True
-    """Whether to concatenate chosen and rejected for DPO training."""
-    packing: bool = False
-    """Whether to use packing/padding-free collation."""
-
-    @property
-    def forward_fn(self) -> Callable:
-        fn = concatenated_forward if self.concatenated_forward else separate_forward
-        if self.packing:
-            if not self.concatenated_forward:
-                raise NotImplementedError("separate forward not implemented for packing/padding-free")
-            fn = functools.partial(fn, packing=True)
-        return fn
 
 
 REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
@@ -79,17 +269,17 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 
 @dataclass
-class FlatArguments(
-    dpo_config_lib.ExperimentConfig,
+class ExperimentConfig(
+    TrackingConfig,
     ModelConfig,
-    dpo_config_lib.DPOHyperparamsConfig,
-    dpo_config_lib.TrainingConfig,
-    dpo_config_lib.DatasetConfig,
-    dpo_config_lib.LoRAConfig,
-    dpo_config_lib.LoggingConfig,
-    dpo_config_lib.HubConfig,
-    dpo_config_lib.CheckpointConfig,
-    dpo_config_lib.EvalConfig,
+    DPOConfig,
+    TrainingConfig,
+    DatasetConfig,
+    LoRAConfig,
+    LoggingConfig,
+    HubConfig,
+    CheckpointConfig,
+    EvalConfig,
 ):
     """
     Full arguments class for all fine-tuning jobs.
@@ -203,9 +393,18 @@ class FlatArguments(
     eval_priority: str | None = "high"
     """The priority of auto-launched evaluation jobs"""
 
+    @property
+    def forward_fn(self) -> Callable:
+        fn = concatenated_forward if self.concatenated_forward else separate_forward
+        if self.packing:
+            if not self.concatenated_forward:
+                raise NotImplementedError("separate forward not implemented for packing/padding-free")
+            fn = functools.partial(fn, packing=True)
+        return fn
+
     def __post_init__(self):
         if isinstance(self.loss_type, str):
-            self.loss_type = dpo_config_lib.DPOLossType(self.loss_type)
+            self.loss_type = DPOLossType(self.loss_type)
 
         if self.dataset_name is None and self.dataset_mixer is None and self.mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
@@ -232,8 +431,11 @@ class FlatArguments(
                 raise ValueError("offload_param can only be used with zero_stage 3")
 
 
-def compute_reference_cache_hash(args: FlatArguments, tc: TokenizerConfig) -> str:
-    """Compute deterministic hash for reference logprobs cache from FlatArguments."""
+FlatArguments = ExperimentConfig
+
+
+def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) -> str:
+    """Compute deterministic hash for reference logprobs cache from ExperimentConfig."""
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     dcs = load_dataset_configs(
         args.mixer_list, args.mixer_list_splits, args.transform_fn, transform_fn_args, args.target_columns
@@ -439,7 +641,7 @@ def simpo_loss(
 
 
 def compute_loss(
-    args: dpo_config_lib.DPOHyperparamsConfig,
+    args: DPOConfig,
     batch: dict[str, torch.Tensor],
     policy_chosen_logps: torch.Tensor,
     policy_rejected_logps: torch.Tensor,
@@ -447,7 +649,7 @@ def compute_loss(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     loss_type = args.loss_type
 
-    if loss_type in (dpo_config_lib.DPOLossType.dpo, dpo_config_lib.DPOLossType.dpo_norm):
+    if loss_type in (DPOLossType.dpo, DPOLossType.dpo_norm):
         assert reference_cache is not None
         ref_logps = reference_cache[batch["index"]]
         return dpo_loss(
@@ -458,7 +660,7 @@ def compute_loss(
             beta=args.beta,
             label_smoothing=args.label_smoothing,
         )
-    elif loss_type == dpo_config_lib.DPOLossType.simpo:
+    elif loss_type == DPOLossType.simpo:
         return simpo_loss(
             policy_chosen_logps,
             policy_rejected_logps,
@@ -466,7 +668,7 @@ def compute_loss(
             gamma_beta_ratio=args.gamma_beta_ratio,
             label_smoothing=args.label_smoothing,
         )
-    elif loss_type == dpo_config_lib.DPOLossType.wpo:
+    elif loss_type == DPOLossType.wpo:
         assert reference_cache is not None
         ref_logps = reference_cache[batch["index"]]
         return wpo_loss(
