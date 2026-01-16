@@ -379,7 +379,7 @@ class SerperSearchToolConfig(BaseToolConfig):
 class DrAgentMCPTool(Tool):
     """Wrapper for MCP tools from dr_agent. Requires: uv sync --extra dr-tulu"""
 
-    config_name = "mcp"
+    config_name = "dr_agent_mcp"
     description = "MCP tools wrapper"
     parameters = {
         "type": "object",

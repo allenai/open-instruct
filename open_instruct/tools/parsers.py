@@ -277,17 +277,19 @@ class DRTuluToolParser(ToolParser):
     """
 
     def __init__(self, tool_actors: list[ray.actor.ActorHandle], default_stop_string: str = "</call_tool>"):
-        # Get tool call names for routing
+        # Get tool call name (expects single dr_agent_mcp tool)
         call_names = ray.get([actor.get_call_name.remote() for actor in tool_actors])
-        self.tool_call_name = call_names[0] if call_names else "mcp"
+        self.tool_call_name = call_names[0] if call_names else "dr_agent_mcp"
 
-        # Collect stop strings
+        # Get all stop strings as flat list
         all_stop_strings = ray.get([actor.get_stop_strings.remote() for actor in tool_actors])
-        stop_strings: list[str] = []
-        for tool_stops in all_stop_strings:
-            if tool_stops:
-                stop_strings.extend(tool_stops)
-        self.stop_sequences = list(dict.fromkeys(stop_strings)) or [default_stop_string]
+        self.stop_sequences = list(set(stop for tool_stops in all_stop_strings if tool_stops for stop in tool_stops))
+
+        # For DR Tulu Parser, only tool should be the mcp tool.
+        if len(tool_actors) > 1:
+            logger.warning(
+                f"DRTuluToolParser: Using only one dr_agent_mcp tool is supported, found {len(tool_actors)} tools."
+            )
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
         # Check if any stop sequence is present (indicating a tool call)
