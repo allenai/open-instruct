@@ -96,6 +96,12 @@ environments = [
 ]
 
 [dependency-groups]
+experimenter = [
+    "backoff>=2.2.1",
+    "beaker-py>=2.5.3",
+    "requests>=2.28.0",
+    "rich>=13.7.0",
+]
 dev = [
     "beaker-py>=2.5.3",
     "mkdocs-material>=9.6.8",

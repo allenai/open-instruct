@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.9.0-devel-ubuntu22.04
+FROM nvidia/cuda:12.9.0-devel-ubuntu22.04 AS base
 
 ARG DEBIAN_FRONTEND="noninteractive"
 ENV TZ="America/Los_Angeles" \
@@ -66,11 +66,15 @@ ENV UV_CACHE_DIR=/root/.cache/uv \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
     UV_COMPILE_BYTECODE=0
 
-# Install dependencies
+# Stage: deps - Install Python dependencies (cached unless pyproject.toml/uv.lock change)
+FROM base AS deps
+
+COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
+
+# Stage: final - Add source code
+FROM deps AS final
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
@@ -82,6 +86,7 @@ COPY oe-eval-interna[l] oe-eval-internal/
 ARG GIT_COMMIT="" \
     GIT_BRANCH=""
 
-ENV GIT_COMMIT=${GIT_COMMIT} \
-    GIT_BRANCH=${GIT_BRANCH} \
-    PATH=/stage/.venv/bin:$PATH
+LABEL org.opencontainers.image.revision=${GIT_COMMIT} \
+      org.opencontainers.image.source=${GIT_BRANCH}
+
+ENV PATH=/stage/.venv/bin:$PATH

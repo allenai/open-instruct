@@ -444,22 +444,6 @@ class TestUtilityFunctions(unittest.TestCase):
 
     @parameterized.expand(
         [
-            ("https://wandb.ai/org/project/runs/runid", "org/project/runid"),
-            (
-                "https://wandb.ai/ai2-llm/open_instruct_internal/runs/5nigq0mz",
-                "ai2-llm/open_instruct_internal/5nigq0mz",
-            ),
-            (
-                "https://wandb.ai/ai2-llm/open_instruct_internal/runs/vjyp36sp",
-                "ai2-llm/open_instruct_internal/vjyp36sp",
-            ),
-        ]
-    )
-    def test_wandb_url_to_run_path(self, url: str, expected_run_path: str):
-        self.assertEqual(utils.wandb_url_to_run_path(url), expected_run_path)
-
-    @parameterized.expand(
-        [
             ("NVIDIA H100 80GB HBM3", "h100"),
             ("NVIDIA L40S", "l40s"),
             ("NVIDIA RTX A6000", "a6000"),

@@ -74,8 +74,23 @@ maybe_update_beaker_description()
 TEST_DATA_DIR = pathlib.Path(__file__).parent / "test_data"
 
 
+def _get_safe_env_vars():
+    """Get env vars safe to pass to Ray runtime_env (excludes virtualenv/uv vars that cause reinstalls)."""
+    exclude_prefixes = ("VIRTUAL_ENV", "UV_", "_OLD_VIRTUAL")
+    return {k: v for k, v in os.environ.items() if not k.startswith(exclude_prefixes)}
+
+
 class TestGeneration(TestGrpoFastBase):
     """Tests for tool invocation with vLLM."""
+
+    def setUp(self):
+        """Initialize Ray with filtered env vars to avoid package reinstallation."""
+        self._initial_resources = self._get_resource_tracker_state()
+        self._ray_queues = []
+        from open_instruct import utils
+
+        utils.check_runtime_leaks()
+        ray.init(include_dashboard=False, runtime_env={"env_vars": _get_safe_env_vars()})
 
     @classmethod
     def setUpClass(cls):
@@ -208,6 +223,15 @@ class TestGeneration(TestGrpoFastBase):
 
 class TestVLLMQueueSystem(TestGrpoFastBase):
     """Tests for the vLLM queue-based system."""
+
+    def setUp(self):
+        """Initialize Ray with filtered env vars to avoid package reinstallation."""
+        self._initial_resources = self._get_resource_tracker_state()
+        self._ray_queues = []
+        from open_instruct import utils
+
+        utils.check_runtime_leaks()
+        ray.init(include_dashboard=False, runtime_env={"env_vars": _get_safe_env_vars()})
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_vllm_queue_system_single_prompt(self):

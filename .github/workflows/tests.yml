@@ -85,6 +85,8 @@ jobs:
       - name: Upload image to Beaker and run tests
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+          DOCKER_CACHE_PUSH: "1"
+          DOCKER_CACHE_REPO: ghcr.io/${{ github.repository }}:buildcache
         run: |
           beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
           short_sha="${GITHUB_SHA::8}"

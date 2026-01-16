@@ -6,7 +6,7 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
-uv run python mason.py \
+uv run --with backoff --with beaker-py --with requests --with rich python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/ceres \
        --cluster ai2/saturn \
