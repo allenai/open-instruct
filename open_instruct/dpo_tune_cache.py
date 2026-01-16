@@ -38,7 +38,6 @@ import torch.utils.data
 import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
-from accelerate.logging import get_logger
 from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
@@ -54,7 +53,6 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.dpo_utils import ExperimentConfig
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -70,7 +68,7 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
 )
 
-logger = get_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 def build_deepspeed_config(
@@ -758,6 +756,6 @@ def print_gpu_stats(init_gpu_memory: int | None):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((ExperimentConfig, TokenizerConfig))
+    parser = ArgumentParserPlus((dpo_utils.ExperimentConfig, TokenizerConfig))
     args, tc = parser.parse_args_into_dataclasses()
     main(args, tc)
