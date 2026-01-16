@@ -492,7 +492,7 @@ class TestCreateToolParser(unittest.TestCase):
 
     def test_create_dr_tulu_parser(self):
         """Test creating dr_tulu parser."""
-        mock_actor = create_mock_tool_actor("search")
+        mock_actor = create_mock_tool_actor("dr_agent_mcp")
         mock_tokenizer = MagicMock()
 
         parser = create_tool_parser("dr_tulu", tokenizer=mock_tokenizer, tool_actors=[mock_actor])
