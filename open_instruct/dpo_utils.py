@@ -55,6 +55,17 @@ REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
+def config_to_json_serializable(obj: object) -> object:
+    """Convert config object to JSON-serializable format."""
+    if isinstance(obj, dict):
+        return {k: config_to_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [config_to_json_serializable(v) for v in obj]
+    if isinstance(obj, enum.Enum):
+        return obj.value
+    return obj
+
+
 class DPOLossType(enum.StrEnum):
     dpo = "dpo"
     dpo_norm = "dpo_norm"
