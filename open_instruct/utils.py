@@ -1749,6 +1749,9 @@ GPU_SPECS = {
     "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
     # Specs from https://www.techpowerup.com/gpu-specs/geforce-rtx-4090-mobile.c3949.
     "4090 laptop": {"flops": 32.98e12, "memory_size": 24e9, "memory_bandwidth": 576e9},
+    # DGX Spark GB10 (Blackwell) - unified LPDDR5X memory with CPU
+    # Specs from https://www.nvidia.com/en-us/products/workstations/dgx-spark/
+    "gb10": {"flops": 104e12, "memory_size": 128e9, "memory_bandwidth": 273e9},  # 273 GB/s LPDDR5X unified
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
