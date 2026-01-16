@@ -45,20 +45,6 @@ class ExperimentConfig:
 
 
 @dataclass
-class ModelConfig:
-    """Configuration for model loading."""
-
-    model_name_or_path: str | None = None
-    """The model checkpoint for weights initialization."""
-    use_flash_attn: bool = True
-    """Whether to use flash attention in the model training"""
-    model_revision: str | None = None
-    """The specific model version to use (can be a branch name, tag name or commit id)."""
-    low_cpu_mem_usage: bool = False
-    """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
-
-
-@dataclass
 class DPOHyperparamsConfig:
     """Configuration for DPO-specific hyperparameters."""
 
@@ -74,10 +60,6 @@ class DPOHyperparamsConfig:
     """Whether to include a load balancing loss (for OLMoE) or not."""
     load_balancing_weight: float = 0.001
     """Weight for load balancing loss if applicable."""
-    concatenated_forward: bool = True
-    """Whether to concatenate chosen and rejected for DPO training."""
-    packing: bool = False
-    """Whether to use packing/padding-free collation."""
 
 
 @dataclass

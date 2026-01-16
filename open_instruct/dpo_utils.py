@@ -17,6 +17,7 @@ DPO utils
 Adapted from https://github.com/eric-mitchell/direct-preference-optimization/blob/main/trainers.py
 """
 
+import functools
 import hashlib
 import json
 import os
@@ -42,6 +43,34 @@ from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_
 
 logger = logger_utils.setup_logger(__name__)
 
+
+@dataclass
+class ModelConfig:
+    """Configuration for model loading."""
+
+    model_name_or_path: str | None = None
+    """The model checkpoint for weights initialization."""
+    use_flash_attn: bool = True
+    """Whether to use flash attention in the model training"""
+    model_revision: str | None = None
+    """The specific model version to use (can be a branch name, tag name or commit id)."""
+    low_cpu_mem_usage: bool = False
+    """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
+    concatenated_forward: bool = True
+    """Whether to concatenate chosen and rejected for DPO training."""
+    packing: bool = False
+    """Whether to use packing/padding-free collation."""
+
+    @property
+    def forward_fn(self) -> Callable:
+        fn = concatenated_forward if self.concatenated_forward else separate_forward
+        if self.packing:
+            if not self.concatenated_forward:
+                raise NotImplementedError("separate forward not implemented for packing/padding-free")
+            fn = functools.partial(fn, packing=True)
+        return fn
+
+
 REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
     "REFERENCE_LOGPROBS_CACHE_PATH", "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
 )
@@ -52,7 +81,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 @dataclass
 class FlatArguments(
     dpo_config_lib.ExperimentConfig,
-    dpo_config_lib.ModelConfig,
+    ModelConfig,
     dpo_config_lib.DPOHyperparamsConfig,
     dpo_config_lib.TrainingConfig,
     dpo_config_lib.DatasetConfig,

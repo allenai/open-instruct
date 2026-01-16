@@ -30,7 +30,6 @@ import random
 import shutil
 import time
 from datetime import timedelta
-from functools import partial
 
 import datasets
 import torch
@@ -522,18 +521,13 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
     print_gpu_stats(init_gpu_memory)
 
     # Cache the logprobs
-    forward_fn = dpo_utils.concatenated_forward if args.concatenated_forward else dpo_utils.separate_forward
-    if args.packing:
-        if not args.concatenated_forward:
-            raise NotImplementedError("seperate forward not implemented for packing/padding-free")
-        forward_fn = partial(forward_fn, packing=True)
     if args.dpo_loss_type.needs_reference_model:
         reference_cache = dpo_utils.build_reference_logprobs_cache(
             model=model,
             dataloader=train_dataloader,
             accelerator=accelerator,
             average_log_prob=args.dpo_loss_type.is_average_loss,
-            forward_fn=forward_fn,
+            forward_fn=args.forward_fn,
             full_dataset_size=original_dataset_size,
             reference_cache_hash=dpo_utils.compute_reference_cache_hash(args, tc),
             use_lora=args.use_lora,
@@ -569,7 +563,7 @@ def main(args: dpo_utils.FlatArguments, tc: TokenizerConfig):
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
             with accelerator.accumulate(model):
-                policy_chosen_logps, policy_rejected_logps, aux_loss = forward_fn(
+                policy_chosen_logps, policy_rejected_logps, aux_loss = args.forward_fn(
                     model,
                     batch,
                     average_log_prob=args.dpo_loss_type.is_average_loss,
