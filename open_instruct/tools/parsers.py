@@ -287,7 +287,8 @@ class DRTuluToolParser(ToolParser):
             raise ValueError(f"DRTuluToolParser requires dr_agent_mcp tool, got {self.tool_call_name}")
 
         stop_strings = ray.get(actor.get_stop_strings.remote())
-        self.stop_sequences = list(set(stop_strings)) if stop_strings else []
+        # Use dict.fromkeys to deduplicate while preserving order
+        self.stop_sequences = list(dict.fromkeys(stop_strings)) if stop_strings else []
 
     def get_tool_calls(self, text: str) -> list[ToolCall]:
         for stop in self.stop_sequences:
