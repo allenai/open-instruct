@@ -2,7 +2,6 @@
 Basic tools that are built-in to open-instruct.
 """
 
-import inspect
 import os
 import time
 import urllib.parse
@@ -416,21 +415,21 @@ class DrAgentMCPTool(Tool):
                 raise ValueError(f"Unknown MCP tool: {name}. Available: {list(DR_AGENT_MCP_TOOLS.keys())}")
 
             cls = DR_AGENT_MCP_TOOLS[name]
-            valid_params = set(inspect.signature(cls.__init__).parameters.keys())
-            kwargs: dict[str, Any] = {}
-            if "host" in valid_params:
-                kwargs["host"] = resolved_host
-            if "port" in valid_params:
-                kwargs["port"] = resolved_port
-            if "base_url" in valid_params:
-                kwargs["base_url"] = base_url
-            if "number_documents_to_search" in valid_params:
-                kwargs["number_documents_to_search"] = num_results
+            kwargs: dict[str, Any] = {
+                "timeout": timeout,
+                "name": name,
+                "tool_parser": parser_name,
+                "transport_type": transport,
+                "host": resolved_host,
+                "port": resolved_port,
+                "base_url": base_url,
+                "number_documents_to_search": num_results,
+            }
             if name == "browse_webpage":
                 kwargs["use_docker_version"] = True
                 kwargs["use_ai2_config"] = True
 
-            tool = cls(timeout=timeout, name=name, tool_parser=parser_name, transport_type=transport, **kwargs)
+            tool = cls(**kwargs)
             self.mcp_tools.append(tool)
             self.stop_strings.extend(tool.tool_parser.stop_sequences)
             self._tool_names.append(name)
