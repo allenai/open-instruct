@@ -286,9 +286,6 @@ class DRTuluToolParser(ToolParser):
         self.stop_sequences = list(set(stop for tool_stops in all_stop_strings if tool_stops for stop in tool_stops))
         if not self.stop_sequences:
             self.stop_sequences = [default_stop_string]
-            print(f"[DEBUG] No stop strings from tools, using default: {default_stop_string}")
-        else:
-            print(f"[DEBUG] DRTuluToolParser stop sequences: {self.stop_sequences}")
 
         # For DR Tulu Parser, only tool should be the mcp tool.
         if len(tool_actors) > 1:
