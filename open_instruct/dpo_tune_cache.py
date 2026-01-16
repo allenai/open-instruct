@@ -590,11 +590,11 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                 with torch.no_grad():
                     local_metrics["train_loss"] += loss
                     if args.loss_type.computes_reward_metrics:
-                        average_rewards = (chosen_rewards + rejected_rewards) / 2
-                        accuracy = (chosen_rewards > rejected_rewards).float()
-                        margin = chosen_rewards - rejected_rewards
-                        local_metrics["rewards/chosen"] += chosen_rewards
-                        local_metrics["rewards/rejected"] += rejected_rewards
+                        average_rewards = ((chosen_rewards + rejected_rewards) / 2).mean()
+                        accuracy = (chosen_rewards > rejected_rewards).float().mean()
+                        margin = (chosen_rewards - rejected_rewards).mean()
+                        local_metrics["rewards/chosen"] += chosen_rewards.mean()
+                        local_metrics["rewards/rejected"] += rejected_rewards.mean()
                         local_metrics["rewards/average"] += average_rewards
                         local_metrics["rewards/accuracy"] += accuracy
                         local_metrics["rewards/margin"] += margin

@@ -555,8 +555,8 @@ def dpo_loss(
     logits = pi_logratios - ref_logratios
 
     losses = -F.logsigmoid(beta * logits) * (1 - label_smoothing) - F.logsigmoid(-beta * logits) * label_smoothing
-    chosen_rewards = (beta * (policy_chosen_logps - reference_chosen_logps)).detach().mean()
-    rejected_rewards = (beta * (policy_rejected_logps - reference_rejected_logps)).detach().mean()
+    chosen_rewards = (beta * (policy_chosen_logps - reference_chosen_logps)).detach()
+    rejected_rewards = (beta * (policy_rejected_logps - reference_rejected_logps)).detach()
 
     return losses, chosen_rewards, rejected_rewards
 
@@ -605,8 +605,8 @@ def wpo_loss(
         - F.logsigmoid(-beta * logits) * label_smoothing * policy_weights
     )
 
-    chosen_rewards = (beta * (policy_chosen_logps - reference_chosen_logps)).detach().mean()
-    rejected_rewards = (beta * (policy_rejected_logps - reference_rejected_logps)).detach().mean()
+    chosen_rewards = (beta * (policy_chosen_logps - reference_chosen_logps)).detach()
+    rejected_rewards = (beta * (policy_rejected_logps - reference_rejected_logps)).detach()
 
     return losses, chosen_rewards, rejected_rewards
 
@@ -634,8 +634,8 @@ def simpo_loss(
     # sigmoid loss type from SimPO.
     losses = -F.logsigmoid(beta * logits) * (1 - label_smoothing) - F.logsigmoid(-beta * logits) * label_smoothing
 
-    chosen_rewards = (beta * policy_chosen_logps).detach().mean()
-    rejected_rewards = (beta * policy_rejected_logps).detach().mean()
+    chosen_rewards = (beta * policy_chosen_logps).detach()
+    rejected_rewards = (beta * policy_rejected_logps).detach()
 
     return losses, chosen_rewards, rejected_rewards
 
