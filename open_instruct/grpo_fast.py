@@ -2294,8 +2294,6 @@ def main(
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
-    else:
-        logger.warning("No tool stop sequences found - tools may not work correctly")
 
     train_dataset, eval_dataset = setup_datasets(
         args, tc, tokenizer, streaming_config, tool_definitions if tools_config.pass_tools_to_chat_template else []
