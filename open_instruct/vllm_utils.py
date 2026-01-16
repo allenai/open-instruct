@@ -874,6 +874,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
 
+    # Compute allowed tools once: intersection of configured tools and active tools for this sample
+    configured_tools = set(actor.tool_actor_map.keys())
+    allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
+
     while True:
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
         api_response = await actor.client.completions.create(
@@ -906,13 +910,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             break
 
         tool_calls = actor.tool_parser.get_tool_calls(output.text)
-        # Filter tool calls to only include tools that:
-        # 1. Exist in the tool actor map (tool is configured)
-        # 2. Are in the active_tools list for this sample (if active_tools is set)
-        tool_calls = [tc for tc in tool_calls if tc.name in actor.tool_actor_map]
-        if active_tools is not None:
-            # Only execute tools that are in the active_tools list for this sample
-            tool_calls = [tc for tc in tool_calls if tc.name in active_tools]
+        # Filter tool calls to only include allowed tools (configured AND active for this sample)
+        tool_calls = [tc for tc in tool_calls if tc.name in allowed_tools]
         if not tool_calls:
             break
 
