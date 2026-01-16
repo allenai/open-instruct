@@ -2,16 +2,37 @@
 Basic tools that are built-in to open-instruct.
 """
 
+import inspect
 import os
 import time
 import urllib.parse
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from open_instruct import logger_utils
 from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, make_api_request
 
 logger = logger_utils.setup_logger(__name__)
+
+
+try:
+    from dr_agent.tool_interface.mcp_tools import (
+        Crawl4AIBrowseTool,
+        MassiveServeSearchTool,
+        SemanticScholarSnippetSearchTool,
+    )
+    from dr_agent.tool_interface.mcp_tools import SerperSearchTool as DrAgentSerperSearchTool
+
+    DR_AGENT_MCP_AVAILABLE = True
+    DR_AGENT_MCP_TOOLS: dict[str, type] = {
+        "snippet_search": SemanticScholarSnippetSearchTool,
+        "google_search": DrAgentSerperSearchTool,
+        "massive_serve": MassiveServeSearchTool,
+        "browse_webpage": Crawl4AIBrowseTool,
+    }
+except ImportError:
+    DR_AGENT_MCP_AVAILABLE = False
+    DR_AGENT_MCP_TOOLS: dict[str, type] = {}
 
 
 def _truncate(text: str, max_length: int = 500) -> str:
@@ -493,6 +514,105 @@ class Crawl4AIBrowseTool(Tool):
         return result
 
 
+class DrAgentMCPTool(Tool):
+    """Wrapper for MCP tools from dr_agent. Requires: uv sync --extra dr-tulu"""
+
+    config_name = "dr_agent_mcp"
+    description = "MCP tools wrapper"
+    parameters = {
+        "type": "object",
+        "properties": {"text": {"type": "string", "description": "Text containing MCP tool calls"}},
+        "required": ["text"],
+    }
+
+    def __init__(
+        self,
+        call_name: str,
+        tool_names: str,
+        parser_name: str,
+        transport_type: str | None = None,
+        host: str | None = None,
+        port: int | None = None,
+        timeout: int = 180,
+        base_url: str | None = None,
+        num_results: int = 10,
+    ) -> None:
+        if not DR_AGENT_MCP_AVAILABLE:
+            raise ImportError("MCP tools require dr_agent package. Install with: uv sync --extra dr-tulu")
+
+        self.call_name = call_name
+        self.mcp_tools: list[Any] = []
+        self.stop_strings: list[str] = []
+
+        transport = transport_type or os.environ.get("MCP_TRANSPORT", "StreamableHttpTransport")
+        resolved_host = host or os.environ.get("MCP_TRANSPORT_HOST", "0.0.0.0")
+        resolved_port = port or int(os.environ.get("MCP_TRANSPORT_PORT", "8000"))
+
+        for name in [n.strip() for n in tool_names.split(",") if n.strip()]:
+            if name not in DR_AGENT_MCP_TOOLS:
+                raise ValueError(f"Unknown MCP tool: {name}. Available: {list(DR_AGENT_MCP_TOOLS.keys())}")
+
+            cls = DR_AGENT_MCP_TOOLS[name]
+            valid_params = set(inspect.signature(cls.__init__).parameters.keys())
+            kwargs: dict[str, Any] = {}
+            if "host" in valid_params:
+                kwargs["host"] = resolved_host
+            if "port" in valid_params:
+                kwargs["port"] = resolved_port
+            if "base_url" in valid_params:
+                kwargs["base_url"] = base_url
+            if "number_documents_to_search" in valid_params:
+                kwargs["number_documents_to_search"] = num_results
+            if name == "browse_webpage":
+                kwargs["use_docker_version"] = True
+                kwargs["use_ai2_config"] = True
+
+            tool = cls(timeout=timeout, name=name, tool_parser=parser_name, transport_type=transport, **kwargs)
+            self.mcp_tools.append(tool)
+            self.stop_strings.extend(tool.tool_parser.stop_sequences)
+
+    def get_stop_strings(self) -> list[str]:
+        return self.stop_strings
+
+    async def execute(self, text: str) -> ToolOutput:
+        if not text or not text.strip():
+            return ToolOutput(output="", error="Empty input", called=True, timeout=False, runtime=0)
+
+        start_time = time.time()
+        outputs: list[str] = []
+        errors: list[str] = []
+        any_timeout = False
+
+        for mcp_tool in self.mcp_tools:
+            if mcp_tool.tool_parser.has_calls(text, mcp_tool.name):
+                try:
+                    output = await mcp_tool(text)
+                    formatted = mcp_tool.tool_parser.format_result(mcp_tool._format_output(output), output)
+                    outputs.append(formatted)
+                    if output.error:
+                        errors.append(output.error)
+                    if output.timeout:
+                        any_timeout = True
+                except Exception as e:
+                    outputs.append(str(e))
+                    errors.append(str(e))
+
+        if not outputs:
+            result = ToolOutput(
+                output="", called=False, error="No tool calls found", timeout=False, runtime=time.time() - start_time
+            )
+        else:
+            result = ToolOutput(
+                output="\n".join(outputs),
+                called=True,
+                error="; ".join(errors) if errors else "",
+                timeout=any_timeout,
+                runtime=time.time() - start_time,
+            )
+        _log_tool_call(self.call_name, text, result)
+        return result
+
+
 @dataclass
 class Crawl4AIBrowseToolConfig(BaseToolConfig):
     """Configuration for the Crawl4AI browse tool."""
@@ -511,6 +631,22 @@ class Crawl4AIBrowseToolConfig(BaseToolConfig):
     """Maximum content length in characters. None means no limit."""
 
 
+@dataclass
+class DrAgentMCPToolConfig(BaseToolConfig):
+    """Config for MCP tools. Requires: uv sync --extra dr-tulu"""
+
+    tool_class: ClassVar[type[Tool]] = DrAgentMCPTool
+
+    tool_names: str
+    parser_name: str
+    transport_type: str | None = None
+    host: str | None = None
+    port: int | None = None
+    timeout: int = 180
+    base_url: str | None = None
+    num_results: int = 10
+
+
 # Tool Registry: Maps tool names to their config classes
 TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     PythonCodeToolConfig.tool_class.config_name: PythonCodeToolConfig,
@@ -518,4 +654,5 @@ TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     S2SearchToolConfig.tool_class.config_name: S2SearchToolConfig,
     SerperSearchToolConfig.tool_class.config_name: SerperSearchToolConfig,
     Crawl4AIBrowseToolConfig.tool_class.config_name: Crawl4AIBrowseToolConfig,
+    DrAgentMCPToolConfig.tool_class.config_name: DrAgentMCPToolConfig,
 }

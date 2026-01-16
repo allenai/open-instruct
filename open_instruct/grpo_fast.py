@@ -2288,11 +2288,16 @@ def main(
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     tool_actors, tool_definitions, tool_stop_sequences = initialize_tools(tools_config, tokenizer)
+    logger.info(
+        f"Initialized {len(tool_actors)} tool actors with definitions: {[d['function']['name'] for d in tool_definitions]}"
+    )
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
 
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config, tool_definitions)
+    train_dataset, eval_dataset = setup_datasets(
+        args, tc, tokenizer, streaming_config, tool_definitions if tools_config.pass_tools_to_chat_template else []
+    )
 
     if len(train_dataset) < (
         needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout

@@ -84,6 +84,9 @@ code = [
     "pydantic>=2.0.0",
     "requests>=2.28.0",
 ]
+dr-tulu = [
+    "dr_agent",
+]
 
 [tool.uv]
 preview = true
