@@ -918,9 +918,8 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
     return dataset
 
 
-# Tools column keys for per-sample tool definitions and active tools
+# Tools column key for per-sample tool definitions
 TOOLS_COLUMN_KEY = "tools"
-ACTIVE_TOOLS_COLUMN_KEY = "active_tools"
 
 
 def validate_dataset_tools(
@@ -975,9 +974,24 @@ def dataset_has_tools_column(dataset: Dataset) -> bool:
     return TOOLS_COLUMN_KEY in dataset.column_names
 
 
-def dataset_has_active_tools_column(dataset: Dataset) -> bool:
-    """Check if a dataset has an 'active_tools' column for per-sample active tool lists."""
-    return ACTIVE_TOOLS_COLUMN_KEY in dataset.column_names
+def extract_tool_names_from_definitions(tool_definitions: list[dict] | None) -> list[str] | None:
+    """Extract tool names from OpenAI-format tool definitions.
+
+    Args:
+        tool_definitions: List of tool definitions in OpenAI format, or None.
+
+    Returns:
+        List of tool names, or None if no definitions provided.
+    """
+    if not tool_definitions:
+        return None
+    tool_names = []
+    for tool_def in tool_definitions:
+        if isinstance(tool_def, dict) and "function" in tool_def:
+            tool_name = tool_def["function"].get("name")
+            if tool_name:
+                tool_names.append(tool_name)
+    return tool_names if tool_names else None
 
 
 # Preference dataset
@@ -1637,9 +1651,6 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Always preserve tools column if it exists (for per-sample tool definitions)
         if TOOLS_COLUMN_KEY in dataset.column_names and TOOLS_COLUMN_KEY not in target_columns:
             target_columns = target_columns + [TOOLS_COLUMN_KEY]
-        # Always preserve active_tools column if it exists (for per-sample active tool lists)
-        if ACTIVE_TOOLS_COLUMN_KEY in dataset.column_names and ACTIVE_TOOLS_COLUMN_KEY not in target_columns:
-            target_columns = target_columns + [ACTIVE_TOOLS_COLUMN_KEY]
 
         if fn_type == "map":
             dataset = dataset.map(

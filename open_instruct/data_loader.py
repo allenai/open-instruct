@@ -37,7 +37,9 @@ from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
+    TOOLS_COLUMN_KEY,
     VERIFIER_SOURCE_KEY,
+    extract_tool_names_from_definitions,
 )
 from open_instruct.model_utils import Batch
 from open_instruct.rl_utils import PackedSequences, pack_sequences
@@ -510,8 +512,9 @@ def add_prompt_to_generator(
     example: dict[str, Any], epoch_number: int, param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
 ) -> None:
     index = example["index"]
-    # Get active_tools from the example if it exists (for per-sample active tool lists)
-    active_tools = example.get("active_tools", None)
+    # Extract active tool names from the per-sample tools column if it exists
+    # This determines which tools can be executed for this sample
+    active_tools = extract_tool_names_from_definitions(example.get(TOOLS_COLUMN_KEY))
     param_prompt_Q.put(
         data_types.PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],

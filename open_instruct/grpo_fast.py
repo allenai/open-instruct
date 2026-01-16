@@ -82,11 +82,9 @@ from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
-    ACTIVE_TOOLS_COLUMN_KEY,
     INPUT_IDS_PROMPT_KEY,
     TOOLS_COLUMN_KEY,
     TokenizerConfig,
-    dataset_has_active_tools_column,
     dataset_has_tools_column,
     get_cached_dataset_tulu,
     validate_dataset_tools,
@@ -1447,10 +1445,7 @@ def setup_datasets(
     if dataset_has_tools_column(train_dataset) and configured_tool_call_names:
         logger.info(f"Dataset has '{TOOLS_COLUMN_KEY}' column - validating configured tools against dataset tools")
         validate_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
-
-    # Log if dataset has active_tools column for per-sample tool activation
-    if dataset_has_active_tools_column(train_dataset):
-        logger.info(f"Dataset has '{ACTIVE_TOOLS_COLUMN_KEY}' column - per-sample tool activation enabled")
+        logger.info(f"Dataset has '{TOOLS_COLUMN_KEY}' column - per-sample tool activation enabled")
 
     train_dataset = train_dataset.shuffle(seed=args.seed)
 
@@ -1473,10 +1468,7 @@ def setup_datasets(
         if dataset_has_tools_column(eval_dataset) and configured_tool_call_names:
             logger.info(f"Eval dataset has '{TOOLS_COLUMN_KEY}' column - validating configured tools against dataset tools")
             validate_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
-
-        # Log if eval dataset has active_tools column
-        if dataset_has_active_tools_column(eval_dataset):
-            logger.info(f"Eval dataset has '{ACTIVE_TOOLS_COLUMN_KEY}' column - per-sample tool activation enabled")
+            logger.info(f"Eval dataset has '{TOOLS_COLUMN_KEY}' column - per-sample tool activation enabled")
 
         if streaming_config.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
