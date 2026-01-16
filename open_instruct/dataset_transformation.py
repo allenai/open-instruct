@@ -955,6 +955,9 @@ def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], d
             f"All tools in the dataset must be configured for execution."
         )
 
+    # extraneous tools might happen e.g. if you subsample a dataset,
+    # and end up with no samples with some set of tools present in the entire dataset.
+    # or you might just accidentally include tools you don't need.
     extraneous_tools = configured_set - dataset_tool_names
     if extraneous_tools:
         logger.warning(
