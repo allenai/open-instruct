@@ -1706,6 +1706,20 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     if len(dataset) == 0:
         raise ValueError("No examples left after transformation")
+
+    # DEBUG: Show first sample's prompt to verify tool filtering
+    if INPUT_IDS_PROMPT_KEY in dataset.column_names and len(dataset) > 0:
+        first_prompt_ids = dataset[0][INPUT_IDS_PROMPT_KEY]
+        decoded_prompt = tokenizer.decode(first_prompt_ids, skip_special_tokens=False)
+        # Check which tool names appear in the prompt
+        tool_mentions = []
+        for tool_name in ["code", "search", "browse"]:
+            if tool_name in decoded_prompt.lower():
+                tool_mentions.append(tool_name)
+        print(f"📋 [DEBUG] First sample tools column: {dataset[0].get(TOOLS_COLUMN_KEY, 'N/A')}")
+        print(f"📋 [DEBUG] Tools found in decoded prompt: {tool_mentions}")
+        print(f"📋 [DEBUG] First 500 chars of prompt: {decoded_prompt[:500]}")
+
     return dataset
 
 
