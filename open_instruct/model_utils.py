@@ -54,10 +54,6 @@ class TensorCache:
         """Get cached tensors for the given indices."""
         return {k: v[indices.long()] for k, v in self.tensors.items()}
 
-    def to(self, device: torch.device | str) -> "TensorCache":
-        """Move all tensors to the specified device."""
-        return TensorCache(tensors={k: v.to(device) for k, v in self.tensors.items()})
-
     def to_disk(self, path: str | pathlib.Path) -> None:
         """Save the cache to disk atomically using temp file and rename."""
         path = pathlib.Path(path)
@@ -69,10 +65,9 @@ class TensorCache:
         tmp_path.rename(path)
 
     @classmethod
-    def from_disk(cls, path: str | pathlib.Path, device: torch.device | str | None = None) -> "TensorCache":
+    def from_disk(cls, path: str | pathlib.Path, device: torch.device) -> "TensorCache":
         """Load a cache from disk."""
-        data = torch.load(path, weights_only=True, map_location=device)
-        return cls(tensors=data)
+        return cls(tensors=torch.load(path, weights_only=True, map_location=device))
 
 
 @dataclass
@@ -134,9 +129,10 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
     """The data type to load the model under. If specified, overrides the default `torch.dtype`."""
-    attn_implementation: Literal["flash_attention_2"] | None = None
-    """Which attention implementation to use; you can run --attn_implementation=flash_attention_2, in which case
-    you must install this manually by running `pip install flash-attn --no-build-isolation`"""
+    attn_implementation: Literal["flash_attention_2", "sdpa"] = "flash_attention_2"
+    """Which attention implementation to use.
+    flash_attention_2: Requires flash-attn package (default)
+    sdpa: Uses PyTorch's native scaled_dot_product_attention (no flash-attn required)"""
     use_cache: bool | None = None
     """Whether to use cache in the model."""
     gradient_checkpointing: bool = False
@@ -252,7 +248,7 @@ def load_ref_policy(
         model_config.model_name_or_path,
         revision=model_config.model_revision,
         dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
+        attn_implementation=model_config.attn_implementation,
         use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
@@ -716,8 +712,9 @@ def print_rich_single_line_metrics(metrics):
         values = grouped_metrics[category]
         value_strings = []
         for key, value in values:
-            # Use the last part of the key as the display name
-            display_name = key.split("/")[-1]
+            # Use everything after the first "/" as the display name
+            parts = key.split("/")
+            display_name = "/".join(parts[1:]) if len(parts) > 1 else key
             value_strings.append(f"{display_name}: {format_value(value)}")
 
         # Join all values for this category into a single string

@@ -1,5 +1,5 @@
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
@@ -20,6 +20,15 @@ class TokenStatistics:
 
 
 @dataclass
+class ToolCallStats:
+    """Statistics for a single tool call."""
+
+    tool_name: str
+    success: bool
+    runtime: float
+
+
+@dataclass
 class RequestInfo:
     """Container for tool usage information used in queue payloads."""
 
@@ -29,6 +38,9 @@ class RequestInfo:
     tool_outputs: list[str]
     tool_runtimes: list[float]
     tool_calleds: list[bool]
+    tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
+    excess_tool_calls: list[dict[str, int]] = field(default_factory=list)
+    """Per-sample dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
 
 
 @dataclass

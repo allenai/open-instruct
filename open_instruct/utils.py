@@ -31,6 +31,7 @@ except Exception:
 # isort: on
 import dataclasses
 import functools
+import importlib
 import json
 import logging
 import math
@@ -58,7 +59,6 @@ import ray
 import requests
 import torch
 import torch.nn.functional as F
-import vllm.config
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -70,10 +70,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentPars
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import data_types, logger_utils
-
-WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
-GCP_CLUSTERS = ["ai2/augusta"]
-INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
+from open_instruct.launch_utils import GCP_CLUSTERS, gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -85,6 +82,22 @@ INVALID_LOGPROB = 1.0  # Sentinel value for masked/invalid log probabilities
 logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+def import_class_from_string(import_path: str) -> type:
+    """Dynamically import a class from a 'module.path:ClassName' string.
+
+    Args:
+        import_path: Import path in format 'module.submodule:ClassName'.
+
+    Returns:
+        The imported class.
+    """
+    if ":" not in import_path:
+        raise ValueError(f"Invalid import path '{import_path}'. Expected format: 'module.path:ClassName'")
+    module_name, class_name = import_path.rsplit(":", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)
 
 
 def warn_if_low_disk_space(
@@ -1117,70 +1130,6 @@ def maybe_update_beaker_description(
         )
 
 
-def live_subprocess_output(cmd: list[str]) -> str:
-    output_lines = []
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    # Display output in real-time and collect it
-    for line in iter(process.stdout.readline, ""):
-        if line.strip():
-            print(line.strip())
-            output_lines.append(line.strip())
-    process.wait()
-    if process.returncode != 0:
-        # Get the actual error message from the process
-        process_error = process.stderr.read() if process.stderr else "No error message available"
-        error_message = f"gsutil command failed with return code {process.returncode}: {process_error}"
-        print(error_message)
-        raise Exception(error_message)
-
-    return "\n".join(output_lines)
-
-
-def download_from_hf(model_name_or_path: str, revision: str) -> None:
-    cmd = ["huggingface-cli", "download", model_name_or_path, "--revision", revision]
-    print(f"Downloading from HF with command: {cmd}")
-    output = live_subprocess_output(cmd)
-    # for some reason, sometimes the output includes the line including some loading message.
-    # so do some minor cleaning.
-    if "\n" in output:
-        output = output.split("\n")[-1].strip()
-    return output
-
-
-def download_from_gs_bucket(src_paths: list[str], dest_path: str) -> None:
-    os.makedirs(dest_path, exist_ok=True)
-    cmd = [
-        "gsutil",
-        "-o",
-        "GSUtil:parallel_thread_count=1",
-        "-o",
-        "GSUtil:sliced_object_download_threshold=150",
-        "-m",
-        "cp",
-        "-r",
-    ]
-    cmd.extend(src_paths)
-    cmd.append(dest_path)
-    print(f"Downloading from GS bucket with command: {cmd}")
-    live_subprocess_output(cmd)
-
-
-def gs_folder_exists(path: str) -> bool:
-    cmd = ["gsutil", "ls", path]
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    # print(f"GS stat command: {cmd}")
-    # print(f"GS stat stdout: {stdout}")
-    # print(f"GS stat stderr: {stderr}")
-    return process.returncode == 0
-
-
-def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
-    cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-r", src_path, dest_path]
-    print(f"Copying model to GS bucket with command: {cmd}")
-    live_subprocess_output(cmd)
-
-
 def sync_gs_bucket(src_path: str, dest_path: str) -> None:
     cmd = [
         "gsutil",
@@ -1800,6 +1749,9 @@ GPU_SPECS = {
     "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
     # Specs from https://www.techpowerup.com/gpu-specs/geforce-rtx-4090-mobile.c3949.
     "4090 laptop": {"flops": 32.98e12, "memory_size": 24e9, "memory_bandwidth": 576e9},
+    # DGX Spark GB10 (Blackwell) - unified LPDDR5X memory with CPU
+    # Specs from https://www.nvidia.com/en-us/products/workstations/dgx-spark/
+    "gb10": {"flops": 104e12, "memory_size": 128e9, "memory_bandwidth": 273e9},  # 273 GB/s LPDDR5X unified
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
@@ -1855,40 +1807,6 @@ class ModelDims:
         lm_head_params = self.vocab_size * self.hidden_size
 
         return embedding_params + layer_params + lm_head_params
-
-    @classmethod
-    def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
-        """Create ModelDims from a vLLM config object."""
-        model_config = vllm_config.model_config
-        hidden_size = model_config.get_hidden_size()
-
-        # Try to get intermediate_size, default to 4x hidden_size if not present
-        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
-
-        sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
-        num_layers = model_config.get_num_layers(vllm_config.parallel_config)
-        num_sliding_window_layers = 0
-
-        if sliding_window is not None:
-            layer_types = getattr(model_config.hf_text_config, "layer_types", None)
-            if layer_types is not None:
-                num_sliding_window_layers = layer_types.count("sliding_attention")
-            else:
-                # If "layer_types" is None, then we assume all layers are sliding layers.
-                num_sliding_window_layers = num_layers
-
-        return cls(
-            num_layers=num_layers,
-            hidden_size=hidden_size,
-            intermediate_size=intermediate_size,
-            vocab_size=model_config.get_vocab_size(),
-            num_attn_heads=model_config.hf_text_config.num_attention_heads,
-            num_kv_heads=model_config.hf_text_config.num_key_value_heads,
-            head_dim=model_config.get_head_size(),
-            sliding_window=sliding_window,
-            num_sliding_window_layers=num_sliding_window_layers,
-            device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
-        )
 
     @classmethod
     def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
@@ -2450,6 +2368,44 @@ def get_device_name(device_name: str) -> str:
         f"Unknown device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}. "
         f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the device you need. In the interim, you can add the specs for your device using the name {normalized_device_name} to the GPU_SPECS dictionary in utils.py."
     )
+
+
+def calculate_utilization_metrics(
+    model_dims: ModelDims,
+    prompt_lengths: list[int],
+    response_lengths: list[int],
+    total_generation_time: float,
+    samples_per_prompt: int,
+    num_engines: int,
+    num_gpus_per_engine: int,
+    training_time: float,
+    num_training_gpus: int,
+) -> dict:
+    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+    )
+
+    actor_metrics = model_dims.calculate_actor_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        total_generation_time=total_generation_time,
+        samples_per_prompt=samples_per_prompt,
+        num_engines=num_engines,
+        num_gpus_per_engine=num_gpus_per_engine,
+    )
+
+    learner_metrics = model_dims.calculate_learner_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        training_time=training_time,
+        samples_per_prompt=samples_per_prompt,
+        num_training_gpus=num_training_gpus,
+    )
+
+    utilization_metrics = {f"actor_{k}": v for k, v in actor_metrics.items()}
+    utilization_metrics["learner_mfu"] = learner_metrics["mfu"]
+
+    return utilization_metrics
 
 
 def check_calculation(

@@ -64,37 +64,18 @@ from transformers import (
     LlamaTokenizerFast,
     PreTrainedTokenizer,
 )
-from transformers.utils.hub import _CACHED_NO_EXIST, TRANSFORMERS_CACHE, extract_commit_hash, try_to_load_from_cache
+from transformers.utils.hub import extract_commit_hash
 
+from open_instruct import launch_utils
 from open_instruct.utils import hf_whoami, max_num_processes
 
 
 # ----------------------------------------------------------------------------
 # Utilities
-def custom_cached_file(model_name_or_path: str, filename: str, revision: str = None, repo_type: str = "model"):
-    """@vwxyzjn: HF's `cached_file` no longer works for `repo_type="dataset"`."""
-    # local_file = os.path.join(model_name_or_path, filename)
-
-    if os.path.isdir(model_name_or_path):
-        resolved_file = os.path.join(model_name_or_path, filename)
-        if os.path.isfile(resolved_file):
-            return resolved_file
-        else:
-            return None
-    else:
-        resolved_file = try_to_load_from_cache(
-            model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type
-        )
-        # special return value from try_to_load_from_cache
-        if resolved_file == _CACHED_NO_EXIST:
-            return None
-        return resolved_file
-
-
 def get_commit_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
-    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+    file = launch_utils.custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     commit_hash = extract_commit_hash(file, None)
     return commit_hash
 
@@ -102,12 +83,10 @@ def get_commit_hash(
 def get_file_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
-    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+    file = launch_utils.custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     if isinstance(file, str):
         with open(file, "rb") as f:
             return hashlib.sha256(f.read()).hexdigest()
-    elif file is _CACHED_NO_EXIST:
-        return f"{filename} not found"
     elif file is None:
         return f"{filename} not found"
     else:
@@ -1348,6 +1327,7 @@ def rlvr_tokenize_v3(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
     system_prompt_override: Optional[str] = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
 ):
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
@@ -1360,7 +1340,10 @@ def rlvr_tokenize_v3(
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+    chat_template_kwargs = {"add_generation_prompt": True}
+    if tool_definitions:
+        chat_template_kwargs["tools"] = tool_definitions
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
     row[GROUND_TRUTHS_KEY] = row[ground_truths_key]

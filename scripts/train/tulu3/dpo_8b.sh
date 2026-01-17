@@ -19,7 +19,7 @@ python mason.py \
     --tokenizer_name allenai/Llama-3.1-Tulu-3-8B-SFT \
     --tokenizer_revision main \
     --use_slow_tokenizer \
-    --dataset_mixer_list allenai/llama-3.1-tulu-3-8b-preference-mixture 1.0 \
+    --mixer_list allenai/llama-3.1-tulu-3-8b-preference-mixture 1.0 \
     --max_seq_length 2048 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 16 \
@@ -27,12 +27,11 @@ python mason.py \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
-    --num_train_epochs 1 \
-    --dpo_loss_type dpo_norm \
-    --dpo_beta 5 \
+    --num_epochs 1 \
+    --loss_type dpo_norm \
+    --beta 5 \
     --use_flash_attn \
     --gradient_checkpointing \
-    --report_to wandb \
     --with_tracking \
     --logging_steps 1 \
     --seed 8

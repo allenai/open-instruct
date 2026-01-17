@@ -12,6 +12,9 @@ jobs:
     name: Run unit tests
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
     steps:
 
       - name: Checkout code
@@ -34,6 +37,9 @@ jobs:
     concurrency:
       group: gpu-tests-${{ github.head_ref || github.run_id }}
       cancel-in-progress: true
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
     steps:
 
       - name: Checkout code
@@ -47,8 +53,11 @@ jobs:
       - name: Set up Python
         run: uv sync --frozen
 
-      - name: Install Beaker CLI
-        run: curl -s https://beaker.org/install | sudo bash
+      - name: Setup Beaker
+        uses: allenai/setup-beaker@v2
+        with:
+          token: ${{ secrets.BEAKER_TOKEN }}
+          workspace: ai2/open-instruct-dev
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -70,17 +79,17 @@ jobs:
           build-args: |
             GIT_COMMIT=${{ github.sha }}
             GIT_BRANCH=${{ github.head_ref || github.ref_name }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
+          cache-from: type=registry,ref=ghcr.io/allenai/open-instruct:buildcache
+          cache-to: type=inline
 
       - name: Upload image to Beaker and run tests
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: |
           beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-          image_name="open-instruct-gpu-tests-ci"
+          short_sha="${GITHUB_SHA::8}"
+          image_name="open-instruct-gpu-tests-${short_sha}"
 
-          beaker image rename "$beaker_user/$image_name" "" 2>/dev/null || true
           beaker image create open-instruct-gpu-tests:latest -n "$image_name" -w "ai2/$beaker_user" --description "Git commit: ${{ github.sha }}"
 
           uv sync --frozen

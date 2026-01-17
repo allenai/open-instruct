@@ -582,6 +582,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.use_lora:
         if args.use_qlora:
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+        elif args.gradient_checkpointing:
+            # Enable gradient checkpointing for LoRA (non-QLoRA) too
+            model.gradient_checkpointing_enable()
 
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(

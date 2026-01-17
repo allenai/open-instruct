@@ -25,14 +25,17 @@ dependencies = [
     "ray[default]>=2.49.2",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.8.0,<2.9",
+    "torch>=2.9.0,<2.10",
     "transformers>=4.57.0",
-    "vllm==0.11.0",
-    "wandb==0.18.1",
+    "vllm==0.12.0; platform_system != 'Darwin' and platform_machine != 'aarch64'",
+    "vllm==0.13.0; platform_system != 'Darwin' and platform_machine == 'aarch64'",
+    "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
-    "flash-attn>=2.8.3; platform_system != 'Darwin'",
+    "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
 ]
 
 [build-system]
@@ -51,12 +54,24 @@ flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 # pytorch related setups
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
+  { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
+]
+# vLLM aarch64 (DGX Spark): PyPI lacks aarch64+cu130 wheels, so we pin to vLLM's nightly wheel server.
+# This can be removed once vLLM publishes official aarch64+cu130 wheels to PyPI.
+# See docs/DGX_SPARK.md for details.
+vllm = [
+  { url = "https://wheels.vllm.ai/72506c98349d6bcd32b4e33eec7b5513453c1502/vllm-0.13.0%2Bcu130-cp38-abi3-manylinux_2_35_aarch64.whl", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [[tool.uv.index]]
@@ -66,16 +81,22 @@ explicit = true
 
 [project.optional-dependencies]
 code = [
-    "fastapi>=0.100.0",
-    "uvicorn>=0.20.0",
     "pydantic>=2.0.0",
     "requests>=2.28.0",
+]
+dr-tulu = [
+    "dr_agent",
 ]
 
 [tool.uv]
 preview = true
 python-preference = "only-managed"
 link-mode = "hardlink"
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "sys_platform == 'darwin'",
+]
 
 [dependency-groups]
 dev = [
@@ -142,6 +163,12 @@ case-sensitive = false
 # Disable split-on-trailing-comma to work with skip-magic-trailing-comma
 split-on-trailing-comma = false
 
+# Ignore unresolved imports because some packages (e.g. vllm) are not available on macOS
+# Ignore possibly-missing-attribute for torch.distributed which has incomplete type stubs
+[tool.ty.rules]
+unresolved-import = "ignore"
+possibly-missing-attribute = "ignore"
+
 [tool.ty.src]
 include = [
     "open_instruct/actor_manager.py",
@@ -151,13 +178,15 @@ include = [
     "open_instruct/dataset_processor.py",
     "open_instruct/data_loader.py",
     "open_instruct/data_types.py",
+    "open_instruct/dpo_config.py",
+    "open_instruct/dpo_utils.py",
     "open_instruct/logger_utils.py",
     "open_instruct/mix_data.py",
     "open_instruct/mix_data_preferences.py",
     "open_instruct/padding_free_collator.py",
     "open_instruct/rejection_sampling/prompt_templates.py",
-    "open_instruct/search_utils/",
-    "open_instruct/tool_utils/tools.py",
+    "open_instruct/tools/massive_ds.py",
+    "open_instruct/tools/tools.py",
     "open_instruct/rl_utils.py",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]

@@ -426,20 +426,20 @@ class StringMatcherVerifier(VerifierFunction):
 class F1Verifier(VerifierFunction):
     """
     Verifier that computes the string F1 score between the prediction and the label.
+
+    The label can be a single string or a list of strings. If a list is provided,
+    the maximum F1 score across all labels is returned.
     """
 
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("string_f1", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self, tokenized_prediction: list[int], prediction: str, label: str | list[str], query: str | None = None
     ) -> VerificationResult:
-        # remove thinking section from the prediction
-        prediction = prediction.split("</think>")[-1]
-        # remove answer tags from the prediction
-        prediction = prediction.replace("<answer>", "").replace("</answer>", "")
-        # return f1 score
-        score = f1_score(prediction, label)["f1"]
+        prediction = remove_thinking_section(prediction)
+        labels: list[str] = label if isinstance(label, list) else [label]
+        score = max(f1_score(prediction, str(lab))["f1"] for lab in labels)
         return VerificationResult(score=score)
 
 
