@@ -1,13 +1,6 @@
 #!/bin/bash
 # Debug script for testing GRPO with generic MCP tool using the weather MCP server
 #
-# Prerequisites:
-# 1. Start the weather MCP server first:
-#    cd open_instruct/tools/servers/weather_mcp_server
-#    uv run python server.py 8765
-#
-# 2. The server will be available at http://localhost:8765/mcp
-#
 # Dataset: https://huggingface.co/datasets/hamishivi/wots_the_weather
 # This dataset contains weather-related questions that the model can answer
 # using the get_current_weather, get_weather_forecast, and compare_weather tools.
@@ -16,19 +9,54 @@
 # - get_current_weather(city): Get current weather for a city
 # - get_weather_forecast(city, days): Get a multi-day weather forecast  
 # - compare_weather(city1, city2): Compare weather between two cities
+#
+# The script will automatically start the weather server if it's not running.
 
 set -e
 
-# Check if weather server is running
-if ! curl -s http://localhost:8765/mcp > /dev/null 2>&1; then
-    echo "ERROR: Weather MCP server is not running!"
-    echo "Please start it first with:"
-    echo "  cd open_instruct/tools/servers/weather_mcp_server"
-    echo "  uv run python server.py 8765"
-    exit 1
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+WEATHER_SERVER_DIR="$REPO_ROOT/open_instruct/tools/servers/weather_mcp_server"
+WEATHER_SERVER_PORT=8765
+WEATHER_SERVER_URL="http://localhost:$WEATHER_SERVER_PORT/mcp"
+WEATHER_SERVER_PID=""
+
+# Cleanup function to stop the server if we started it
+cleanup() {
+    if [ -n "$WEATHER_SERVER_PID" ]; then
+        echo "Stopping weather MCP server (PID: $WEATHER_SERVER_PID)..."
+        kill "$WEATHER_SERVER_PID" 2>/dev/null || true
+        wait "$WEATHER_SERVER_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+# Check if weather server is running, start it if not
+if curl -s "$WEATHER_SERVER_URL" > /dev/null 2>&1; then
+    echo "Weather MCP server is already running at $WEATHER_SERVER_URL"
+else
+    echo "Weather MCP server not running. Starting it..."
+    cd "$WEATHER_SERVER_DIR"
+    uv run python server.py "$WEATHER_SERVER_PORT" > /dev/null 2>&1 &
+    WEATHER_SERVER_PID=$!
+    cd "$REPO_ROOT"
+    
+    # Wait for server to be ready (max 30 seconds)
+    echo "Waiting for server to be ready..."
+    for i in {1..30}; do
+        if curl -s "$WEATHER_SERVER_URL" > /dev/null 2>&1; then
+            echo "Weather MCP server started successfully (PID: $WEATHER_SERVER_PID)"
+            break
+        fi
+        if [ $i -eq 30 ]; then
+            echo "ERROR: Weather MCP server failed to start within 30 seconds"
+            exit 1
+        fi
+        sleep 1
+    done
 fi
 
-echo "Weather MCP server is running. Starting training..."
+echo "Starting training..."
 
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/wots_the_weather 32 \
