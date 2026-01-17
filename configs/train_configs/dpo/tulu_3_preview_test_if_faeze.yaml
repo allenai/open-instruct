@@ -19,11 +19,11 @@ learning_rate: 5.0e-7
 lr_scheduler_type: linear
 warmup_ratio: 0.1
 weight_decay: 0.0
-num_train_epochs: 1
+num_epochs: 1
 output_dir: /output
 with_tracking: true
 logging_steps: 1
 use_lora: false
-dpo_loss_type: dpo_norm
-dpo_beta: 5
+loss_type: dpo_norm
+beta: 5
 checkpointing_steps: 2000

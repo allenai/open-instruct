@@ -1,24 +1,40 @@
 import asyncio
 import json
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 import aiohttp
 
 from open_instruct import logger_utils
+from open_instruct.data_types import ToolCallStats
 
 logger = logger_utils.setup_logger(__name__)
+
+
+@dataclass
+class ParsedToolConfig:
+    """A parsed tool configuration combining name, call name, and config."""
+
+    name: str
+    """The tool name (e.g., "python", "search")."""
+
+    call_name: str
+    """The name used in tool calls (e.g., "code", "web_search")."""
+
+    config: dict[str, Any]
+    """The parsed configuration dictionary for this tool."""
 
 
 @dataclass
 class ToolsConfig:
     """Configuration for tools used during generation."""
 
-    tools: list[str] | None = None
+    tools: list[str] = field(default_factory=list)
     """List of tool names to enable (e.g., ["python", "search"])."""
 
-    tool_call_names: list[str] | None = None
+    tool_call_names: list[str] = field(default_factory=list)
     """Override names used in tool calls (e.g., '<name>...</name>').
     Must match length of tools if set. Defaults to tools if not specified."""
 
@@ -26,7 +42,7 @@ class ToolsConfig:
     """JSON strings for configuring each tool. Must match length of tools. Use '{}' for defaults."""
 
     tool_parser_type: str = "legacy"
-    """Type of tool parser to use: 'legacy' is the only option for now."""
+    """Type of tool parser to use. See parsers.get_available_parsers() for valid options."""
 
     max_tool_calls: int = 5
     """Maximum number of tool calls allowed per generation."""
@@ -34,39 +50,45 @@ class ToolsConfig:
     only_reward_good_outputs: bool = False
     """Only apply rewards to outputs from tools that didn't error."""
 
-    _parsed_tool_configs: list[dict[str, Any]] = field(default_factory=list, init=False)
-    """Parsed tool configurations as dictionaries. Populated from tool_configs during __post_init__."""
+    pass_tools_to_chat_template: bool = True
+    """Pass tool definitions to the chat template. Set to False if using a custom system prompt."""
+
+    _parsed_tools: list[ParsedToolConfig] = field(default_factory=list, init=False)
+    """Parsed tool configurations. Populated during __post_init__."""
 
     def __post_init__(self):
         self.max_tool_calls = int(self.max_tool_calls)
 
-        if self.tools:
-            # Set default tool_call_names if not provided
-            if not self.tool_call_names:
-                self.tool_call_names = self.tools
-            elif len(self.tool_call_names) != len(self.tools):
-                raise ValueError(
-                    f"tool_call_names must have same length as tools. "
-                    f"Got {len(self.tool_call_names)} names for {len(self.tools)} tools."
-                )
+        if not self.tools:
+            return
 
-            # Set default tool_configs if not provided
-            if not self.tool_configs:
-                self.tool_configs = ["{}"] * len(self.tools)
-            elif len(self.tool_configs) != len(self.tools):
-                raise ValueError(
-                    f"tool_configs must have same length as tools. "
-                    f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
-                )
+        # Set defaults for empty lists
+        if not self.tool_call_names:
+            self.tool_call_names = list(self.tools)
+        if not self.tool_configs:
+            self.tool_configs = ["{}"] * len(self.tools)
 
-            # Parse all tool_configs into dicts and store in _parsed_tool_configs
-            # using a simple loop to make the error message more informative
-            self._parsed_tool_configs = []
-            for i, (tool_name, config) in enumerate(zip(self.tools, self.tool_configs)):
-                try:
-                    self._parsed_tool_configs.append(json.loads(config))
-                except Exception as e:
-                    raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
+        # Validate lengths
+        if len(self.tool_call_names) != len(self.tools):
+            raise ValueError(
+                f"tool_call_names must have same length as tools. "
+                f"Got {len(self.tool_call_names)} names for {len(self.tools)} tools."
+            )
+        if len(self.tool_configs) != len(self.tools):
+            raise ValueError(
+                f"tool_configs must have same length as tools. "
+                f"Got {len(self.tool_configs)} configs for {len(self.tools)} tools."
+            )
+
+        # Parse and combine into ParsedTool instances
+        for i, (tool_name, call_name, config_str) in enumerate(
+            zip(self.tools, self.tool_call_names, self.tool_configs)
+        ):
+            try:
+                config = json.loads(config_str)
+            except Exception as e:
+                raise ValueError(f"Invalid tool_config for tool {tool_name} at index {i}: {e}") from e
+            self._parsed_tools.append(ParsedToolConfig(name=tool_name, call_name=call_name, config=config))
 
     @property
     def enabled(self) -> bool:
@@ -81,6 +103,89 @@ class ToolOutput:
     error: str
     timeout: bool
     runtime: float
+
+
+class ToolStatistics:
+    """Manages aggregated tool call statistics across rollouts.
+
+    Provides methods to add rollout stats and compute per-tool and aggregate metrics.
+    """
+
+    def __init__(self, tool_names: list[str] | None = None):
+        """Initialize tool statistics tracker.
+
+        Args:
+            tool_names: List of tool names to track. New tool names seen in add_rollout are added automatically.
+        """
+        self.tool_names: set[str] = set(tool_names) if tool_names else set()
+        self.num_rollouts = 0
+        self._counts: defaultdict[str, int] = defaultdict(int)
+        self._failures: defaultdict[str, int] = defaultdict(int)
+        self._runtimes: defaultdict[str, float] = defaultdict(float)
+        self._excess_calls: defaultdict[str, int] = defaultdict(int)
+
+    def add_rollout(
+        self, tool_call_stats: list[ToolCallStats], excess_tool_calls: dict[str, int] | None = None
+    ) -> None:
+        """Add statistics from a single rollout.
+
+        Args:
+            tool_call_stats: List of ToolCallStats from a single rollout.
+            excess_tool_calls: Dict mapping tool name to count of calls that exceeded the limit.
+        """
+        self.num_rollouts += 1
+        for s in tool_call_stats:
+            self.tool_names.add(s.tool_name)
+            self._counts[s.tool_name] += 1
+            self._failures[s.tool_name] += not s.success
+            self._runtimes[s.tool_name] += s.runtime
+
+        if excess_tool_calls:
+            for tool_name, count in excess_tool_calls.items():
+                self.tool_names.add(tool_name)
+                self._excess_calls[tool_name] += count
+
+    def compute_metrics(self) -> dict[str, float]:
+        """Compute per-tool and aggregate metrics.
+
+        Returns:
+            Dictionary with metrics for each tool and aggregate totals:
+            - tools/{name}/avg_calls_per_rollout
+            - tools/{name}/failure_rate
+            - tools/{name}/avg_runtime
+            - tools/{name}/avg_excess_calls_per_rollout
+            - tools/aggregate/avg_calls_per_rollout
+            - tools/aggregate/failure_rate
+            - tools/aggregate/avg_runtime
+            - tools/aggregate/avg_excess_calls_per_rollout
+        """
+        if not self.num_rollouts or not self.tool_names:
+            return {}
+
+        metrics: dict[str, float] = {}
+        total_calls = 0
+        total_failures = 0
+        total_runtime = 0.0
+        total_excess = 0
+
+        for name in self.tool_names:
+            calls, failures, runtime = self._counts[name], self._failures[name], self._runtimes[name]
+            excess = self._excess_calls[name]
+            metrics[f"tools/{name}/avg_calls_per_rollout"] = calls / self.num_rollouts
+            metrics[f"tools/{name}/failure_rate"] = failures / calls if calls else 0.0
+            metrics[f"tools/{name}/avg_runtime"] = runtime / calls if calls else 0.0
+            metrics[f"tools/{name}/avg_excess_calls_per_rollout"] = excess / self.num_rollouts
+            total_calls += calls
+            total_failures += failures
+            total_runtime += runtime
+            total_excess += excess
+
+        metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / self.num_rollouts
+        metrics["tools/aggregate/failure_rate"] = total_failures / total_calls if total_calls else 0.0
+        metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls if total_calls else 0.0
+        metrics["tools/aggregate/avg_excess_calls_per_rollout"] = total_excess / self.num_rollouts
+
+        return metrics
 
 
 @dataclass

@@ -58,12 +58,12 @@ from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
-from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
+from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.tools.utils import ToolOutput
-from open_instruct.utils import ModelDims, ray_get_with_progress
+from open_instruct.utils import ModelDims, get_device_name, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -71,6 +71,32 @@ NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
+
+
+def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelDims:
+    model_config = vllm_config.model_config
+    hidden_size = model_config.get_hidden_size()
+    intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
+    sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
+    num_layers = model_config.get_num_layers(vllm_config.parallel_config)
+    num_sliding_window_layers = 0
+
+    if sliding_window is not None:
+        layer_types = getattr(model_config.hf_text_config, "layer_types", None)
+        num_sliding_window_layers = layer_types.count("sliding_attention") if layer_types is not None else num_layers
+
+    return ModelDims(
+        num_layers=num_layers,
+        hidden_size=hidden_size,
+        intermediate_size=intermediate_size,
+        vocab_size=model_config.get_vocab_size(),
+        num_attn_heads=model_config.hf_text_config.num_attention_heads,
+        num_kv_heads=model_config.hf_text_config.num_key_value_heads,
+        head_dim=model_config.get_head_size(),
+        sliding_window=sliding_window,
+        num_sliding_window_layers=num_sliding_window_layers,
+        device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
+    )
 
 
 @dataclasses.dataclass
@@ -98,6 +124,9 @@ class CompletionOutput:
     tool_output: str = ""
     tool_runtime: float = 0.0
     tool_called: bool = False
+    tool_call_stats: list[ToolCallStats] = dataclasses.field(default_factory=list)
+    excess_tool_calls: dict[str, int] = dataclasses.field(default_factory=dict)
+    """Dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
 
 
 @dataclasses.dataclass
@@ -282,6 +311,8 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_outputs = [getattr(out, "tool_output", "") for out in final_output.outputs]
         tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in final_output.outputs]
         tool_calleds = [getattr(out, "tool_called", False) for out in final_output.outputs]
+        tool_call_stats = [out.tool_call_stats for out in final_output.outputs]
+        excess_tool_calls = [getattr(out, "excess_tool_calls", {}) for out in final_output.outputs]
     else:
         # Use default values when tools are not used
         masks = [[1] * len(resp) for resp in response_ids]
@@ -291,6 +322,8 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_outputs = [""] * len(response_ids)
         tool_runtimes = [0.0] * len(response_ids)
         tool_calleds = [False] * len(response_ids)
+        tool_call_stats = [[] for _ in response_ids]
+        excess_tool_calls = [{} for _ in response_ids]
 
     result = GenerationResult(
         responses=response_ids,
@@ -303,6 +336,8 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
             tool_outputs=tool_outputs,
             tool_runtimes=tool_runtimes,
             tool_calleds=tool_calleds,
+            tool_call_stats=tool_call_stats,
+            excess_tool_calls=excess_tool_calls,
         ),
         index=metadata["index"],
         prompt_id=metadata["prompt_id"],
@@ -534,14 +569,7 @@ class LLMRayActor:
     ):
         assert_threaded_actor(self)
         self._init_config(
-            tool_actors,
-            tool_parser_type,
-            max_tool_calls,
-            mask_tool_use,
-            inflight_updates,
-            reward_config,
-            train_dataset,
-            eval_dataset,
+            tool_actors, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -552,11 +580,12 @@ class LLMRayActor:
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
+        # comes after executor as it requires tokenizer access.
+        self._init_tool_parser(tool_parser_type)
 
     def _init_config(
         self,
         tool_actors: list[ray.actor.ActorHandle] | None,
-        tool_parser_type: str,
         max_tool_calls: int,
         mask_tool_use: bool,
         inflight_updates: bool,
@@ -588,11 +617,6 @@ class LLMRayActor:
             call_names = ray.get([actor.get_call_name.remote() for actor in self.tool_actors])
             self.tool_actor_map = dict(zip(call_names, self.tool_actors))
 
-        # Create tool parser inside the actor (avoids serialization issues)
-        self.tool_parser = None
-        if self.tool_actors:
-            self.tool_parser = create_tool_parser(parser_type=tool_parser_type, tool_actors=self.tool_actors)
-
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
         self.prompt_queue = prompt_queue
@@ -609,6 +633,17 @@ class LLMRayActor:
         self.executor = futures.ThreadPoolExecutor(max_workers=max_workers)
         self._prefetch_future = self.executor.submit(_prefetch_worker, self)
         self._process_future = self.executor.submit(self.process_from_queue)
+
+    def _init_tool_parser(self, tool_parser_type: str) -> None:
+        if not self.tool_actors:
+            return
+        _tool_definitions = ray.get([actor.get_openai_tool_definitions.remote() for actor in self.tool_actors])
+        self.tool_parser = create_tool_parser(
+            parser_type=tool_parser_type,
+            tool_actors=self.tool_actors,
+            tokenizer=self.llm_engine.tokenizer,
+            tool_definitions=_tool_definitions,
+        )
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
@@ -699,8 +734,7 @@ class LLMRayActor:
         logger.info("vLLM OpenAI API server is ready")
 
     def get_model_dims(self):
-        """Get only the model dimensions without loading weights."""
-        return ModelDims.from_vllm_config(self.llm_engine.vllm_config)
+        return model_dims_from_vllm_config(self.llm_engine.vllm_config)
 
     def _should_stop(self) -> bool:
         if self.actor_manager is None:
@@ -834,6 +868,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     tool_output = ""
     tool_runtime = 0.0
     tool_called = False
+    tool_call_stats: list[ToolCallStats] = []
+    excess_tool_calls: dict[str, int] = {}
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
     original_prompt = actor.request_metadata[base_request_id]["prompt_token_ids"]
@@ -883,15 +919,32 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         # Execute tool calls
         outputs: list[str] = []
         for tool_call in tool_calls:
-            tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].execute.remote(**tool_call.args)
-
             tool_called = True
             num_calls += 1
+
+            # Check if we've exceeded max tool calls
+            if num_calls > actor.max_tool_calls:
+                exceeded_message = "Max tool calls exceeded"
+                tool_error += exceeded_message
+                outputs.append(exceeded_message)
+                excess_tool_calls[tool_call.name] = excess_tool_calls.get(tool_call.name, 0) + 1
+                continue
+
+            tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].execute.remote(**tool_call.args)
+
             timeout = timeout or tool_result.timeout
             tool_error += tool_result.error or ""
             tool_output += tool_result.output
             tool_runtime += tool_result.runtime
             outputs.append(tool_result.output)
+
+            tool_call_stats.append(
+                ToolCallStats(
+                    tool_name=tool_call.name,
+                    success=not tool_result.error and not tool_result.timeout,
+                    runtime=tool_result.runtime,
+                )
+            )
 
         tool_tokens, tool_logprobs, tool_masks, excess = process_tool_tokens(
             tool_outputs=outputs,
@@ -934,6 +987,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         complete_output.tool_output = tool_output
         complete_output.tool_runtime = tool_runtime
         complete_output.tool_called = tool_called
+        complete_output.tool_call_stats = tool_call_stats
+        complete_output.excess_tool_calls = excess_tool_calls
 
     actor.active_tasks.pop(sub_request_id, None)
 

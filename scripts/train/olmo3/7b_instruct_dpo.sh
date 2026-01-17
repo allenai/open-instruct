@@ -29,7 +29,7 @@ do
         --model_name_or_path $MODEL_NAME \
         --tokenizer_name $MODEL_NAME \
         --use_slow_tokenizer False \
-        --dataset_mixer_list allenai/olmo-3-pref-mix-deltas-complement2-DECON-tpc-kwd-ch-dedup5-lbc100-grafmix-unbal 125000 \
+        --mixer_list allenai/olmo-3-pref-mix-deltas-complement2-DECON-tpc-kwd-ch-dedup5-lbc100-grafmix-unbal 125000 \
             allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_reje-426124-rm-gemma3-kwd-ftd-ch-ftd-topic-ftd-dedup5-lbc100 125000 \
             allenai/related-query_qwen_pairs_filtered_lbc100 1250 \
             allenai/paraphrase_qwen_pairs_filtered_lbc100 938 \
@@ -47,10 +47,10 @@ do
         --lr_scheduler_type linear \
         --warmup_ratio 0.1 \
         --weight_decay 0.0 \
-        --num_train_epochs 1 \
+        --num_epochs 1 \
         --logging_steps 1 \
-        --dpo_loss_type dpo_norm \
-        --dpo_beta 5 \
+        --loss_type dpo_norm \
+        --beta 5 \
         --use_flash_attn \
         --gradient_checkpointing \
         --chat_template_name olmo123 \

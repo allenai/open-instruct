@@ -103,7 +103,7 @@ from open_instruct.model_utils import (
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.tools.parsers import create_tool_parser
 from open_instruct.tools.tools import TOOL_REGISTRY
-from open_instruct.tools.utils import ToolsConfig
+from open_instruct.tools.utils import ParsedToolConfig, ToolsConfig
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -452,17 +452,16 @@ class PolicyTrainerRayProcess(RayProcess):
         # note this returns None if sequence_parallel_size == 1
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=model_config.model_name_or_path,
-            core_attn_implementation="flash_attention_2",
+            core_attn_implementation=model_config.attn_implementation,
             sequence_parallel_size=args.sequence_parallel_size,
             micro_batch_size=args.per_device_train_batch_size,
             seq_length_is_variable=True,
         )
-
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            attn_implementation=model_config.attn_implementation,
             use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
@@ -1307,63 +1306,6 @@ def compute_token_weights(metrics_list: list[dict[str, float]]) -> list[float]:
     return [1.0 / len(metrics_list)] * len(metrics_list)
 
 
-def calculate_utilization_metrics(
-    model_dims: utils.ModelDims,
-    prompt_lengths: list[int],
-    response_lengths: list[int],
-    total_generation_time: float,
-    samples_per_prompt: int,
-    num_engines: int,
-    num_gpus_per_engine: int,
-    training_time: float,
-    num_training_gpus: int,
-) -> dict:
-    """Calculate MFU and MBU metrics for model inference and training.
-
-    Args:
-        model_dims: Model dimensions with device information
-        prompt_lengths: List of prompt lengths
-        response_lengths: List of response lengths
-        total_generation_time: Total time taken for generation (for actor metrics)
-        samples_per_prompt: Number of samples generated per prompt
-        num_engines: Number of vLLM engines for inference
-        num_gpus_per_engine: Number of GPUs assigned to each vLLM engine (tensor parallel size)
-        training_time: Time taken for training step (for learner metrics)
-        num_training_gpus: Number of GPUs used for training (for learner metrics)
-
-    Returns:
-        Dict with the following keys:
-            - actor_mfu: Model FLOPs utilization for inference (percentage)
-            - actor_mbu: Model bandwidth utilization for inference (percentage)
-            - learner_mfu: Model FLOPs utilization for training (percentage)
-    """
-    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-    )
-
-    actor_metrics = model_dims.calculate_actor_utilization(
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
-        total_generation_time=total_generation_time,
-        samples_per_prompt=samples_per_prompt,
-        num_engines=num_engines,
-        num_gpus_per_engine=num_gpus_per_engine,
-    )
-
-    learner_metrics = model_dims.calculate_learner_utilization(
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
-        training_time=training_time,
-        samples_per_prompt=samples_per_prompt,
-        num_training_gpus=num_training_gpus,
-    )
-
-    utilization_metrics = {f"actor_{k}": v for k, v in actor_metrics.items()}
-    utilization_metrics["learner_mfu"] = learner_metrics["mfu"]
-
-    return utilization_metrics
-
-
 def validate_configs(
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
@@ -1451,6 +1393,7 @@ def setup_datasets(
     tc: TokenizerConfig,
     tokenizer: PreTrainedTokenizer,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    tool_definitions: list[dict[str, Any]],
 ):
     """Set up training and evaluation datasets."""
     system_prompt_override = None
@@ -1461,7 +1404,7 @@ def setup_datasets(
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
     transform_fn_args = [
-        {"system_prompt_override": system_prompt_override},
+        {"system_prompt_override": system_prompt_override, "tool_definitions": tool_definitions},
         {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
@@ -1503,17 +1446,11 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def create_tools(
-    tools: list[str] | None, tool_call_names: list[str] | None = None, tool_configs: list[dict[str, Any]] | None = None
-) -> list[ray.actor.ActorHandle]:
+def create_tools(parsed_tools: list[ParsedToolConfig]) -> list[ray.actor.ActorHandle]:
     """Create tool actors based on tool configuration using the TOOL_REGISTRY.
 
     Args:
-        tools: List of tool names to enable (e.g., ["code", "search"]).
-        tool_call_names: Optional list of names to use in model output (e.g., ["python", "search"]).
-                        Must match length of tools. Defaults to tools if not specified.
-        tool_configs: List of JSON dictionaries for configuring each tool. Must match length of tools.
-                     Use '{}' for defaults. Example: ['{"api_endpoint": "http://..."}', '{}']
+        parsed_tools: List of ParsedTool instances containing name, call_name, and config.
 
     Returns:
         A list of Ray actor handles for the requested tools.
@@ -1523,21 +1460,21 @@ def create_tools(
     """
     tool_actors = []
 
-    for tool, call_name, config in zip(tools, tool_call_names, tool_configs):
-        if tool not in TOOL_REGISTRY:
+    for parsed_tool in parsed_tools:
+        if parsed_tool.name not in TOOL_REGISTRY:
             available_tools = ", ".join(TOOL_REGISTRY.keys())
-            raise ValueError(f"Unknown tool: {tool}. Available tools: {available_tools}")
+            raise ValueError(f"Unknown tool: {parsed_tool.name}. Available tools: {available_tools}")
 
-        tool_config_class = TOOL_REGISTRY[tool]
+        tool_config_class = TOOL_REGISTRY[parsed_tool.name]
         # Build config from dictionary
         try:
-            config = tool_config_class(**config)
+            config = tool_config_class(**parsed_tool.config)
         except Exception as e:
-            raise ValueError(f"Invalid config for tool '{tool}': {e}") from e
+            raise ValueError(f"Invalid config for tool '{parsed_tool.name}': {e}") from e
 
         # The config is a dataclass, and may have performed additional validation
         # or transformation of the args, which we then now pass to the tool.
-        _kwarg_dict = asdict(config) | {"call_name": call_name}
+        _kwarg_dict = asdict(config) | {"call_name": parsed_tool.call_name}
         tool_actors.append(ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**_kwarg_dict))
 
     return tool_actors
@@ -1600,6 +1537,7 @@ def create_model_and_optimizer(
         model_dims=model_dims,
         verbose=args.verbose,
         work_dir=args.output_dir,
+        tool_names=tools_config.tool_call_names if tools_config else [],
         initial_state=data_prep_actor_state,
     )
 
@@ -1853,7 +1791,7 @@ def one_training_step(
     response_lengths = array_metrics[0]["batch/response_lengths"]
     num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
 
-    utilization_metrics = calculate_utilization_metrics(
+    utilization_metrics = utils.calculate_utilization_metrics(
         model_dims=model_dims,
         prompt_lengths=prompt_lengths,
         response_lengths=response_lengths,
@@ -2301,6 +2239,32 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
+def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, list[str]]:
+    """Initialize tool actors and get tool definitions and stop sequences.
+
+    Args:
+        tools_config: Configuration for tools.
+        tokenizer: Tokenizer for the model.
+
+    Returns:
+        Tuple of (tool_actors, tool_definitions, stop_sequences).
+    """
+    tool_actors = create_tools(tools_config._parsed_tools)
+    tool_definitions = (
+        ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
+    )
+
+    # Create parser temporarily to get stop sequences for generation config
+    # The actual parser used during generation will be created inside vLLM actors
+    stop_sequences = []
+    if tool_actors:
+        stop_sequences = create_tool_parser(
+            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
+        ).stop_sequences
+
+    return tool_actors, tool_definitions, stop_sequences
+
+
 def main(
     args: Args,
     tc: TokenizerConfig,
@@ -2320,7 +2284,20 @@ def main(
 
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer, streaming_config)
+    # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
+    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
+
+    tool_actors, tool_definitions, tool_stop_sequences = initialize_tools(tools_config, tokenizer)
+    logger.info(
+        f"Initialized {len(tool_actors)} tool actors with definitions: {[d['function']['name'] for d in tool_definitions]}"
+    )
+    if tool_stop_sequences:
+        logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
+        streaming_config.stop_strings.extend(tool_stop_sequences)
+
+    train_dataset, eval_dataset = setup_datasets(
+        args, tc, tokenizer, streaming_config, tool_definitions if tools_config.pass_tools_to_chat_template else []
+    )
 
     if len(train_dataset) < (
         needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
@@ -2333,9 +2310,6 @@ def main(
         return
 
     pprint([args, model_config, streaming_config, vllm_config, tools_config])
-
-    # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
@@ -2359,22 +2333,6 @@ def main(
         additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
-
-    # Note that parser will be created inside vLLM actors to avoid serialization issues
-    tool_actors = create_tools(
-        tools=tools_config.tools,
-        tool_call_names=tools_config.tool_call_names,
-        tool_configs=tools_config._parsed_tool_configs,
-    )
-
-    # Create parser temporarily to get stop sequences for generation config
-    # The actual parser used during generation will be created inside vLLM actors
-    if tool_actors:
-        parser_stop_seqs = create_tool_parser(
-            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors
-        ).stop_sequences()
-        logger.info(f"Adding tool stop sequences to config: {parser_stop_seqs}")
-        streaming_config.stop_strings.extend(parser_stop_seqs)
 
     # AFTER potentially adding tool stop sequences, create generation configs
     generation_configs = create_generation_configs(args, streaming_config)

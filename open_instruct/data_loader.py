@@ -41,6 +41,7 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.model_utils import Batch
 from open_instruct.rl_utils import PackedSequences, pack_sequences
+from open_instruct.tools.utils import ToolStatistics
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
@@ -673,6 +674,7 @@ def accumulate_inference_batches(
     combined_tool_outputs = []
     combined_tool_runtimes = []
     combined_tool_calleds = []
+    combined_tool_call_stats = []
     combined_logprobs = []
 
     earliest_start_time = float("inf")
@@ -693,6 +695,7 @@ def accumulate_inference_batches(
         combined_tool_outputs.extend(result.request_info.tool_outputs)
         combined_tool_runtimes.extend(result.request_info.tool_runtimes)
         combined_tool_calleds.extend(result.request_info.tool_calleds)
+        combined_tool_call_stats.extend(result.request_info.tool_call_stats)
 
         combined_logprobs.extend(result.logprobs)
 
@@ -721,6 +724,7 @@ def accumulate_inference_batches(
         tool_outputs=combined_tool_outputs,
         tool_runtimes=combined_tool_runtimes,
         tool_calleds=combined_tool_calleds,
+        tool_call_stats=combined_tool_call_stats,
     )
 
     combined_result = data_types.GenerationResult(
@@ -879,6 +883,7 @@ class DataPreparationActor:
         model_dims: utils.ModelDims,
         verbose: bool,
         work_dir: str,
+        tool_names: list[str],
         initial_state: dict | None = None,
     ):
         self.inference_results_Q = inference_results_Q
@@ -895,6 +900,7 @@ class DataPreparationActor:
         self.model_dims = model_dims
         self.verbose = verbose
         self.dataset = dataset
+        self.tool_names = tool_names
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
@@ -1088,16 +1094,17 @@ class DataPreparationActor:
                     "val/advantages_min": advantages.min(),
                     "val/advantages_max": advantages.max(),
                     "val/advantages_hist": advantages,
-                    "val/num_calls_rate": np.array(result.request_info.num_calls).mean(),
-                    "val/timeouts_rate": np.array(result.request_info.timeouts).mean(),
-                    "val/tool_errors_rate": np.array(
-                        [len(item) > 0 for item in result.request_info.tool_errors]
-                    ).mean(),
-                    "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
-                    "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
                     **reward_metrics,
                     **batch_metrics_prefixed,
                 }
+
+                tool_stats = ToolStatistics(tool_names=self.tool_names)
+                excess_calls = result.request_info.excess_tool_calls or [
+                    {} for _ in range(len(result.request_info.tool_call_stats))
+                ]
+                for rollout_stats, excess in zip(result.request_info.tool_call_stats, excess_calls):
+                    tool_stats.add_rollout(rollout_stats, excess)
+                step_metrics.update(tool_stats.compute_metrics())
 
                 assert result.token_statistics is not None
                 total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
