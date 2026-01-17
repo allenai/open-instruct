@@ -1425,6 +1425,9 @@ def rlvr_tokenize_v3(
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
 ):
+    # DEBUG: Write at very start of function
+    with open("/tmp/v3_start_debug.txt", "a") as f:
+        f.write(f"v3 called! row.keys()={list(row.keys())}, pass_tools={pass_tools_to_chat_template}, tool_defs={len(tool_definitions) if tool_definitions else 0}\n")
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
