@@ -1415,6 +1415,7 @@ def rlvr_tokenize_v3(
     if pass_tools_to_chat_template and tool_definitions:
         # Filter tool definitions to only include active tools for this sample
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+        logger.info(f"[TOOLS DEBUG] row keys: {list(row.keys())}, TOOLS_COLUMN_KEY={TOOLS_COLUMN_KEY}, sample_active_tools={sample_active_tools}")
         if sample_active_tools is not None:
             # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
