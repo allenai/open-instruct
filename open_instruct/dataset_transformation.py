@@ -1415,10 +1415,14 @@ def rlvr_tokenize_v3(
     if pass_tools_to_chat_template and tool_definitions:
         # Filter tool definitions to only include active tools for this sample
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+        # DEBUG: Write to stderr which works in multiprocessing
+        import sys
+        print(f"[TOOLS FILTER] row_keys={list(row.keys())}, tools_col={TOOLS_COLUMN_KEY}, sample_active_tools={sample_active_tools}", file=sys.stderr)
         if sample_active_tools is not None:
             # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
             filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
+            print(f"[TOOLS FILTER] active_names={active_tool_names}, filtered={[t.get('function',{}).get('name') for t in filtered_tools]}", file=sys.stderr)
             if filtered_tools:
                 chat_template_kwargs["tools"] = filtered_tools
             # If sample_active_tools is empty list [], no tools are passed
