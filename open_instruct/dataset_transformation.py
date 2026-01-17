@@ -1425,11 +1425,6 @@ def rlvr_tokenize_v3(
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
 ):
-    # DEBUG: Store debug info in row (only way to get data out of workers)
-    row["_debug_v3_called"] = True
-    row["_debug_row_keys"] = str(list(row.keys()))
-    row["_debug_pass_tools"] = pass_tools_to_chat_template
-    row["_debug_tool_defs_count"] = len(tool_definitions) if tool_definitions else 0
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
@@ -1445,18 +1440,10 @@ def rlvr_tokenize_v3(
     if pass_tools_to_chat_template and tool_definitions:
         # Filter tool definitions to only include active tools for this sample
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
-        # DEBUG: Store filter state in row
-        row["_debug_sample_active_tools"] = str(sample_active_tools)
-        row["_debug_tools_column_key"] = TOOLS_COLUMN_KEY
         if sample_active_tools is not None:
             # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
             filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
-            print(
-                f"[V3 FILTER] filtered to {len(filtered_tools)} tools: {[t.get('function', {}).get('name') for t in filtered_tools]}",
-                file=sys.stderr,
-                flush=True,
-            )
             if filtered_tools:
                 chat_template_kwargs["tools"] = filtered_tools
             # If sample_active_tools is empty list [], no tools are passed
@@ -1510,13 +1497,6 @@ def rlvr_max_length_filter_v2(
     return len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
 
 
-def rlvr_tokenize_v3_wrapper(row, **kwargs):
-    """Wrapper to ensure fresh function execution"""
-    row["_debug_wrapper_called"] = True
-    result = rlvr_tokenize_v3(row, **kwargs)
-    return result
-
-
 TRANSFORM_FNS = {
     "sft_tokenize_v1": (sft_tokenize_v1, "map"),
     "sft_tokenize_mask_out_prompt_v1": (sft_tokenize_mask_out_prompt_v1, "map"),
@@ -1527,7 +1507,7 @@ TRANSFORM_FNS = {
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
-    "rlvr_tokenize_v1": (rlvr_tokenize_v3_wrapper, "map"),
+    "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
     "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
 }
 
@@ -1688,13 +1668,6 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
             target_columns = target_columns + [TOOLS_COLUMN_KEY]
 
         if fn_type == "map":
-            # Debug: show what's being passed to the transform function
-            if fn_name.startswith("rlvr_tokenize"):
-                print(f"🔧 [DEBUG] Calling {fn_name} with fn_kwargs keys: {list(fn_kwargs.keys())}")
-                print(f"🔧 [DEBUG] Actual function being called: {fn.__name__}")
-                print(f"🔧 [DEBUG] pass_tools_to_chat_template={fn_kwargs.get('pass_tools_to_chat_template')}")
-                print(f"🔧 [DEBUG] tool_definitions count={len(fn_kwargs.get('tool_definitions', []))}")
-                print(f"🔧 [DEBUG] dataset columns: {dataset.column_names}")
             dataset = dataset.map(
                 fn,
                 fn_kwargs=fn_kwargs,
@@ -1713,25 +1686,6 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     if len(dataset) == 0:
         raise ValueError("No examples left after transformation")
-
-    # DEBUG: Show first sample's prompt to verify tool filtering
-    if INPUT_IDS_PROMPT_KEY in dataset.column_names and len(dataset) > 0:
-        first_sample = dataset[0]
-        first_prompt_ids = first_sample[INPUT_IDS_PROMPT_KEY]
-        decoded_prompt = tokenizer.decode(first_prompt_ids, skip_special_tokens=False)
-        # Check which tool names appear in the prompt
-        tool_mentions = []
-        for tool_name in ["code", "search", "browse"]:
-            if tool_name in decoded_prompt.lower():
-                tool_mentions.append(tool_name)
-        print(f"📋 [DEBUG] First sample tools column: {first_sample.get(TOOLS_COLUMN_KEY, 'N/A')}")
-        print(f"📋 [DEBUG] Tools found in decoded prompt: {tool_mentions}")
-        print(f"📋 [DEBUG] First 500 chars of prompt: {decoded_prompt[:500]}")
-        # Show debug fields from v3
-        print(f"📋 [DEBUG] _debug_wrapper_called: {first_sample.get('_debug_wrapper_called', 'NOT SET')}")
-        print(f"📋 [DEBUG] _debug_v3_called: {first_sample.get('_debug_v3_called', 'NOT SET')}")
-        print(f"📋 [DEBUG] _debug_row_keys: {first_sample.get('_debug_row_keys', 'NOT SET')}")
-        print(f"📋 [DEBUG] _debug_sample_active_tools: {first_sample.get('_debug_sample_active_tools', 'NOT SET')}")
 
     return dataset
 
@@ -1867,9 +1821,6 @@ class LocalDatasetTransformationCache:
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
             dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
-            print(f"📋 Dataset columns: {dataset.column_names}")
-            if TOOLS_COLUMN_KEY in dataset.column_names:
-                print(f"🔧 Sample tools values: {dataset[TOOLS_COLUMN_KEY][:3]}")
             if "index" not in dataset.column_names:
                 dataset = dataset.add_column("index", range(len(dataset)))
             # Load statistics from cache if available
