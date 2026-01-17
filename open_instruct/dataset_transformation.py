@@ -1333,12 +1333,37 @@ def rlvr_tokenize_v1(
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
+    system_prompt_override: Optional[str] = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
+    pass_tools_to_chat_template: bool = True,
 ):
     if len(row[sft_messages_key]) == 1:
         prompt = row[sft_messages_key]
     else:
         prompt = row[sft_messages_key][:-1]
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+
+    # Override the system prompt if provided
+    if system_prompt_override:
+        if prompt[0]["role"] == "system":
+            prompt = prompt[1:]
+        prompt = [{"role": "system", "content": system_prompt_override}] + prompt
+
+    chat_template_kwargs = {"add_generation_prompt": True}
+    if pass_tools_to_chat_template and tool_definitions:
+        # Filter tool definitions to only include active tools for this sample
+        sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+        if sample_active_tools is not None:
+            # Only include tools that are in the sample's active tools list
+            active_tool_names = set(sample_active_tools)
+            filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
+            if filtered_tools:
+                chat_template_kwargs["tools"] = filtered_tools
+            # If sample_active_tools is empty list [], no tools are passed
+        else:
+            # No tools column or None value means all tools are active
+            chat_template_kwargs["tools"] = tool_definitions
+
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
@@ -1415,11 +1440,14 @@ def rlvr_tokenize_v3(
     if pass_tools_to_chat_template and tool_definitions:
         # Filter tool definitions to only include active tools for this sample
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+        # DEBUG: Show what we're working with
+        tool_def_names = [t.get("function", {}).get("name") for t in tool_definitions]
+        print(f"[V3 FILTER] sample_active_tools={sample_active_tools}, tool_def_names={tool_def_names}", flush=True)
         if sample_active_tools is not None:
             # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
             filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
-            print(f"[TOOLS FILTER] active_names={active_tool_names}, filtered={[t.get('function',{}).get('name') for t in filtered_tools]}", file=sys.stderr)
+            print(f"[V3 FILTER] filtered to {len(filtered_tools)} tools: {[t.get('function',{}).get('name') for t in filtered_tools]}", flush=True)
             if filtered_tools:
                 chat_template_kwargs["tools"] = filtered_tools
             # If sample_active_tools is empty list [], no tools are passed
@@ -1645,7 +1673,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
         if fn_type == "map":
             # Debug: show what's being passed to the transform function
-            if fn_name == "rlvr_tokenize_v1":
+            if fn_name.startswith("rlvr_tokenize"):
                 print(f"🔧 [DEBUG] Calling {fn_name} with fn_kwargs keys: {list(fn_kwargs.keys())}")
                 print(f"🔧 [DEBUG] pass_tools_to_chat_template={fn_kwargs.get('pass_tools_to_chat_template')}")
                 print(f"🔧 [DEBUG] tool_definitions count={len(fn_kwargs.get('tool_definitions', []))}")
