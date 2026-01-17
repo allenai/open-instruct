@@ -922,6 +922,10 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
 
 TOOLS_COLUMN_KEY = "tools"
 
+# Cache version: increment this when transformation logic changes significantly
+# to invalidate old caches. v2: Added per-sample tool filtering in rlvr_tokenize_v3.
+DATASET_CACHE_VERSION = "v2"
+
 
 def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
     """Validate that configured tools match tools in dataset's 'tools' column.
@@ -1018,7 +1022,7 @@ TOKENIZED_PREFERENCE_DATASET_KEYS = [
 
 # TODO: allow passing in sft_message key, so we can train on "chosen" of pref dataset.
 def sft_tokenize_v1(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
+    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY, **kwargs
 ):
     if len(row[sft_messages_key]) == 1:
         prompt = row[sft_messages_key]
@@ -1035,7 +1039,7 @@ def sft_tokenize_v1(
 
 
 def sft_tokenize_mask_out_prompt_v1(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
+    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY, **kwargs
 ):
     """mask out the prompt tokens by manipulating labels"""
     if len(row[sft_messages_key]) == 1:
@@ -1058,6 +1062,7 @@ def sft_filter_v1(
     max_prompt_token_length: Optional[int] = None,
     max_token_length: Optional[int] = None,
     need_contain_labels: bool = True,
+    **kwargs,
 ):
     max_prompt_token_length_ok = True
     if max_prompt_token_length is not None:
@@ -1071,7 +1076,9 @@ def sft_filter_v1(
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
-def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+def sft_tulu_tokenize_and_truncate_v1(
+    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int, **kwargs
+):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
     if len(messages) == 0:
@@ -1207,11 +1214,11 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreT
     return row
 
 
-def sft_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
+def sft_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, **kwargs):
     return any(x != -100 for x in row[LABELS_KEY])
 
 
-def preference_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
+def preference_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, **kwargs):
     # Extract prompt (all messages except the last one)
     prompt = row["chosen"][:-1]
 
@@ -1235,6 +1242,7 @@ def preference_filter_v1(
     tokenizer: PreTrainedTokenizer,
     max_prompt_token_length: Optional[int] = None,
     max_token_length: Optional[int] = None,
+    **kwargs,
 ):
     # Check prompt length if specified
     if max_prompt_token_length is not None:
@@ -1257,6 +1265,7 @@ def preference_tulu_tokenize_and_truncate_v1(
     max_seq_length: int,
     chosen_key: str = DEFAULT_CHOSEN_KEY,
     rejected_key: str = DEFAULT_REJECTED_KEY,
+    **kwargs,
 ):
     """
     Here we assume each example has a rejected and chosen field, both of which are a list of messages.
@@ -1293,6 +1302,7 @@ def preference_tulu_tokenize_and_truncate_v1_2(
     max_seq_length: int,
     chosen_key: str = DEFAULT_CHOSEN_KEY,
     rejected_key: str = DEFAULT_REJECTED_KEY,
+    **kwargs,
 ):
     """
     Here we assume each example has a rejected and chosen field, both of which are a list of messages.
@@ -1323,7 +1333,7 @@ def preference_tulu_tokenize_and_truncate_v1_2(
     }
 
 
-def preference_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
+def preference_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, **kwargs):
     return any(x != -100 for x in row[CHOSEN_LABELS_KEY]) and any(x != -100 for x in row[REJECTED_LABELS_KEY])
 
 
@@ -1336,6 +1346,7 @@ def rlvr_tokenize_v1(
     system_prompt_override: Optional[str] = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
+    **kwargs,
 ):
     if len(row[sft_messages_key]) == 1:
         prompt = row[sft_messages_key]
@@ -1381,6 +1392,7 @@ def rlvr_tokenize_v2(
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
+    **kwargs,
 ):
     if len(row[sft_messages_key]) == 1:
         prompt = row[sft_messages_key]
@@ -1424,6 +1436,7 @@ def rlvr_tokenize_v3(
     system_prompt_override: Optional[str] = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
+    **kwargs,  # Accepts _cache_version for HF cache invalidation
 ):
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
@@ -1476,6 +1489,7 @@ def rlvr_filter_v1(
     need_contain_labels: bool = True,
     max_prompt_token_length: Optional[int] = None,
     max_token_length: Optional[int] = None,
+    **kwargs,
 ):
     max_prompt_token_length_ok = True
     if max_prompt_token_length is not None:
@@ -1490,7 +1504,10 @@ def rlvr_filter_v1(
 
 
 def rlvr_max_length_filter_v2(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: Optional[int] = None
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    max_prompt_token_length: Optional[int] = None,
+    **kwargs,  # Accepts _cache_version for HF cache invalidation
 ):
     if max_prompt_token_length is None:
         return True
@@ -1656,7 +1673,9 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
-        fn_kwargs = {"tokenizer": tokenizer}
+        # Include DATASET_CACHE_VERSION to invalidate HuggingFace's internal .map() cache
+        # when transformation logic changes significantly
+        fn_kwargs = {"tokenizer": tokenizer, "_cache_version": DATASET_CACHE_VERSION}
         fn_kwargs.update(fn_args)
 
         # perform the transformation
@@ -1690,10 +1709,14 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
 
 def compute_config_hash(dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
-    """Compute a deterministic hash of both configs for caching."""
+    """Compute a deterministic hash of both configs for caching.
+
+    The hash includes DATASET_CACHE_VERSION to invalidate old caches when
+    transformation logic changes significantly.
+    """
     dc_dicts = [{k: v for k, v in asdict(dc).items() if v is not None} for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
-    combined_dict = {"dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
+    combined_dict = {"cache_version": DATASET_CACHE_VERSION, "dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
     config_str = json.dumps(combined_dict, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:10]
 
