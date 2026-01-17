@@ -1679,6 +1679,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
             # Debug: show what's being passed to the transform function
             if fn_name.startswith("rlvr_tokenize"):
                 print(f"🔧 [DEBUG] Calling {fn_name} with fn_kwargs keys: {list(fn_kwargs.keys())}")
+                print(f"🔧 [DEBUG] Actual function being called: {fn.__name__}")
                 print(f"🔧 [DEBUG] pass_tools_to_chat_template={fn_kwargs.get('pass_tools_to_chat_template')}")
                 print(f"🔧 [DEBUG] tool_definitions count={len(fn_kwargs.get('tool_definitions', []))}")
                 print(f"🔧 [DEBUG] dataset columns: {dataset.column_names}")
