@@ -1415,16 +1415,10 @@ def rlvr_tokenize_v3(
     if pass_tools_to_chat_template and tool_definitions:
         # Filter tool definitions to only include active tools for this sample
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
-        logger.info(f"[TOOLS DEBUG] row keys: {list(row.keys())}, TOOLS_COLUMN_KEY={TOOLS_COLUMN_KEY}, sample_active_tools={sample_active_tools}")
         if sample_active_tools is not None:
             # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
             filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
-            logger.debug(
-                f"Filtering tools: sample_active_tools={sample_active_tools}, "
-                f"definition_names={[t.get('function', {}).get('name') for t in tool_definitions]}, "
-                f"filtered={[t.get('function', {}).get('name') for t in filtered_tools]}"
-            )
             if filtered_tools:
                 chat_template_kwargs["tools"] = filtered_tools
             # If sample_active_tools is empty list [], no tools are passed
@@ -1801,6 +1795,9 @@ class LocalDatasetTransformationCache:
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
             dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
+            print(f"📋 Dataset columns: {dataset.column_names}")
+            if TOOLS_COLUMN_KEY in dataset.column_names:
+                print(f"🔧 Sample tools values: {dataset[TOOLS_COLUMN_KEY][:3]}")
             if "index" not in dataset.column_names:
                 dataset = dataset.add_column("index", range(len(dataset)))
             # Load statistics from cache if available
