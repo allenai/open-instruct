@@ -1440,10 +1440,9 @@ def rlvr_tokenize_v3(
     if pass_tools_to_chat_template and tool_definitions:
         # Filter tool definitions to only include active tools for this sample
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
-        # DEBUG: Raise exception to see row state (will show in main process)
-        if not hasattr(rlvr_tokenize_v3, '_debug_printed'):
-            rlvr_tokenize_v3._debug_printed = True
-            raise ValueError(f"DEBUG: row.keys()={list(row.keys())}, TOOLS_COLUMN_KEY={TOOLS_COLUMN_KEY}, sample_active_tools={sample_active_tools}, tool_def_names={[t.get('function', {}).get('name') for t in tool_definitions]}")
+        # DEBUG: Write to file to see row state
+        with open("/tmp/v3_debug.txt", "a") as f:
+            f.write(f"row.keys()={list(row.keys())}, TOOLS_COLUMN_KEY={TOOLS_COLUMN_KEY}, sample_active_tools={sample_active_tools}\n")
         if sample_active_tools is not None:
             # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
