@@ -1,5 +1,4 @@
 # !/usr/bin/env python
-# coding=utf-8
 # Copyright 2024 AllenAI. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,31 +17,19 @@ DPO tuning script. Adapted from our finetuning script.
 """
 
 # isort: off
+import contextlib
 import os
 
-# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
-# https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
-try:
+with contextlib.suppress(Exception):
     import deepspeed
 
-    # @vwxyzjn: when importing on CPU-only machines, we get the following error:
-    # RuntimeError: 0 active drivers ([]). There should only be one.
-    # so we need to catch the exception and do nothing
-    # https://github.com/deepspeedai/DeepSpeed/issues/7028
-except Exception:
-    pass
 # isort: on
-import json
 import math
-import os
 import random
 import shutil
 import time
-from dataclasses import dataclass, field
 from datetime import timedelta
-from functools import partial
-from typing import Callable, List, Literal, Optional, Union
 
 import datasets
 import torch
@@ -51,394 +38,102 @@ import torch.utils.data
 import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
-from accelerate.logging import get_logger
-from accelerate.utils import InitProcessGroupKwargs, set_seed
+from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
-from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils
+from open_instruct import dpo_utils, logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
-    TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.dpo_utils import (
-    DataCollatorForSeq2SeqDPO,
-    concatenated_forward,
-    dpo_loss,
-    separate_forward,
-    simpo_loss,
-    wpo_loss,
-)
-from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
     ArgumentParserPlus,
+    ModelDims,
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
+    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
 )
 
-logger = get_logger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
-@dataclass
-class FlatArguments:
-    """
-    Full arguments class for all fine-tuning jobs.
-    """
-
-    # Sometimes users will pass in a `str` repr of a dict in the CLI
-    # We need to track what fields those can be. Each time a new arg
-    # has a dict type, it must be added to this list.
-    # Important: These should be typed with Optional[Union[dict,str,...]]
-    _VALID_DICT_FIELDS = ["additional_model_arguments"]
-
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
-    """The name of this experiment"""
-    run_name: Optional[str] = None
-    """A unique name of this run"""
-    add_seed_and_date_to_exp_name: bool = True
-    """Append the seed and date to exp_name"""
-    do_not_randomize_output_dir: bool = False
-    """By default the output directory will be randomized"""
-    model_name_or_path: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": (
-                "The model checkpoint for weights initialization. Don't set if you want to train a model from scratch."
-            )
+def build_deepspeed_config(
+    zero_stage: int, offload_optimizer: bool = False, offload_param: bool = False, zero_hpz_partition_size: int = 8
+) -> dict:
+    config = {
+        "bf16": {"enabled": "auto"},
+        "zero_optimization": {
+            "stage": zero_stage,
+            "overlap_comm": True,
+            "contiguous_gradients": True,
+            "reduce_bucket_size": "auto",
         },
-    )
-    config_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
-    dpo_use_paged_optimizer: bool = field(
-        default=False,
-        metadata={
-            "help": "Use paged optimizer from bitsandbytes."
-            " Not compatible with deepspeed (use deepspeed config instead)."
-        },
-    )
-    dpo_beta: float = field(default=0.1, metadata={"help": "Beta parameter for DPO loss. Default is 0.1."})
-    dpo_loss_type: str = field(
-        default="dpo", metadata={"help": "Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."}
-    )
-    dpo_gamma_beta_ratio: float = field(
-        default=0.3, metadata={"help": "Gamma to beta ratio for SimPO loss. Default is 0.3. Not used for DPO loss."}
-    )
-    dpo_label_smoothing: float = field(
-        default=0.0, metadata={"help": "Label smoothing for DPO/SimPO loss. Default is 0 (no smoothing)."}
-    )
-    use_flash_attn: bool = field(
-        default=True, metadata={"help": "Whether to use flash attention in the model training"}
-    )
-    model_revision: Optional[str] = field(
-        default=None,
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    additional_model_arguments: Optional[Union[dict, str]] = field(
-        default_factory=dict, metadata={"help": "A dictionary of additional model args used to construct the model."}
-    )
-    sync_each_batch: bool = False
-    """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
-    low_cpu_mem_usage: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "It is an option to create the model as an empty shell, "
-                "then only materialize its parameters when the pretrained weights are loaded. "
-                "set True will benefit LLM loading time and RAM consumption."
-            )
-        },
-    )
-    dataset_name: Optional[str] = field(
-        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
-    )
-    dataset_mixer: Optional[dict] = field(
-        default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
-    )
-    dataset_mixer_list: List[str] = field(
-        default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
-    )
-    """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
-    """The dataset splits to use for training"""
-    dataset_transform_fn: list[str] = field(
-        default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
-    )
-    """The list of transform functions to apply to the dataset."""
-    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
-    """The columns to use for the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "local"
-    """The mode to use for caching the dataset."""
-    dataset_local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
-    dataset_config_hash: Optional[str] = None
-    """The hash of the dataset configuration."""
-    dataset_skip_cache: bool = False
-    """Whether to skip the cache."""
-    dataset_mix_dir: Optional[str] = field(
-        default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
-    )
-    dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
-    )
-    max_train_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
-            )
-        },
-    )
-    preprocessing_num_workers: Optional[int] = field(
-        default=None, metadata={"help": "The number of processes to use for the preprocessing."}
-    )
-    max_seq_length: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "The maximum total input sequence length after tokenization. "
-                "Sequences longer than this will be truncated,"
-            )
-        },
-    )
-    overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
-    )
-    clip_grad_norm: float = field(
-        default=-1,
-        metadata={"help": "Clip gradient norm. Not compatible with deepspeed (use deepspeed config instead)."},
-    )
-    gradient_accumulation_steps: int = field(
-        default=1, metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."}
-    )
-    learning_rate: float = field(default=2e-5, metadata={"help": "The initial learning rate for AdamW optimizer."})
-    logging_steps: Optional[int] = field(
-        default=None, metadata={"help": "Log the training loss and learning rate every logging_steps steps."}
-    )
-    lora_rank: int = field(default=64, metadata={"help": "The rank of lora."})
-    lora_alpha: float = field(default=16, metadata={"help": "The alpha parameter of lora."})
-    lora_dropout: float = field(default=0.1, metadata={"help": "The dropout rate of lora modules."})
-    lr_scheduler_type: str = field(
-        default="linear",
-        metadata={
-            "help": "The scheduler type to use for learning rate adjustment.",
-            "choices": ["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
-        },
-    )
-    num_train_epochs: int = field(default=2, metadata={"help": "Total number of training epochs to perform."})
-    output_dir: str = field(
-        default="output/",
-        metadata={"help": "The output directory where the model predictions and checkpoints will be written."},
-    )
-    per_device_train_batch_size: int = field(
-        default=8, metadata={"help": "Batch size per GPU/TPU core/CPU for training."}
-    )
-    use_lora: bool = field(
-        default=False,
-        metadata={"help": "If True, will use LORA (low-rank parameter-efficient training) to train the model."},
-    )
-    use_qlora: bool = field(
-        default=False,
-        metadata={"help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."},
-    )
-    use_8bit_optimizer: bool = field(
-        default=False, metadata={"help": "Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed."}
-    )
-    warmup_ratio: float = field(
-        default=0.03, metadata={"help": "Linear warmup over warmup_ratio fraction of total steps."}
-    )
-    weight_decay: float = field(default=0.0, metadata={"help": "Weight decay for AdamW if we apply some."})
-    timeout: int = field(
-        default=1800,
-        metadata={
-            "help": "Timeout for the training process in seconds."
-            "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
-        },
-    )
-    reduce_loss: str = field(
-        default="mean",
-        metadata={
-            "help": "How to reduce loss over tokens. Options are 'mean' or 'sum'."
-            "Using 'sum' can improve chat model performance."
-        },
-    )
-    resume_from_checkpoint: Optional[str] = field(
-        default=None, metadata={"help": "If the training should continue from a checkpoint folder."}
-    )
-    report_to: Union[str, List[str]] = field(
-        default="all",
-        metadata={
-            "help": "The integration(s) to report results and logs to. "
-            "Can be a single string or a list of strings. "
-            "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'. "
-            "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
-        },
-    )
-    save_to_hub: Optional[str] = field(
-        default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
-    )
-    gradient_checkpointing: bool = field(
-        default=False, metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."}
-    )
-    use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
-    max_train_steps: Optional[int] = field(
-        default=None,
-        metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
-    )
-    seed: int = field(default=42, metadata={"help": "Random seed for initialization and dataset shuffling."})
-    checkpointing_steps: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
-        },
-    )
-    keep_last_n_checkpoints: int = field(
-        default=3, metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."}
-    )
-    fused_optimizer: bool = field(default=True, metadata={"help": "Whether to use fused AdamW or not."})
-    load_balancing_loss: bool = field(
-        default=False, metadata={"help": "Whether to include a load balancing loss (for OLMoE) or not."}
-    )
-    load_balancing_weight: float = field(
-        default=0.001, metadata={"help": "Weight for load balancing loss if applicable."}
-    )
-    concatenated_forward: bool = True
-    """Whether to concatenate chosen and rejected for DPO training; True is good but you can set to False for saving memory."""
+        "gradient_accumulation_steps": "auto",
+        "gradient_clipping": "auto",
+        "steps_per_print": 1e5,
+        "train_batch_size": "auto",
+        "train_micro_batch_size_per_gpu": "auto",
+        "wall_clock_breakdown": False,
+    }
 
-    # Experiment tracking
-    with_tracking: bool = False
-    """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open_instruct_internal"
-    """The wandb's project name"""
-    wandb_entity: Optional[str] = None
-    """The entity (team) of wandb's project"""
-    push_to_hub: bool = True
-    """Whether to upload the saved model to huggingface"""
-    hf_entity: Optional[str] = None
-    """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: Optional[str] = None
-    """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: Optional[str] = None
-    """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: Optional[str] = None
-    """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    try_launch_beaker_eval_jobs: bool = True
-    """Whether to launch beaker evaluation jobs after training"""
-    hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
-    """What dataset to upload the metadata to. If unset, don't upload metadata"""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
+    if zero_stage == 3:
+        config["zero_optimization"].update(
+            {
+                "sub_group_size": 1e9,
+                "stage3_prefetch_bucket_size": "auto",
+                "stage3_param_persistence_threshold": "auto",
+                "stage3_max_live_parameters": 1e9,
+                "stage3_max_reuse_distance": 1e9,
+                "stage3_gather_16bit_weights_on_model_save": True,
+                "zero_hpz_partition_size": zero_hpz_partition_size,
+            }
+        )
 
-    packing: bool = field(
-        default=False,
-        metadata={"help": "Whether to use packing/padding-free collation via DataCollatorWithFlatteningDPO"},
-    )
+    if offload_optimizer:
+        config["zero_optimization"]["offload_optimizer"] = {"device": "cpu", "pin_memory": True}
 
-    # Ai2 specific settings
-    try_auto_save_to_beaker: bool = True
-    """Whether to try to save the model to Beaker dataset `/output` after training"""
-    gs_bucket_path: Optional[str] = None
-    """The path to the gs bucket to save the model to"""
-    oe_eval_tasks: Optional[List[str]] = None
-    """The beaker evaluation tasks to launch"""
-    oe_eval_max_length: int = 4096
-    """the max generation length for evaluation for oe-eval"""
+    if offload_param:
+        config["zero_optimization"]["offload_param"] = {"device": "cpu", "pin_memory": True}
 
-    def __post_init__(self):
-        if self.reduce_loss not in ["mean", "sum"]:
-            raise ValueError("reduce_loss must be either 'mean' or 'sum'")
-        if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
-            raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
-        if (
-            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
-            or (self.dataset_name is not None)
-            or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
-        ):
-            raise ValueError("Cannot provide two dataset selection mechanisms.")
-        if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
-            raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
-
-        # Parse in args that could be `dict` sent in from the CLI as a string
-        for dict_feld in self._VALID_DICT_FIELDS:
-            passed_value = getattr(self, dict_feld)
-            # We only want to do this if the str starts with a bracket to indicate a `dict`
-            # else its likely a filename if supported
-            if isinstance(passed_value, str) and passed_value.startswith("{"):
-                loaded_dict = json.loads(passed_value)
-                # Convert str values to types if applicable
-                loaded_dict = _convert_str_dict(loaded_dict)
-                setattr(self, dict_feld, loaded_dict)
+    return config
 
 
-def get_cache_ref_logprobs(
-    model: torch.nn.Module,
-    active_dataloader: torch.utils.data.DataLoader,
-    accelerator: Accelerator,
-    average_log_prob: bool,
-    last_checkpoint_path: Optional[str],
-    resume_step: int,
-    epoch_range: range,
-    forward_fn: Callable,
-):
-    epoch_cached_reference_chosen_logps = []
-    epoch_cached_reference_rejected_logps = []
-    for epoch in epoch_range:
-        active_dataloader.set_epoch(epoch)
-        if last_checkpoint_path and resume_step is not None:
-            # We skip the first `n` batches in the dataloader when resuming from a checkpoint
-            active_dataloader = accelerator.skip_first_batches(active_dataloader, resume_step)
-        cached_reference_chosen_logps = []
-        cached_reference_rejected_logps = []
-        with torch.no_grad():
-            for batch in tqdm(
-                active_dataloader,
-                disable=not accelerator.is_local_main_process,
-                desc=f"Generating reference cache (epoch {epoch})",
-            ):
-                if args.use_lora:
-                    with accelerator.unwrap_model(model).disable_adapter():
-                        reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
-                            model, batch, average_log_prob=average_log_prob
-                        )
-                else:
-                    reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
-                        model, batch, average_log_prob=average_log_prob
-                    )
-                cached_reference_chosen_logps.append(reference_chosen_logps.cpu())
-                cached_reference_rejected_logps.append(reference_rejected_logps.cpu())
-        epoch_cached_reference_chosen_logps.append(cached_reference_chosen_logps)
-        epoch_cached_reference_rejected_logps.append(cached_reference_rejected_logps)
-    return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
-
-
-def main(args: FlatArguments, tc: TokenizerConfig):
+def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
     accelerator_log_kwargs = {}
     if args.with_tracking:
-        accelerator_log_kwargs["log_with"] = args.report_to
+        accelerator_log_kwargs["log_with"] = "wandb"
         accelerator_log_kwargs["project_dir"] = args.output_dir
     # if you get timeouts (e.g. due to long tokenization) increase this.
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
     dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
+    deepspeed_plugin = None
+    if args.zero_stage is not None:
+        deepspeed_config = build_deepspeed_config(
+            zero_stage=args.zero_stage,
+            offload_optimizer=args.offload_optimizer,
+            offload_param=args.offload_param,
+            zero_hpz_partition_size=args.zero_hpz_partition_size,
+        )
+        deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=deepspeed_config)
+
     accelerator = Accelerator(
         dataloader_config=dataloader_config,
         **accelerator_log_kwargs,
@@ -446,6 +141,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         gradient_accumulation_plugin=GradientAccumulationPlugin(
             num_steps=args.gradient_accumulation_steps, sync_each_batch=args.sync_each_batch
         ),
+        deepspeed_plugin=deepspeed_plugin,
     )
 
     # ------------------------------------------------------------
@@ -472,9 +168,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if not args.do_not_randomize_output_dir:
         args.output_dir = os.path.join(args.output_dir, args.exp_name)
     logger.info("using the output directory: %s", args.output_dir)
-    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    args.local_cache_dir = os.path.abspath(args.local_cache_dir)
     if is_beaker_job():
-        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     if args.push_to_hub and accelerator.is_main_process:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -504,7 +200,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
         accelerator.init_trackers(
-            args.wandb_project_name,
+            args.wandb_project,
             experiment_config,
             init_kwargs={
                 "wandb": {
@@ -514,7 +210,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 }
             },
         )
+
+    if args.with_tracking:
         wandb_tracker = accelerator.get_tracker("wandb")
+        if accelerator.is_main_process:
+            maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
+    else:
+        wandb_tracker = None
 
     if accelerator.is_main_process:
         pprint([args, tc])
@@ -537,28 +239,27 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.seed is not None:
         set_seed(args.seed)
 
-    if accelerator.is_main_process:
-        if args.output_dir is not None:
-            os.makedirs(args.output_dir, exist_ok=True)
+    if accelerator.is_main_process and args.output_dir is not None:
+        os.makedirs(args.output_dir, exist_ok=True)
 
     accelerator.wait_for_everyone()
 
     if args.dataset_mixer is not None:
-        args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
+        args.mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
         transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
         train_dataset = get_cached_dataset_tulu(
-            dataset_mixer_list=args.dataset_mixer_list,
-            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            dataset_mixer_list=args.mixer_list,
+            dataset_mixer_list_splits=args.mixer_list_splits,
             tc=tc,
-            dataset_transform_fn=args.dataset_transform_fn,
+            dataset_transform_fn=args.transform_fn,
             transform_fn_args=transform_fn_args,
-            target_columns=args.dataset_target_columns,
-            dataset_cache_mode=args.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_hash,
+            target_columns=args.target_columns,
+            dataset_cache_mode=args.cache_mode,
+            dataset_config_hash=args.config_hash,
             hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.dataset_local_cache_dir,
-            dataset_skip_cache=args.dataset_skip_cache,
+            dataset_local_cache_dir=args.local_cache_dir,
+            dataset_skip_cache=args.skip_cache,
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
@@ -607,7 +308,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     trust_remote_code=tc.trust_remote_code,
                     quantization_config=bnb_config,
                     device_map=device_map,
-                    torch_dtype=torch.bfloat16,
+                    dtype=torch.bfloat16,
                     attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 )
             elif args.use_liger_kernel:
@@ -635,7 +336,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     config=config,
                     trust_remote_code=tc.trust_remote_code,
                     low_cpu_mem_usage=args.low_cpu_mem_usage,
-                    torch_dtype=torch.bfloat16,
+                    dtype=torch.bfloat16,
                     attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 )
         else:
@@ -644,7 +345,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         return model
 
     model = load_model()
-    print("=============model loaded")
+    logger.info("=============model loaded")
     print_gpu_stats(init_gpu_memory)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
@@ -675,7 +376,19 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     elif args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
-    # debugging tool for fewer samples
+    model_dims = ModelDims(
+        num_layers=config.num_hidden_layers,
+        hidden_size=config.hidden_size,
+        intermediate_size=config.intermediate_size,
+        vocab_size=config.vocab_size,
+        num_attn_heads=config.num_attention_heads,
+        head_dim=config.hidden_size // config.num_attention_heads,
+        num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
+    )
+
+    # Capture full dataset size by getting it from the dataset. Sharding happens inside the dataloaders, not the dataset, so we're fine to do this.
+    # This is used to allocate tensors for the logprobs cache.
+    original_dataset_size = len(train_dataset)
     if args.max_train_samples is not None:
         max_train_samples = min(len(train_dataset), args.max_train_samples)
         logger.info(f"Limiting training samples to {max_train_samples} from {len(train_dataset)}.")
@@ -690,7 +403,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         accelerator.print("Using packing/padding-free collation")
         collate_fn = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
-        collate_fn = DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
+        collate_fn = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
 
     train_dataloader = DataLoader(
         train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
@@ -717,13 +430,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
     else:
         optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
-    print("=============optimizer loaded")
+    logger.info("=============optimizer loaded")
     print_gpu_stats(init_gpu_memory)
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if args.max_train_steps is None:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+        args.max_train_steps = args.num_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
 
     # Create the learning rate scheduler.
@@ -751,15 +464,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
-    print("=============accelerate prepared")
+    logger.info("=============accelerate prepared")
     print_gpu_stats(init_gpu_memory)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+        args.max_train_steps = args.num_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
-    args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+    args.num_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
@@ -771,7 +484,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
-    logger.info(f"  Num Epochs = {args.num_train_epochs}")
+    logger.info(f"  Num Epochs = {args.num_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.per_device_train_batch_size}")
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
@@ -800,44 +513,42 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             completed_steps = resume_step // args.gradient_accumulation_steps
             resume_step -= starting_epoch * len(train_dataloader)
 
-    print(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
+    logger.info(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
 
-    print("=============before cache logprobs")
+    logger.info("=============before cache logprobs")
     print_gpu_stats(init_gpu_memory)
 
     # Cache the logprobs
-    average_log_prob_loss_types = ["simpo", "dpo_norm"]
-    average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
-    forward_fn = concatenated_forward if args.concatenated_forward else separate_forward
-    if args.packing:
-        if not args.concatenated_forward:
-            raise NotImplementedError("seperate forward not implemented for packing/padding-free")
-        forward_fn = partial(forward_fn, packing=True)
-    if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
-            model,
-            train_dataloader,
-            accelerator,
-            average_log_prob,
-            last_checkpoint_path,
-            resume_step,
-            range(starting_epoch, args.num_train_epochs),
-            forward_fn,
+    if args.loss_type.needs_reference_model:
+        reference_cache = dpo_utils.build_reference_logprobs_cache(
+            model=model,
+            dataloader=train_dataloader,
+            accelerator=accelerator,
+            average_log_prob=args.loss_type.is_average_loss,
+            forward_fn=args.forward_fn,
+            full_dataset_size=original_dataset_size,
+            reference_cache_hash=dpo_utils.compute_reference_cache_hash(args, tc),
+            use_lora=args.use_lora,
         )
-        print("=============after cache logprobs")
+        logger.info("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
-        torch.cuda.empty_cache()  # clear cache
+        torch.cuda.empty_cache()
+        logger.info("=============after cache logprobs; clear cache")
+        print_gpu_stats(init_gpu_memory)
 
-    print("=============after cache logprobs; clear cache")
-    print_gpu_stats(init_gpu_memory)
     # Only show the progress bar once on each machine.
-    progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
+    start_time = time.perf_counter()
+    progress_bar = tqdm(
+        range(args.max_train_steps), disable=not accelerator.is_local_main_process, bar_format="{l_bar}{bar}{r_bar}\n"
+    )
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
-    local_metrics = torch.zeros((20), device=accelerator.device)
+    local_metrics = utils.MetricsTracker(device=accelerator.device)
     episode = 0
-    for epoch in range(starting_epoch, args.num_train_epochs):
+    total_tokens_processed = 0
+    mfu_interval_start = time.perf_counter()
+    for epoch in range(starting_epoch, args.num_epochs):
         model.train()
         train_dataloader.set_epoch(epoch)
         if last_checkpoint_path and resume_step is not None:
@@ -846,77 +557,55 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         else:
             active_dataloader = train_dataloader
         # we need to average the log probs for simpo loss
-        for step, batch in enumerate(active_dataloader):
+        for batch in active_dataloader:
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
             with accelerator.accumulate(model):
-                policy_chosen_logps, policy_rejected_logps, aux_loss = forward_fn(
-                    model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
+                policy_chosen_logps, policy_rejected_logps, aux_loss = args.forward_fn(
+                    model,
+                    batch,
+                    average_log_prob=args.loss_type.is_average_loss,
+                    output_router_logits=args.load_balancing_loss,
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
-                if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-                    p_device = policy_chosen_logps.device
-                    reference_chosen_logps = epoch_cached_reference_chosen_logps[epoch][step].to(p_device)
-                    reference_rejected_logps = epoch_cached_reference_rejected_logps[epoch][step].to(p_device)
-                    losses, _, _ = dpo_loss(
-                        policy_chosen_logps,
-                        policy_rejected_logps,
-                        reference_chosen_logps,
-                        reference_rejected_logps,
-                        beta=args.dpo_beta,
-                        label_smoothing=args.dpo_label_smoothing,
-                    )
-                elif args.dpo_loss_type == "simpo":
-                    losses, _, _ = simpo_loss(
-                        policy_chosen_logps,
-                        policy_rejected_logps,
-                        beta=args.dpo_beta,
-                        gamma_beta_ratio=args.dpo_gamma_beta_ratio,
-                        label_smoothing=args.dpo_label_smoothing,
-                    )
-                elif args.dpo_loss_type == "wpo":
-                    losses, _, _ = wpo_loss(
-                        policy_chosen_logps,
-                        policy_rejected_logps,
-                        reference_chosen_logps,
-                        reference_rejected_logps,
-                        beta=args.dpo_beta,
-                        label_smoothing=args.dpo_label_smoothing,
-                        chosen_loss_mask=batch["chosen_labels"] != -100,
-                        rejected_loss_mask=batch["rejected_labels"] != -100,
-                    )
-                else:
-                    raise ValueError(f"Invalid dpo loss type {args.dpo_loss_type}.")
-                # TODO: metric logging
+                losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
+                    args,
+                    batch,
+                    policy_chosen_logps,
+                    policy_rejected_logps,
+                    reference_cache if args.loss_type.needs_reference_model else None,
+                )
                 loss = losses.mean()
                 if args.load_balancing_loss:
                     weighted_aux_loss = args.load_balancing_weight * aux_loss
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
-                if accelerator.sync_gradients and args.clip_grad_norm > 0:
-                    accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                if accelerator.sync_gradients and args.max_grad_norm > 0:
+                    accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()
 
                 # We keep track of the loss at each logged step
                 with torch.no_grad():
-                    local_metrics[0] += loss
-                    if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-                        chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
-                        rejected_rewards = (args.dpo_beta * (policy_rejected_logps - reference_rejected_logps)).mean()
-                        average_rewards = (chosen_rewards + rejected_rewards) / 2
+                    local_metrics["train_loss"] += loss
+                    if args.loss_type.computes_reward_metrics:
+                        average_rewards = ((chosen_rewards + rejected_rewards) / 2).mean()
                         accuracy = (chosen_rewards > rejected_rewards).float().mean()
                         margin = (chosen_rewards - rejected_rewards).mean()
-                        local_metrics[1] += chosen_rewards
-                        local_metrics[2] += rejected_rewards
-                        local_metrics[3] += average_rewards
-                        local_metrics[4] += accuracy
-                        local_metrics[5] += margin
-                    local_metrics[6] += policy_chosen_logps.mean()
-                    local_metrics[7] += policy_rejected_logps.mean()
+                        local_metrics["rewards/chosen"] += chosen_rewards.mean()
+                        local_metrics["rewards/rejected"] += rejected_rewards.mean()
+                        local_metrics["rewards/average"] += average_rewards
+                        local_metrics["rewards/accuracy"] += accuracy
+                        local_metrics["rewards/margin"] += margin
+                    local_metrics["logps/chosen"] += policy_chosen_logps.mean()
+                    local_metrics["logps/rejected"] += policy_rejected_logps.mean()
                     if args.load_balancing_loss:
-                        local_metrics[19] += weighted_aux_loss
+                        local_metrics["aux_loss"] += weighted_aux_loss
+
+                    chosen_lengths = (batch["chosen_labels"] != -100).sum(dim=1)
+                    rejected_lengths = (batch["rejected_labels"] != -100).sum(dim=1)
+                    local_metrics["token_count"] += chosen_lengths.sum() + rejected_lengths.sum()
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
@@ -924,53 +613,86 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 completed_steps += 1
                 if args.logging_steps and completed_steps % args.logging_steps == 0:
                     # single all reduce to save time, avoiding per metric all reduce
-                    global_metrics = accelerator.reduce(local_metrics, reduction="mean")
-                    global_metrics /= args.gradient_accumulation_steps * args.logging_steps
-                    global_metrics = global_metrics.tolist()
+                    global_metrics_tensor = accelerator.reduce(local_metrics.metrics, reduction="mean")
+                    global_metrics_tensor /= args.gradient_accumulation_steps * args.logging_steps
+                    global_metrics_tensor[local_metrics.names2idx["token_count"]] *= accelerator.num_processes
+                    global_metrics = {
+                        name: global_metrics_tensor[index].item() for name, index in local_metrics.names2idx.items()
+                    }
+
+                    mfu_interval_end = time.perf_counter()
+                    training_time = mfu_interval_end - mfu_interval_start
+                    total_tokens_step = int(global_metrics["token_count"])
+                    total_tokens_processed += total_tokens_step
+                    avg_sequence_length = total_tokens_step / (
+                        args.per_device_train_batch_size
+                        * accelerator.num_processes
+                        * args.gradient_accumulation_steps
+                        * args.logging_steps
+                        * 2
+                    )
+
+                    step_tokens_per_second = total_tokens_step / training_time
+                    total_time_elapsed = time.perf_counter() - start_time
+                    total_tokens_per_second = total_tokens_processed / total_time_elapsed
+
                     metrics_to_log = {
                         "training_step": completed_steps,
                         "learning_rate": lr_scheduler.get_last_lr()[0],
                         "epoch": episode / len(train_dataset),
-                        "train_loss": global_metrics[0],
-                        "logps/chosen": global_metrics[6],
-                        "logps/rejected": global_metrics[7],
+                        "train_loss": global_metrics["train_loss"],
+                        "logps/chosen": global_metrics["logps/chosen"],
+                        "logps/rejected": global_metrics["logps/rejected"],
                     }
-                    if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
+                    if args.loss_type.computes_reward_metrics:
                         metrics_to_log.update(
                             {
-                                "rewards/chosen": global_metrics[1],
-                                "rewards/rejected": global_metrics[2],
-                                "rewards/average": global_metrics[3],
-                                "rewards/accuracy": global_metrics[4],
-                                "rewards/margin": global_metrics[5],
+                                "rewards/chosen": global_metrics["rewards/chosen"],
+                                "rewards/rejected": global_metrics["rewards/rejected"],
+                                "rewards/average": global_metrics["rewards/average"],
+                                "rewards/accuracy": global_metrics["rewards/accuracy"],
+                                "rewards/margin": global_metrics["rewards/margin"],
                             }
                         )
-                    logger_str = (
-                        f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics[0]}"
-                    )
+                    logger_str = f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics['train_loss']}"
                     if args.load_balancing_loss:
-                        logger_str += f" Aux Loss: {global_metrics[19]}"
-                        metrics_to_log["aux_loss"] = global_metrics[19]
+                        logger_str += f" Aux Loss: {global_metrics['aux_loss']}"
+                        metrics_to_log["aux_loss"] = global_metrics["aux_loss"]
+
+                    metrics_to_log["perf/mfu_step"] = model_dims.approximate_learner_utilization(
+                        total_tokens=total_tokens_step,
+                        avg_sequence_length=avg_sequence_length,
+                        training_time=training_time,
+                        num_training_gpus=accelerator.num_processes,
+                    )["mfu"]
+                    metrics_to_log["perf/tokens_per_second_step"] = step_tokens_per_second
+                    metrics_to_log["perf/tokens_per_second_total"] = total_tokens_per_second
+
                     logger.info(logger_str)
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
+                    if accelerator.is_main_process:
+                        maybe_update_beaker_description(
+                            current_step=completed_steps,
+                            total_steps=args.max_train_steps,
+                            start_time=start_time,
+                            wandb_url=None if wandb_tracker is None else wandb_tracker.run.get_url(),
+                        )
                     # Reset the local metrics
-                    local_metrics.zero_()
+                    local_metrics.metrics.zero_()
+                    mfu_interval_start = mfu_interval_end
 
-                if isinstance(checkpointing_steps, int):
-                    if completed_steps % checkpointing_steps == 0:
-                        output_dir = f"step_{completed_steps}"
-                        if args.output_dir is not None:
-                            output_dir = os.path.join(args.output_dir, output_dir)
-                        accelerator.save_state(output_dir)
-                        # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
-                        with open(
-                            os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
-                        ) as f:
-                            f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-                        if accelerator.is_local_main_process:
-                            clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
-                        accelerator.wait_for_everyone()
+                if isinstance(checkpointing_steps, int) and completed_steps % checkpointing_steps == 0:
+                    output_dir = f"step_{completed_steps}"
+                    if args.output_dir is not None:
+                        output_dir = os.path.join(args.output_dir, output_dir)
+                    accelerator.save_state(output_dir)
+                    # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
+                    with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                        f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+                    if accelerator.is_local_main_process:
+                        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+                    accelerator.wait_for_everyone()
 
                 if completed_steps >= args.max_train_steps:
                     break
@@ -988,7 +710,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             accelerator.wait_for_everyone()
 
     if args.output_dir is not None:
-        save_with_accelerate(
+        model_utils.save_with_accelerate(
             accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
         )
 
@@ -1010,27 +732,30 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=wandb_tracker.run.get_url(),
+            wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
+            eval_workspace=args.eval_workspace,
+            eval_priority=args.eval_priority,
+            oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
         )
-    if args.push_to_hub:
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+    if args.push_to_hub and accelerator.is_main_process:
+        model_utils.push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     accelerator.wait_for_everyone()
     if args.with_tracking:
         accelerator.end_training()
 
 
-def print_gpu_stats(init_gpu_memory: Optional[int]):
+def print_gpu_stats(init_gpu_memory: int | None):
     if torch.cuda.is_available():
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
         peak_memory = init_gpu_memory - free_gpu_memory
-        print(f"Peak memory usage: {peak_memory / 1024**3:.2f} GB")
-        print(f"Total memory usage: {total_gpu_memory / 1024**3:.2f} GB")
-        print(f"Free memory: {free_gpu_memory / 1024**3:.2f} GB")
+        logger.info(f"Peak memory usage: {peak_memory / 1024**3:.2f} GB")
+        logger.info(f"Total memory usage: {total_gpu_memory / 1024**3:.2f} GB")
+        logger.info(f"Free memory: {free_gpu_memory / 1024**3:.2f} GB")
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((FlatArguments, TokenizerConfig))
+    parser = ArgumentParserPlus((dpo_utils.ExperimentConfig, TokenizerConfig))
     args, tc = parser.parse_args_into_dataclasses()
     main(args, tc)

@@ -1,5 +1,4 @@
 # !/usr/bin/env python
-# coding=utf-8
 # Copyright 2024 AllenAI. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,20 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
+import contextlib
 import os
 
-# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
-# https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
-try:
+with contextlib.suppress(Exception):
     import deepspeed
 
-    # @vwxyzjn: when importing on CPU-only machines, we get the following error:
-    # RuntimeError: 0 active drivers ([]). There should only be one.
-    # so we need to catch the exception and do nothing
-    # https://github.com/deepspeedai/DeepSpeed/issues/7028
-except Exception:
-    pass
 # isort: on
 import json
 import math
@@ -36,7 +28,7 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import List, Literal, Optional, Union
+from typing import Literal
 
 import datasets
 import torch
@@ -71,6 +63,7 @@ from open_instruct.utils import (
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
+    maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
 )
@@ -95,7 +88,7 @@ class FlatArguments:
     """The name of this experiment"""
     do_not_randomize_output_dir: bool = False
     """By default the output directory will be randomized"""
-    model_name_or_path: Optional[str] = field(
+    model_name_or_path: str | None = field(
         default=None,
         metadata={
             "help": (
@@ -103,17 +96,17 @@ class FlatArguments:
             )
         },
     )
-    config_name: Optional[str] = field(
+    config_name: str | None = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
     use_flash_attn: bool = field(
         default=True, metadata={"help": "Whether to use flash attention in the model training"}
     )
-    model_revision: Optional[str] = field(
+    model_revision: str | None = field(
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    additional_model_arguments: Optional[Union[dict, str]] = field(
+    additional_model_arguments: dict | str | None = field(
         default_factory=dict, metadata={"help": "A dictionary of additional model args used to construct the model."}
     )
     low_cpu_mem_usage: bool = field(
@@ -126,37 +119,37 @@ class FlatArguments:
             )
         },
     )
-    dataset_name: Optional[str] = field(
+    dataset_name: str | None = field(
         default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
     )
-    dataset_mixer: Optional[dict] = field(
+    dataset_mixer: dict | None = field(
         default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
     )
-    dataset_mixer_list: List[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-personas-algebra", "1.0"])
+    dataset_mixer_list: list[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-personas-algebra", "1.0"])
     """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
+    dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
     dataset_transform_fn: list[str] = field(
         default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
     )
     """The list of transform functions to apply to the dataset."""
-    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
+    dataset_target_columns: list[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
     """The columns to use for the dataset."""
     dataset_cache_mode: Literal["hf", "local"] = "local"
     """The mode to use for caching the dataset."""
     dataset_local_cache_dir: str = "local_dataset_cache"
     """The directory to save the local dataset cache to."""
-    dataset_config_hash: Optional[str] = None
+    dataset_config_hash: str | None = None
     """The hash of the dataset configuration."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
-    dataset_mix_dir: Optional[str] = field(
+    dataset_mix_dir: str | None = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
-    dataset_config_name: Optional[str] = field(
+    dataset_config_name: str | None = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
-    max_train_samples: Optional[int] = field(
+    max_train_samples: int | None = field(
         default=None,
         metadata={
             "help": (
@@ -165,10 +158,10 @@ class FlatArguments:
             )
         },
     )
-    preprocessing_num_workers: Optional[int] = field(
+    preprocessing_num_workers: int | None = field(
         default=None, metadata={"help": "The number of processes to use for the preprocessing."}
     )
-    max_seq_length: Optional[int] = field(
+    max_seq_length: int | None = field(
         default=None,
         metadata={
             "help": (
@@ -188,7 +181,7 @@ class FlatArguments:
         default=1, metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."}
     )
     learning_rate: float = field(default=2e-5, metadata={"help": "The initial learning rate for AdamW optimizer."})
-    logging_steps: Optional[int] = field(
+    logging_steps: int | None = field(
         default=None, metadata={"help": "Log the training loss and learning rate every logging_steps steps."}
     )
     lora_rank: int = field(default=64, metadata={"help": "The rank of lora."})
@@ -223,14 +216,13 @@ class FlatArguments:
     warmup_ratio: float = field(
         default=0.03, metadata={"help": "Linear warmup over warmup_ratio fraction of total steps."}
     )
-    final_lr_ratio: Optional[float] = field(
+    final_lr_ratio: float | None = field(
         default=None,
         metadata={
             "help": "Set the final lr value at the end of training to be final_lr_ratio * learning_rate."
             " Only for linear schedulers, currently."
         },
     )
-    weight_decay: float = field(default=0.0, metadata={"help": "Weight decay for AdamW if we apply some."})
     weight_decay: float = field(default=0.0, metadata={"help": "Weight decay for AdamW if we apply some."})
     timeout: int = field(
         default=1800,
@@ -239,10 +231,10 @@ class FlatArguments:
             "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
         },
     )
-    resume_from_checkpoint: Optional[str] = field(
+    resume_from_checkpoint: str | None = field(
         default=None, metadata={"help": "If the training should continue from a checkpoint folder."}
     )
-    report_to: Union[str, List[str]] = field(
+    report_to: str | list[str] = field(
         default="all",
         metadata={
             "help": "The integration(s) to report results and logs to. "
@@ -251,22 +243,22 @@ class FlatArguments:
             "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
         },
     )
-    save_to_hub: Optional[str] = field(
+    save_to_hub: str | None = field(
         default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
     )
     gradient_checkpointing: bool = field(
         default=False, metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."}
     )
     use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
-    max_train_steps: Optional[int] = field(
+    max_train_steps: int | None = field(
         default=None,
         metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
     )
     seed: int = field(default=42, metadata={"help": "Random seed for initialization and dataset shuffling."})
-    checkpointing_steps: Optional[str] = field(
+    checkpointing_steps: str | None = field(
         default=None,
         metadata={
-            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
+            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."
         },
     )
     keep_last_n_checkpoints: int = field(
@@ -288,21 +280,21 @@ class FlatArguments:
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
     """The wandb's project name"""
-    wandb_entity: Optional[str] = None
+    wandb_entity: str | None = None
     """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
-    hf_entity: Optional[str] = None
+    hf_entity: str | None = None
     """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: Optional[str] = None
+    hf_repo_id: str | None = None
     """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: Optional[str] = None
+    hf_repo_revision: str | None = None
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: Optional[str] = None
+    hf_repo_url: str | None = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
-    hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
+    hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
@@ -312,9 +304,9 @@ class FlatArguments:
     # Ai2 specific settings
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
-    gs_bucket_path: Optional[str] = None
+    gs_bucket_path: str | None = None
     """The path to the gs bucket to save the model to"""
-    oe_eval_tasks: Optional[List[str]] = None
+    oe_eval_tasks: list[str] | None = None
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
@@ -448,6 +440,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
+        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
     else:
         wandb_tracker = None  # for later eval launching
 
@@ -468,9 +461,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.seed is not None:
         set_seed(args.seed)
 
-    if accelerator.is_main_process:
-        if args.output_dir is not None:
-            os.makedirs(args.output_dir, exist_ok=True)
+    if accelerator.is_main_process and args.output_dir is not None:
+        os.makedirs(args.output_dir, exist_ok=True)
 
     accelerator.wait_for_everyone()
 
@@ -537,7 +529,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 trust_remote_code=tc.trust_remote_code,
                 quantization_config=bnb_config,
                 device_map=device_map,
-                torch_dtype=torch.bfloat16,
+                dtype=torch.bfloat16,
                 attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
             )
         elif args.use_liger_kernel:
@@ -565,7 +557,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 config=config,
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
-                torch_dtype=torch.bfloat16,
+                dtype=torch.bfloat16,
                 attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
             )
     else:
@@ -590,6 +582,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.use_lora:
         if args.use_qlora:
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+        elif args.gradient_checkpointing:
+            # Enable gradient checkpointing for LoRA (non-QLoRA) too
+            model.gradient_checkpointing_enable()
 
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(
@@ -738,7 +733,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     local_total_tokens_this_log_period = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     local_pred_tokens_this_log_period = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     total_token_including_padding = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
-    start_time = time.time()
+    start_time = time.perf_counter()
     skipped_batches = False
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
@@ -752,7 +747,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             skipped_batches = True
         else:
             active_dataloader = train_dataloader
-        for step, batch in enumerate(active_dataloader):
+        for batch in active_dataloader:
             pred_tokens_in_batch = (batch["labels"] != -100).sum()
             if "attention_mask" in batch:
                 tokens_in_batch = batch["attention_mask"].sum()
@@ -835,10 +830,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         "avg_tokens_per_batch": avg_tokens_per_batch,
                         "avg_tokens_per_batch_including_padding": avg_tokens_per_batch_including_padding,
                         "avg_pred_tokens_per_batch": avg_pred_tokens_per_batch,
-                        "per_device_tps": total_tokens / accelerator.num_processes / (time.time() - start_time),
+                        "per_device_tps": total_tokens
+                        / accelerator.num_processes
+                        / (time.perf_counter() - start_time),
                         "per_device_tps_including_padding": total_tokens_including_padding
                         / accelerator.num_processes
-                        / (time.time() - start_time),
+                        / (time.perf_counter() - start_time),
                         "reserved_mem_GiB": torch.cuda.max_memory_reserved(device=torch.cuda.current_device()) / 2**30,
                         "allocated_mem_GiB": torch.cuda.max_memory_allocated(device=torch.cuda.current_device())
                         / 2**30,
@@ -866,7 +863,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     avg_loss = sum_loss / total_fwd_passes
                     metrics_to_log["train_loss"] = avg_loss
                     if args.verbose:
-                        sec_per_step = (time.time() - start_time) / (completed_steps - resume_step)
+                        sec_per_step = (time.perf_counter() - start_time) / (completed_steps - resume_step)
                         steps_remaining = args.max_train_steps - completed_steps
                         secs_remaining = steps_remaining * sec_per_step
                         accelerator.print(
@@ -880,34 +877,36 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                             / args.logging_steps
                         )
                         logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}, TPS: {total_tokens / (time.time() - start_time)}"
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}, TPS: {total_tokens / (time.perf_counter() - start_time)}"
                         )
                         metrics_to_log["aux_loss"] = avg_aux_loss
                     else:
                         logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, TPS: {total_tokens / (time.time() - start_time)}"
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, TPS: {total_tokens / (time.perf_counter() - start_time)}"
                         )
                     if args.verbose:
                         accelerator.print(f"{metrics_to_log=}")
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
+                    maybe_update_beaker_description(
+                        current_step=completed_steps,
+                        total_steps=args.max_train_steps,
+                        start_time=start_time,
+                        wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
+                    )
                     total_loss = 0
                     total_aux_loss = 0
 
-                if isinstance(checkpointing_steps, int):
-                    if completed_steps % checkpointing_steps == 0:
-                        output_dir = f"step_{completed_steps}"
-                        if args.output_dir is not None:
-                            output_dir = os.path.join(args.output_dir, output_dir)
-                        accelerator.save_state(output_dir)
-                        # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
-                        with open(
-                            os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
-                        ) as f:
-                            f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-                        if accelerator.is_local_main_process:  # TODO: in mason local model this is gonna error out if using something like output/test; because mason used the same shared file ssytem.
-                            clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
-                        accelerator.wait_for_everyone()
+                if isinstance(checkpointing_steps, int) and completed_steps % checkpointing_steps == 0:
+                    output_dir = f"step_{completed_steps}"
+                    if args.output_dir is not None:
+                        output_dir = os.path.join(args.output_dir, output_dir)
+                    accelerator.save_state(output_dir)
+                    with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                        f.write("COMPLETED")
+                    if accelerator.is_local_main_process:
+                        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+                    accelerator.wait_for_everyone()
 
                 if completed_steps >= args.max_train_steps:
                     break
@@ -951,8 +950,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
         )
-    if args.push_to_hub:
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+    if args.push_to_hub and accelerator.is_main_process:
+        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     accelerator.wait_for_everyone()
     if args.with_tracking:
         accelerator.end_training()

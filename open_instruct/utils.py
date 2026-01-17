@@ -20,6 +20,7 @@ os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
     from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+    import deepspeed.comm as dist
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
@@ -30,8 +31,10 @@ except Exception:
 # isort: on
 import dataclasses
 import functools
+import importlib
 import json
 import logging
+import math
 import multiprocessing as mp
 import os
 import random
@@ -42,18 +45,20 @@ import subprocess
 import sys
 import threading
 import time
+from collections import defaultdict
+from collections.abc import Iterable
 from concurrent import futures
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass
 from multiprocessing import resource_tracker as _rt
-from typing import Any, Iterable, List, NewType, Optional, Tuple, Union
+from typing import Any, NewType
 
 import beaker
 import numpy as np
 import ray
 import requests
 import torch
-import vllm.config
+import torch.nn.functional as F
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -61,17 +66,114 @@ from huggingface_hub import HfApi
 from ray.util import state as ray_state
 from rich.pretty import pprint
 from tqdm import tqdm
-from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
+from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentParser
+from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import logger_utils
+from open_instruct import data_types, logger_utils
+from open_instruct.launch_utils import GCP_CLUSTERS, gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
+DISK_USAGE_WARNING_THRESHOLD = 0.85
+CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://", "/filestore")
+INVALID_LOGPROB = 1.0  # Sentinel value for masked/invalid log probabilities
 
 logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+def import_class_from_string(import_path: str) -> type:
+    """Dynamically import a class from a 'module.path:ClassName' string.
+
+    Args:
+        import_path: Import path in format 'module.submodule:ClassName'.
+
+    Returns:
+        The imported class.
+    """
+    if ":" not in import_path:
+        raise ValueError(f"Invalid import path '{import_path}'. Expected format: 'module.path:ClassName'")
+    module_name, class_name = import_path.rsplit(":", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)
+
+
+def warn_if_low_disk_space(
+    path: str, *, threshold: float = DISK_USAGE_WARNING_THRESHOLD, send_slack_alerts: bool = False
+) -> None:
+    """Warns when disk usage exceeds the provided threshold.
+
+    Args:
+        path: Filesystem path to check disk usage for.
+        threshold: Usage ratio (0.0-1.0) above which to warn.
+        send_slack_alerts: Whether to also send a Slack alert when warning.
+    """
+    if path.startswith(CLOUD_PATH_PREFIXES):
+        return
+
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError as e:
+        logger.warning(f"Skipping disk usage check for {path}, encountered OS error: {e}")
+        return
+
+    if usage.total == 0:
+        return
+
+    used_ratio = usage.used / usage.total
+    if used_ratio >= threshold:
+        used_percent = used_ratio * 100
+        free_gib = usage.free / (1024**3)
+        total_gib = usage.total / (1024**3)
+        warning_message = (
+            f"Disk usage near capacity for {path}: {used_percent:.1f}% used "
+            f"({free_gib:.1f} GiB free of {total_gib:.1f} GiB). Checkpointing may fail."
+        )
+        logger.warning(warning_message)
+        if send_slack_alerts:
+            send_slack_message(f"{warning_message}")
+
+
+class MetricsTracker:
+    """A simple class to preallocate all metrics in an array
+    so we can do only one allreduce operation to get the metrics mean"""
+
+    def __init__(self, max_metrics: int = 32, device: str = "cuda"):
+        self.metrics = torch.zeros(max_metrics, device=device)
+        self.names2idx = {}
+        self.current_idx = 0
+        self.max_metrics = max_metrics
+
+    def _maybe_register_metric(self, name: str) -> int:
+        if name not in self.names2idx:
+            if self.current_idx >= self.max_metrics:
+                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
+            self.names2idx[name] = self.current_idx
+            self.current_idx += 1
+        return self.names2idx[name]
+
+    def __getitem__(self, name: str) -> torch.Tensor:
+        idx = self._maybe_register_metric(name)
+        return self.metrics[idx]
+
+    def __setitem__(self, name: str, value):
+        idx = self._maybe_register_metric(name)
+        self.metrics[idx] = value
+
+    def get_metrics_list(self) -> dict[str, float]:
+        # Convert to Python floats for logging systems (wandb, tensorboard)
+        metrics_list = self.metrics.tolist()
+        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
+
+
+def max_num_processes() -> int:
+    """Returns a reasonable default number of processes to run for multiprocessing."""
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    else:
+        return os.cpu_count() or 1
 
 
 def repeat_each(seq, k):
@@ -80,7 +182,7 @@ def repeat_each(seq, k):
 
 
 def ray_get_with_progress(
-    ray_refs: List[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: Optional[float] = None
+    ray_refs: list[ray.ObjectRef], desc: str = "Processing", enable: bool = True, timeout: float | None = None
 ):
     """Execute ray.get() with a progress bar using futures and collect timings.
 
@@ -110,10 +212,13 @@ def ray_get_with_progress(
     if enable:
         futures_iter = tqdm(futures_iter, total=len(ray_futures), desc=desc, bar_format="{l_bar}{bar}{r_bar}\n")
 
-    for future in futures_iter:
-        idx = fut_to_idx[future]
-        results[idx] = future.result()
-        completion_times[idx] = time.perf_counter() - t0
+    try:
+        for future in futures_iter:
+            idx = fut_to_idx[future]
+            results[idx] = future.result()
+            completion_times[idx] = time.perf_counter() - t0
+    except TimeoutError as e:
+        raise TimeoutError(f"{desc} failed.") from e
 
     return results, completion_times
 
@@ -244,13 +349,13 @@ def convert_rejection_samples_to_messages(example):
 
 
 def get_datasets(
-    dataset_mixer: Union[dict, list],
-    splits: Optional[List[str]] = None,
-    configs: Optional[List[str]] = None,
-    columns_to_keep: Optional[List[str]] = None,
+    dataset_mixer: dict | list,
+    splits: list[str] | None = None,
+    configs: list[str] | None = None,
+    columns_to_keep: list[str] | None = None,
     shuffle: bool = True,
-    save_data_dir: Optional[str] = None,
-    need_columns: Optional[List[str]] = None,
+    save_data_dir: str | None = None,
+    need_columns: list[str] | None = None,
     keep_ids: bool = False,
     add_source_col: bool = False,
 ) -> DatasetDict:
@@ -289,16 +394,13 @@ def get_datasets(
         i = 0
         while i < len(dataset_mixer) - 1:
             assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
-            if "." in dataset_mixer[i + 1]:
-                value = float(dataset_mixer[i + 1])
-            else:
-                value = int(dataset_mixer[i + 1])
+            value = float(dataset_mixer[i + 1]) if "." in dataset_mixer[i + 1] else int(dataset_mixer[i + 1])
             mixer_dict[dataset_mixer[i]] = value
             i += 2
         dataset_mixer = mixer_dict
 
     splits = ["train", "test"] if splits is None else splits
-    configs = [None] * len(dataset_mixer) if not configs else configs
+    configs = configs if configs else [None] * len(dataset_mixer)
     columns_to_keep = [] if columns_to_keep is None else columns_to_keep
 
     if configs is not None and len(configs) != len(dataset_mixer):
@@ -317,13 +419,13 @@ def get_datasets(
         for split in splits:
             # if dataset ends with .json or .jsonl, load from file
             if ds.endswith(".json") or ds.endswith(".jsonl"):
-                dataset = load_dataset("json", data_files=ds, split=split)
+                dataset = load_dataset("json", data_files=ds, split=split, num_proc=max_num_processes())
             elif ds.endswith(".parquet"):
-                dataset = load_dataset("parquet", data_files=ds, split=split)
+                dataset = load_dataset("parquet", data_files=ds, split=split, num_proc=max_num_processes())
             else:
                 try:
                     # Try first if dataset on a Hub repo
-                    dataset = load_dataset(ds, ds_config, split=split)
+                    dataset = load_dataset(ds, ds_config, split=split, num_proc=max_num_processes())
                 except DatasetGenerationError:
                     # If not, check local dataset
                     dataset = load_from_disk(os.path.join(ds, split))
@@ -333,9 +435,8 @@ def get_datasets(
                 dataset = dataset.shuffle(seed=42)
 
             # assert that needed columns are present
-            if need_columns:
-                if not all(col in dataset.column_names for col in need_columns):
-                    raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.column_names}.")
+            if need_columns and not all(col in dataset.column_names for col in need_columns):
+                raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.column_names}.")
 
             # handle per-case conversions
             # if "instruction" and "output" columns are present and "messages" is not, convert to messages
@@ -464,23 +565,21 @@ def get_datasets(
 
     if not keep_ids:
         # remove id column
-        if len(raw_train_datasets) > 0:
-            if "id" in raw_datasets["train"].column_names:
-                raw_datasets["train"] = raw_datasets["train"].remove_columns("id")
-        if len(raw_val_datasets) > 0:
-            if "id" in raw_datasets["test"].column_names:
-                raw_datasets["test"] = raw_datasets["test"].remove_columns("id")
+        if len(raw_train_datasets) > 0 and "id" in raw_datasets["train"].column_names:
+            raw_datasets["train"] = raw_datasets["train"].remove_columns("id")
+        if len(raw_val_datasets) > 0 and "id" in raw_datasets["test"].column_names:
+            raw_datasets["test"] = raw_datasets["test"].remove_columns("id")
 
     return raw_datasets
 
 
 def combine_dataset(
-    dataset_mixer: Union[dict, list],
-    splits: List[str],
-    configs: Optional[List[str]] = None,
-    columns_to_keep: Optional[List[str]] = None,
+    dataset_mixer: dict | list,
+    splits: list[str],
+    configs: list[str] | None = None,
+    columns_to_keep: list[str] | None = None,
     shuffle: bool = False,
-    save_data_dir: Optional[str] = None,
+    save_data_dir: str | None = None,
     keep_ids: bool = False,
 ) -> DatasetDict:
     """
@@ -512,10 +611,7 @@ def combine_dataset(
         i = 0
         while i < len(dataset_mixer) - 1:
             assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
-            if "." in dataset_mixer[i + 1]:
-                value = float(dataset_mixer[i + 1])
-            else:
-                value = int(dataset_mixer[i + 1])
+            value = float(dataset_mixer[i + 1]) if "." in dataset_mixer[i + 1] else int(dataset_mixer[i + 1])
             mixer_dict[dataset_mixer[i]] = value
             i += 2
         dataset_mixer = mixer_dict
@@ -523,7 +619,7 @@ def combine_dataset(
     if any(frac_or_samples < 0 for frac_or_samples in dataset_mixer.values()):
         raise ValueError("Dataset fractions / lengths cannot be negative.")
 
-    configs = [None] * len(dataset_mixer) if not configs else configs
+    configs = configs if configs else [None] * len(dataset_mixer)
     columns_to_keep = [] if columns_to_keep is None else columns_to_keep
 
     if configs is not None and len(configs) != len(dataset_mixer):
@@ -537,11 +633,11 @@ def combine_dataset(
     for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits):
         # if dataset ends with .json or .jsonl, load from file
         if ds.endswith(".json") or ds.endswith(".jsonl"):
-            dataset = load_dataset("json", data_files=ds, split=split)
+            dataset = load_dataset("json", data_files=ds, split=split, num_proc=max_num_processes())
         else:
             try:
                 # Try first if dataset on a Hub repo
-                dataset = load_dataset(ds, ds_config, split=split)
+                dataset = load_dataset(ds, ds_config, split=split, num_proc=max_num_processes())
             except DatasetGenerationError:
                 # If not, check local dataset
                 dataset = load_from_disk(os.path.join(ds, split))
@@ -551,10 +647,7 @@ def combine_dataset(
             dataset = dataset.shuffle(seed=42)
 
         # select a fraction of the dataset
-        if frac_or_samples > 1.0:
-            samples = int(frac_or_samples)
-        else:
-            samples = int(frac_or_samples * len(dataset))
+        samples = int(frac_or_samples) if frac_or_samples > 1.0 else int(frac_or_samples * len(dataset))
         dataset = dataset.select(range(samples))
 
         # if id not in dataset, create it as ds-{index}
@@ -574,10 +667,8 @@ def combine_dataset(
     if save_data_dir:
         datasets.to_json(save_data_dir + "mixed_ds.json")
 
-    if not keep_ids:
-        # remove id column
-        if "id" in datasets.column_names:
-            datasets = datasets.remove_columns("id")
+    if not keep_ids and "id" in datasets.column_names:
+        datasets = datasets.remove_columns("id")
 
     return datasets
 
@@ -585,7 +676,7 @@ def combine_dataset(
 # ----------------------------------------------------------------------------
 # Arguments utilities
 class ArgumentParserPlus(HfArgumentParser):
-    def parse_yaml_and_args(self, yaml_arg: str, other_args: Optional[List[str]] = None) -> List[dataclass]:
+    def parse_yaml_and_args(self, yaml_arg: str, other_args: list[str] | None = None) -> list[dataclass]:
         """
         Parse a YAML file and overwrite the default/loaded values with the values provided to the command line.
 
@@ -621,7 +712,7 @@ class ArgumentParserPlus(HfArgumentParser):
                     if base_type in [int, float]:
                         inputs[arg] = base_type(val)
 
-                    if base_type == List[str]:
+                    if base_type == list[str]:
                         inputs[arg] = [str(v) for v in val.split(",")]
 
                     # bool of a non-empty string is True, so we manually check for bools
@@ -642,7 +733,7 @@ class ArgumentParserPlus(HfArgumentParser):
 
         return outputs
 
-    def parse(self) -> Union[DataClassType, Tuple[DataClassType]]:
+    def parse(self) -> DataClassType | tuple[DataClassType]:
         if len(sys.argv) == 2 and sys.argv[1].endswith(".yaml"):
             # If we pass only one argument to the script and it's the path to a YAML file,
             # let's parse it to get our arguments.
@@ -661,28 +752,30 @@ class ArgumentParserPlus(HfArgumentParser):
 
 # ----------------------------------------------------------------------------
 # Experiment tracking utilities
-def get_wandb_tags() -> List[str]:
+def get_wandb_tags() -> list[str]:
     """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123,branch-main`)"""
     tags = [t for t in os.environ.get("WANDB_TAGS", "").split(",") if t != ""]
     if "GIT_COMMIT" in os.environ:
         git_commit = os.environ["GIT_COMMIT"]
         tags.append(f"commit: {git_commit}")
-        # try finding the pull request number on github
-        prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
-        if prs.status_code == 200:
+        try:
+            # try finding the pull request number on github
+            prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
+            prs.raise_for_status()
             prs = prs.json()
-            if len(prs["items"]):
-                pr = prs["items"][0]
-                tags.append(f"pr: {pr['number']}")
+            pr = prs["items"][0]
+            tags.append(f"pr: {pr['number']}")
+        except (requests.exceptions.RequestException, KeyError, IndexError, ValueError) as e:
+            logger.warning(f"Failed to get PR number from GitHub API: {e}.")
     if "GIT_BRANCH" in os.environ:
         tags.append(f"branch: {os.environ['GIT_BRANCH']}")
-    tags = [tag[:64] for tag in tags if len(tag) > 64]
+    tags = [tag[:64] for tag in tags]
     return tags
 
 
 # ----------------------------------------------------------------------------
 # Check pointing utilities
-def get_last_checkpoint(folder: str, incomplete: bool = False) -> Optional[str]:
+def get_last_checkpoint(folder: str, incomplete: bool = False) -> str | None:
     content = os.listdir(folder)
     checkpoint_steps = [path for path in content if path.startswith("step_")]
     checkpoint_epochs = [path for path in content if path.startswith("epoch_")]
@@ -827,17 +920,17 @@ def calibrate_checkpoint_state_dir(checkpoint_state_dir: str) -> None:
 @dataclass
 class BeakerRuntimeConfig:
     beaker_workload_id: str
-    beaker_node_hostname: Optional[List[str]] = None
-    beaker_experiment_url: Optional[List[str]] = None
-    beaker_dataset_ids: Optional[List[str]] = None
-    beaker_dataset_id_urls: Optional[List[str]] = None
+    beaker_node_hostname: list[str] | None = None
+    beaker_experiment_url: list[str] | None = None
+    beaker_dataset_ids: list[str] | None = None
+    beaker_dataset_id_urls: list[str] | None = None
 
 
 def is_beaker_job() -> bool:
     return "BEAKER_JOB_ID" in os.environ
 
 
-def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
+def get_beaker_experiment_info(experiment_id: str) -> dict | None:
     get_experiment_command = f"beaker experiment get {experiment_id} --format json"
     process = subprocess.Popen(["bash", "-c", get_experiment_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
@@ -849,10 +942,7 @@ def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
 
 def beaker_experiment_succeeded(experiment_id: str) -> bool:
     experiment = get_beaker_experiment_info(experiment_id)
-    if "replicas" in experiment["jobs"][0]["execution"]["spec"]:
-        num_replicas = experiment["jobs"][0]["execution"]["spec"]["replicas"]
-    else:
-        num_replicas = 1
+    num_replicas = experiment["jobs"][0]["execution"]["spec"].get("replicas", 1)
     if not experiment:
         return False
     pprint(experiment)
@@ -871,7 +961,7 @@ class DatasetInfo:
     non_empty: bool
 
 
-def get_beaker_dataset_ids(experiment_id: str, sort=False) -> Optional[List[str]]:
+def get_beaker_dataset_ids(experiment_id: str, sort=False) -> list[str] | None:
     """if sort is True, the non-empty latest dataset will be availble at the end of the list"""
     experiment = get_beaker_experiment_info(experiment_id)
     if not experiment:
@@ -906,7 +996,7 @@ def get_beaker_dataset_ids(experiment_id: str, sort=False) -> Optional[List[str]
 
 
 @functools.lru_cache(maxsize=1)
-def get_beaker_whoami() -> Optional[str]:
+def get_beaker_whoami() -> str | None:
     get_beaker_whoami_command = "beaker account whoami --format json"
     process = subprocess.Popen(
         ["bash", "-c", get_beaker_whoami_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -951,11 +1041,11 @@ def format_eta(seconds: float) -> str:
 
 
 def maybe_update_beaker_description(
-    current_step: Optional[int] = None,
-    total_steps: Optional[int] = None,
-    start_time: Optional[float] = None,
-    wandb_url: Optional[str] = None,
-    original_descriptions: dict[str, str] = {},
+    current_step: int | None = None,
+    total_steps: int | None = None,
+    start_time: float | None = None,
+    wandb_url: str | None = None,
+    original_descriptions: dict[str, str] = {},  # noqa: B006
 ) -> None:
     """Update Beaker experiment description with training progress and/or wandb URL.
 
@@ -972,19 +1062,22 @@ def maybe_update_beaker_description(
     experiment_id = os.environ.get("BEAKER_WORKLOAD_ID")
     if not experiment_id:
         logger.warning(
-            f"BEAKER_WORKLOAD_ID not found in environment. Available env vars: {', '.join(sorted([k for k in os.environ.keys() if 'BEAKER' in k]))}"
+            f"BEAKER_WORKLOAD_ID not found in environment. Available env vars: {', '.join(sorted([k for k in os.environ if 'BEAKER' in k]))}"
         )
         return
 
     try:
         client = beaker.Beaker.from_env()
-    except beaker.exceptions.ConfigurationError as e:
+    except beaker.exceptions.BeakerConfigurationError as e:
         logger.warning(f"Failed to initialize Beaker client: {e}")
         return
 
     try:
-        spec = client.experiment.get(experiment_id)
-    except beaker.exceptions.ExperimentNotFound:
+        # Get the workload first (experiment_id is actually BEAKER_WORKLOAD_ID)
+        workload = client.workload.get(experiment_id)
+        # Then get the experiment spec from the workload
+        spec = client.experiment.get_spec(workload)
+    except (beaker.exceptions.BeakerExperimentNotFound, ValueError):
         logger.warning(
             f"Failed to get Beaker experiment with ID: {experiment_id}"
             "This might be fine if you are e.g. running in an interactive job."
@@ -992,7 +1085,10 @@ def maybe_update_beaker_description(
         return
 
     if experiment_id not in original_descriptions:
-        original_descriptions[experiment_id] = spec.description or ""
+        raw_description = spec.description or ""
+        if "git_commit:" in raw_description:
+            raw_description = raw_description.split("git_commit:")[0].strip()
+        original_descriptions[experiment_id] = raw_description
 
     # Build description from scratch each time
     description_components = [
@@ -1025,89 +1121,13 @@ def maybe_update_beaker_description(
         description_components.append(progress_bar)
     new_description = " ".join(description_components)
     try:
-        client.experiment.set_description(experiment_id, new_description)
+        # Update the workload description using the workload object we got earlier
+        client.workload.update(workload, description=new_description)
     except requests.exceptions.HTTPError as e:
         logger.warning(
             f"Failed to update Beaker description due to HTTP error: {e}"
             "Continuing without updating description - this is likely a temporary Beaker service issue"
         )
-
-
-def live_subprocess_output(cmd: List[str]) -> str:
-    output_lines = []
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    # Display output in real-time and collect it
-    for line in iter(process.stdout.readline, ""):
-        if line.strip():
-            print(line.strip())
-            output_lines.append(line.strip())
-    process.wait()
-    if process.returncode != 0:
-        # Get the actual error message from the process
-        process_error = process.stderr.read() if process.stderr else "No error message available"
-        error_message = f"gsutil command failed with return code {process.returncode}: {process_error}"
-        print(error_message)
-        raise Exception(error_message)
-
-    return "\n".join(output_lines)
-
-
-def download_from_hf(model_name_or_path: str, revision: str) -> None:
-    cmd = ["huggingface-cli", "download", model_name_or_path, "--revision", revision]
-    print(f"Downloading from HF with command: {cmd}")
-    output = live_subprocess_output(cmd)
-    # for some reason, sometimes the output includes the line including some loading message.
-    # so do some minor cleaning.
-    if "\n" in output:
-        output = output.split("\n")[-1].strip()
-    return output
-
-
-[
-    "gsutil",
-    "-o",
-    "GSUtil:parallel_composite_upload_threshold=150M",
-    "cp",
-    "-r",
-    "/root/.cache/huggingface/hub/models--Qwen--Qwen3-8B/snapshots/9c925d64d72725edaf899c6cb9c377fd0709d9c5",
-    "gs://ai2-llm/post-training/deletable_cache_models/Qwen/Qwen3-8B/9c925d64d72725edaf899c6cb9c377fd0709d9c5",
-]
-
-
-def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
-    cmd = [
-        "gsutil",
-        "-o",
-        "GSUtil:parallel_thread_count=1",
-        "-o",
-        "GSUtil:sliced_object_download_threshold=150",
-        "-m",
-        "cp",
-        "-r",
-        src_path,
-        dest_path,
-    ]
-    print(f"Downloading from GS bucket with command: {cmd}")
-    live_subprocess_output(cmd)
-
-
-def gs_folder_exists(path: str) -> bool:
-    cmd = ["gsutil", "ls", path]
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    # print(f"GS stat command: {cmd}")
-    # print(f"GS stat stdout: {stdout}")
-    # print(f"GS stat stderr: {stderr}")
-    if process.returncode == 0:
-        return True
-    else:
-        return False
-
-
-def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
-    cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-r", src_path, dest_path]
-    print(f"Copying model to GS bucket with command: {cmd}")
-    live_subprocess_output(cmd)
 
 
 def sync_gs_bucket(src_path: str, dest_path: str) -> None:
@@ -1137,21 +1157,21 @@ def download_latest_checkpoint_from_gs(gs_checkpoint_state_dir: str, checkpoint_
 def launch_ai2_evals_on_weka(
     path: str,
     leaderboard_name: str,
-    oe_eval_max_length: Optional[int] = None,
-    wandb_url: Optional[str] = None,
-    training_step: Optional[int] = None,
-    oe_eval_tasks: Optional[List[str]] = None,
-    stop_strings: Optional[List[str]] = None,
-    gs_bucket_path: Optional[str] = None,
-    eval_priority: Optional[str] = "normal",
-    beaker_image: Optional[str] = None,
+    oe_eval_max_length: int | None = None,
+    wandb_url: str | None = None,
+    training_step: int | None = None,
+    oe_eval_tasks: list[str] | None = None,
+    stop_strings: list[str] | None = None,
+    gs_bucket_path: str | None = None,
+    eval_priority: str | None = "normal",
+    eval_workspace: str | None = "ai2/tulu-3-results",
+    beaker_image: str | None = None,
+    oe_eval_gpu_multiplier: int | None = None,
 ) -> None:
-    weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
-    gcp_cluster = "ai2/augusta-google-1"
-    cluster = weka_cluster if gs_bucket_path is None else gcp_cluster
     beaker_users = get_beaker_whoami()
 
     if gs_bucket_path is not None:
+        cluster_str = f"--cluster {' '.join(GCP_CLUSTERS)}"
         if beaker_users is not None:
             gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
         else:
@@ -1171,14 +1191,14 @@ def launch_ai2_evals_on_weka(
 
         # Update path to use the GS bucket path for evaluation
         path = gs_saved_path
-
+    else:
+        cluster_str = ""
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \
---location {path} \
---cluster {cluster} \
+--location {path} {cluster_str} \
 --is_tuned \
---workspace "tulu-3-results" \
+--workspace {eval_workspace} \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
@@ -1192,7 +1212,7 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
         command += f" --step {training_step}"
-    if cluster == weka_cluster:
+    if gs_bucket_path is None:
         command += " --evaluate_on_weka"
     if oe_eval_tasks is not None:
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
@@ -1200,6 +1220,8 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
     if beaker_image is not None:
         command += f" --beaker_image {beaker_image}"
+    if oe_eval_gpu_multiplier is not None:
+        command += f" --gpu_multiplier {oe_eval_gpu_multiplier}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
@@ -1277,7 +1299,7 @@ def retry_on_exception(max_attempts=4, delay=1, backoff=2):
 
 @retry_on_exception()
 @functools.lru_cache(maxsize=1)
-def maybe_use_ai2_wandb_entity() -> Optional[str]:
+def maybe_use_ai2_wandb_entity() -> str | None:
     """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
     import wandb
 
@@ -1293,12 +1315,12 @@ def maybe_use_ai2_wandb_entity() -> Optional[str]:
 
 @retry_on_exception()
 @functools.lru_cache(maxsize=1)
-def hf_whoami() -> List[str]:
+def hf_whoami() -> list[str]:
     return HfApi().whoami()
 
 
 @functools.lru_cache(maxsize=1)
-def maybe_use_ai2_hf_entity() -> Optional[str]:
+def maybe_use_ai2_hf_entity() -> str | None:
     """Ai2 internal logic: try use the allenai entity if possible. Should not affect external users."""
     orgs = hf_whoami()
     orgs = [item["name"] for item in orgs["orgs"]]
@@ -1336,6 +1358,7 @@ def get_train_ds_config(
     zpg=8,
     grad_accum_dtype=None,
     disable_trace_cache=False,
+    sequence_parallel_size=1,
 ):
     device = "cpu" if offload else "none"
     zero_opt_dict = {
@@ -1366,28 +1389,58 @@ def get_train_ds_config(
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
         "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
+        "sequence_parallel_size": sequence_parallel_size,
     }
 
 
-def get_eval_ds_config(offload, stage=0, bf16=True):
+def get_eval_ds_config(
+    offload: bool, stage: int = 0, bf16: bool = True, per_device_train_batch_size: int = 1
+) -> tuple[dict[str, Any], HfDeepSpeedConfig | None]:
+    """Creates a DeepSpeed configuration for evaluation.
+
+    Args:
+        offload: Whether to offload parameters to CPU.
+        stage: ZeRO optimization stage. Only 0 or 3 are relevant as there's no optimizer for eval.
+        bf16: Whether to enable bfloat16 precision.
+        per_device_train_batch_size: Batch size per GPU.
+
+    Returns:
+        Tuple containing a Dictionary containing DeepSpeed configuration, and the actual HfDeepSpeedConfig object if stage 3 is used, else None. We need to return the HfDeepSpeedConfig object so it doesn't go out of scope as HF accelerate uses it internally via a global weakref.
+
+    Raises:
+        ValueError: If stage is not 0 or 3.
+    """
+    if stage not in (0, 3):
+        raise ValueError(
+            f"stage must be 0 or 3 for evaluation (got {stage}). 1 or 2 only differ from stage 0 by optimizer sharding, which is irrelevant for evaluation."
+        )
     zero_opt_dict = {
         "stage": stage,
         "stage3_param_persistence_threshold": "auto",
         "offload_param": {"device": "cpu" if offload else "none", "pin_memory": True},
     }
-    return {
+    ds_config = {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
         "bf16": {"enabled": bf16},
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
     }
+    ds_config["train_micro_batch_size_per_gpu"] = per_device_train_batch_size
+    ds_config["gradient_accumulation_steps"] = 1
+    if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+        # This is needed as it apparently has mysterious side effects.
+        hf_config = HfDeepSpeedConfig(ds_config)
+        logger.info(f"DeepSpeed config: {hf_config}")
+    else:
+        hf_config = None
+    return ds_config, hf_config
 
 
 def get_optimizer_grouped_parameters(
     model: torch.nn.Module,
     weight_decay: float,
-    no_decay_name_list=["bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"],
+    no_decay_name_list=("bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"),
 ):
     optimizer_grouped_parameters = [
         {
@@ -1414,7 +1467,7 @@ def _z3_params_to_fetch(param_list):
     return [p for p in param_list if hasattr(p, "ds_id") and p.ds_status == ZeroParamStatus.NOT_AVAILABLE]
 
 
-def get_ray_address() -> Optional[str]:
+def get_ray_address() -> str | None:
     """Get the Ray address from the environment variable."""
     return os.environ.get("RAY_ADDRESS")
 
@@ -1658,7 +1711,7 @@ def check_runtime_leaks(
 
     if _rt and hasattr(_rt, "_resource_tracker"):
         cache = getattr(_rt._resource_tracker, "_cache", {})
-        for name, (count, rtype) in cache.items():
+        for count, rtype in cache.values():
             if count > 0:
                 leak_logger.warning(f"Leaked {rtype} resources: {count}")
 
@@ -1687,11 +1740,18 @@ def check_oe_eval_internal():
 # For FLOPS, we assume bf16 and ignore sparsity.
 # Memory bandwidth values are peak theoretical bandwidth.
 GPU_SPECS = {
-    "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 1.6e12},  # 1.6 TB/s HBM2e
+    "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 2.0e12},  # 2.0 TB/s HBM2e (80GB variant)
     "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
+    "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
+    "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
+    # Specs from https://www.techpowerup.com/gpu-specs/geforce-rtx-4090-mobile.c3949.
+    "4090 laptop": {"flops": 32.98e12, "memory_size": 24e9, "memory_bandwidth": 576e9},
+    # DGX Spark GB10 (Blackwell) - unified LPDDR5X memory with CPU
+    # Specs from https://www.nvidia.com/en-us/products/workstations/dgx-spark/
+    "gb10": {"flops": 104e12, "memory_size": 128e9, "memory_bandwidth": 273e9},  # 273 GB/s LPDDR5X unified
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
@@ -1708,42 +1768,73 @@ class ModelDims:
     intermediate_size: int
     vocab_size: int
     num_attn_heads: int
-    num_kv_heads: Optional[int] = None
-    device_name: Optional[str] = None
+    head_dim: int
+    num_kv_heads: int | None = None
+    num_params: int | None = None
+    device_name: str | None = None
+    sliding_window: int | None = None
+    num_sliding_window_layers: int = 0
 
     def __post_init__(self):
         if self.num_kv_heads is None:
             self.num_kv_heads = self.num_attn_heads
 
-        if self.device_name is None:
+        self.num_params = self.num_params or self._calculate_num_params()
+
+        if self.device_name is None and torch.cuda.is_available():
             self.device_name = get_device_name(torch.cuda.get_device_name(0))
 
         assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
         assert self.num_attn_heads % self.num_kv_heads == 0, (
             "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
         )
-
-    @classmethod
-    def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
-        """Create ModelDims from a vLLM config object."""
-        model_config = vllm_config.model_config
-        hidden_size = model_config.get_hidden_size()
-
-        # Try to get intermediate_size, default to 4x hidden_size if not present
-        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
-
-        return cls(
-            num_layers=model_config.get_num_layers(vllm_config.parallel_config),
-            hidden_size=hidden_size,
-            intermediate_size=intermediate_size,
-            vocab_size=model_config.get_vocab_size(),
-            num_attn_heads=model_config.get_num_attention_heads(vllm_config.parallel_config),
-            num_kv_heads=model_config.get_num_kv_heads(vllm_config.parallel_config),
+        assert self.num_sliding_window_layers <= self.num_layers, (
+            f"num_sliding_window_layers ({self.num_sliding_window_layers}) cannot exceed num_layers ({self.num_layers})"
         )
 
-    @property
-    def head_dim(self) -> int:
-        return self.hidden_size // self.num_attn_heads
+    def _calculate_num_params(self) -> int:
+        embedding_params = self.vocab_size * self.hidden_size
+
+        q_params = self.hidden_size * (self.num_attn_heads * self.head_dim)
+        kv_params = self.hidden_size * (self.num_kv_heads * self.head_dim) * 2
+        o_params = (self.num_attn_heads * self.head_dim) * self.hidden_size
+        mlp_up_params = self.hidden_size * self.intermediate_size * 2
+        mlp_down_params = self.intermediate_size * self.hidden_size
+
+        per_layer_params = q_params + kv_params + o_params + mlp_up_params + mlp_down_params
+        layer_params = self.num_layers * per_layer_params
+
+        lm_head_params = self.vocab_size * self.hidden_size
+
+        return embedding_params + layer_params + lm_head_params
+
+    @classmethod
+    def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
+        """Create ModelDims from a HuggingFace model name or path."""
+        config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        hidden_size = config.hidden_size
+        intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)
+        sliding_window = getattr(config, "sliding_window", None)
+        num_sliding_window_layers = 0
+        if sliding_window is not None:
+            layer_types = getattr(config, "layer_types", None)
+            if layer_types is not None:
+                num_sliding_window_layers = layer_types.count("sliding_attention")
+            else:
+                num_sliding_window_layers = config.num_hidden_layers
+        head_dim = getattr(config, "head_dim", hidden_size // config.num_attention_heads)
+        return cls(
+            num_layers=config.num_hidden_layers,
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            vocab_size=config.vocab_size,
+            num_attn_heads=config.num_attention_heads,
+            num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
+            head_dim=head_dim,
+            sliding_window=sliding_window,
+            num_sliding_window_layers=num_sliding_window_layers,
+            device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
+        )
 
     @property
     def device_flops(self) -> float:
@@ -1757,7 +1848,7 @@ class ModelDims:
         assert self.device_name in GPU_SPECS, f"Unknown device: {self.device_name}"
         return GPU_SPECS[self.device_name]["memory_bandwidth"]
 
-    def attn_flops(self, query_len: int, kv_len: int) -> int:
+    def attn_flops(self, query_len: int, kv_len: int, sliding_window: int | None = None) -> int:
         """FLOPs for one layer of self-attention given query_len and kv_len.
 
         Assumptions:
@@ -1769,9 +1860,14 @@ class ModelDims:
         d = self.head_dim
         mul = FLOP_PER_MAC
 
+        q_dim = self.num_attn_heads * d
+        kv_dim = self.num_kv_heads * d
+
+        kv_len = min(kv_len, sliding_window or float("inf"))
+
         # Projections for the query_len new tokens
-        q_proj = mul * query_len * self.hidden_size * self.hidden_size
-        kv_proj = mul * 2 * query_len * self.hidden_size * (self.num_kv_heads * d)  # GQA/MQA
+        q_proj = mul * query_len * self.hidden_size * q_dim
+        kv_proj = mul * 2 * query_len * self.hidden_size * kv_dim  # GQA/MQA
 
         # Scores and attention-weighted values
         qk = mul * self.num_attn_heads * query_len * kv_len * d
@@ -1779,25 +1875,36 @@ class ModelDims:
         av = mul * self.num_attn_heads * query_len * kv_len * d
 
         # Output projection
-        out_proj = mul * query_len * self.hidden_size * self.hidden_size
+        out_proj = mul * query_len * q_dim * self.hidden_size
 
         return q_proj + kv_proj + qk + softmax + av + out_proj
 
     def mlp_flops(self, seq_len: int) -> int:
         """Two matmuls dominate; activation cost under-counted on purpose."""
         mul = FLOP_PER_MAC
-        first = mul * seq_len * self.hidden_size * self.intermediate_size
+        first = mul * seq_len * self.hidden_size * (self.intermediate_size * 2)  # times 2 due to SwiGLU
         act = seq_len * self.intermediate_size  # under-counted on purpose
         second = mul * seq_len * self.intermediate_size * self.hidden_size
         return first + act + second
 
     def prefill_flops(self, prompt_lengths: list[int]) -> int:
         """Prefill builds the KV cache; logits are computed once after each prompt."""
+        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
+        num_sliding_layers = self.num_sliding_window_layers
+
         total = 0
         for L in prompt_lengths:
-            total += self.num_layers * (self.attn_flops(L, L) + self.mlp_flops(L))
+            if num_full_attn_layers > 0:
+                total += num_full_attn_layers * (self.attn_flops(L, L, sliding_window=None) + self.mlp_flops(L))
+
+            if num_sliding_layers > 0:
+                total += num_sliding_layers * (
+                    self.attn_flops(L, L, sliding_window=self.sliding_window) + self.mlp_flops(L)
+                )
+
             # Always include a single LM head after prefill (next-token logits)
             total += FLOP_PER_MAC * self.hidden_size * self.vocab_size
+
         return total
 
     def decode_flops(self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1) -> int:
@@ -1814,6 +1921,9 @@ class ModelDims:
             f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
         )
 
+        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
+        num_sliding_layers = self.num_sliding_window_layers
+
         total = 0
         response_idx = 0
         for P in prompt_lengths:
@@ -1823,7 +1933,14 @@ class ModelDims:
                 total += R * self.num_layers * self.mlp_flops(seq_len=1)
                 for t in range(R):
                     kv_len = P + t + 1  # prompt + generated so far + current
-                    total += self.num_layers * self.attn_flops(query_len=1, kv_len=kv_len)
+                    if num_full_attn_layers > 0:
+                        total += num_full_attn_layers * self.attn_flops(
+                            query_len=1, kv_len=kv_len, sliding_window=None
+                        )
+                    if num_sliding_layers > 0:
+                        total += num_sliding_layers * self.attn_flops(
+                            query_len=1, kv_len=kv_len, sliding_window=self.sliding_window
+                        )
                 total += R * FLOP_PER_MAC * self.hidden_size * self.vocab_size
                 response_idx += 1
         return total
@@ -1831,7 +1948,7 @@ class ModelDims:
     def flops(
         self,
         prompt_lengths: list[int],
-        response_lengths: Optional[list[int]] = None,
+        response_lengths: list[int] | None = None,
         samples_per_prompt: int = 1,
         is_training: bool = False,
     ) -> int:
@@ -1861,16 +1978,15 @@ class ModelDims:
         Returns:
             Total bytes for weight reads across all layers
         """
-        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        head_dim = self.hidden_size // self.num_attn_heads
-        hidden_kv = num_kv * head_dim
+        hidden_q = self.num_attn_heads * self.head_dim
+        hidden_kv = self.num_kv_heads * self.head_dim
 
         # Per-layer weight params (Q, K, V, O, MLP up, MLP down)
-        w_q = self.hidden_size * self.hidden_size
+        w_q = self.hidden_size * hidden_q
         w_k = self.hidden_size * hidden_kv
         w_v = self.hidden_size * hidden_kv
-        w_o = self.hidden_size * self.hidden_size
-        w_up = self.hidden_size * self.intermediate_size
+        w_o = hidden_q * self.hidden_size
+        w_up = self.hidden_size * (self.intermediate_size * 2)  # times 2 due to SwiGLU
         w_dn = self.intermediate_size * self.hidden_size
 
         per_layer_weight_bytes = (w_q + w_k + w_v + w_o + w_up + w_dn) * dtype_bytes
@@ -1886,11 +2002,8 @@ class ModelDims:
         Returns:
             Total bytes for KV cache writes across all layers
         """
-        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        head_dim = self.hidden_size // self.num_attn_heads
-
         # 2x for K and V
-        kv_write_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
+        kv_write_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
         return self.num_layers * num_tokens * kv_write_bytes_per_token
 
     def kv_cache_read_bytes(
@@ -1914,8 +2027,8 @@ class ModelDims:
             f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
         )
 
-        num_kv = self.num_kv_heads if self.num_kv_heads is not None else self.num_attn_heads
-        head_dim = self.hidden_size // self.num_attn_heads
+        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
+        num_sliding_layers = self.num_sliding_window_layers
 
         # For batched sampling with shared prompt KV cache:
         # - Prompt KV is read once per new token position across ALL samples (not per sample)
@@ -1933,26 +2046,28 @@ class ModelDims:
             # Prompt KV reads: In synchronized batch generation with vLLM n>1,
             # the prompt KV cache is stored once but each sample reads it independently.
             # At each decoding position, each sample reads the prompt KV cache.
-            # Number of positions = max response length (all generate synchronously)
+            # Number of positions = max response length (all generate synchronously).
             max_response_length = max(prompt_responses) if prompt_responses else 0
             # Each of the samples_per_prompt samples reads prompt KV at each position
-            kv_read_terms += max_response_length * samples_per_prompt * P
+            kv_read_terms += max_response_length * samples_per_prompt * P * num_full_attn_layers
 
             # Per-sample generated KV reads: Each sample reads its own previously generated tokens
             for R in prompt_responses:
                 # Each token in this sample reads its previously generated tokens
-                # sum_{i=0}^{R-1} i = R*(R-1)/2
-                kv_read_terms += R * (R - 1) // 2
-
+                kv_read_terms += num_full_attn_layers * R * (R - 1) // 2
+                if num_sliding_layers > 0:
+                    # ... unless we have a sliding window, at which point we cap the max tokens to read.
+                    # Note that we also account for the prompt KV values here as well.
+                    kv_read_terms += num_sliding_layers * sum(min(P + t, self.sliding_window) for t in range(R))
         # 2x for K and V
-        kv_bytes_per_token = 2 * num_kv * head_dim * dtype_bytes
-        return self.num_layers * kv_bytes_per_token * kv_read_terms
+        kv_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
+        return kv_bytes_per_token * kv_read_terms
 
     def prefill_memory_bytes(self, prompt_lengths: list[int], dtype_bytes: int = 2) -> int:
         """Memory bytes for prefill phase.
 
         During prefill:
-        - Read weights once for the entire batch (batched matmul)
+        - Read weights once per prefill operation
         - Write KV cache for each token
 
         Args:
@@ -1962,12 +2077,8 @@ class ModelDims:
         Returns:
             Total memory bytes for prefill
         """
-        # In batched prefill, weights are read once for the entire operation,
-        # not once per token. We process all prompts in a single batch.
-        num_prefill_batches = len(prompt_lengths)  # Each prompt is a "batch"
-        weight_bytes = self.weight_memory_bytes(num_prefill_batches, dtype_bytes)
-
-        # KV cache is written for every token
+        num_prefill_ops = 1
+        weight_bytes = self.weight_memory_bytes(num_prefill_ops, dtype_bytes)
         total_prefill_tokens = sum(prompt_lengths)
         kv_write_bytes = self.kv_cache_write_bytes(total_prefill_tokens, dtype_bytes)
         return weight_bytes + kv_write_bytes
@@ -2016,50 +2127,474 @@ class ModelDims:
     def memory_bytes(
         self,
         prompt_lengths: list[int],
-        response_lengths: Optional[list[int]] = None,
+        num_engines: int,
+        num_gpus_per_engine: int,
+        response_lengths: list[int] | None = None,
         samples_per_prompt: int = 1,
         dtype_bytes: int = 2,
     ) -> int:
-        """Approximate total HBM bytes moved for prefill + decode.
+        """Approximate total HBM bytes moved per engine for prefill + decode.
 
-        Returns an integer number of bytes. Divide by elapsed seconds to get B/s;
-        compare against peak bandwidth to get utilization.
+        When multiple engines process work in parallel, this calculates the bytes
+        moved by ONE engine processing its fraction of the prompts.
 
         Args:
-            prompt_lengths: List of prompt lengths (one per unique prompt)
+            prompt_lengths: List of ALL prompt lengths across all engines
+            num_engines: Number of vLLM engines working in parallel
+            num_gpus_per_engine: Number of GPUs per engine (tensor parallelism)
             response_lengths: List of response lengths (samples_per_prompt * len(prompt_lengths) total)
             samples_per_prompt: Number of samples generated per prompt
             dtype_bytes: Bytes per element (2 for FP16/BF16)
 
         Returns:
-            Total memory bytes moved
+            Memory bytes moved by ONE engine (not total across all engines)
 
         Assumptions:
+          - Prompts are evenly distributed across engines
+          - Each engine processes its subset independently
           - Weights are read once per token per layer (Q,K,V,O + MLP up/down)
           - KV cache: write K/V for every token; during decode, read all past K/V per new token
           - When batching samples, prompt KV cache is shared across samples
           - Embedding and LM head reads are ignored (usually dominated by matmul weight traffic)
         """
-        total = self.prefill_memory_bytes(prompt_lengths, dtype_bytes)
+        if num_engines < 1:
+            raise ValueError(f"num_engines must be >= 1, got {num_engines}")
+        if num_gpus_per_engine < 1:
+            raise ValueError(f"num_gpus_per_engine must be >= 1, got {num_gpus_per_engine}")
 
+        if not prompt_lengths:
+            return 0
+
+        def _split_evenly(seq: list[int], parts: int) -> list[list[int]]:
+            base, extra = divmod(len(seq), parts)
+            result: list[list[int]] = []
+            start = 0
+            for i in range(parts):
+                size = base + (1 if i < extra else 0)
+                result.append(seq[start : start + size])
+                start += size
+            return result
+
+        prompt_chunks = _split_evenly(prompt_lengths, num_engines)
+
+        response_chunks: list[list[int] | None]
         if response_lengths is not None:
             assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
                 f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
             )
+            response_chunks = []
+            response_idx = 0
+            for chunk in prompt_chunks:
+                num_responses = len(chunk) * samples_per_prompt
+                response_chunks.append(response_lengths[response_idx : response_idx + num_responses])
+                response_idx += num_responses
+        else:
+            response_chunks = [None] * num_engines
 
-            # Pass original prompt_lengths with samples_per_prompt to correctly handle shared KV cache
-            total += self.decode_memory_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
+        per_engine_totals: list[int] = []
+        for chunk_prompts, chunk_responses in zip(prompt_chunks, response_chunks):
+            if not chunk_prompts:
+                per_engine_totals.append(0)
+                continue
 
-        return total
+            total = self.prefill_memory_bytes(chunk_prompts, dtype_bytes)
+            if chunk_responses is not None:
+                total += self.decode_memory_bytes(chunk_prompts, chunk_responses, samples_per_prompt, dtype_bytes)
+            per_engine_totals.append(total)
+
+        if len(per_engine_totals) < num_engines:
+            per_engine_totals.extend([0] * (num_engines - len(per_engine_totals)))
+
+        avg_bytes_per_engine = math.ceil(sum(per_engine_totals) / num_engines)
+        return avg_bytes_per_engine
+
+    def calculate_mfu(
+        self,
+        prompt_lengths: list[int],
+        generation_time: float,
+        response_lengths: list[int] | None = None,
+        samples_per_prompt: int = 1,
+        num_gpus: int = 1,
+    ) -> float:
+        total_flops = self.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
+        flops_per_second = total_flops / generation_time if generation_time > 0 else 0
+        total_device_flops = self.device_flops * num_gpus
+        return 100 * flops_per_second / total_device_flops
+
+    def calculate_mbu(
+        self,
+        prompt_lengths: list[int],
+        generation_time: float,
+        response_lengths: list[int] | None = None,
+        samples_per_prompt: int = 1,
+        num_engines: int = 1,
+        num_gpus_per_engine: int = 1,
+    ) -> float:
+        total_memory_bytes = self.memory_bytes(
+            prompt_lengths,
+            num_engines,
+            num_gpus_per_engine,
+            response_lengths=response_lengths,
+            samples_per_prompt=samples_per_prompt,
+        )
+        bytes_per_second = total_memory_bytes / generation_time if generation_time > 0 else 0
+        # Normalize against total system bandwidth. This is correct because prompt_lengths and
+        # generation_time represent aggregated data from all engines already.
+        total_device_bandwidth = self.device_memory_bandwidth * num_engines * num_gpus_per_engine
+        return 100 * bytes_per_second / total_device_bandwidth
+
+    def calculate_actor_utilization(
+        self,
+        prompt_lengths: list[int],
+        response_lengths: list[int],
+        total_generation_time: float,
+        samples_per_prompt: int,
+        num_engines: int,
+        num_gpus_per_engine: int,
+    ) -> dict[str, float]:
+        actor_mfu = self.calculate_mfu(
+            prompt_lengths,
+            total_generation_time,
+            response_lengths=response_lengths,
+            samples_per_prompt=samples_per_prompt,
+            num_gpus=num_engines * num_gpus_per_engine,
+        )
+        actor_mbu = self.calculate_mbu(
+            prompt_lengths,
+            total_generation_time,
+            response_lengths=response_lengths,
+            samples_per_prompt=samples_per_prompt,
+            num_engines=num_engines,
+            num_gpus_per_engine=num_gpus_per_engine,
+        )
+
+        check_calculation(
+            actor_mfu,
+            "Actor MFU",
+            self,
+            total_generation_time,
+            prompt_lengths,
+            response_lengths,
+            samples_per_prompt,
+            num_engines,
+            num_gpus_per_engine,
+        )
+
+        check_calculation(
+            actor_mbu,
+            "Actor MBU",
+            self,
+            total_generation_time,
+            prompt_lengths,
+            response_lengths,
+            samples_per_prompt,
+            num_engines,
+            num_gpus_per_engine,
+        )
+
+        return {"mfu": actor_mfu, "mbu": actor_mbu}
+
+    def calculate_learner_utilization(
+        self,
+        prompt_lengths: list[int],
+        response_lengths: list[int],
+        training_time: float,
+        samples_per_prompt: int,
+        num_training_gpus: int,
+    ) -> dict[str, float]:
+        total_sequence_lengths = [
+            prompt_lengths[i // samples_per_prompt] + response_len for i, response_len in enumerate(response_lengths)
+        ]
+
+        training_flops = self.flops(
+            prompt_lengths=total_sequence_lengths, response_lengths=None, samples_per_prompt=1, is_training=True
+        )
+
+        training_flops_per_second = training_flops / training_time
+        total_training_device_flops = self.device_flops * num_training_gpus
+        learner_mfu = 100 * training_flops_per_second / total_training_device_flops
+
+        check_calculation(
+            learner_mfu, "Learner MFU", self, training_time, total_sequence_lengths, None, 1, 1, num_training_gpus
+        )
+
+        return {"mfu": learner_mfu}
+
+    def approximate_learner_utilization(
+        self, total_tokens: int, avg_sequence_length: float, training_time: float, num_training_gpus: int
+    ) -> dict[str, float]:
+        num_sequences = int(total_tokens / avg_sequence_length)
+        sequence_lengths = [int(avg_sequence_length)] * num_sequences
+
+        training_flops = self.flops(
+            prompt_lengths=sequence_lengths, response_lengths=None, samples_per_prompt=1, is_training=True
+        )
+
+        training_flops_per_second = training_flops / training_time
+        total_training_device_flops = self.device_flops * num_training_gpus
+        learner_mfu = 100 * training_flops_per_second / total_training_device_flops
+
+        return {"mfu": learner_mfu}
 
 
 def get_device_name(device_name: str) -> str:
-    tokens = device_name.lower().replace("-", " ").split()
+    """Normalize a GPU device name to a standard key used in GPU_SPECS.
 
-    filtered = [val for val in tokens if val not in ["nvidia", "80gb", "40gb", "48gb", "hbm3", "rtx", "sxm4", "pcie"]]
+    The function converts device names from torch.cuda.get_device_name() format
+    to a standardized key that can be used to look up GPU specifications.
 
-    for token in filtered:
-        if token in GPU_SPECS:
-            return token
+    Args:
+        device_name: Raw device name string (e.g., "NVIDIA H100 80GB HBM3")
 
-    raise ValueError(f"Unsupported device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}")
+    Returns:
+        Standardized GPU key (e.g., "h100")
+
+    Raises:
+        ValueError: If the device name is not recognized
+
+    Examples:
+        >>> get_device_name("NVIDIA H100 80GB HBM3")
+        'h100'
+
+        >>> get_device_name("NVIDIA RTX PRO 6000 Blackwell Server Edition")
+        'pro 6000'
+    """
+    normalized_device_name = device_name.lower().replace("-", " ")
+
+    for key in GPU_SPECS:
+        if key in normalized_device_name:
+            return key
+    raise ValueError(
+        f"Unknown device name: {device_name}. Expected one of: {list(GPU_SPECS.keys())}. "
+        f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the device you need. In the interim, you can add the specs for your device using the name {normalized_device_name} to the GPU_SPECS dictionary in utils.py."
+    )
+
+
+def calculate_utilization_metrics(
+    model_dims: ModelDims,
+    prompt_lengths: list[int],
+    response_lengths: list[int],
+    total_generation_time: float,
+    samples_per_prompt: int,
+    num_engines: int,
+    num_gpus_per_engine: int,
+    training_time: float,
+    num_training_gpus: int,
+) -> dict:
+    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+    )
+
+    actor_metrics = model_dims.calculate_actor_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        total_generation_time=total_generation_time,
+        samples_per_prompt=samples_per_prompt,
+        num_engines=num_engines,
+        num_gpus_per_engine=num_gpus_per_engine,
+    )
+
+    learner_metrics = model_dims.calculate_learner_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        training_time=training_time,
+        samples_per_prompt=samples_per_prompt,
+        num_training_gpus=num_training_gpus,
+    )
+
+    utilization_metrics = {f"actor_{k}": v for k, v in actor_metrics.items()}
+    utilization_metrics["learner_mfu"] = learner_metrics["mfu"]
+
+    return utilization_metrics
+
+
+def check_calculation(
+    percentage: float,
+    metric_name: str,
+    model_dims: ModelDims,
+    timing: float,
+    prompt_lengths: list[int],
+    response_lengths: list[int] | None,
+    samples_per_prompt: int,
+    num_engines: int,
+    num_gpus_per_engine: int,
+) -> None:
+    if percentage <= 100:
+        return
+
+    import json
+
+    full_device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+
+    avg_prompt_length = sum(prompt_lengths) / len(prompt_lengths)
+    avg_response_length = sum(response_lengths) / len(response_lengths) if response_lengths else 0
+
+    test_case_json = {
+        "model_name": "REPLACE_WITH_MODEL_NAME",
+        "total_generation_time": timing,
+        "samples_per_prompt": samples_per_prompt,
+        "num_engines": num_engines,
+        "num_gpus_per_engine": num_gpus_per_engine,
+        "training_time": "REPLACE_WITH_TRAINING_TIME",
+        "num_training_gpus": "REPLACE_WITH_NUM_TRAINING_GPUS",
+        "prompt_lengths": prompt_lengths,
+        "response_lengths": response_lengths,
+    }
+
+    warning_message = (
+        f"{metric_name} exceeded 100%: {percentage:.2f}%\n"
+        f"\n"
+        f"{model_dims}\n"
+        f"\n"
+        f"Timing and GPU info:\n"
+        f"  timing: {timing:.6f}s\n"
+        f"  num_engines: {num_engines}\n"
+        f"  num_gpus_per_engine: {num_gpus_per_engine}\n"
+        f"  full_device_name: {full_device_name}\n"
+        f"\n"
+        f"Batch/sequence info:\n"
+        f"  num_prompts: {len(prompt_lengths)}\n"
+        f"  samples_per_prompt: {samples_per_prompt}\n"
+        f"  avg_prompt_length: {avg_prompt_length:.1f}\n"
+        f"  avg_response_length: {avg_response_length:.1f}\n"
+        f"\n"
+        f"To reproduce this calculation, use these exact parameters:\n"
+        f"  prompt_lengths = {prompt_lengths}\n"
+        f"  response_lengths = {response_lengths}\n"
+        f"  timing = {timing}\n"
+        f"  samples_per_prompt = {samples_per_prompt}\n"
+        f"  num_engines = {num_engines}\n"
+        f"  num_gpus_per_engine = {num_gpus_per_engine}\n"
+        f"\n"
+        f"JSON format for test case (copy this to mbu_reproduction_cases.json):\n"
+        f"{json.dumps(test_case_json, indent=2)}\n"
+        f"\n"
+        f"This may indicate an issue with the MFU/MBU calculation logic or GPU specifications.\n"
+        f"Please raise an issue at https://github.com/allenai/open-instruct/issues with the above information."
+    )
+
+    logger.warning(warning_message)
+
+
+def combine_reward_metrics(reward_metrics: list[dict[str, Any]]) -> dict[str, Any]:
+    """Assumes same number of metric_records in each dict in the list"""
+    buckets = defaultdict(list)
+    for metrics in reward_metrics:
+        for key, value in metrics.items():
+            buckets[key].append(value)
+
+    combined: dict[str, Any] = {}
+    for key, records in buckets.items():
+        sample_value = records[0]
+        if isinstance(sample_value, np.ndarray):
+            combined[key] = [x for value in records for x in value]
+        elif isinstance(sample_value, (list | tuple)):
+            concatenated: list[Any] = []
+            for value in records:
+                concatenated.extend(list(value))
+            combined[key] = concatenated
+        elif isinstance(sample_value, (int | float | bool | np.integer | np.floating)):
+            # combine and get average value
+            combined[key] = sum(value for value in records) / len(records) if len(records) > 0 else sample_value
+        else:
+            # Fallback: keep the latest value if aggregation strategy is unclear.
+            combined[key] = records[-1]
+    return combined
+
+
+def send_slack_message(message: str) -> None:
+    """Sends a message to a Slack webhook if configured.
+
+    Args:
+        message: Message body to send to Slack.
+    """
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK")
+    if not slack_webhook_url:
+        logger.warning("SLACK_WEBHOOK environment variable not set. Skipping Slack alert.")
+        return
+
+    beaker_url = get_beaker_experiment_url()
+    beaker_suffix = f" Check it out: {beaker_url}" if beaker_url else ""
+
+    payload = {"text": f"{message}{beaker_suffix}"}
+    try:
+        response = requests.post(slack_webhook_url, json=payload)
+        if not response.ok:
+            logger.warning("Failed to send Slack alert with status %s: %s", response.status_code, response.text)
+    except requests.RequestException as exc:
+        logger.warning("Failed to send Slack alert due to network error: %s", exc)
+
+
+def get_beaker_experiment_url() -> str | None:
+    """If the env var BEAKER_WORKLOAD_ID is set, gets the current experiment URL."""
+    try:
+        beaker_client = beaker.Beaker.from_env()
+        workload = beaker_client.workload.get(os.environ["BEAKER_WORKLOAD_ID"])
+        url = beaker_client.experiment.url(workload.experiment)
+        return url
+    except Exception:
+        return None
+
+
+@dataclass
+class UlyssesSPSplitter:
+    """Splits CollatedBatchData for Ulysses sequence parallelism.
+
+    Adapted from the UlyssesSPDataLoaderAdapter
+    (https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py#L427)
+    Rather than wrapping a dataloader, we just want to split a given batch into the shards across sp group.
+    """
+
+    sp_rank: int
+    sp_group: "torch.distributed.distributed_c10d.ProcessGroup"
+    sp_world_size: int
+    device: torch.device
+    pad_token_id: int
+
+    def split_collated_batch(self, data: data_types.CollatedBatchData) -> data_types.CollatedBatchData:
+        """Get this rank's shard of a CollatedBatchData for sequence parallelism."""
+        # Find max sequence length across all ranks to ensure consistent padding
+        local_max = max(t.shape[-1] for t in data.query_responses)
+        local_seqlen = torch.tensor([local_max], dtype=torch.int64, device=self.device)
+        seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
+        dist.all_gather(seqlens, local_seqlen, group=self.sp_group)
+        max_seqlen = max(x.item() for x in seqlens)
+
+        # Round up to be divisible by sp_world_size
+        max_seqlen = ((max_seqlen + self.sp_world_size - 1) // self.sp_world_size) * self.sp_world_size
+        chunk_len = max_seqlen // self.sp_world_size
+
+        # Compute start and end indices for this rank's chunk
+        start_idx = chunk_len * self.sp_rank
+        end_idx = chunk_len * (self.sp_rank + 1)
+
+        # slice and pad tensors for this sp rank
+        kwargs = {}
+        for field in dataclasses.fields(data):
+            if field.name == "query_responses":
+                pad_value = self.pad_token_id
+            elif field.name == "vllm_logprobs":
+                pad_value = INVALID_LOGPROB
+            else:
+                pad_value = 0
+            sharded = []
+            for t in getattr(data, field.name):
+                # For all tensors in batch, pad tensor to max_seqlen, then slice to get this SP rank's chunk
+                padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
+                sharded.append(padded_sliced)
+            kwargs[field.name] = sharded
+
+        return data_types.CollatedBatchData(**kwargs)
+
+
+def get_denominator(loss_denominator: str | float) -> float | str:
+    """
+    Validates and converts the loss_denominator argument.
+    """
+    if loss_denominator == "token":
+        return "token"
+
+    val = float(loss_denominator)
+    if val <= 0:
+        raise ValueError(f"loss_denominator must be greater than 0 if not 'token', got: {loss_denominator}")
+    return val

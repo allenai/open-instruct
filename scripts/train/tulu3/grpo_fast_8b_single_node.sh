@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -12,7 +12,7 @@ python mason.py \
     --num_unique_prompts_rollout 64 \
     --num_samples_per_prompt_rollout 16 \
     --try_launch_beaker_eval_jobs_on_weka \
-    --kl_estimator kl3 \
+    --kl_estimator 2 \
     --learning_rate 5e-7 \
     --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
     --dataset_mixer_list_splits train \

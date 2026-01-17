@@ -22,16 +22,16 @@ sudo sed -i 's/worker_connections [0-9]*;/worker_connections 100000;/' /etc/ngin
 # Function to create the Nginx configuration file on head node
 setup_nginx_head() {
     local config_file="/etc/nginx/conf.d/api_loadbalancer.conf"
-    
+
     # Create upstream entries for all nodes
     upstream_entries=""
-    
+
     # Add local servers
     for ((i=0; i<CODE_SERVER_CPUS; i++)); do
         PORT=$((API_BASE_PORT + i))
         upstream_entries+="    server 127.0.0.1:$PORT;\n"
     done
-    
+
     # Create a proper configuration file
     cat > /tmp/api_loadbalancer.conf << EOF
 upstream api_servers {
@@ -68,25 +68,25 @@ EOF
 # Function to start uvicorn instances on any node
 start_uvicorn_servers() {
     echo "Starting API servers on $(hostname)"
-    
+
     # Create logs directory
     mkdir -p api_logs
-    
+
     # Start multiple uvicorn instances on separate cores
     for ((i=0; i<CODE_SERVER_CPUS; i++)); do
         CPU_ID=$((STARTING_CPU + i))
         PORT=$((API_BASE_PORT + i))
-        
+
         echo "Starting API server on core $CPU_ID, port $PORT"
-        
+
         # Use absolute path and better command structure
         cd "$REPO_PATH"
-        
+
         # Start uvicorn with better error handling
         taskset -c $CPU_ID nohup uvicorn open_instruct.code_utils.api:app --host 0.0.0.0 --port $PORT > api_logs/api_server_$PORT.log 2>&1 &
         SERVER_PID=$!
         echo "API server started on port $PORT with PID $SERVER_PID"
-        
+
         # Give it a moment to start
         if [ $i -eq 0 ]; then
             echo "Waiting for first server to start..."
@@ -100,7 +100,7 @@ start_uvicorn_servers() {
             fi
         fi
     done
-    
+
     echo "Waiting for all servers to start up..."
     sleep 5
 }

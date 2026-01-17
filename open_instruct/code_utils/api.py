@@ -43,12 +43,12 @@ class TestRequest(BaseModel):
 
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
 @app.post("/test_program")
-async def test_program(request: TestRequest):
+async def test_program(request: TestRequest) -> dict[str, list[int] | list[float]]:
     try:
         # logger.info("Executing tests for program: %s", request.program)
         decoded_tests = decode_tests(request.tests)
@@ -58,11 +58,11 @@ async def test_program(request: TestRequest):
         return {"results": results, "runtimes": runtimes}
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/test_program_stdio")
-async def test_program_stdio(request: TestRequest):
+async def test_program_stdio(request: TestRequest) -> dict[str, list[int] | list[float]]:
     # run tests with the stdio format
     try:
         decoded_tests = decode_tests(request.tests)
@@ -72,4 +72,4 @@ async def test_program_stdio(request: TestRequest):
         return {"results": results, "runtimes": runtimes}
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

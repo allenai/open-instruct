@@ -13,6 +13,7 @@ from huggingface_hub import HfApi
 #   "beaker_datasets": []
 # }
 
+
 def take_and_check_valid_input(prompt, valid_values):
     while True:
         print(prompt, end=" ")
@@ -22,6 +23,7 @@ def take_and_check_valid_input(prompt, valid_values):
         else:
             print(f"Invalid input. Please enter one of {valid_values}.")
 
+
 print("Welcome! This script will upload metadata for a run if you need. Please provide the following information.")
 print("Please ensure you have set a write access HF token in the HF_TOKEN environment variable.")
 print("Model name (e.g. Meta-Llama-3.1-8B-Instruct):", end=" ")
@@ -30,7 +32,9 @@ valid_model_types = ["sft", "dpo", "ppo", "merge", "reject", "online-dpo"]
 model_type = take_and_check_valid_input(f"Model type {valid_model_types}:", valid_model_types)
 wandb_link = input("Link to wandb run: ")
 beaker_datasets = [input("Beaker dataset: ")]
-base_model = input("Base model HF name (e.g. meta-llama/Meta-Llama-3.1-8B, or the starting SFT checkpoint for DPO/etc models): ")
+base_model = input(
+    "Base model HF name (e.g. meta-llama/Meta-Llama-3.1-8B, or the starting SFT checkpoint for DPO/etc models): "
+)
 print("Thanks! Uploading metadata...")
 # construct metadata
 metadata = {
@@ -39,7 +43,7 @@ metadata = {
     "datasets": [],
     "base_model": base_model,
     "wandb_path": wandb_link,
-    "beaker_datasets": beaker_datasets
+    "beaker_datasets": beaker_datasets,
 }
 
 with open("metadata.json", "w") as f:

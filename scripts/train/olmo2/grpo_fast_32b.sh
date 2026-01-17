@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -11,7 +11,7 @@ python mason.py \
     --beta 0.0 \
     --num_unique_prompts_rollout 256 \
     --num_samples_per_prompt_rollout 64 \
-    --kl_estimator kl3 \
+    --kl_estimator 2 \
     --learning_rate 5e-7 \
     --dataset_mixer_list ai2-adapt-dev/math_ground_truth_zs 1.0 \
     --dataset_mixer_list_splits train \

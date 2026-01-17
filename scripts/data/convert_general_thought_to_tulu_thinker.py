@@ -10,9 +10,13 @@ import random
 
 from datasets import Dataset, load_dataset
 
+import open_instruct.utils as open_instruct_utils
+
 random_gen = random.Random(42)
 
-ds = load_dataset("natolambert/GeneralThought-430K-filtered", split="train")
+ds = load_dataset(
+    "natolambert/GeneralThought-430K-filtered", split="train", num_proc=open_instruct_utils.max_num_processes()
+)
 new_data = []
 
 for sample in ds:
@@ -25,11 +29,7 @@ for sample in ds:
         {"role": "user", "content": question},
         {"role": "assistant", "content": f"<think>{model_reasoning}</think><answer>{model_answer}</answer>"},
     ]
-    new_data.append({
-        "messages": messages,
-        "ground_truth": model_answer,
-        "dataset": "tulu_thinker"
-    })
+    new_data.append({"messages": messages, "ground_truth": model_answer, "dataset": "tulu_thinker"})
 
 random_gen.shuffle(new_data)
 dataset = Dataset.from_list(new_data)

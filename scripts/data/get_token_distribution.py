@@ -7,6 +7,8 @@ from datasets import load_dataset
 from matplotlib.patches import Patch
 from transformers import AutoTokenizer
 
+import open_instruct.utils as open_instruct_utils
+
 """
 Example commands
 SFT plot in paper:
@@ -16,18 +18,21 @@ python scripts/data/get_token_distribution.py --dataset allenai/tulu-v2-sft-mixt
 python scripts/data/get_token_distribution.py --dataset teknium/OpenHermes-2.5 --column_name conversations --log_x --not_log_y --automatic_binning --hide_legend --dont_split_histogram --set_max_y 60000
 """
 
-def plot_token_length_histogram(dataset_name,
-                                column_name='messages',
-                                tokenizer_name="baseten/Meta-Llama-3-tokenizer",
-                                num_proc=16,
-                                automatic_binning=False,
-                                log_x=False,
-                                not_log_y=False,
-                                hide_legend=False,
-                                plot_num_turns=False,
-                                dont_split_histogram=False,
-                                set_max_y=0,
-                                min_category_count=0):
+
+def plot_token_length_histogram(
+    dataset_name,
+    column_name="messages",
+    tokenizer_name="baseten/Meta-Llama-3-tokenizer",
+    num_proc=16,
+    automatic_binning=False,
+    log_x=False,
+    not_log_y=False,
+    hide_legend=False,
+    plot_num_turns=False,
+    dont_split_histogram=False,
+    set_max_y=0,
+    min_category_count=0,
+):
     DATASET_NAME_MAPPING = {
         # EXTRA DATASETS
         # "NuminaMath-TIR": "NuminaMath-TIR",
@@ -58,22 +63,18 @@ def plot_token_length_histogram(dataset_name,
         "personahub_math_v5_regen_149960": "Tulu 3 Persona MATH",
         "tulu-3-sft-personas-math-grade": "Tulu 3 Persona Grade School Math",
         "personahub_code_v2_34999": "Tulu 3 Persona Code",
-
         # GENERAL DATASETS
         "flan_v2_converted": "FLAN v2",
         "no_robots_converted": "No Robots",
         "oasst1_converted": "OASST1",
         "tulu_v3.9_wildchat_100k": "WildChat",
-
         # MATH DATASETS
         "numinamath_tir_math_decontaminated": "NuminaMath-TIR",
         "tulu_v3.9_open_math_2_gsm8k_50k": "OpenMathInstruct2",
-
         # SAFETY
         "coconot_converted": "CoCoNot",
         "tulu_v3.9_wildjailbreak_decontaminated_50k": "WildJailbreak",
         "tulu_v3.9_synthetic_finalresp_wildguardmixtrain_decontaminated_50k": "WildGuard",
-
         # OTHER
         "evol_codealpaca_heval_decontaminated": "Evol CodeAlpaca",
         "tulu_hard_coded_repeated_10": "Hardcoded",
@@ -91,16 +92,16 @@ def plot_token_length_histogram(dataset_name,
         # Modifications of WildChat data to preferences with
         "personahub_if_pref_data_manualseed_v2_19890": "Tulu 3 Persona IF Preferences",
         # Custom IF Eval data with Llama 3.1 405B for chosen and Tulu 2 as rejected
-        "Llama-3.1-if_taxonomy_tulu": "Tulu 3 IFEval"
+        "Llama-3.1-if_taxonomy_tulu": "Tulu 3 IFEval",
     }
 
     # swap dataset mapping if preferences
-    if column_name in ['chosen', 'rejected']:
+    if column_name in ["chosen", "rejected"]:
         DATASET_NAME_MAPPING = DATASET_NAME_MAPPING_PREF
 
     print("Running analytics...")
     # Load the dataset
-    dataset = load_dataset(dataset_name)
+    dataset = load_dataset(dataset_name, num_proc=open_instruct_utils.max_num_processes())
 
     # Convert "from"/"value" format to "role"/"content" if needed
     def convert_to_messages(sample, column_name=column_name):
@@ -112,22 +113,22 @@ def plot_token_length_histogram(dataset_name,
         sample[column_name] = new_messages
         return sample
 
-    if "from" in dataset['train'][0][column_name][0].keys():
+    if "from" in dataset["train"][0][column_name][0].keys():
         dataset = dataset.map(convert_to_messages, num_proc=num_proc)
 
     # If allenai/tulu in name, turn on categories
-    TRACK_CATEGORIES = "allenai/tulu" in dataset_name or "source" in dataset['train'].column_names
+    TRACK_CATEGORIES = "allenai/tulu" in dataset_name or "source" in dataset["train"].column_names
     if dont_split_histogram:
         TRACK_CATEGORIES = False
 
     if plot_num_turns:
         # Count turns (number of messages divided by 2)
         def process_sample(example):
-            example['metric_value'] = len(example[column_name]) // 2
+            example["metric_value"] = len(example[column_name]) // 2
             return example
 
-        xlabel = 'Number of turns in conversation'
-        metric_name = 'turns'
+        xlabel = "Number of turns in conversation"
+        metric_name = "turns"
     else:
         # Process tokens
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
@@ -139,31 +140,29 @@ def plot_token_length_histogram(dataset_name,
 
             def apply_template(self, example):
                 tokenized = self.tokenizer.apply_chat_template(example[self.column])
-                example['metric_value'] = len(tokenized)
+                example["metric_value"] = len(tokenized)
                 return example
 
         process_sample = MapColumn(column_name, tokenizer).apply_template
-        xlabel = 'Number of tokens in sample'
-        metric_name = 'tokens'
+        xlabel = "Number of tokens in sample"
+        metric_name = "tokens"
 
     # Process the dataset
     print(f"Processing {'turns' if plot_num_turns else 'tokens'} in conversations...")
-    processed_dataset = dataset['train'].map(
-        process_sample,
-        num_proc=num_proc,
-        desc=f"Processing {'turns' if plot_num_turns else 'tokens'}"
+    processed_dataset = dataset["train"].map(
+        process_sample, num_proc=num_proc, desc=f"Processing {'turns' if plot_num_turns else 'tokens'}"
     )
 
     # Extract metric values and categories
-    metric_values = processed_dataset['metric_value']
+    metric_values = processed_dataset["metric_value"]
 
     if TRACK_CATEGORIES:
         # if source in dataset, take those as categories
-        if "source" in dataset['train'].column_names:
-            categories = processed_dataset['source']
+        if "source" in dataset["train"].column_names:
+            categories = processed_dataset["source"]
         else:
-            categories = processed_dataset['id']
-            categories = [category.rsplit('_', 1)[0] for category in categories]
+            categories = processed_dataset["id"]
+            categories = [category.rsplit("_", 1)[0] for category in categories]
 
             repeated_ids = ["sharegpt"]
             for repeated_id in repeated_ids:
@@ -175,8 +174,12 @@ def plot_token_length_histogram(dataset_name,
         unique_categories = np.unique(categories)
         # if min_category_count is set, combine categories with less than min_category_count samples to "Other"
         if min_category_count > 0:
-            category_counts = {category: sum([1 for c in categories if c == category]) for category in unique_categories}
-            categories = [category if category_counts[category] >= min_category_count else "Other" for category in categories]
+            category_counts = {
+                category: sum([1 for c in categories if c == category]) for category in unique_categories
+            }
+            categories = [
+                category if category_counts[category] >= min_category_count else "Other" for category in categories
+            ]
             unique_categories = np.unique(categories)
             # add other to category counts
             DATASET_NAME_MAPPING["Other"] = "Other"
@@ -205,14 +208,10 @@ def plot_token_length_histogram(dataset_name,
 
     # Create figure and axis
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
 
-    plt.rcParams.update({
-        'font.size': 38,
-        'font.family': 'DeJavu Serif',
-        'font.serif': ['Times New Roman']
-    })
+    plt.rcParams.update({"font.size": 38, "font.family": "DeJavu Serif", "font.serif": ["Times New Roman"]})
 
     print("Plotting histogram...")
     # Prepare histogram bins
@@ -234,30 +233,40 @@ def plot_token_length_histogram(dataset_name,
             bins = [0, 2000, 4000, 6000, 8000, 10000, 12000]
 
     if TRACK_CATEGORIES:
-        bin_counts = {category: np.histogram(category_metric_values[category], bins=bins)[0]
-                     for category in category_colors}
+        bin_counts = {
+            category: np.histogram(category_metric_values[category], bins=bins)[0] for category in category_colors
+        }
         bottom_counts = np.zeros(len(bins) - 1)
 
         for category, color in category_colors.items():
             counts = bin_counts[category]
-            ax.bar(bins[:-1], counts, width=np.diff(bins), color=color, alpha=1.0,
-                  edgecolor='black', label=category, align='edge', bottom=bottom_counts)
+            ax.bar(
+                bins[:-1],
+                counts,
+                width=np.diff(bins),
+                color=color,
+                alpha=1.0,
+                edgecolor="black",
+                label=category,
+                align="edge",
+                bottom=bottom_counts,
+            )
             bottom_counts += counts
     else:
-        n, bins, patches = ax.hist(metric_values, bins=bins, color='grey', edgecolor='black')
+        n, bins, patches = ax.hist(metric_values, bins=bins, color="grey", edgecolor="black")
 
     # Set axis properties
     if not automatic_binning and not plot_num_turns:
         ax.set_xlim(0, 12000)
         ax.set_xticks(bins)
         ax.set_xticks(np.array(bins[1:]) - 1000)
-        ax.set_xticklabels([f'{int(center)}' for center in bins[1:]])
+        ax.set_xticklabels([f"{int(center)}" for center in bins[1:]])
     else:
         if log_x and not plot_num_turns:
-            ax.set_xscale('log')
-            ticks = [16, 128, 512, 2048, 8192, 16384*2]
+            ax.set_xscale("log")
+            ticks = [16, 128, 512, 2048, 8192, 16384 * 2]
             ax.set_xticks(ticks)
-            ax.set_xticklabels([f'{tick}' for tick in ticks])
+            ax.set_xticklabels([f"{tick}" for tick in ticks])
         else:
             if plot_num_turns:
                 ax.set_xticks(bins[::2])  # Show every other tick for turns
@@ -273,7 +282,7 @@ def plot_token_length_histogram(dataset_name,
                 ax.set_xticks(major_ticks)
 
     if log_x and not plot_num_turns:
-        xlabel += ' (log scale)'
+        xlabel += " (log scale)"
     ax.set_xlabel(xlabel)
 
     # Set y-axis properties
@@ -295,7 +304,7 @@ def plot_token_length_histogram(dataset_name,
         ax.set_yticks(major_ticks)
     else:
         # Log scale
-        ax.set_yscale('log')
+        ax.set_yscale("log")
         max_count = max(metric_values)
         max_power = int(np.ceil(np.log10(max_count)))
         major_ticks = [10**i for i in range(max_power + 1)]
@@ -305,10 +314,10 @@ def plot_token_length_histogram(dataset_name,
                 minor_ticks.append(factor * 10**power)
         ax.set_yticks(major_ticks)
         ax.set_yticks(minor_ticks, minor=True)
-        ax.set_yticklabels([f'$10^{int(np.log10(tick))}$' for tick in major_ticks])
-        ax.tick_params(axis='y', which='minor', length=4)
-        ax.tick_params(axis='y', which='major', length=8)
-        ax.set_ylabel('Count (log scale)')
+        ax.set_yticklabels([f"$10^{int(np.log10(tick))}$" for tick in major_ticks])
+        ax.tick_params(axis="y", which="minor", length=4)
+        ax.tick_params(axis="y", which="major", length=8)
+        ax.set_ylabel("Count (log scale)")
 
     # Add legend
     if TRACK_CATEGORIES and not hide_legend:
@@ -343,26 +352,38 @@ def plot_token_length_histogram(dataset_name,
     print(f"Min {metric_name}: {min(metric_values)}")
 
     # Save plot
-    dataset_name = dataset_name.split('/')[-1]
-    metric_suffix = 'turns' if plot_num_turns else 'tokens'
+    dataset_name = dataset_name.split("/")[-1]
+    metric_suffix = "turns" if plot_num_turns else "tokens"
     plt.savefig(f"output/{metric_suffix}_histogram_{dataset_name}_{column_name}.pdf")
 
     return fig, ax
 
+
 def main():
     parser = argparse.ArgumentParser(description="Plot token length or turns histogram from Hugging Face datasets")
-    parser.add_argument('--dataset', type=str, required=True, help="Name of the Hugging Face dataset to load")
-    parser.add_argument('--column_name', type=str, default='messages', help="Column to extract text from (default: messages)")
-    parser.add_argument('--tokenizer', type=str, default='baseten/Meta-Llama-3-tokenizer', help="Tokenizer to use (default: Meta-Llama-3)")
-    parser.add_argument('--num_proc', type=int, default=16, help="Number of processes for parallel processing (default: 16)")
-    parser.add_argument('--automatic_binning', action='store_true', help="Use automatic binning for the histogram")
-    parser.add_argument('--log_x', action='store_true', help="Use log scale for x-axis")
-    parser.add_argument('--not_log_y', action='store_true', help="Use log scale for y-axis")
-    parser.add_argument('--hide_legend', action='store_true', help="Hide the legend")
-    parser.add_argument('--plot_num_turns', action='store_true', help="Plot number of turns instead of token length")
-    parser.add_argument('--dont_split_histogram', action='store_true', help="Unicolor histogram")
-    parser.add_argument('--set_max_y', type=int, default=0, help="Set max y value")
-    parser.add_argument('--min_category_count', type=int, default=0, help="Minimum number of samples for a category to be included")
+    parser.add_argument("--dataset", type=str, required=True, help="Name of the Hugging Face dataset to load")
+    parser.add_argument(
+        "--column_name", type=str, default="messages", help="Column to extract text from (default: messages)"
+    )
+    parser.add_argument(
+        "--tokenizer",
+        type=str,
+        default="baseten/Meta-Llama-3-tokenizer",
+        help="Tokenizer to use (default: Meta-Llama-3)",
+    )
+    parser.add_argument(
+        "--num_proc", type=int, default=16, help="Number of processes for parallel processing (default: 16)"
+    )
+    parser.add_argument("--automatic_binning", action="store_true", help="Use automatic binning for the histogram")
+    parser.add_argument("--log_x", action="store_true", help="Use log scale for x-axis")
+    parser.add_argument("--not_log_y", action="store_true", help="Use log scale for y-axis")
+    parser.add_argument("--hide_legend", action="store_true", help="Hide the legend")
+    parser.add_argument("--plot_num_turns", action="store_true", help="Plot number of turns instead of token length")
+    parser.add_argument("--dont_split_histogram", action="store_true", help="Unicolor histogram")
+    parser.add_argument("--set_max_y", type=int, default=0, help="Set max y value")
+    parser.add_argument(
+        "--min_category_count", type=int, default=0, help="Minimum number of samples for a category to be included"
+    )
     args = parser.parse_args()
 
     fig, ax = plot_token_length_histogram(
@@ -377,8 +398,9 @@ def main():
         args.plot_num_turns,
         args.dont_split_histogram,
         args.set_max_y,
-        args.min_category_count
+        args.min_category_count,
     )
+
 
 if __name__ == "__main__":
     main()

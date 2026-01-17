@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+datasets
+requests
+sympy
+numpy
+pandas
+networkx

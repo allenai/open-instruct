@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/augusta \
     --workspace ai2/tulu-thinker \
     --priority high \
     --image valpy/open_instruct_dev_multi --pure_docker_mode \
@@ -12,7 +12,7 @@ python mason.py \
     --num_unique_prompts_rollout 48 \
     --num_samples_per_prompt_rollout 16 \
     --try_launch_beaker_eval_jobs_on_weka \
-    --kl_estimator kl3 \
+    --kl_estimator 2 \
     --learning_rate 5e-7 \
     --dataset_mixer_list allenai/IF_multi_constraints_upto5 1.0 \
     --dataset_mixer_list_splits train \

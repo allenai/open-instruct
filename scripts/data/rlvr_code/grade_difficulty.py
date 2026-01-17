@@ -10,6 +10,7 @@ It works by:
 
 The expected output from the language model for each problem is a JSON object containing `explanation` and `difficulty`.
 """
+
 import json
 import os
 import time
@@ -18,21 +19,29 @@ from datasets import load_dataset
 from openai import AzureOpenAI
 from pydantic import BaseModel, ConfigDict
 
-datasets = ['saurabh5/open-code-reasoning-rlvr', 'saurabh5/tulu-3-personas-code-rlvr', 'saurabh5/rlvr_acecoder_filtered', 'saurabh5/the-algorithm-python', 'saurabh5/llama-nemotron-rlvr', 'saurabh5/open-code-reasoning-rlvr-stdio']
-MODEL = 'o3'
+import open_instruct.utils as open_instruct_utils
+
+datasets = [
+    "saurabh5/open-code-reasoning-rlvr",
+    "saurabh5/tulu-3-personas-code-rlvr",
+    "saurabh5/rlvr_acecoder_filtered",
+    "saurabh5/the-algorithm-python",
+    "saurabh5/llama-nemotron-rlvr",
+    "saurabh5/open-code-reasoning-rlvr-stdio",
+]
+MODEL = "o3"
 
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
     azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
-    api_version="2024-12-01-preview"
+    api_version="2024-12-01-preview",
 )
 
 WD = os.getcwd()
 TIMESTAMP = int(time.time())
 BATCH_FILE_NAME = f"{WD}/batch_files/{TIMESTAMP}.jsonl"
 os.makedirs(f"{WD}/batch_files", exist_ok=True)
-
 
 
 prompt = r"""
@@ -64,24 +73,29 @@ Here is the solution:
 </solution>
 """
 
+
 class OpenAIStructuredOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     explanation: str
     difficulty: int
 
+
 def get_input(row):
-    return row['messages'][0]['content']
+    return row["messages"][0]["content"]
+
 
 def get_solution(row):
-    if 'rewritten_solution' in row:
-        return row['rewritten_solution']
-    elif 'reference_solution' in row:
-        return row['reference_solution']
+    if "rewritten_solution" in row:
+        return row["rewritten_solution"]
+    elif "reference_solution" in row:
+        return row["reference_solution"]
     else:
-        return row['solution']
+        return row["solution"]
+
 
 def get_id(row):
-    return row['id']
+    return row["id"]
+
 
 def create_batch_file(prompts):
     """Create a batch file in the format required by Azure OpenAI Batch API."""
@@ -102,23 +116,23 @@ def create_batch_file(prompts):
                 "body": {
                     "model": MODEL,
                     "messages": [
-                        {"role": "system", "content": "You are a helpful assistant that can understand code and grade the difficulty of a Python code problem."},
-                        {"role": "user", "content": prompt}
+                        {
+                            "role": "system",
+                            "content": "You are a helpful assistant that can understand code and grade the difficulty of a Python code problem.",
+                        },
+                        {"role": "user", "content": prompt},
                     ],
                     "response_format": {
                         "type": "json_schema",
-                        "json_schema": {
-                            "name": "OpenAIStructuredOutput",
-                            "strict": True,
-                            "schema": schema,
-                        }
+                        "json_schema": {"name": "OpenAIStructuredOutput", "strict": True, "schema": schema},
                     },
                 },
             }
             f.write(json.dumps(batch_request) + "\n")
 
+
 def grade_difficulty(dataset):
-    ds = load_dataset(dataset, split='train')
+    ds = load_dataset(dataset, split="train", num_proc=open_instruct_utils.max_num_processes())
     prompts = []
     for row in ds:
         problem = get_input(row)
@@ -128,20 +142,16 @@ def grade_difficulty(dataset):
     print(f"Created batch file at {BATCH_FILE_NAME}")
 
     print("Submitting batch job to Azure OpenAI...")
-    batch_file = client.files.create(
-        file=open(BATCH_FILE_NAME, "rb"),
-        purpose="batch"
-    )
+    batch_file = client.files.create(file=open(BATCH_FILE_NAME, "rb"), purpose="batch")
 
     batch_job = client.batches.create(
-        input_file_id=batch_file.id,
-        endpoint="/v1/chat/completions",
-        completion_window="24h"
+        input_file_id=batch_file.id, endpoint="/v1/chat/completions", completion_window="24h"
     )
 
     print(f"Batch job submitted with ID: {batch_job.id}")
 
     return batch_job.id
+
 
 if __name__ == "__main__":
     batches = {}

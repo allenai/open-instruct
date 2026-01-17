@@ -28,40 +28,37 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
+import contextlib
 import os
+import pathlib
 from concurrent import futures
+from datetime import timedelta
 
-# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
-# https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
-try:
+with contextlib.suppress(Exception):
     import deepspeed
+    from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
+    from deepspeed.utils import groups
 
-    # @vwxyzjn: when importing on CPU-only machines, we get the following error:
-    # RuntimeError: 0 active drivers ([]). There should only be one.
-    # so we need to catch the exception and do nothing
-    # https://github.com/deepspeedai/DeepSpeed/issues/7028
-except Exception:
-    pass
-
-from open_instruct import utils
+from open_instruct import data_loader as data_loader_lib
+from open_instruct import data_types, utils
+from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
 
 # isort: on
 import asyncio
-import json
+import dataclasses
+import logging
 import math
 import random
 import shutil
 import socket
 import threading
 import time
-from argparse import Namespace
-from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from datetime import timedelta
 from queue import Empty, Full, Queue
-from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
+from typing import Any, Literal
 
+import backoff
 import datasets
 import numpy as np
 import pandas as pd
@@ -70,52 +67,49 @@ import torch
 import torch.distributed as dist
 import torch.utils
 import torch.utils.data
-import vllm
 import wandb
+from datasets import Dataset
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
-from tqdm import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import logger_utils, vllm_utils3
+from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
+from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
-    GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
-    RAW_PROMPT_KEY,
-    VERIFIER_SOURCE_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.ground_truth_utils import (
-    build_all_verifiers,
-    cleanup_all_llm_judge_clients,
-    soft_format_reward_func,
-)
+from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
-    Batch,
     ModelConfig,
-    apply_verifiable_reward,
     disable_dropout_in_model,
     entropy_from_logits,
+    estimate_kl,
     get_olmo3_generation_config,
+    load_ref_policy,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.queue_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics
-from open_instruct.rl_utils2 import Timer, pack_sequences
+from open_instruct.rl_utils import Timer, masked_mean
+from open_instruct.tools.parsers import create_tool_parser
+from open_instruct.tools.tools import TOOL_REGISTRY
+from open_instruct.tools.utils import ParsedToolConfig, ToolsConfig
 from open_instruct.utils import (
+    INVALID_LOGPROB,
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
+    UlyssesSPSplitter,
     _z3_params_to_fetch,
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
@@ -132,56 +126,22 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     ray_get_with_progress,
-    repeat_each,
     sync_gs_bucket,
 )
 
 logger = logger_utils.setup_logger(__name__)
 
-api = HfApi()
-INVALID_LOGPROB = 1.0
-
-
-class ShutdownSentinel:
-    """Sentinel value to signal thread shutdown via queue."""
+CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 
 
 @dataclass
 class Args:
-    # Dataset
-    dataset_mixer_list: List[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
-    """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_eval_list: List[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
-    """A list of datasets (local or HF) to sample from for evaluation."""
-    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
-    """The dataset splits to use for training"""
-    dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: ["test"])
-    """The dataset splits to use for evaluation"""
-    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
-    """The list of transform functions to apply to the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "local"
-    """The mode to use for caching the dataset."""
-    dataset_local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
-    dataset_config_hash: Optional[str] = None
-    """The hash of the dataset configuration."""
-    dataset_config_eval_hash: Optional[str] = None
-    """The hash of the dataset configuration for evaluation."""
-    dataset_skip_cache: bool = False
-    """Whether to skip the cache."""
-    shuffle_eval_dataset: bool = False
-    """Whether to shuffle the evaluation dataset."""
-    max_token_length: int = 512
-    """The maximum token length to use for the dataset"""
-    max_prompt_token_length: int = 256
-    """The maximum prompt token length to use for the dataset"""
-
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
     seed: int = 1
     """Seed of the experiment"""
-    run_name: Optional[str] = None
+    run_name: str | None = None
     """RUNTIME VALUE: A unique name of this run"""
 
     # Optimizer
@@ -207,37 +167,18 @@ class Args:
     """The forward batch size per device (local_micro_batch_size)"""
     total_episodes: int = 100000
     """The total number of episodes in the dataset"""
-    world_size: Optional[int] = None
-    """RUNTIME VALUE: The number of processes (GPUs) to use"""
-    num_training_steps: Optional[int] = None
+    world_size: int | None = None
+    """RUNTIME VALUE: The number of processes (GPUs) to use for training ONLY"""
+    num_training_steps: int | None = None
     """RUNTIME VALUE: The number of training_steps to train"""
     local_eval_every: int = 100
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
     """How many train steps to save the model"""
-    allow_world_padding: bool = False
-    """Whether to allow world padding. This is useful for model sweeps, but wastes compute."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
 
-    # Generation
-    response_length: int = 256
-    """the length of the response"""
-    temperature: float = 0.7
-    """the sampling temperature"""
-    num_unique_prompts_rollout: int = 16
-    """The number of unique prompts during rollout"""
-    num_samples_per_prompt_rollout: int = 4
-    """the number of samples to generate per prompt during rollout, useful for easy-star"""
-    stop_strings: Optional[List[str]] = None
-    """List of strings that stop the generation when they are generated.
-    The returned output will not contain the stop strings."""
-    use_fp8_kv_cache: bool = False
-    """Whether to use fp8 kv cache. This is useful for larger models or olmo."""
-
     # Algorithm
-    async_steps: int = 1
-    """Number of steps ahead to generate responses. Set to 0 to make the code synchronous. Values greater than 0 learn from a policy up to async_steps old like Cleanba (https://arxiv.org/abs/2310.00036)"""
     num_epochs: int = 1
     """the number of epochs to train"""
     num_mini_batches: int = 1
@@ -248,134 +189,73 @@ class Args:
     """the lower clip range"""
     clip_higher: float = 0.2
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
-    inflight_updates: bool = False
-    """Enable immediate stopping of request processing when should_stop is set, allowing for quick pausing and resumption"""
-    kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
+    truncated_importance_sampling_ratio_cap: float = 0.0
+    """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
+    kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
-    pack_length: int = 512
-    """the length of the pack (you should prob set to the max length of the model)"""
-    masked_mean_axis: Optional[int] = None
-    """the axis to compute the mean of the masked values"""
+    loss_denominator: str = "token"
+    """Optional constant denominator for masked_mean; can be "token" or a float value.
+    when "token", the loss is divided by the total number of tokens in the batch (standard LM training).
+    when a float value, the loss is divided by this value (ideally, max tokens in batch, per Dr GRPO).
+    """
     alpha: float = 0.6
     """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
     reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
     used. E.g., [TD3](https://arxiv.org/abs/1802.09477) uses https://github.com/vwxyzjn/cleanrl/blob/dcc289fc6f0bda492fa7360a155262cf826b12a5/cleanrl/td3_continuous_action.py#L269
     """
-    ref_policy_update_freq: Optional[int] = None
+    ref_policy_update_freq: int | None = None
     """How many training steps to take before updating the reference policy."""
-    advantage_normalization_type: Literal["standard", "centered"] = "standard"
-    """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
-    divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
-    DR.GRPO https://arxiv.org/pdf/2503.20783)."""
-    mask_truncated_completions: bool = False
-    """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
-
-    fill_completions: bool = False
-    """Whether to refill the batchsize with after filtering."""
-
+    load_ref_policy: bool = True
+    """Whether to load and use a reference policy for KL penalty calculation."""
+    loss_fn: Literal["dapo", "cispo"] = "dapo"
+    """Whether to use DAPO or CISPO loss function."""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
-
-    # Reward
-    # -- r1 style format reward
-    apply_r1_style_format_reward: bool = False
-    """whether to add the R1 style format reward"""
-    r1_style_format_reward: float = 1.0
-    """the reward value for R1 style format reward"""
-    additive_format_reward: bool = False
-    """whether to add the format reward to the final reward"""
-
-    # -- verifiable reward
-    apply_verifiable_reward: bool = True
-    """whether to apply verifiable reward"""
-    verification_reward: float = 10.0
-    """the reward value for verifiable responses"""
-    remap_verifier: str = None
-    """Remap verifier like string_f1=general-quality_ref. Currently can only remap once."""
-
-    # -- llm verifiers
-    llm_judge_model: str = "azure/gpt-4o-mini-standard"
-    """the model to use for the llm judge"""
-    llm_judge_max_tokens: int = 2048
-    """the max tokens to use for the llm judge"""
-    llm_judge_max_context_length: int = 8192
-    """the max context length to use for the llm judge"""
-    llm_judge_temperature: float = 1.0
-    """the temperature to use for the llm judge"""
-    llm_judge_timeout: int = 60
-    """the timeout to use for the llm judge"""
-
-    # -- code verifier
-    code_api_url: str = os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
-    """the api url to use for the code verifier"""
-    code_max_execution_time: float = 1.0
-    """the max execution time to use for the code verifier"""
-    code_pass_rate_reward_threshold: float = 0.0
-    """the pass rate reward threshold for the code verifier. If pass rate is less than this threshold, reward is 0.0, otherwise reward is pass rate"""
-    code_apply_perf_penalty: bool = False
-    """whether to apply a performance penalty to the code verifier"""
-
-    # -- max length verifier
-    max_length_verifier_max_length: int = 32768
-    """the max length to use for the max length verifier"""
-
-    # -- non stop penalty
-    non_stop_penalty: bool = False
-    """whether to penalize responses which did not finish generation"""
-    non_stop_penalty_value: float = 0.0
-    """the reward value for responses which did not finish generation"""
+    use_vllm_logprobs: bool = False
+    """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
-    num_learners_per_node: List[int] = field(default_factory=lambda: [1])
+    num_learners_per_node: list[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
-    vllm_num_engines: int = 1
-    """number of vLLM Engines, set to 0 to disable vLLM"""
-    inference_batch_size: Optional[int] = None
-    """inference batch size per vLLM engine. If None, calculated as ceil(num_unique_prompts_rollout / vllm_num_engines) * num_samples_per_prompt_rollout"""
-    vllm_tensor_parallel_size: int = 1
-    """tensor parallel size of vLLM Engine for multi-GPU inference"""
-    vllm_enforce_eager: bool = False
-    """whether to enforce eager mode for vLLM -- slow inference but needed for multi-node"""
-    vllm_sync_backend: str = "nccl"
-    """DeepSpeed -> vLLM weight sync backend"""
-    vllm_gpu_memory_utilization: float = 0.9
-    """vLLM GPU memory utilization"""
-    vllm_enable_prefix_caching: bool = False
-    """whether to enable prefix caching"""
-    vllm_top_p: float = 1.0
-    """vLLM top p for nucleus sampling"""
+    sequence_parallel_size: int = 1
+    """sequence parallel size - how many GPUs we will parallelize sequences across during training.
+    Useful for super-long context lengths."""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
+    deepspeed_zpg: int = 8
+    """the deepspeed zpg value. Higher values are more memory efficient but slower. Set to 1 to disable zpg, which uses less memory but is significantly slower. Ideally is set to the number of GPUs per node (usually 8, default)."""
+    deepspeed_offload_param: bool = False
+    """whether to offload parameters to CPU (reduces GPU memory usage)"""
+    deepspeed_offload_optimizer: bool = False
+    """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
     enable_queue_dashboard: bool = True
     """whether to enable the ActorManager queue monitoring dashboard"""
-    queue_dashboard_port: Optional[int] = None
+    queue_dashboard_port: int | None = None
     """optional port for the dashboard server (if None, finds a free port automatically)"""
 
     # Experiment tracking
     verbose: bool = False
     """If toggled, debug output will be shown"""
-    update_progress_every: int = 10
-    """How often to update the progress bar (in steps)."""
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
     """The wandb's project name"""
-    wandb_entity: Optional[str] = None
+    wandb_entity: str | None = None
     """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
-    hf_entity: Optional[str] = None
+    hf_entity: str | None = None
     """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: Optional[str] = None
+    hf_repo_id: str | None = None
     """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: Optional[str] = None
+    hf_repo_revision: str | None = None
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: Optional[str] = None
+    hf_repo_url: str | None = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     output_dir: str = "output"
     """Where to save the model"""
@@ -387,9 +267,9 @@ class Args:
     """How many checkpoints to keep in the output directory. -1 for all."""
     checkpoint_state_freq: int = -1
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
-    checkpoint_state_dir: Optional[str] = None
+    checkpoint_state_dir: str | None = None
     """Where to save the model checkpoint (if applicable)"""
-    gs_checkpoint_state_dir: Optional[str] = None
+    gs_checkpoint_state_dir: str | None = None
     """The actual `checkpoint_state_dir` to use (handling the case where gs_bucket_path is provided)"""
 
     # Ai2 specific settings
@@ -397,65 +277,34 @@ class Args:
     """Whether to launch beaker evaluation jobs after training on weka"""
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
-    gs_bucket_path: Optional[str] = None
+    gs_bucket_path: str | None = None
     """The path to the gs bucket to save the model to"""
-    oe_eval_tasks: Optional[List[str]] = None
+    oe_eval_tasks: list[str] | None = None
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
-    oe_eval_beaker_image: Optional[str] = None
+    oe_eval_beaker_image: str | None = None
     """the docker image for evaluation for oe-eval"""
+    oe_eval_gpu_multiplier: int | None = None
+    """multiply the gpus used for each oe-eval task"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+    eval_workspace: str = "ai2/tulu-3-results"
+    """the workspace to launch evaluation jobs on"""
+    send_slack_alerts: bool = False
+    """Whether to send Slack alerts on training failures"""
 
     # Evaluation behavior
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
-    # Tool settings
-    tools: Optional[List[str]] = None
-    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: List[int] = field(default_factory=lambda: [5])
-    """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
-    mask_tool_use: bool = True
-    """Whether to mask the tool output. By default on."""
-    only_reward_good_outputs: bool = False
-    """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
-
-    # rl-rag specific settngs
-    number_documents_to_search: int = 3
-    """The maximum number of documents to retrieve for each query."""
-    search_api_endpoint: Optional[str] = None
-    """The API endpoint for the search engine."""
-
-    # code-tool specific settings
-    code_tool_api_endpoint: Optional[str] = None
-
     def __post_init__(self):
-        if os.environ.get("VLLM_USE_V1") == "0":
-            logger.warning("When using the v0 version of vLLM, caching is broken and will never be invalidated.")
-            if self.vllm_enable_prefix_caching:
-                raise ValueError("Prefix caching is currently not supported for v0.")
-        assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
-        if self.num_samples_per_prompt_rollout == 1:
-            logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
-        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
-            "At least one reward must be applied!"
-        )
-        # Ensure we have enough prompts for all VLLM engines
-        if self.num_unique_prompts_rollout < self.vllm_num_engines:
+        if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
-                f"{self.num_unique_prompts_rollout=} must be >= {self.vllm_num_engines=} to avoid empty batches."
+                "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
+                "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
-        # Initialize stop_strings if None
-        if self.stop_strings is None:
-            self.stop_strings = []
-        if self.inference_batch_size is None:
-            total_prompts = self.num_samples_per_prompt_rollout * self.num_unique_prompts_rollout
-            self.inference_batch_size = max(1, math.ceil(total_prompts / self.vllm_num_engines))
-        assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
-            "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
-        )
+        self.loss_denominator = utils.get_denominator(self.loss_denominator)
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
@@ -465,6 +314,8 @@ class Args:
             raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
         if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
+        if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:
+            raise ValueError("`sequence_parallel_size` > 1 requires `deepspeed_stage` to be 3!")
 
         if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
             if self.checkpoint_state_dir is None:
@@ -475,117 +326,61 @@ class Args:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{beaker_users}/{checkpoint_dir_name}"
             else:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{checkpoint_dir_name}"
+            # On GCP, all checkpointing must happen on filestore.
+            # TODO(finbarrtimbers): Change this so we can checkpoint to GCS.
+            # TODO(finbarrtimbers): Move this logic to mason.py once we refactor config.
+            if not checkpoint_dir_name.startswith("/filestore"):
+                self.checkpoint_state_dir = f"/filestore{self.checkpoint_state_dir}"
 
         if self.checkpoint_state_dir is not None:
             if self.gs_checkpoint_state_dir is not None:
                 download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if self.tools is not None and len(self.tools) > 0:
-            for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+        if not self.load_ref_policy and self.beta != 0.0:
+            raise ValueError(
+                "When load_ref_policy=False, beta must be 0.0. "
+                f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
+            )
 
 
-def next_batch(dataset_indices: List[int], dataset: datasets.Dataset) -> Batch:
-    """Extract next batch of data based on indices."""
-    data_next = dataset[dataset_indices]
-    return Batch(
-        queries=data_next[INPUT_IDS_PROMPT_KEY],
-        ground_truths=data_next[GROUND_TRUTHS_KEY],
-        datasets=data_next[VERIFIER_SOURCE_KEY],
-        raw_queries=data_next[RAW_PROMPT_KEY],
-        indices=dataset_indices,
-    )
-
-
-def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
-    """Compute mean of tensor with a masked values."""
-    if axis is not None:
-        return ((values * mask).sum(axis=axis) / mask.sum(axis=axis)).mean()
-    else:
-        return (values * mask).sum() / mask.sum()
-
-
-class MetricsTracker:
-    """A simple class to prellocate all metrics in an array
-    so we can do only one allreduce operation to get the metrics mean"""
-
-    def __init__(self, max_metrics: int = 32, device: torch.device = torch.device("cuda")):
-        self.metrics = torch.zeros(max_metrics, device=device)
-        self.names2idx = {}
-        self.current_idx = 0
-        self.max_metrics = max_metrics
-
-    def add(self, name: str, value: torch.tensor):
-        if name not in self.names2idx:
-            if self.current_idx >= self.max_metrics:
-                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
-            self.names2idx[name] = self.current_idx
-            self.current_idx += 1
-
-        self.metrics[self.names2idx[name]] = value
-        return self
-
-    def get_metrics_list(self) -> dict[str, float]:
-        metrics_list = self.metrics.tolist()
-        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
-
-
-def collate_fn(tensors_list: List[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
-    padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
-    if pin_memory:
-        padded_tensor = padded_tensor.pin_memory()
-    return padded_tensor
-
-
-def to_device_inplace(tensors_list: List[torch.Tensor], device: torch.device):
+def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
     for i in range(len(tensors_list)):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
 
 
-class ShufflingIterator:
-    def __init__(self, data: np.ndarray, batch_size: int, seed: Optional[int] = None):
-        self.data = data.copy()
-        self.batch_size = batch_size
-        self.index = 0
-        self.rng = np.random.default_rng(seed)
-        self.rng.shuffle(self.data)
-
-        # Ensure the effective dataset size is divisible by batch_size
-        self.effective_size = len(self.data) - (len(self.data) % batch_size)
-
-    def __iter__(self) -> Iterator[List[int]]:
-        return self
-
-    def __next__(self) -> List[int]:
-        if self.index >= self.effective_size:
-            self.index = 0
-            self.rng.shuffle(self.data)
-
-        end_index = self.index + self.batch_size
-        batch = self.data[self.index : end_index].tolist()
-        self.index = end_index
-
-        return batch
-
-    def get_state(self) -> Dict[str, Any]:
-        """Get the current state of the iterator for checkpointing."""
-        return {
-            "index": self.index,
-            "data": self.data.copy(),  # Current shuffled order
-            "rng_state": self.rng.bit_generator.state,
-        }
-
-    def set_state(self, state: Dict[str, Any]) -> None:
-        """Restore the iterator state from a checkpoint."""
-        self.index = state["index"]
-        self.data = state["data"].copy()
-        self.rng.bit_generator.state = state["rng_state"]
-
-
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
+    def __init__(
+        self,
+        world_size: int,
+        rank: int,
+        local_rank: int,
+        master_addr: str | None,
+        master_port: int | None,
+        args: Args,
+        streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+        vllm_config: data_loader_lib.VLLMConfig,
+        data_prep_actor_name: str,
+        tokenizer: PreTrainedTokenizer,
+    ):
+        super().__init__(world_size, rank, local_rank, master_addr, master_port)
+        self.tokenizer = tokenizer
+        self.pad_token_id = tokenizer.pad_token_id
+        self.num_mini_batches = args.num_mini_batches
+        self._args = args
+        self.streaming_config = streaming_config
+        self.vllm_config = vllm_config
+        self.world_size = world_size
+        self.local_rank = local_rank
+        self.dp_world_size = world_size // args.sequence_parallel_size
+        self._data_prep_actor_name = data_prep_actor_name
+
+    def get_dataloader_state(self) -> dict[str, Any]:
+        return self._streaming_dataloader.state_dict()
+
+    def load_dataloader_state(self, state_dict: dict[str, Any]) -> None:
+        self._streaming_dataloader.load_state_dict(state_dict)
+
     def from_pretrained(
         self,
         args: Args,
@@ -593,7 +388,7 @@ class PolicyTrainerRayProcess(RayProcess):
         beaker_config: BeakerRuntimeConfig,
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
-    ):
+    ) -> int:
         # ------------------------------------------------------------
         # Monkey patch to load checkpoints with `weights_only=False`
         # otherwise it errors out with:
@@ -625,9 +420,22 @@ class PolicyTrainerRayProcess(RayProcess):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
+        # Pre-initialize torch.distributed WITHOUT device_id to avoid NCCL hangs.
+        # DeepSpeed 0.17.3 and up sets device_id in init_process_group which can cause hangs
+        # when multiple process groups exist (e.g., for weight sync to vLLM).
+        # By initializing first, DeepSpeed will detect it and wrap it instead of re-initializing.
+        if not torch.distributed.is_initialized():
+            torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=args.backend_timeout))
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
-        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
+        ds_config = get_train_ds_config(
+            offload=args.deepspeed_offload_param,
+            adam_offload=args.deepspeed_offload_optimizer,
+            stage=args.deepspeed_stage,
+            bf16=True,
+            zpg=args.deepspeed_zpg,
+            sequence_parallel_size=args.sequence_parallel_size,
+        )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
@@ -640,22 +448,29 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
 
+        # set sequence parallel
+        # note this returns None if sequence_parallel_size == 1
+        self.mpu = UlyssesSPAttentionHF.register_with_transformers(
+            model_name_or_path=model_config.model_name_or_path,
+            core_attn_implementation=model_config.attn_implementation,
+            sequence_parallel_size=args.sequence_parallel_size,
+            micro_batch_size=args.per_device_train_batch_size,
+            seq_length_is_variable=True,
+        )
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            dtype=torch.bfloat16,
+            attn_implementation=model_config.attn_implementation,
             use_cache=False,
+            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
-        # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
-        # AdamOptimizer = FusedAdam
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
@@ -672,7 +487,8 @@ class PolicyTrainerRayProcess(RayProcess):
             optimizer=self.optimizer,
             config=ds_config,
             lr_scheduler=scheduler,
-            dist_init_required=True,
+            dist_init_required=False,
+            mpu=self.mpu,
         )
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
@@ -682,6 +498,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
                 )
             else:
+                # remove mpu for loading checkpoints, add it back after loading
+                old_mpu = self.mpu
+                self.model.mpu = None
                 path, states = self.model.load_checkpoint(
                     args.checkpoint_state_dir,
                     load_module_strict=True,
@@ -689,6 +508,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     load_lr_scheduler_states=True,
                     load_module_only=False,
                 )
+                self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 optimization_steps_done = states["training_step"]
@@ -710,7 +530,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 # Save reference policy path to load later (after ref_policy is initialized)
                 self.ref_policy_checkpoint_path = None
-                if states.get("ref_policy_saved", False):
+                if args.load_ref_policy and states.get("ref_policy_saved", False):
                     ref_policy_dir = os.path.join(args.checkpoint_state_dir, "ref_policy")
                     model_path = os.path.join(ref_policy_dir, "pytorch_model.bin")
                     if os.path.exists(model_path):
@@ -723,42 +543,67 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model.train()
 
         # reference model
-        ds_config = get_eval_ds_config(
-            offload=False,
-            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-            # stage 2 is optimizer sharding which doesn't apply to inference
-            stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
-            bf16=True,
-        )
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["gradient_accumulation_steps"] = 1
-        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
+        if args.load_ref_policy:
+            ds_config, self.ref_policy_hf_ds_config = get_eval_ds_config(
+                offload=False,
+                # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+                # stage 2 is optimizer sharding which doesn't apply to inference
+                stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+                bf16=True,
+                per_device_train_batch_size=args.per_device_train_batch_size,
+            )
+
+            self.ref_policy: PreTrainedModel = load_ref_policy(
+                model_config=model_config,
+                ds_config=ds_config,
+                deepspeed_stage=args.deepspeed_stage,
+                local_rank=self.local_rank,
+                device=self.device,
+                rank=self.rank,
+                checkpoint_path=self.ref_policy_checkpoint_path
+                if hasattr(self, "ref_policy_checkpoint_path")
+                else None,
+                mpu=self.mpu,
+                ref_policy_update_freq=args.ref_policy_update_freq,
+                alpha=args.alpha,
+            )
+        self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
+
+        if self.mpu is not None:
+            self.splitter = UlyssesSPSplitter(
+                sp_rank=groups._get_sequence_parallel_rank(),
+                sp_group=groups._get_sequence_parallel_group(),
+                sp_world_size=groups._get_sequence_parallel_world_size(),
+                device=self.device,
+                pad_token_id=self.tokenizer.pad_token_id,
+            )
         else:
-            dschf = None
-        logger.info(f"DeepSpeed config: {dschf=}")
+            self.splitter = None
 
-        self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
+        # dp_rank = which data-parallel group this worker belongs to
+        # With SP, workers in the same SP group share the same dp_rank
+        dp_rank = self.rank // args.sequence_parallel_size
+        assert dp_rank < self.dp_world_size
+
+        # Verify SP groups are consecutive as we assume for above logic (e.g., [0,1,2,3], [4,5,6,7], ...)
+        # getting the dp_rank directly does not work right now with the mpus :/
+        if self.mpu is not None:
+            sp_group = groups._get_sequence_parallel_group()
+            sp_ranks = sorted(torch.distributed.get_process_group_ranks(sp_group))
+            expected = list(range(dp_rank * args.sequence_parallel_size, (dp_rank + 1) * args.sequence_parallel_size))
+            assert sp_ranks == expected, f"SP group {sp_ranks} != expected {expected}"
+
+        self._streaming_dataloader = streaming_config.build_dataloader(
+            data_prep_actor_name=self._data_prep_actor_name,
+            tokenizer=tokenizer,
+            dp_rank=dp_rank,
+            fs_local_rank=self.local_rank,
+            num_training_steps=args.num_training_steps,
+            work_dir=args.output_dir,
+            dp_world_size=self.dp_world_size,
         )
-        disable_dropout_in_model(self.ref_policy)
-        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
-        self.ref_policy.eval()
+        self.dataloader = iter(self._streaming_dataloader)
 
-        # Load reference policy checkpoint if available
-        if hasattr(self, "ref_policy_checkpoint_path") and self.ref_policy_checkpoint_path:
-            state_dict = torch.load(self.ref_policy_checkpoint_path, map_location=self.device)
-            if hasattr(self.ref_policy, "module"):
-                # If wrapped by DeepSpeed
-                self.ref_policy.module.load_state_dict(state_dict)
-            else:
-                self.ref_policy.load_state_dict(state_dict)
-            logger.info(f"{self.rank=}: Loaded reference policy checkpoint from {self.ref_policy_checkpoint_path}")
-        self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
         return optimization_steps_done
 
     def forward(
@@ -802,11 +647,11 @@ class PolicyTrainerRayProcess(RayProcess):
                 sock.bind(("", 0))
                 master_port = sock.getsockname()[1]
             vllm_num_engines, vllm_tensor_parallel_size = (
-                self.args.vllm_num_engines,
-                self.args.vllm_tensor_parallel_size,
+                self.vllm_config.vllm_num_engines,
+                self.vllm_config.vllm_tensor_parallel_size,
             )
             world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
-            backend = self.args.vllm_sync_backend
+            backend = self.vllm_config.vllm_sync_backend
             refs = [
                 engine.init_process_group.remote(
                     master_address,
@@ -819,7 +664,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
                 for i, engine in enumerate(vllm_engines)
             ]
-            self.model_update_group = vllm_utils3.init_process_group(
+            torch.cuda.set_device(self.local_rank)
+            self.model_update_group = vllm_utils.init_process_group(
                 backend=backend,
                 init_method=f"tcp://{master_address}:{master_port}",
                 world_size=world_size,
@@ -827,12 +673,15 @@ class PolicyTrainerRayProcess(RayProcess):
                 group_name="openrlhf",
                 timeout=timedelta(minutes=self.args.backend_timeout),
             )
-            ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=60)
+            ray_get_with_progress(refs, desc="Initializing vLLM process groups", timeout=600)
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
         # avoid OOM
         torch.cuda.empty_cache()
+        # Ensure CUDA device is set before broadcast operations.
+        # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
+        torch.cuda.set_device(self.local_rank)
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
@@ -845,7 +694,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                         refs = [
                             engine.update_weight.remote(
-                                name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                                name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
                             )
                             for engine in self.vllm_engines
                         ]
@@ -859,7 +708,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                     refs = [
                         engine.update_weight.remote(
-                            name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                            name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
                         )
                         for engine in self.vllm_engines
                     ]
@@ -875,6 +724,8 @@ class PolicyTrainerRayProcess(RayProcess):
         return all_refs
 
     def update_ref_policy(self):
+        if not self.args.load_ref_policy:
+            return
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
             if self.args.deepspeed_stage == 3:
                 with deepspeed.zero.GatheredParameters([param, ref_param], modifier_rank=0):
@@ -883,218 +734,347 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
-    def train(
-        self,
-        collated_query_responses,
-        collated_tool_masks,
-        collated_attention_masks,
-        collated_position_ids,
-        collated_advantages,
-        collated_response_masks,
-        pad_token_id: int,
-        num_mini_batches: int,
-    ):
-        args = self.args
-        to_device_inplace(collated_query_responses, self.device)
-        to_device_inplace(collated_tool_masks, self.device)
-        to_device_inplace(collated_attention_masks, self.device)
-        to_device_inplace(collated_position_ids, self.device)
-        to_device_inplace(collated_advantages, self.device)
-        to_device_inplace(collated_response_masks, self.device)
-        # accumulation steps should always be at least 1
-        accumulation_steps = max(math.ceil(len(collated_query_responses) / num_mini_batches - 0.5), 1)
-        leftover = len(collated_query_responses) % accumulation_steps
+    def compute_logprobs(
+        self, model: PreTrainedModel, data_BT: data_types.CollatedBatchData, pad_token_id: int, use_grad: bool = False
+    ) -> list[torch.Tensor]:
+        logprobs_BT: list[torch.Tensor] = []
+
+        context = contextlib.nullcontext() if use_grad else torch.no_grad()
+        with context:
+            for i in range(len(data_BT.query_responses)):
+                logprob_BT, _ = self.forward(
+                    model,
+                    data_BT.query_responses[i],
+                    data_BT.attention_masks[i],
+                    data_BT.position_ids[i],
+                    pad_token_id,
+                    self.streaming_config.temperature,
+                    return_entropy=False,
+                )
+
+                response_mask_BT = data_BT.response_masks[i]
+                logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:], INVALID_LOGPROB)
+                logprobs_BT.append(logprob_BT)
+
+                torch.cuda.empty_cache()
+
+        return logprobs_BT
+
+    def calculate_token_counts(
+        self, accumulation_steps: int, data_BT: data_types.CollatedBatchData
+    ) -> dict[int, float]:
+        accumulation_counts: dict[int, float] = {}
+        local_counts = [mask[:, 1:].sum().float() for mask in data_BT.response_masks]
+        if not local_counts:
+            return accumulation_counts
+
+        counts_tensor = torch.stack(local_counts)
+        dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
+
+        for i, count in enumerate(counts_tensor):
+            group_idx = i // accumulation_steps
+            key = int(group_idx * accumulation_steps)
+            accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
+
+        return accumulation_counts
+
+    def _compute_loss_metrics(
+        self, loss_stats_B: dict[str, torch.Tensor], total_valid_tokens: int
+    ) -> dict[str, float]:
+        """Compute weighted average metrics from per-batch loss statistics."""
+        token_counts = loss_stats_B["token_count"]
+        total_tokens = token_counts.sum()
+        # Zero weights when no tokens - all weighted sums become 0
+        weights = token_counts / total_tokens if total_tokens > 0 else torch.zeros_like(token_counts)
+
+        if self.args.load_ref_policy:
+            for j in range(4):
+                self.local_metrics[f"objective/kl{j}_avg"] = (loss_stats_B["kl"][j] * weights).sum()
+            self.local_metrics["loss/kl_avg"] = (loss_stats_B["kl_loss"] * weights).sum()
+        self.local_metrics["loss/policy_avg"] = (loss_stats_B["pg_loss"] * weights).sum()
+        self.local_metrics["loss/total_avg"] = (loss_stats_B["loss"] * weights).sum()
+        self.local_metrics["policy/clipfrac_avg"] = (loss_stats_B["pg_clipfrac"] * weights).sum()
+        self.local_metrics["val/ratio"] = (loss_stats_B["ratio"] * weights).sum()
+        weighted_mean_ratio = self.local_metrics["val/ratio"]
+        self.local_metrics["val/ratio_var"] = (weights * (loss_stats_B["ratio"] - weighted_mean_ratio) ** 2).sum()
+        if self.args.record_entropy:
+            self.local_metrics["policy/entropy_avg"] = (loss_stats_B["entropy"] * weights).sum()
+
+        self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
+        self.local_metrics["_token_count"] = total_valid_tokens
+
+    def step(self):
+        """Execute one training step: fetch data from the dataloader and train on it.
+
+        Returns:
+            Tuple of (metrics_list, array_metrics) from training.
+        """
+        batch_data = next(self.dataloader)
+        data_BT = batch_data["batch"]
+        if len(data_BT) == 0:
+            logger.warning("[Training] Empty batch received, skipping training step")
+            return [], {}
+
+        # split batch for sequence parallelism. Do before moving data to GPU.
+        if self.splitter is not None:
+            with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
+                data_BT = self.splitter.split_collated_batch(data_BT)
+
+        for f in dataclasses.fields(data_BT):
+            to_device_inplace(getattr(data_BT, f.name), self.device)
+        data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
+        num_samples = len(data_BT)
+        accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
+        leftover = num_samples % accumulation_steps
         if leftover > 0:
-            collated_query_responses = collated_query_responses[0:-leftover]
-            collated_tool_masks = collated_tool_masks[0:-leftover]
-            collated_attention_masks = collated_attention_masks[0:-leftover]
-            collated_position_ids = collated_position_ids[0:-leftover]
-            collated_advantages = collated_advantages[0:-leftover]
-            collated_response_masks = collated_response_masks[0:-leftover]
-            logger.warning(f"{leftover} samples are dropped due to batch size {num_mini_batches}")
+            data_BT = data_BT[:-leftover]
+            logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
 
-        # recalculate the "real" number of mini-batches
-        num_mini_batches = len(collated_query_responses) // accumulation_steps
+        num_mini_batches = len(data_BT.query_responses) // accumulation_steps
 
-        # Calculate the logprob of the reference policy
-        collated_ref_logprobs = []
-        with Timer("Inference Calculation", noop=self.rank != 0):
-            with torch.no_grad():
-                for i in range(len(collated_query_responses)):
-                    query_response = collated_query_responses[i]
-                    tool_mask = collated_tool_masks[i]
-                    attention_mask = collated_attention_masks[i]
-                    position_id = collated_position_ids[i]
-                    response_mask = collated_response_masks[i]
-                    ref_logprob, _ = self.forward(
-                        self.ref_policy,
-                        query_response,
-                        attention_mask,
-                        position_id,
-                        pad_token_id,
-                        args.temperature,
-                        return_entropy=False,
-                    )
-                    if args.mask_tool_use and args.tool_use:
-                        # mask logprobs for tool tokens
-                        response_mask = response_mask.bool() & tool_mask.bool()
-                    else:
-                        response_mask = response_mask.bool()
-                    ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                    collated_ref_logprobs.append(ref_logprob)
-                    torch.cuda.empty_cache()
+        ref_logprobs_BT: list[torch.Tensor] = []
+        if self.args.load_ref_policy:
+            with Timer("Inference Calculation", noop=self.rank != 0):
+                ref_logprobs_BT = self.compute_logprobs(self.ref_policy, data_BT, self.pad_token_id, use_grad=False)
+
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
         # from the generator (note that async mode means these are a bit diff!)
-        old_logprobs = [None for _ in range(len(collated_query_responses))]
+        old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(len(data_BT.query_responses))]
         if num_mini_batches > 1:
             with Timer("Old logprobs Calculation", noop=self.rank != 0):
+                local_old_logprobs_BT = None
+                if not self.args.use_vllm_logprobs:
+                    local_old_logprobs_BT = self.compute_logprobs(
+                        self.model, data_BT, self.pad_token_id, use_grad=False
+                    )
+
                 with torch.no_grad():
-                    for i in range(len(collated_query_responses)):
-                        query_response = collated_query_responses[i]
-                        tool_mask = collated_tool_masks[i]
-                        attention_mask = collated_attention_masks[i]
-                        position_id = collated_position_ids[i]
-                        response_mask = collated_response_masks[i]
-                        old_logprob, _ = self.forward(
-                            self.model,
-                            query_response,
-                            attention_mask,
-                            position_id,
-                            pad_token_id,
-                            args.temperature,
-                            return_entropy=False,
+                    for i in range(len(data_BT.query_responses)):
+                        vllm_old_logprob_BT = data_BT.vllm_logprobs[i][:, 1:]
+                        vllm_old_logprob_BT = torch.masked_fill(
+                            vllm_old_logprob_BT, ~data_BT.response_masks[i][:, 1:], INVALID_LOGPROB
                         )
-                        if args.mask_tool_use and args.tool_use:
-                            response_mask = response_mask.bool() & tool_mask.bool()
+                        vllm_old_logprob_BT = torch.nan_to_num(vllm_old_logprob_BT, nan=INVALID_LOGPROB)
+
+                        if self.args.use_vllm_logprobs:
+                            old_logprobs_BT[i] = vllm_old_logprob_BT
                         else:
-                            response_mask = response_mask.bool()
-                        old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
-                        old_logprobs[i] = old_logprob
+                            old_logprobs_BT[i] = local_old_logprobs_BT[i]
+
                         torch.cuda.empty_cache()
 
         local_step = 0
+        num_samples = len(data_BT.query_responses)
+        # Pre-compute token counts per sample (for weighted averaging across SP ranks)
+        # This only needs to be done once since response_masks don't change across epochs
+        token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
+        total_valid_tokens = token_counts_per_sample.sum().item()
+        device = token_counts_per_sample.device
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            kl1_stats = torch.zeros(len(collated_query_responses))
-            kl2_stats = torch.zeros(len(collated_query_responses))
-            kl3_stats = torch.zeros(len(collated_query_responses))
-            kl4_stats = torch.zeros(len(collated_query_responses))
-            kl_loss_stats = torch.zeros(len(collated_query_responses))
-            pg_clipfrac_stats = torch.zeros(len(collated_query_responses))
-            pg_loss_stats = torch.zeros(len(collated_query_responses))
-            loss_stats = torch.zeros(len(collated_query_responses))
-            ratio_stats = torch.zeros(len(collated_query_responses))
-            entropy_stats = torch.zeros(len(collated_query_responses))
-            for epoch_idx in range(args.num_epochs):
-                for i in range(len(collated_query_responses)):
-                    mb_ref_logprob = collated_ref_logprobs[i]
-                    mb_query_responses = collated_query_responses[i]
-                    mb_tool_mask = collated_tool_masks[i]
-                    mb_advantages = collated_advantages[i]
-                    mb_response_masks = collated_response_masks[i]
-                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()
-                    # if masking snippets, do it here.
-                    if args.mask_tool_use and args.tool_use:
-                        mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
-                    mb_attention_mask = collated_attention_masks[i]
-                    mb_position_id = collated_position_ids[i]
-                    mb_new_logprobs, mb_entropy = self.forward(
+            loss_stats_B: dict[str, torch.Tensor] = {
+                "kl": torch.zeros(4, num_samples, device=device),
+                "kl_loss": torch.zeros(num_samples, device=device),
+                "pg_clipfrac": torch.zeros(num_samples, device=device),
+                "pg_loss": torch.zeros(num_samples, device=device),
+                "loss": torch.zeros(num_samples, device=device),
+                "ratio": torch.zeros(num_samples, device=device),
+                "entropy": torch.zeros(num_samples, device=device),
+                "token_count": token_counts_per_sample,
+            }
+            for epoch_idx in range(self.args.num_epochs):
+                # Pre-compute total tokens for each accumulation group if using "token" normalization
+                # This ensures all minibatches in an accumulation group are normalized by the same total
+                if self.args.loss_denominator == "token":
+                    accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
+                else:
+                    accumulation_token_counts = {
+                        int(group_idx * accumulation_steps): self.args.loss_denominator
+                        for group_idx in range((len(data_BT.query_responses) // accumulation_steps) + 1)
+                    }
+
+                for i in range(num_samples):
+                    response_mask_BT = data_BT.response_masks[i][:, 1:]
+                    # retrieve the loss denominator for the current batch
+                    batch_start = (i // accumulation_steps) * accumulation_steps
+                    loss_denominator = accumulation_token_counts[batch_start]
+                    local_logprobs_BT, entropy_BT = self.forward(
                         self.model,
-                        mb_query_responses,
-                        mb_attention_mask,
-                        mb_position_id,
-                        pad_token_id,
-                        args.temperature,
-                        return_entropy=args.record_entropy,
+                        data_BT.query_responses[i],
+                        data_BT.attention_masks[i],
+                        data_BT.position_ids[i],
+                        self.pad_token_id,
+                        self.streaming_config.temperature,
+                        return_entropy=self.args.record_entropy,
                     )
-                    mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
+                    local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
+                    vllm_logprobs_BT = data_BT.vllm_logprobs[i][:, 1:]
+                    vllm_logprobs_BT = torch.masked_fill(vllm_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
+                    vllm_logprobs_BT = torch.nan_to_num(vllm_logprobs_BT, nan=INVALID_LOGPROB)
+
+                    # Compare vLLM logprobs with local logprobs
+                    with torch.no_grad():
+                        valid_mask_BT = response_mask_BT & ~torch.isnan(vllm_logprobs_BT)
+                        logprob_diff_BT = (local_logprobs_BT - vllm_logprobs_BT).abs()
+                        masked_diff_BT = torch.masked_fill(logprob_diff_BT, ~valid_mask_BT, 0.0)
+                        mean_diff = masked_diff_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
+                        max_diff = masked_diff_BT.max()
+                        std_diff = masked_diff_BT[valid_mask_BT].std() if valid_mask_BT.sum() > 1 else 0.0
+
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = float(mean_diff)
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = float(max_diff)
+                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = float(std_diff)
+
+                        reverse_kl_BT = torch.exp(vllm_logprobs_BT) * (vllm_logprobs_BT - local_logprobs_BT)
+                        masked_reverse_kl_BT = torch.masked_fill(reverse_kl_BT, ~valid_mask_BT, 0.0)
+                        mean_reverse_kl = (
+                            masked_reverse_kl_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
+                        )
+                        self.local_metrics["debug/vllm_local_reverse_kl"] = float(mean_reverse_kl)
+
+                    new_logprobs_BT = local_logprobs_BT
 
                     # Cache the old logprobs
                     if num_mini_batches > 1:
-                        mb_old_logprobs = old_logprobs[i]
+                        old_logprob_BT = old_logprobs_BT[i]
                     else:
                         with torch.no_grad():
                             if epoch_idx == 0:
-                                old_logprobs[i] = mb_new_logprobs
-                            mb_old_logprobs = old_logprobs[i].detach()
+                                if self.args.use_vllm_logprobs:
+                                    old_logprobs_BT[i] = vllm_logprobs_BT
+                                else:
+                                    old_logprobs_BT[i] = local_logprobs_BT.detach()
+                            old_logprob_BT = old_logprobs_BT[i]
+
+                    old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
+                    assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
+                        f"Old logprobs mask should match response mask. "
+                        f"old_mask sum={old_logprobs_mask_BT.sum()}, "
+                        f"response_mask sum={response_mask_BT.sum()}"
+                    )
 
                     # Calculate the policy's loss
-                    logprobs_diff = mb_new_logprobs - mb_old_logprobs
-                    ratio = torch.exp(logprobs_diff)
-                    pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(
-                        ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher
-                    )
-                    pg_loss_max = torch.max(pg_losses, pg_losses2)
+                    logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
+                    ratio_BT = torch.exp(logprobs_diff_BT)
+                    if self.args.loss_fn == "dapo":
+                        pg_losses_BT = -data_BT.advantages[i][:, 1:] * ratio_BT
+                        pg_losses2_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
+                            ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher
+                        )
+                    elif self.args.loss_fn == "cispo":
+                        # cispo: directly clip ratio, no lower bound.
+                        # reinforce loss, so multiply by new logprobs
+                        pg_losses_BT = (
+                            -data_BT.advantages[i][:, 1:]
+                            * torch.clamp(ratio_BT.detach(), max=1.0 + self.args.clip_higher)
+                            * new_logprobs_BT
+                        )
+                        pg_losses2_BT = pg_losses_BT
+                    else:
+                        raise ValueError(f"Invalid loss function: {self.args.loss_fn}")
 
-                    # Here we recalculate kl: we want the KL loss to backpropagate through the model
-                    # We also clamp the KL loss to avoid numerical instability
-                    # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
-                    ref_logprobs_diff = (mb_new_logprobs - mb_ref_logprob).clamp(-40.0, 40.0)
-                    kl1 = ref_logprobs_diff
-                    kl2 = (ref_logprobs_diff) ** 2 / 2
-                    kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
-                    kl4 = ratio * ref_logprobs_diff
-                    if args.kl_estimator == "kl1":
-                        kl = kl1
-                    elif args.kl_estimator == "kl2":
-                        kl = kl2
-                    elif args.kl_estimator == "kl3":
-                        kl = kl3
-                    elif args.kl_estimator == "kl4":
-                        kl = kl4
+                    # Apply truncated importance sampling if enabled
+                    if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
+                        old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
+                        vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
 
-                    # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
-                    loss = loss / accumulation_steps
+                        assert torch.all(old_logprobs_mask_BT == response_mask_BT), (
+                            f"Old logprobs mask should match response mask. "
+                            f"old_mask sum={old_logprobs_mask_BT.sum()}, "
+                            f"response_mask sum={response_mask_BT.sum()}"
+                        )
+                        assert torch.all(vllm_logprobs_mask_BT == response_mask_BT), (
+                            f"vLLM logprobs mask should match response mask. "
+                            f"vllm_mask sum={vllm_logprobs_mask_BT.sum()}, "
+                            f"response_mask sum={response_mask_BT.sum()}"
+                        )
+
+                        valid_mask_BT = response_mask_BT
+
+                        # Initialize importance ratio to 1.0 (no effect) for all positions
+                        tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
+
+                        if valid_mask_BT.any():
+                            # Calculate logprob difference only for valid positions
+                            logprob_diff_is_BT = old_logprob_BT - vllm_logprobs_BT
+                            # Clamp to prevent numerical overflow in exp
+                            logprob_diff_is_BT = torch.where(
+                                valid_mask_BT,
+                                logprob_diff_is_BT.clamp(-10.0, 10.0),
+                                torch.zeros_like(logprob_diff_is_BT),
+                            )
+                            # Compute importance ratio only for valid positions
+                            tis_imp_ratio_BT = torch.where(
+                                valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
+                            )
+                            # Apply cap
+                            tis_imp_ratio_BT = torch.clamp(
+                                tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
+                            )
+
+                        # Apply importance sampling to losses
+                        pg_losses_BT = pg_losses_BT * tis_imp_ratio_BT
+                        pg_losses2_BT = pg_losses2_BT * tis_imp_ratio_BT
+
+                    pg_loss_max_BT = torch.max(pg_losses_BT, pg_losses2_BT)
+
+                    if self.args.load_ref_policy:
+                        ref_logprob_BT = ref_logprobs_BT[i]
+                        # Here we recalculate kl: we want the KL loss to backpropagate through the model
+                        # We also clamp the KL loss to avoid numerical instability
+                        # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
+                        ref_logprobs_diff_BT = (new_logprobs_BT - ref_logprob_BT).clamp(-40.0, 40.0)
+                        kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
+                        # grpo change: directly subtract KL in loss (add)
+                        loss = masked_mean(
+                            pg_loss_max_BT + self.args.beta * kl_4BT[self.args.kl_estimator],
+                            response_mask_BT,
+                            None,
+                            loss_denominator,
+                        )
+                    else:
+                        loss = masked_mean(pg_loss_max_BT, response_mask_BT, None, loss_denominator)
+
+                    # we already took world size into account via the tokens
+                    # but deepspeed will try to average over ranks, so multiply back
+                    # up, adjusting for the sequence parallel size (adjust by dp world size).
+                    loss *= self.args.world_size // self.args.sequence_parallel_size
+
+                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
+                    torch.cuda.empty_cache()
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
-                        # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
-                        if args.kl_estimator == "kl1":
-                            kl_loss_stats[i] = kl1_stats[i] * args.beta
-                        elif args.kl_estimator == "kl2":
-                            kl_loss_stats[i] = kl2_stats[i] * args.beta
-                        elif args.kl_estimator == "kl3":
-                            kl_loss_stats[i] = kl3_stats[i] * args.beta
-                        elif args.kl_estimator == "kl4":
-                            kl_loss_stats[i] = kl4_stats[i] * args.beta
-                        pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
+                        if self.args.load_ref_policy:
+                            # NOTE: in packed implementation, kl calculation are averages over response tokens
+                            loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
+                            loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
+                        loss_stats_B["pg_clipfrac"][i] = masked_mean(
+                            (pg_losses2_BT > pg_losses_BT).float(), response_mask_BT
                         )
-                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
-                        loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
-                        if args.record_entropy:
-                            # Calculate entropy statistics
-                            entropy_stats[i] = masked_mean(
-                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis
-                            ).float()
+                        loss_stats_B["pg_loss"][i] = masked_mean(pg_loss_max_BT, response_mask_BT)
+                        loss_stats_B["loss"][i] = loss
+                        loss_stats_B["ratio"][i] = masked_mean(ratio_BT, response_mask_BT)
+                        if self.args.record_entropy:
+                            loss_stats_B["entropy"][i] = masked_mean(entropy_BT, response_mask_BT).float()
 
+            batch_metrics = batch_data["metrics"]
             with torch.no_grad():
-                self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
-                self.local_metrics.add("objective/kl2_avg", kl2_stats.mean())
-                self.local_metrics.add("objective/kl3_avg", kl3_stats.mean())
-                self.local_metrics.add("objective/kl4_avg", kl4_stats.mean())
-                self.local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
-                self.local_metrics.add("loss/kl_avg", kl_loss_stats.mean())
-                self.local_metrics.add("loss/total_avg", loss_stats.mean())
-                self.local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
-                self.local_metrics.add("val/ratio", ratio_stats.mean())
-                self.local_metrics.add("val/ratio_var", ratio_stats.var())
-                if args.record_entropy:
-                    self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
-                self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
-                return self.local_metrics.get_metrics_list()
+                self._compute_loss_metrics(loss_stats_B, total_valid_tokens)
+                array_metrics = {}
+                for key, value in batch_metrics.items():
+                    if value is None:
+                        continue
+                    if isinstance(value, (int, float, np.floating, np.integer)):
+                        self.local_metrics[key] = value
+                    else:
+                        array_metrics[key] = value
+                return self.local_metrics.get_metrics_list(), array_metrics
 
-    def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: Dict[str, Any]) -> None:
+    def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
         args = self.args
 
         # Save comprehensive RNG states for each rank
@@ -1116,7 +1096,7 @@ class PolicyTrainerRayProcess(RayProcess):
         client_state["rank"] = self.rank
 
         # Save reference policy checkpoint (model only, no optimizer)
-        if hasattr(self, "ref_policy") and self.ref_policy is not None:
+        if self.args.load_ref_policy:
             ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
             os.makedirs(ref_policy_dir, exist_ok=True)
 
@@ -1125,12 +1105,7 @@ class PolicyTrainerRayProcess(RayProcess):
             # which doesn't have state_dict
             if self.rank == 0:
                 # Only rank 0 saves the model state
-                if hasattr(self.ref_policy, "module"):
-                    # If wrapped by DeepSpeed, get the underlying module
-                    model_to_save = self.ref_policy.module
-                else:
-                    model_to_save = self.ref_policy
-
+                model_to_save = self.ref_policy.module if hasattr(self.ref_policy, "module") else self.ref_policy
                 # Save the state dict
                 torch.save(model_to_save.state_dict(), os.path.join(ref_policy_dir, "pytorch_model.bin"))
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
@@ -1138,6 +1113,11 @@ class PolicyTrainerRayProcess(RayProcess):
             client_state["ref_policy_saved"] = True
 
         # Save the main model checkpoint with enhanced client state
+        # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
+        old_mpu = None
+        if self.model.mpu is not None:
+            old_mpu = self.mpu
+            self.model.mpu = None
         self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
 
         # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
@@ -1150,15 +1130,23 @@ class PolicyTrainerRayProcess(RayProcess):
                 ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
                     checkpoint_state_dir, args.gs_checkpoint_state_dir
                 )
+        # add back the mpu
+        if old_mpu is not None:
+            self.model.mpu = old_mpu
 
     def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
+        output_path = pathlib.Path(output_dir)
+        marker_path = output_path / CHECKPOINT_COMPLETE_MARKER
+        if marker_path.exists():
+            logger.info(f"Checkpoint already complete at {output_dir}, skipping save")
+            return
+
         model_to_save = self.model
         if chat_template_name is not None and "olmo" in chat_template_name:
-            # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
             model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         if self.rank == 0:
-            os.makedirs(output_dir, exist_ok=True)
+            output_path.mkdir(parents=True, exist_ok=True)
 
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
@@ -1200,36 +1188,46 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_to_save.save_pretrained(output_dir)
                 if self.stage == 3:
                     torch.save(
-                        get_peft_model_state_dict(model_to_save, output_state_dict),
-                        os.path.join(output_dir, "adapter_model.bin"),
+                        get_peft_model_state_dict(model_to_save, output_state_dict), output_path / "adapter_model.bin"
                     )
             else:
                 model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
-            # save tokenizer
             self.tokenizer.save_pretrained(output_dir)
+            marker_path.touch()
 
     # we need this because we don't know which node is rank 0 is on
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
         args = self.args
         if self.rank == 0:
             ray.remote(launch_ai2_evals_on_weka).options(num_cpus=1).remote(
-                step_dir,
-                leaderboard_name,
-                args.oe_eval_max_length,
-                wandb_url,
-                training_step,
-                args.oe_eval_tasks,
-                args.stop_strings,
-                args.gs_bucket_path,
-                args.eval_priority,
-                args.oe_eval_beaker_image,
+                path=step_dir,
+                leaderboard_name=leaderboard_name,
+                oe_eval_max_length=args.oe_eval_max_length,
+                wandb_url=wandb_url,
+                training_step=training_step,
+                oe_eval_tasks=args.oe_eval_tasks,
+                stop_strings=streaming_config.stop_strings,
+                gs_bucket_path=args.gs_bucket_path,
+                eval_priority=args.eval_priority,
+                eval_workspace=args.eval_workspace,
+                beaker_image=args.oe_eval_beaker_image,
+                oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
             )
 
 
 class ModelGroup:
     def __init__(
-        self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_node: List[int], single_gpu_mode: bool
+        self,
+        pg: PlacementGroup,
+        ray_process_cls: RayProcess,
+        num_gpus_per_node: list[int],
+        single_gpu_mode: bool,
+        args: Args,
+        streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+        vllm_config: data_loader_lib.VLLMConfig,
+        data_prep_actor_name: str,
+        tokenizer: PreTrainedTokenizer,
     ):
         self.pg = pg
         self.ray_process_cls = ray_process_cls
@@ -1244,7 +1242,7 @@ class ModelGroup:
             scheduling_strategy=PlacementGroupSchedulingStrategy(
                 placement_group=self.pg, placement_group_bundle_index=0
             ),
-        ).remote(world_size, 0, 0, None, None)
+        ).remote(world_size, 0, 0, None, None, args, streaming_config, vllm_config, data_prep_actor_name, tokenizer)
 
         self.models.append(master_policy)
         results, _ = ray_get_with_progress(
@@ -1277,697 +1275,76 @@ class ModelGroup:
                 num_cpus=self.num_cpus_per_actor,
                 num_gpus=self.num_gpus_per_actor,
                 scheduling_strategy=scheduling_strategy,
-            ).remote(world_size, rank, 0, master_addr, master_port)
+            ).remote(
+                world_size,
+                rank,
+                0,
+                master_addr,
+                master_port,
+                args,
+                streaming_config,
+                vllm_config,
+                data_prep_actor_name,
+                tokenizer,
+            )
             self.models.append(worker_policy)
 
 
-class PendingQueriesMap:
-    """Thread-safe map for tracking pending queries with reference counting."""
+def compute_token_weights(metrics_list: list[dict[str, float]]) -> list[float]:
+    """Compute token-weighted weights for averaging metrics across ranks.
 
-    def __init__(self):
-        self._map = {}  # dataset_idx -> (query, ground_truth, dataset, count)
-        self._lock = threading.Lock()
-
-    def insert(self, dataset_idx, query, ground_truth, dataset, raw_query):
-        """Insert or increment count for a dataset index."""
-        with self._lock:
-            if dataset_idx in self._map:
-                # Already exists - just increment count
-                existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
-                    dataset_idx
-                ]
-                self._map[dataset_idx] = (
-                    existing_query,
-                    existing_ground_truth,
-                    existing_dataset,
-                    existing_raw_query,
-                    count + 1,
-                )
-            else:
-                # New entry - count starts at 1
-                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, 1)
-
-    def insert_many(self, dataset_indices, queries, ground_truths, datasets, raw_queries):
-        """Insert or increment count for multiple dataset indices at once."""
-        with self._lock:
-            for i, dataset_idx in enumerate(dataset_indices):
-                current_raw_query = raw_queries[i]
-
-                if dataset_idx in self._map:
-                    # Already exists - just increment count
-                    existing_query, existing_ground_truth, existing_dataset, existing_raw_query, count = self._map[
-                        dataset_idx
-                    ]
-                    self._map[dataset_idx] = (
-                        existing_query,
-                        existing_ground_truth,
-                        existing_dataset,
-                        existing_raw_query,
-                        count + 1,
-                    )
-                else:
-                    # New entry - count starts at 1
-                    self._map[dataset_idx] = (queries[i], ground_truths[i], datasets[i], current_raw_query, 1)
-
-    def pop(self, dataset_idx):
-        """Retrieve data and decrement count. Removes entry when count reaches 0."""
-        with self._lock:
-            if dataset_idx not in self._map:
-                raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
-
-            query, ground_truth, dataset, raw_query, count = self._map[dataset_idx]
-
-            if count > 1:
-                # More results expected - just decrement
-                self._map[dataset_idx] = (query, ground_truth, dataset, raw_query, count - 1)
-            else:
-                # Last result - remove entry
-                del self._map[dataset_idx]
-
-            return query, ground_truth, dataset, raw_query
-
-    def __len__(self):
-        """Return the number of entries in the map."""
-        with self._lock:
-            return len(self._map)
-
-    def __contains__(self, dataset_idx):
-        """Check if a dataset index is in the map."""
-        with self._lock:
-            return dataset_idx in self._map
-
-    def __getitem__(self, dataset_idx):
-        """Get the value for a dataset index."""
-        with self._lock:
-            return self._map[dataset_idx]
-
-    def keys(self):
-        """Return a view of the keys in the map."""
-        with self._lock:
-            return list(self._map.keys())
-
-
-def calculate_utilization_metrics(
-    model_dims: utils.ModelDims,
-    prompt_lengths: list[int],
-    response_lengths: list[int],
-    total_generation_time: float,
-    samples_per_prompt: int,
-    num_inference_gpus: int,
-    training_time: float,
-    num_training_gpus: int,
-) -> dict:
-    """Calculate MFU and MBU metrics for model inference and training.
-
-    Args:
-        model_dims: Model dimensions with device information
-        prompt_lengths: List of prompt lengths
-        response_lengths: List of response lengths
-        total_generation_time: Total time taken for generation (for actor metrics)
-        samples_per_prompt: Number of samples generated per prompt
-        num_inference_gpus: Number of GPUs used for inference
-        training_time: Time taken for training step (for learner metrics)
-        num_training_gpus: Number of GPUs used for training (for learner metrics)
-
-    Returns:
-        Dict with the following keys:
-            - actor_mfu: Model FLOPs utilization for inference (percentage)
-            - actor_mbu: Model bandwidth utilization for inference (percentage)
-            - learner_mfu: Model FLOPs utilization for training (percentage)
+    Important for sequence parallel where different ranks may have different token counts.
     """
-    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
-    )
-
-    # Calculate FLOPs and memory bytes for inference
-    actor_total_flops = model_dims.flops(prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt)
-    actor_total_memory_bytes = model_dims.memory_bytes(
-        prompt_lengths, response_lengths, samples_per_prompt=samples_per_prompt
-    )
-
-    # Calculate MFU and MBU accounting for multiple GPUs
-    flops_per_second = actor_total_flops / total_generation_time
-    bytes_per_second = actor_total_memory_bytes / total_generation_time
-    # Scale device capabilities by number of GPUs
-    total_device_flops = model_dims.device_flops * num_inference_gpus
-    total_device_bandwidth = model_dims.device_memory_bandwidth * num_inference_gpus
-    actor_mfu = 100 * flops_per_second / total_device_flops
-    actor_mbu = 100 * bytes_per_second / total_device_bandwidth
-
-    # Calculate learner/training metrics
-    # For training, we need to use total sequence lengths (prompt + response) since training
-    # processes the full sequences, not separate prefill/decode operations
-    total_sequence_lengths = [
-        prompt_lengths[i // samples_per_prompt] + response_len for i, response_len in enumerate(response_lengths)
-    ]
-
-    # For training FLOPs, pass total sequence lengths as prompt_lengths with response_lengths=None
-    training_flops = model_dims.flops(
-        prompt_lengths=total_sequence_lengths,
-        response_lengths=None,
-        samples_per_prompt=1,  # Already expanded in total_sequence_lengths
-        is_training=True,
-    )
-
-    # Calculate training MFU
-    training_flops_per_second = training_flops / training_time
-    total_training_device_flops = model_dims.device_flops * num_training_gpus
-    learner_mfu = 100 * training_flops_per_second / total_training_device_flops
-
-    return {"actor_mfu": actor_mfu, "actor_mbu": actor_mbu, "learner_mfu": learner_mfu}
+    token_counts = []
+    total_tokens = 0.0
+    for m in metrics_list:
+        tc = m.get("_token_count", 1.0)
+        token_counts.append(tc)
+        total_tokens += tc
+    if total_tokens > 0:
+        return [tc / total_tokens for tc in token_counts]
+    return [1.0 / len(metrics_list)] * len(metrics_list)
 
 
-def accumulate_inference_batches(
-    inference_results_Q: ray_queue.Queue,
-    pending_queries_map: PendingQueriesMap,
-    args: Args,
-    training_step: int,
-    generation_config: vllm.SamplingParams,
-    num_prompts: int,
-    model_dims: utils.ModelDims,
-    actor_manager=None,
-    timeout: Optional[float] = None,
-) -> tuple[GenerationResult, Batch]:
-    """Accumulate multiple inference results into a single training batch.
-
-    Args:
-        inference_results_Q: Queue containing individual GenerationResult objects (one per prompt)
-        pending_queries_map: PendingQueriesMap instance for thread-safe query tracking
-        args: Arguments containing vllm_num_engines and batch size info
-        training_step: Current training step for error reporting
-        generation_config: Generation config containing n (number of samples per prompt)
-        num_prompts: Number of prompts to accumulate
-        timeout: Optional timeout in seconds for queue get operations. If None, blocks indefinitely.
-
-    Raises:
-        queue.Empty: If timeout is specified and no data is available within timeout.
-
-    Returns:
-        Tuple of (combined_result, Batch with queries, ground_truths, datasets, prompt_lengths, response_lengths)
-        or (ShutdownSentinel, None, None, None) if shutdown signal received
-    """
-    results = []
-    all_queries = []
-    all_ground_truths = []
-    all_datasets = []
-    all_raw_queries = []
-    for i in tqdm(
-        range(num_prompts),
-        total=num_prompts,
-        desc=f"Accumulating results from {num_prompts} prompts",
-        bar_format="{l_bar}{bar}{r_bar}\n",
-        disable=not args.verbose,
-    ):
-        result = inference_results_Q.get(timeout=timeout)
-
-        if isinstance(result, ShutdownSentinel):
-            return result, None, None, None
-
-        # Validate that each individual result has the expected number of responses
-        assert len(result.responses) == generation_config.n, (
-            f"Mismatch: individual prompt result has {len(result.responses)} responses "
-            f"but expected {generation_config.n} samples per prompt. "
-            f"Dataset index: {result.dataset_index}, Training step: {training_step}"
+def validate_configs(
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
+    num_learners_per_node: tuple[int, ...],
+    sequence_parallel_size: int,
+) -> None:
+    """Validate cross-cutting config constraints."""
+    if streaming_config.num_unique_prompts_rollout < vllm_config.vllm_num_engines:
+        logger.warning(
+            f"With num_unique_prompts_rollout={streaming_config.num_unique_prompts_rollout} < "
+            f"vllm_num_engines={vllm_config.vllm_num_engines}, vllm will be generating data for multiple "
+            "batches simultaneously. This is fine but might be unexpected behaviour."
         )
-
-        query, ground_truth, dataset, raw_query = pending_queries_map.pop(result.dataset_index)
-
-        results.append(result)
-        all_queries.append(query)
-        all_ground_truths.append(ground_truth)
-        all_datasets.append(dataset)
-        all_raw_queries.append(raw_query)
-
-    # Combine all results into a single GenerationResult
-    combined_responses = []
-    combined_finish_reasons = []
-    combined_masks = []
-    combined_num_calls = []
-    combined_timeouts = []
-    combined_tool_errors = []
-    combined_tool_outputs = []
-    combined_tool_runtimes = []
-    combined_tool_calleds = []
-
-    earliest_start_time = float("inf")
-    prompt_lengths = []
-    response_lengths = []
-
-    total_prompt_tokens = 0
-    total_response_tokens = 0
-    max_generation_time = 0
-
-    for i, result in enumerate(results):
-        combined_responses.extend(result.responses)
-        combined_finish_reasons.extend(result.finish_reasons)
-        combined_masks.extend(result.masks)
-        combined_num_calls.extend(result.request_info.num_calls)
-        combined_timeouts.extend(result.request_info.timeouts)
-        combined_tool_errors.extend(result.request_info.tool_errors)
-        combined_tool_outputs.extend(result.request_info.tool_outputs)
-        combined_tool_runtimes.extend(result.request_info.tool_runtimes)
-        combined_tool_calleds.extend(result.request_info.tool_calleds)
-
-        earliest_start_time = min(earliest_start_time, result.start_time)
-
-        prompt_lengths.append(len(all_queries[i]))
-
-        for response in result.responses:
-            response_lengths.append(len(response))
-
-        total_prompt_tokens += result.token_statistics.num_prompt_tokens
-        total_response_tokens += result.token_statistics.num_response_tokens
-        max_generation_time = max(max_generation_time, result.token_statistics.generation_time)
-
-    # Use the maximum generation time across engines since they work in parallel
-    # This avoids including queue overhead and accumulation time in MFU/MBU calculations
-    total_generation_time = max_generation_time
-
-    accumulated_stats = TokenStatistics(
-        num_prompt_tokens=total_prompt_tokens,
-        num_response_tokens=total_response_tokens,
-        generation_time=total_generation_time,
-        earliest_start_time=earliest_start_time,
+    assert (
+        streaming_config.num_samples_per_prompt_rollout * streaming_config.num_unique_prompts_rollout
+        >= sum(num_learners_per_node) // sequence_parallel_size
+    ), (
+        "num_samples_per_prompt_rollout * num_unique_prompts_rollout must be greater than or equal to world_size // sequence_parallel_size to ensure we have a batch for each rank in distributed training."
     )
 
-    # Create combined RequestInfo
-    combined_request_info = RequestInfo(
-        num_calls=combined_num_calls,
-        timeouts=combined_timeouts,
-        tool_errors=combined_tool_errors,
-        tool_outputs=combined_tool_outputs,
-        tool_runtimes=combined_tool_runtimes,
-        tool_calleds=combined_tool_calleds,
-    )
 
-    # Create combined GenerationResult
-    combined_result = GenerationResult(
-        responses=combined_responses,
-        finish_reasons=combined_finish_reasons,
-        masks=combined_masks,
-        request_info=combined_request_info,
-        dataset_index=None,  # Not meaningful for combined result
-        token_statistics=accumulated_stats,
-    )
-
-    if actor_manager is not None:
-        ray.get(actor_manager.report_token_statistics.remote(accumulated_stats))
-
-    # Note: We don't have dataset_indices here, but they're not needed for the returned batch
-    batch = Batch(
-        queries=all_queries,
-        ground_truths=all_ground_truths,
-        datasets=all_datasets,
-        raw_queries=all_raw_queries,
-        indices=None,  # Not meaningful for combined results
-    )
-    return combined_result, batch, prompt_lengths, response_lengths
-
-
-def data_preparation_thread(
-    reward_fn: Callable,
-    inference_results_Q: ray_queue.Queue,  # Ray queue
-    packed_sequences_Q: Queue,
-    pending_queries_map: dict,
-    args: Args,
-    tokenizer: PreTrainedTokenizer,
-    num_training_steps: int,
-    generation_config,
-    resume_training_step: int,
-    actor_manager=None,
-    model_dims: utils.ModelDims = None,
-):
-    for training_step in range(resume_training_step, num_training_steps + 1):
-        # Streaming accumulation: collect results as they arrive
-        with Timer("🚀 [Data Preparation Thread] Getting response ids") as timer:
-            result, batch, prompt_lengths, response_lengths = accumulate_inference_batches(
-                inference_results_Q,
-                pending_queries_map,
-                args,
-                training_step,
-                generation_config,
-                num_prompts=args.num_unique_prompts_rollout,
-                model_dims=model_dims,
-                actor_manager=actor_manager,
-            )
-            if isinstance(result, ShutdownSentinel):
-                logger.info("[Data Preparation Thread] Received shutdown sentinel, exiting")
-                return
-
-        getting_response_time = timer.duration
-
-        # ------------------------------------------------------------------------------------------------
-        # Pack sequences
-        if args.num_samples_per_prompt_rollout > 1:
-            batch = Batch(
-                queries=repeat_each(batch.queries, args.num_samples_per_prompt_rollout),
-                ground_truths=repeat_each(batch.ground_truths, args.num_samples_per_prompt_rollout),
-                datasets=repeat_each(batch.datasets, args.num_samples_per_prompt_rollout),
-                raw_queries=repeat_each(batch.raw_queries, args.num_samples_per_prompt_rollout),
-                indices=repeat_each(batch.indices, args.num_samples_per_prompt_rollout) if batch.indices else None,
-            )
-            good_outputs = [
-                len(result.request_info.tool_outputs[i]) > 0
-                and result.request_info.tool_calleds[i]
-                and not result.request_info.timeouts[i]
-                and not result.request_info.tool_errors[i]
-                for i in range(len(result.request_info.tool_outputs))
-            ]
-        for i in range(len(result.finish_reasons)):
-            # edge case: sometimes it outputs eos immediately, and we get an empty response
-            # in that case, we need to add the eos token to the response
-            # note that this also adds eos to the end of reponses that stopped for other reasons.
-            if result.finish_reasons[i] == "stop" and (
-                len(result.responses[i]) == 0 or result.responses[i][-1] != tokenizer.eos_token_id
-            ):
-                result.responses[i].append(tokenizer.eos_token_id)
-                result.masks[i].append(1)  # never mask the eos token for
-        with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
-            decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
-            decoded_queries = batch.raw_queries
-            stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
-                result.finish_reasons
-            )
-
-        with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = asyncio.run(
-                reward_fn(
-                    result.responses,
-                    decoded_responses,
-                    batch,
-                    result.finish_reasons,
-                    result.request_info,
-                    decoded_queries,
-                )
-            )
-            scores = np.array(scores)
-            scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
-            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            if args.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif args.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
-            else:
-                raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
-
-        with Timer("📦 [Data Preparation Thread] Filtering sequences"):
-            # Here we get the max possible score for each prompt, and see how many prompts are unsolved
-            max_possible_score = 0
-            if args.apply_verifiable_reward:
-                max_possible_score += args.verification_reward
-            if args.apply_r1_style_format_reward and args.additive_format_reward:
-                max_possible_score += args.r1_style_format_reward
-            unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
-            # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
-            # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
-            non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
-            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
-            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
-            non_zero_gradient_index = np.where(expanded_mask)[0]
-
-            # Log zero-gradient filtering statistics
-            num_zero_std_prompts = (~non_zero_std_mask).sum()
-            num_filtered_responses = len(scores) - len(non_zero_gradient_index)
-            if num_filtered_responses > 0:
-                logger.info(
-                    f"[Zero-gradient filtering] Filtered {num_zero_std_prompts} prompts with zero std "
-                    f"({num_filtered_responses} responses). Retention rate: {len(non_zero_gradient_index) / len(scores):.2%}"
-                )
-
-            advantages = advantages[non_zero_gradient_index]
-            original_batch_size = len(scores)
-            scores = scores[non_zero_gradient_index]
-            responses = [result.responses[i] for i in non_zero_gradient_index]
-            masks = [result.masks[i] for i in non_zero_gradient_index]
-            batch = batch[non_zero_gradient_index.tolist()]
-            finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
-            if args.mask_truncated_completions:
-                stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
-                num_truncated = len(finish_reasons) - len(stop_idxes)
-                if num_truncated > 0:
-                    logger.info(
-                        f"[Truncated completions filtering] Filtered {num_truncated} responses that didn't finish with 'stop'. "
-                        f"Retention rate: {len(stop_idxes) / len(finish_reasons):.2%}"
-                    )
-                scores = scores[stop_idxes]
-                advantages = advantages[stop_idxes]
-                responses = [responses[i] for i in stop_idxes]
-                masks = [masks[i] for i in stop_idxes]
-                batch = batch[stop_idxes.tolist()]
-                finish_reasons = [finish_reasons[i] for i in stop_idxes]
-
-            if args.fill_completions:
-                with Timer("⏱ [Data Preparation Thread] Refill completions"):
-                    current_batch_size = len(scores)
-                    original_prompt_cnt = original_batch_size // args.num_samples_per_prompt_rollout
-                    current_prompt_cnt = current_batch_size // args.num_samples_per_prompt_rollout
-                    need_to_fill_prompt = original_prompt_cnt - current_prompt_cnt
-                    k = args.num_samples_per_prompt_rollout
-
-                    if need_to_fill_prompt > 0 and current_prompt_cnt > 0:
-                        scores_matrix = scores.reshape(current_prompt_cnt, k)
-                        stds = scores_matrix.std(axis=1) + 1e-8
-                        probs = stds / stds.sum()
-
-                        logger.info(
-                            f"[Refill completions] Need to fill {need_to_fill_prompt} prompts to maintain batch size. "
-                            f"Original: {original_prompt_cnt}, Current: {current_prompt_cnt}"
-                        )
-
-                        sampled_prompt_ids = np.random.choice(
-                            current_prompt_cnt, size=need_to_fill_prompt, replace=True, p=probs
-                        )
-
-                        sampled_indices = []
-                        for pid in sampled_prompt_ids:
-                            start = pid * k
-                            sampled_indices.extend(range(start, start + k))
-
-                        advantages = np.concatenate([advantages, advantages[sampled_indices]])
-                        scores = np.concatenate([scores, scores[sampled_indices]])
-                        responses += [responses[i] for i in sampled_indices]
-                        masks += [masks[i] for i in sampled_indices]
-
-                        sampled_batch = batch[sampled_indices]
-
-                        batch = Batch(
-                            queries=batch.queries + sampled_batch.queries,
-                            ground_truths=batch.ground_truths + sampled_batch.ground_truths,
-                            datasets=batch.datasets + sampled_batch.datasets,
-                            indices=batch.indices + sampled_batch.indices if batch.indices is not None else None,
-                        )
-
-                        finish_reasons += [finish_reasons[i] for i in sampled_indices]
-
-                        logger.info(
-                            f"📊 Duplicated {need_to_fill_prompt} prompts from {len(sampled_indices)} total responses"
-                        )
-
-            # Count groups with all zero rewards
-            all_zero_groups = (scores_per_prompt == 0).all(axis=-1).sum()
-            total_groups = len(scores_per_prompt)
-            logger.info(
-                f"[Reward Summary] Groups with all zero rewards: {all_zero_groups}/{total_groups} "
-                f"({all_zero_groups / total_groups:.1%})"
-            )
-
-        with Timer("📦 [Data Preparation Thread] Packing sequences"):
-            packed_sequences = pack_sequences(
-                queries=batch.queries,
-                responses=responses,
-                masks=masks,
-                pack_length=args.pack_length,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-            num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
-            # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
-            # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
-            lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
-            lookup_advantages[1:] = advantages
-            packed_advantages = [
-                torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
-                for packed_mask in packed_sequences.response_masks
-            ]
-            packed_sequences.advantages = packed_advantages
-
-        # if we have less batches than world size, we need to pad out so each world is fine
-        # ideally, you should avoid this since its wasting computation.
-        if args.allow_world_padding:
-            with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
-                shortfall = args.world_size - len(packed_sequences.query_responses)
-                if shortfall > 0:
-                    logger.warning(
-                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
-                    )
-                    # construct "dummy" sequences for padding out the world size
-                    dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
-                    dummy_tool_mask = torch.zeros_like(dummy_qr)
-                    dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-                    dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-                    dummy_response_mask = torch.zeros_like(dummy_qr)
-                    dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
-                    # pad out the world size
-                    for _ in range(shortfall):
-                        packed_sequences.query_responses.append(dummy_qr)
-                        packed_sequences.tool_masks.append(dummy_tool_mask)
-                        packed_sequences.attention_masks.append(dummy_attention)
-                        packed_sequences.position_ids.append(dummy_position_ids)
-                        packed_sequences.response_masks.append(dummy_response_mask)
-                        packed_sequences.advantages.append(dummy_advantage)
-
-        with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
-            B = (
-                len(packed_sequences.query_responses) // args.world_size
-            )  # essentially doing `drop_last=True`, which is fine.
-            collated_data = []
-            for i in range(args.world_size):
-                per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
-                per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
-                per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
-                per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
-                per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
-                per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
-
-                # Shuffle the batch and collate the data
-                b_inds = np.random.permutation(len(per_device_packed_query_responses))
-                collated_query_responses = []
-                collated_tool_masks = []
-                collated_attention_masks = []
-                collated_position_ids = []
-                collated_response_masks = []
-                collated_advantages = []
-                for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
-                    micro_range = b_inds[j : j + args.per_device_train_batch_size]
-                    collated_query_responses.append(
-                        collate_fn(
-                            [per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id
-                        )
-                    )
-                    collated_tool_masks.append(
-                        collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0)
-                    )
-                    collated_attention_masks.append(
-                        collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0)
-                    )
-                    collated_position_ids.append(
-                        collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0)
-                    )
-                    collated_response_masks.append(
-                        collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
-                    )
-                    collated_advantages.append(
-                        collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
-                    )
-                collated_data.append(
-                    {
-                        "collated_query_responses": collated_query_responses,
-                        "collated_tool_masks": collated_tool_masks,
-                        "collated_attention_masks": collated_attention_masks,
-                        "collated_position_ids": collated_position_ids,
-                        "collated_advantages": collated_advantages,
-                        "collated_response_masks": collated_response_masks,
-                    }
-                )
-
-        # Create a result package with metrics and data
-        if len(responses) == 0:
-            # Handle empty responses case
-            # in this case, we won't log metrics, so it should be fine.
-            metrics = {}
-        else:
-            sequence_lengths = np.array([len(response) for response in responses])
-            sequence_length_solved = (
-                np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
-            )
-            sequence_length_unsolved = (
-                np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
-            )
-
-            # Use the already calculated reward summary metrics for wandb
-            all_zero_groups_ratio = all_zero_groups / total_groups if total_groups > 0 else 0
-
-            metrics = {
-                "scores": np.array(scores).mean(),
-                "real_batch_size_ratio": real_batch_size_ratio,
-                "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
-                "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
-                "val/all_zero_reward_groups": all_zero_groups,
-                "val/all_zero_reward_groups_ratio": all_zero_groups_ratio,
-                "val/total_reward_groups": total_groups,
-                "val/sequence_lengths": sequence_lengths.mean(),
-                "val/sequence_lengths_min": sequence_lengths.min(),
-                "val/sequence_lengths_max": sequence_lengths.max(),
-                "val/sequence_lengths_unsolved": (
-                    0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
-                ),
-                "val/sequence_lengths_solved": (
-                    0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean()
-                ),
-                "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
-                "val/sequence_lengths_solved_hist": sequence_length_solved,
-                "val/stop_rate": stop_rate,
-                "val/advantages_mean": advantages.mean(),
-                "val/advantages_min": advantages.min(),
-                "val/advantages_max": advantages.max(),
-                "val/advantages_hist": advantages,
-                "val/num_calls_rate": np.array(result.request_info.num_calls).mean(),
-                "val/timeouts_rate": np.array(result.request_info.timeouts).mean(),
-                "val/tool_errors_rate": np.array([len(item) > 0 for item in result.request_info.tool_errors]).mean(),
-                "val/good_outputs_rate": np.array(good_outputs).mean(),
-                "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
-                "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
-                "time/getting_response": getting_response_time,
-                **reward_metrics,
-            }
-
-            total_tokens = result.token_statistics.num_prompt_tokens + result.token_statistics.num_response_tokens
-            metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
-
-        if args.save_traces:
-            traces = {
-                "scores": scores.tolist(),
-                "finish_reasons": finish_reasons,
-                "responses": responses,
-                "training_step": training_step,
-                **asdict(batch),  # Unpack all batch fields
-                **reward_metrics,
-            }
-            os.makedirs(args.output_dir, exist_ok=True)
-            with open(f"{args.output_dir}/traces_{args.run_name}.jsonl", "a") as f:
-                json.dump(traces, f)
-                f.write("\n")
-
-        if len(responses) == 0:
-            logger.warning(f"No responses in batch {training_step}.")
-
-        # Put the packed sequences and metrics into the output queue
-        packed_sequences_Q.put(
-            {
-                "packed_sequences": packed_sequences,  # for debugging purposes
-                "collated_data": collated_data,
-                "metrics": metrics,
-                "responses_count": len(responses),
-                "num_new_tokens": num_new_tokens,
-                "B": B,
-                "prompt_lengths": prompt_lengths,
-                "response_lengths": response_lengths,
-            }
-        )
-
-
-def setup_runtime_variables(args: Args) -> Args:
+def setup_runtime_variables(
+    args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig, tools_config: ToolsConfig
+) -> Args:
     """Set up runtime variables for the experiment."""
+    if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
+        assert streaming_config.mask_tool_use, (
+            "Must mask tool use when using vLLM logprobs or truncated importance sampling."
+        )
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
-    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
     if is_beaker_job():
-        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        streaming_config.dataset_local_cache_dir = (
+            "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        )
     args.world_size = sum(args.num_learners_per_node)
     args.num_training_steps = args.total_episodes // (
-        args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+        streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
     )
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
@@ -1981,10 +1358,8 @@ def setup_runtime_variables(args: Args) -> Args:
         if args.hf_repo_revision is None:  # auto-generate one
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-    if args.with_tracking:
-        if args.wandb_entity is None:
-            args.wandb_entity = maybe_use_ai2_wandb_entity()
-    args.tool_use = args.tools is not None and len(args.tools) > 0
+    if args.with_tracking and args.wandb_entity is None:
+        args.wandb_entity = maybe_use_ai2_wandb_entity()
     return args
 
 
@@ -2013,46 +1388,96 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
     return beaker_config, wandb_url
 
 
-def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
+def setup_datasets(
+    args: Args,
+    tc: TokenizerConfig,
+    tokenizer: PreTrainedTokenizer,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    tool_definitions: list[dict[str, Any]],
+):
     """Set up training and evaluation datasets."""
+    system_prompt_override = None
+    if streaming_config.system_prompt_override_file is not None:
+        logger.info(f"Loading system prompt override from {streaming_config.system_prompt_override_file}")
+        with open(streaming_config.system_prompt_override_file) as f:
+            system_prompt_override = f.read().strip()
+        logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
+
     transform_fn_args = [
-        {},
-        {"max_token_length": args.max_token_length, "max_prompt_token_length": args.max_prompt_token_length},
+        {"system_prompt_override": system_prompt_override, "tool_definitions": tool_definitions},
+        {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+        dataset_mixer_list=streaming_config.dataset_mixer_list,
+        dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
         tc=tc,
-        dataset_transform_fn=args.dataset_transform_fn,
+        dataset_transform_fn=streaming_config.dataset_transform_fn,
         transform_fn_args=transform_fn_args,
-        dataset_cache_mode=args.dataset_cache_mode,
-        dataset_config_hash=args.dataset_config_hash,
+        dataset_cache_mode=streaming_config.dataset_cache_mode,
+        dataset_config_hash=streaming_config.dataset_config_hash,
         hf_entity=args.hf_entity,
-        dataset_local_cache_dir=args.dataset_local_cache_dir,
-        dataset_skip_cache=args.dataset_skip_cache,
+        dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
+        dataset_skip_cache=streaming_config.dataset_skip_cache,
+        system_prompt_override=system_prompt_override,
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
 
-    eval_dataset = None
-    if len(args.dataset_mixer_eval_list) > 0:
+    if len(streaming_config.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
-            args.dataset_mixer_eval_list,
-            args.dataset_mixer_eval_list_splits,
-            tc,
-            args.dataset_transform_fn,
-            transform_fn_args,
+            dataset_mixer_list=streaming_config.dataset_mixer_eval_list,
+            dataset_mixer_list_splits=streaming_config.dataset_mixer_eval_list_splits,
+            tc=tc,
+            dataset_transform_fn=streaming_config.dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
             hf_entity=args.hf_entity,
-            dataset_cache_mode=args.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_eval_hash,
-            dataset_local_cache_dir=args.dataset_local_cache_dir,
-            dataset_skip_cache=args.dataset_skip_cache,
+            dataset_cache_mode=streaming_config.dataset_cache_mode,
+            dataset_config_hash=streaming_config.dataset_config_eval_hash,
+            dataset_local_cache_dir=streaming_config.dataset_local_cache_dir,
+            dataset_skip_cache=streaming_config.dataset_skip_cache,
+            system_prompt_override=system_prompt_override,
         )
-        if args.shuffle_eval_dataset:
+        if streaming_config.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
+    else:
+        eval_dataset = None
 
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
 
     return train_dataset, eval_dataset
+
+
+def create_tools(parsed_tools: list[ParsedToolConfig]) -> list[ray.actor.ActorHandle]:
+    """Create tool actors based on tool configuration using the TOOL_REGISTRY.
+
+    Args:
+        parsed_tools: List of ParsedTool instances containing name, call_name, and config.
+
+    Returns:
+        A list of Ray actor handles for the requested tools.
+
+    Raises:
+        ValueError: If an unknown tool is requested, configs are invalid, or required fields are missing.
+    """
+    tool_actors = []
+
+    for parsed_tool in parsed_tools:
+        if parsed_tool.name not in TOOL_REGISTRY:
+            available_tools = ", ".join(TOOL_REGISTRY.keys())
+            raise ValueError(f"Unknown tool: {parsed_tool.name}. Available tools: {available_tools}")
+
+        tool_config_class = TOOL_REGISTRY[parsed_tool.name]
+        # Build config from dictionary
+        try:
+            config = tool_config_class(**parsed_tool.config)
+        except Exception as e:
+            raise ValueError(f"Invalid config for tool '{parsed_tool.name}': {e}") from e
+
+        # The config is a dataclass, and may have performed additional validation
+        # or transformation of the args, which we then now pass to the tool.
+        _kwarg_dict = asdict(config) | {"call_name": parsed_tool.call_name}
+        tool_actors.append(ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**_kwarg_dict))
+
+    return tool_actors
 
 
 def create_model_and_optimizer(
@@ -2063,95 +1488,140 @@ def create_model_and_optimizer(
     wandb_url: str,
     tokenizer: PreTrainedTokenizer,
     inference_results_Q: ray_queue.Queue,
-    param_prompt_Q: ray_queue.Queue,
+    prompt_Q: ray_queue.Queue,
     evaluation_inference_results_Q: ray_queue.Queue,
-) -> tuple[ModelGroup, list[vllm_utils3.LLMRayActor], dict, int, int]:
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
+    train_dataset: Dataset,
+    eval_dataset,
+    reward_config: RewardConfig,
+    generation_config,
+    data_prep_actor_state: dict | None = None,
+    tool_actors: list[ray.actor.ActorHandle] | None = None,
+    tools_config: ToolsConfig | None = None,
+) -> tuple[
+    ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
+]:
     """Create the model, optimizer, and vLLM engines."""
     # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
     ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
-    inits = []
-    policy_group = ModelGroup(pg, PolicyTrainerRayProcess, args.num_learners_per_node, args.single_gpu_mode)
-    wandb_url = wandb.run.get_url() if args.with_tracking else None
-    inits.extend(
-        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
-        for model in policy_group.models
-    )
-
-    # Set up tools
-    max_len = args.max_prompt_token_length + args.response_length
-    tool_objects = {}
-    if args.tools:
-        for tool in args.tools:
-            if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
-
-                tool = SearchTool(
-                    start_str="<query>",
-                    end_str="</query>",
-                    api_endpoint=args.search_api_endpoint,
-                    number_documents_to_search=args.number_documents_to_search,
-                )
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
-            elif tool.lower() == "code":
-                from open_instruct.tool_utils.tools import PythonCodeTool
-
-                tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
-                tool_objects[tool.end_str] = tool
-                # Add tool end string to stop_strings
-                args.stop_strings.append(tool.end_str)
-            else:
-                raise ValueError(f"Unknown tool: {tool}")
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
-        "Param Prompt Queue": param_prompt_Q,
+        "Prompt Queue": prompt_Q,
         "Evaluation Queue": evaluation_inference_results_Q,
     }
-    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args)
+    actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
+
+    # Get model_dims early from HuggingFace config (doesn't require vLLM)
+    model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
+
+    # Create DataPreparationActor FIRST so StreamingDataLoader can find it
+    data_prep_actor_name = "data_prep_singleton"
+    _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
+        dataset=train_dataset,
+        inference_results_Q=inference_results_Q,
+        param_prompt_Q=prompt_Q,
+        tokenizer=tokenizer,
+        config=streaming_config,
+        generation_config=generation_config,
+        num_training_steps=args.num_training_steps,
+        seed=args.seed,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        global_batch_size=streaming_config.num_unique_prompts_rollout,
+        dp_world_size=args.world_size // args.sequence_parallel_size,
+        max_possible_score=streaming_config.max_possible_score,
+        actor_manager=actor_manager,
+        model_dims=model_dims,
+        verbose=args.verbose,
+        work_dir=args.output_dir,
+        tool_names=tools_config.tool_call_names if tools_config else [],
+        initial_state=data_prep_actor_state,
+    )
+
+    # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
+    # This ensures policy trainer actors are scheduled first, which affects how Ray schedules
+    # the vLLM placement group and prevents port collisions during vLLM initialization.
+    wandb_url = wandb.run.get_url() if args.with_tracking else None
+    policy_group = ModelGroup(
+        pg,
+        PolicyTrainerRayProcess,
+        args.num_learners_per_node,
+        args.single_gpu_mode,
+        args=args,
+        streaming_config=streaming_config,
+        vllm_config=vllm_config,
+        data_prep_actor_name=data_prep_actor_name,
+        tokenizer=tokenizer,
+    )
+    inits = [
+        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
+        for model in policy_group.models
+    ]
 
     # Create vLLM engines with queues
-    vllm_engines = vllm_utils3.create_vllm_engines(
-        args.vllm_num_engines,
-        args.vllm_tensor_parallel_size,
-        args.vllm_enforce_eager,
+    vllm_engines = vllm_utils.create_vllm_engines(
+        vllm_config.vllm_num_engines,
+        vllm_config.vllm_tensor_parallel_size,
+        vllm_config.vllm_enforce_eager,
         tc.tokenizer_name_or_path,
         model_config.model_name_or_path,
         model_config.model_revision,
         args.seed,
-        args.vllm_enable_prefix_caching,
-        max_len,
-        args.vllm_gpu_memory_utilization,
+        vllm_config.vllm_enable_prefix_caching,
+        streaming_config.max_prompt_token_length + streaming_config.response_length,  # max_model_len
+        vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        tools=tool_objects,
-        max_tool_calls=args.max_tool_calls,
-        prompt_queue=param_prompt_Q,
+        tool_actors=tool_actors,
+        tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
+        max_tool_calls=tools_config.max_tool_calls if tools_config else 5,
+        mask_tool_use=streaming_config.mask_tool_use,
+        prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
-        inference_batch_size=args.inference_batch_size,
-        use_fp8_kv_cache=args.use_fp8_kv_cache,
-        inflight_updates=args.inflight_updates,
-        verbose=args.verbose,
+        inflight_updates=streaming_config.inflight_updates,
+        reward_config=reward_config,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
     )
+    logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
-    results, _ = ray_get_with_progress(inits, desc="Initializing models")
-    resume_training_step = results[0] + 1
-    episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-    logger.info("======== ✅ all models and vLLM engines initialized =========")
-
-    # Get and set KV cache max concurrency from the first engine (all engines have the same config)
-    # fp8 kv cache for now forces v0 engine and breaks this.
-    if vllm_engines and not args.use_fp8_kv_cache:
+    if vllm_engines:
         kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
+        expected_batch_size = (
+            streaming_config.num_unique_prompts_rollout
+            * streaming_config.num_samples_per_prompt_rollout
+            // vllm_config.vllm_num_engines
+        )
+        if kv_cache_max_concurrency < expected_batch_size:
+            nodes_needed = (
+                streaming_config.num_unique_prompts_rollout
+                * streaming_config.num_samples_per_prompt_rollout
+                // kv_cache_max_concurrency
+            )
+            logger.warning(
+                f"kv_cache_max_concurrency ({kv_cache_max_concurrency}) is lower than "
+                f"num_unique_prompts_rollout * num_samples_per_prompt_rollout // vllm_num_engines ({expected_batch_size}). "
+                f"This means actors will have to run multiple sequential batches, hurting performance. "
+                f"You might want to use more inference nodes ({nodes_needed} nodes to generate the entire batch simultaneously)."
+            )
     else:
-        # dummy value
         ray.get(actor_manager.set_kv_cache_max_concurrency.remote(-1))
+
+    # Wait for policy models to finish loading
+    results, _ = ray_get_with_progress(inits, desc="Initializing models")
+    resume_training_step = results[0] + 1
+    episode = (
+        (resume_training_step - 1)
+        * streaming_config.num_unique_prompts_rollout
+        * streaming_config.num_samples_per_prompt_rollout
+    )
+    logger.info("======== ✅ all models initialized =========")
 
     ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],
@@ -2159,85 +1629,22 @@ def create_model_and_optimizer(
     )
     logger.info("======== ✅ model update group setup successfully =========")
 
-    return policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager
+    return (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor)
 
 
-def create_generation_configs(args: Args):
+def create_generation_configs(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig):
     """Create generation configs for training and evaluation."""
-    generation_config = vllm.SamplingParams(
-        temperature=args.temperature,
-        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
-        max_tokens=args.response_length,
-        include_stop_str_in_output=True,
-        skip_special_tokens=False,
-        n=args.num_samples_per_prompt_rollout,
-        stop=args.stop_strings,
+    generation_config = vllm_utils.SamplingConfig(
+        temperature=streaming_config.temperature,
+        top_p=vllm_config.vllm_top_p,
+        max_tokens=streaming_config.response_length,
+        n=streaming_config.num_samples_per_prompt_rollout,
+        stop=streaming_config.stop_strings,
         seed=args.seed,
-        # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
-        # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
-        # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
-        # ensures all n completions are returned together in a single output.
-        output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
+        logprobs=1,
     )
-    eval_generation_config = generation_config.clone()
-    eval_generation_config.temperature = 0.0
-    eval_generation_config.n = 1
+    eval_generation_config = dataclasses.replace(generation_config, n=1)
     return {"train": generation_config, "eval": eval_generation_config}
-
-
-def split_and_insert_batch(
-    batch: Batch,
-    training_step: int,
-    pending_queries_map: PendingQueriesMap,
-    param_prompt_Q: ray_queue.Queue,
-    generation_config,
-    is_eval: bool,
-) -> None:
-    """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
-    for idx, query, ground_truth, dataset, raw_query in zip(
-        batch.indices, batch.queries, batch.ground_truths, batch.datasets, batch.raw_queries
-    ):
-        pending_queries_map.insert(idx, query, ground_truth, dataset, raw_query)
-        param_prompt_Q.put(
-            PromptRequest(
-                prompt=query,
-                generation_config=generation_config,
-                training_step=training_step,
-                dataset_index=idx,
-                is_eval=is_eval,
-            )
-        )
-
-
-def load_data_from_packing_thread(
-    packed_sequences_Q: Queue, num_total_tokens: int, stop_event: threading.Event, health_check_fn: Callable[[], None]
-):
-    """Get the packed sequences with advantages from the packing thread."""
-    with Timer("[Main Thread] 📦 Getting packed sequences from thread") as timer:
-        while True:
-            if stop_event.is_set():
-                logger.warning("[Main Thread] Stop event detected while waiting for packed sequences")
-                return None, {}, num_total_tokens, 0
-            try:
-                packed_data = packed_sequences_Q.get(timeout=30.0)
-                break
-            except Empty:
-                # check that everything is still alive
-                health_check_fn()
-                logger.warning("[Main Thread] Timeout waiting for packed sequences. Retrying...")
-        data_thread_metrics = packed_data["metrics"]
-        B = packed_data["B"]
-        collated_data = packed_data["collated_data"]
-        num_step_tokens = packed_data["num_new_tokens"]
-        num_total_tokens += num_step_tokens
-        prompt_lengths = packed_data["prompt_lengths"]
-        response_lengths = packed_data["response_lengths"]
-
-    data_thread_metrics["time/trainer_idling"] = timer.duration
-    if B == 0:
-        logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
-        return None, data_thread_metrics, num_total_tokens, 0, None, None
-    return collated_data, data_thread_metrics, num_total_tokens, num_step_tokens, prompt_lengths, response_lengths
 
 
 def weight_sync_thread(
@@ -2271,7 +1678,7 @@ def weight_sync_thread(
 
             # Broadcast weights to vLLM engines
             # First get the futures
-            weight_broadcast_futures: List[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
+            weight_broadcast_futures: list[ray.ObjectRef] = [m.broadcast_to_vllm.remote() for m in policy_group.models]
 
             # Wait for all weight updates to complete and collect individual timings
             _, actor_sync_times = ray_get_with_progress(
@@ -2301,70 +1708,140 @@ def weight_sync_thread(
     logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
 
-def generate_thread(args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q):
-    """Thread function that repeatedly calls process_from_queue on vllm engines."""
-    logger.info("[Generate Thread] 🚀 Starting generation thread")
-    while not stop_event.is_set():
-        with Timer("🔥 Generation time") as timer:
-            processed_results, _ = ray_get_with_progress(
-                [engine.process_from_queue.remote(timeout=20) for engine in vllm_engines],
-                desc="[Generate Thread] Waiting for vLLM engines to process",
-                enable=args.verbose,
-            )
-            num_processed = sum(int(result) for result in processed_results)
-            # Suppress timing output if nothing was processed
-            if num_processed == 0:
-                timer.noop = True
-        if num_processed > 0:
-            try:
-                generate_metrics_Q.put_nowait({"time/generation": timer.duration})
-            except Full:
-                logger.warning("[Generate Thread] generate metrics queue full, skipping metric")
-    logger.info("[Generate Thread] 🛑 Stopping generation thread")
-
-
 def one_training_step(
     args: Args,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     policy_group: ModelGroup,
-    collated_data,
-    tokenizer,
-    data_thread_metrics,
-    episode,
-    training_step,
-    num_total_tokens,
-    num_step_tokens,
-    start_time,
-    train_dataset,
-    training_start_time,
-    wandb_url,
-    chat_template_name,
+    tokenizer: PreTrainedTokenizer,
+    data_thread_metrics: dict[str, Any],
+    episode: int,
+    training_step: int,
+    num_total_tokens: int,
+    start_time: float,
+    train_dataset: datasets.Dataset,
+    training_start_time: float,
+    wandb_url: str,
+    chat_template_name: str,
     model_dims: utils.ModelDims,
-    prompt_lengths: list[int],
-    response_lengths: list[int],
-    actor_manager=None,
-    iter_dataloader=None,
-):
-    """Train the model for one step."""
+    actor_manager: ActorManager | None = None,
+) -> int:
+    """Train the model for one step. Returns the number of tokens processed."""
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
-        metrics_list, _ = ray_get_with_progress(
-            [
-                policy_group.models[i].train.remote(
-                    **collated_data[i], pad_token_id=tokenizer.pad_token_id, num_mini_batches=args.num_mini_batches
-                )
-                for i in range(args.world_size)
-            ],
+        results, _ = ray_get_with_progress(
+            [policy_group.models[i].step.remote() for i in range(args.world_size)],
             desc=f"Running training step {training_step}",
         )
+        metrics, array_metrics = zip(*results)
+        if all(len(m) == 0 for m in metrics):
+            logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
+            return 0
         if (
-            args.ref_policy_update_freq is not None
+            args.load_ref_policy
+            and args.ref_policy_update_freq is not None
             and training_step % args.ref_policy_update_freq == 0
             and args.alpha > 0
         ):
             update_ref_policy_future.extend(
                 [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
             )
+            ray_get_with_progress(update_ref_policy_future, desc=f"Updating reference policy at step {training_step}")
 
+    save_time = maybe_save_checkpoint(args, training_step, policy_group, chat_template_name, tokenizer, wandb_url)
+
+    ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
+
+    # Note: metrics contains scalar metrics from each worker, array_metrics contains list/array metrics
+    weights = compute_token_weights(metrics)
+
+    # Metrics that should be token-weighted (averages over tokens)
+    token_weighted_metrics = {
+        "objective/kl0_avg",
+        "objective/kl1_avg",
+        "objective/kl2_avg",
+        "objective/kl3_avg",
+        "loss/kl_avg",
+        "loss/policy_avg",
+        "loss/total_avg",
+        "policy/clipfrac_avg",
+        "policy/entropy_avg",
+        "val/ratio",
+        "val/ratio_var",
+    }
+    average_metrics = {}
+    # Average scalar metrics from each worker
+    for k in metrics[0]:
+        if k == "_token_count":
+            # Don't include internal token count in final metrics
+            continue
+        if k in token_weighted_metrics:
+            # Token-weighted average
+            average_metrics[k] = sum(m[k] * w for m, w in zip(metrics, weights))
+        else:
+            # Simple average for other metrics
+            average_metrics[k] = sum(m[k] for m in metrics) / len(metrics)
+    # Pass through array metrics from the first worker (these are the same across workers)
+    for k, v in array_metrics[0].items():
+        average_metrics[k] = v
+    step_time = time.perf_counter() - start_time
+    total_training_time = time.perf_counter() - training_start_time
+
+    total_generation_time = average_metrics["time/getting_response"]
+    prompt_lengths = array_metrics[0]["batch/prompt_lengths"]
+    response_lengths = array_metrics[0]["batch/response_lengths"]
+    num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
+
+    utilization_metrics = utils.calculate_utilization_metrics(
+        model_dims=model_dims,
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        total_generation_time=total_generation_time,
+        samples_per_prompt=streaming_config.num_samples_per_prompt_rollout,
+        num_engines=vllm_config.vllm_num_engines,
+        num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
+        training_time=train_timer.duration,
+        num_training_gpus=args.world_size,
+    )
+
+    metrics = {
+        "episode": episode,
+        "global_step": episode,
+        "training_step": training_step,
+        "val/num_total_tokens": num_total_tokens,
+        "val/num_step_tokens": num_step_tokens,
+        "epoch": episode / streaming_config.num_samples_per_prompt_rollout / len(train_dataset),
+        "learner_tokens_per_second_overall": num_total_tokens / total_training_time,
+        "learner_tokens_per_second_step": num_step_tokens / step_time,
+        "time/total": step_time,
+        "time/training": train_timer.duration,
+        "time/saving": save_time,
+        **data_thread_metrics,
+        **average_metrics,
+        **utilization_metrics,
+    }
+    # Print only scalar metrics
+    scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
+    print_rich_single_line_metrics(scalar_metrics)
+
+    if args.with_tracking:
+        # Convert array/list metrics to wandb histograms for logging
+        for key, value in metrics.items():
+            if (isinstance(value, np.ndarray | list)) and len(value) > 0:
+                metrics[key] = wandb.Histogram(value)
+        wandb.log(metrics, step=episode)
+
+    return num_step_tokens
+
+
+@backoff.on_exception(backoff.expo, Exception, max_tries=3)
+def maybe_save_checkpoint(
+    args: Args,
+    training_step: int,
+    policy_group: ModelGroup,
+    chat_template_name: str,
+    tokenizer: PreTrainedTokenizer,
+    wandb_url: str,
+) -> float:
     save_time = 0
     if args.save_freq > 0 and training_step % args.save_freq == 0 and (args.eval_on_step_0 or training_step > 1):
         with Timer("[Main Thread] 🗡️ Saving model") as timer:
@@ -2384,129 +1861,61 @@ def one_training_step(
                     policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
                         step_dir, leaderboard_name, wandb_url, training_step
                     )
-        save_time += timer.duration
+        save_time = timer.duration
 
-    if len(update_ref_policy_future) > 0:
-        with Timer("[Main Thread] 🔃 Updating reference policy"):
-            ray_get_with_progress(update_ref_policy_future, desc="Updating reference policy")
-
-    ray.get(actor_manager.report_training_step_time.remote(train_timer.duration))
-
-    average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
-    step_time = time.perf_counter() - start_time
-    total_training_time = time.perf_counter() - training_start_time
-
-    num_actor_gpus = args.vllm_num_engines * args.vllm_tensor_parallel_size
-    total_generation_time = data_thread_metrics["time/getting_response"]
-
-    utilization_metrics = calculate_utilization_metrics(
-        model_dims=model_dims,
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
-        total_generation_time=total_generation_time,
-        samples_per_prompt=args.num_samples_per_prompt_rollout,
-        num_inference_gpus=num_actor_gpus,
-        training_time=train_timer.duration,
-        num_training_gpus=args.world_size,
-    )
-
-    metrics = {
-        "episode": episode,
-        "global_step": episode,
-        "training_step": training_step,
-        "val/num_total_tokens": num_total_tokens,
-        "val/num_step_tokens": num_step_tokens,
-        "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
-        "learner_tokens_per_second_overall": num_total_tokens / total_training_time,
-        "learner_tokens_per_second_step": num_step_tokens / step_time,
-        "time/total": step_time,
-        "time/training": train_timer.duration,
-        "time/saving": save_time,
-        **data_thread_metrics,
-        **average_metrics,
-        **utilization_metrics,
-    }
-    # Print only scalar metrics
-    scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (float, int))}
-    print_rich_single_line_metrics(scalar_metrics)
-
-    if args.with_tracking:
-        # Convert array/list metrics to wandb histograms for logging
-        for key, value in metrics.items():
-            if isinstance(value, np.ndarray) or isinstance(value, list):
-                if len(value) > 0:
-                    metrics[key] = wandb.Histogram(value)
-        wandb.log(metrics, step=episode)
+    return save_time
 
 
 def maybe_evaluate(
     args: Args,
     training_step: int,
-    evaluation_inference_results_Q: ray_queue.Queue,  # Ray queue
+    evaluation_inference_results_Q: ray_queue.Queue,
     tokenizer,
-    reward_fn,
     episode,
-    eval_pending_queries_map: PendingQueriesMap,
+    eval_dataset: Dataset,
     eval_generation_config,
-    generate_metrics_Q: Queue,
-    num_eval_prompts: int,
     model_dims: utils.ModelDims,
     actor_manager=None,
 ):
     """Optionally evaluate the model."""
+    if eval_dataset is None:
+        return
+
     try:
-        # timeout 0.01 if this is the last training step or we're not evaluating
+        # timeout 0.01 if this is not the last training step
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_every < 0) else 100
+        timeout = 0.01 if training_step < args.num_training_steps else 100
 
         # Accumulate evaluation results from all vLLM engines
-        eval_result, eval_batch, _, _ = accumulate_inference_batches(
+        eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
             evaluation_inference_results_Q,
-            eval_pending_queries_map,
-            args,
-            training_step,
             eval_generation_config,
-            num_prompts=num_eval_prompts,
+            num_prompts=len(eval_dataset),
             model_dims=model_dims,
+            tokenizer=tokenizer,
+            dataset=eval_dataset,
             actor_manager=actor_manager,
             timeout=timeout,
+            active_sampling=False,
+            filter_zero_std_samples=False,
+            replenish_prompts=False,
         )
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
 
-        eval_generate_metrics = {}
-        try:
-            eval_generate_metrics = generate_metrics_Q.get_nowait()
-        except Empty:
-            logger.info("[Main Thread] didn't get eval generation metrics")
-
         eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
-        eval_decoded_responses = tokenizer.batch_decode(eval_result.responses, skip_special_tokens=True)
         eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
             eval_result.finish_reasons
         )
-
-        # get and log evaluation metrics
-        eval_scores, eval_reward_metrics = asyncio.run(
-            reward_fn(
-                eval_result.responses,
-                eval_decoded_responses,
-                eval_batch if eval_batch else Batch(queries=[], ground_truths=[], datasets=[], indices=None),
-                eval_result.finish_reasons,
-                eval_result.request_info,
-            )
-        )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
         eval_metrics = {
-            "eval/scores": np.array(eval_scores).mean(),
+            "eval/scores": np.array(eval_batch.scores).mean(),
             "eval/sequence_lengths": eval_sequence_lengths.mean(),
             "eval/sequence_lengths_min": eval_sequence_lengths.min(),
             "eval/sequence_lengths_max": eval_sequence_lengths.max(),
             "eval/stop_rate": eval_stop_rate,
             **eval_reward_metrics,
         }
-        if "time/generation" in eval_generate_metrics:
-            eval_metrics["eval/generation_time"] = eval_generate_metrics["time/generation"]
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
@@ -2517,9 +1926,9 @@ def maybe_evaluate(
 
         table = {}
         table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
-        table["response"] = eval_decoded_responses
+        table["response"] = eval_batch.decoded_responses
         table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-        table["scores"] = eval_scores
+        table["scores"] = eval_batch.scores
         table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
         df = pd.DataFrame(table)
 
@@ -2578,86 +1987,6 @@ def make_tokenizer(tc: TokenizerConfig, model_config: ModelConfig):
     return tc.tokenizer
 
 
-def make_reward_fn(args: Args) -> Callable:
-    """Create a reward function based on the provided arguments."""
-    reward_fn_mapping = build_all_verifiers(args)
-
-    async def reward_fn(
-        responses: List[torch.Tensor],
-        decoded_responses: List[str],
-        batch: Batch,
-        finish_reasons: List[str],
-        infos: List[List[int]],
-        queries: Optional[List[str]] = None,
-    ) -> List[float]:
-        timeouts = infos.timeouts
-        tool_errors = infos.tool_errors
-        tool_outputs = infos.tool_outputs
-        tool_calleds = infos.tool_calleds
-        good_outputs = [
-            len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
-            for i in range(len(tool_outputs))
-        ]
-        scores = [0] * len(decoded_responses)
-        metrics = {}
-
-        if args.apply_r1_style_format_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
-                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
-                if len(format_scores) != len(scores):
-                    raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
-                for i in range(len(format_scores)):
-                    scores[i] = format_scores[i] + scores[i]
-                metrics["val/format_scores"] = np.array(format_scores).mean()
-
-        if args.apply_verifiable_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
-                    reward_fn_mapping,
-                    responses,
-                    decoded_responses,
-                    batch,
-                    reward_mult=args.verification_reward,
-                    queries=queries,
-                )
-                if len(verifiable_rewards) != len(scores):
-                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
-                # slightly complex combo of good outputs and additive format reward
-                for i in range(len(verifiable_rewards)):
-                    if not args.only_reward_good_outputs or (good_outputs[i] and args.only_reward_good_outputs):
-                        if args.apply_r1_style_format_reward and args.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] + scores[i]
-                        elif args.apply_r1_style_format_reward and not args.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
-                        else:
-                            scores[i] = verifiable_rewards[i]
-                np_verifiable_rewards = np.array(verifiable_rewards)
-                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
-                # reshuffle around per_func rewards
-                per_func_lists = defaultdict(list)
-                for reward_dict in per_func_rewards:
-                    for key, value in reward_dict.items():
-                        per_func_lists[key].append(value)
-                # log per function rewards
-                for key, value in per_func_lists.items():
-                    np_value = np.array(value)
-                    metrics[f"objective/{key}_reward"] = np_value.mean()
-                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
-
-        # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
-        if args.non_stop_penalty:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
-                assert len(finish_reasons) == len(scores)
-                for i in range(len(finish_reasons)):
-                    if finish_reasons[i] != "stop":
-                        scores[i] = args.non_stop_penalty_value
-
-        return scores, metrics
-
-    return reward_fn
-
-
 def cleanup_judge_clients():
     """Cleans up all LLM judge clients."""
     asyncio.run(cleanup_all_llm_judge_clients())
@@ -2671,7 +2000,6 @@ def cleanup_training_resources(
     actor_manager: ActorManager,
 ) -> None:
     """Clean up all training resources including threads and Ray queues."""
-    # Signal generate_thread to stop
     stop_event.set()
 
     logger.info("Signaling all actors to stop...")
@@ -2717,14 +2045,13 @@ def cleanup_training_resources(
 
 def run_training(
     args,
+    streaming_config,
     tokenizer,
     train_dataset,
-    eval_batch,
+    eval_dataset,
     policy_group,
     vllm_engines,
     generation_configs,
-    iter_dataloader,
-    reward_fn,
     resume_training_step,
     episode,
     wandb_url,
@@ -2732,12 +2059,8 @@ def run_training(
     stop_event,
     executor,
     inference_results_Q,
-    param_prompt_Q,
+    prompt_Q,
     evaluation_inference_results_Q,
-    packed_sequences_Q,
-    pending_queries_map,
-    eval_pending_queries_map,
-    generate_metrics_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
     model_dims: utils.ModelDims,
@@ -2745,6 +2068,17 @@ def run_training(
 ):
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
+
+    # Restore dataloader state if available in checkpoint
+    if checkpoint_state and "dataloader_state" in checkpoint_state:
+        ray_get_with_progress(
+            [
+                policy_group.models[i].load_dataloader_state.remote(checkpoint_state["dataloader_state"])
+                for i in range(args.world_size)
+            ],
+            desc="Restoring dataloader state",
+        )
+        logger.info("Restored dataloader state from checkpoint")
 
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
@@ -2764,124 +2098,86 @@ def run_training(
         [engine.ready.remote() for engine in vllm_engines], "Checking engines are ready to work", timeout=300
     )
 
-    logger.info("======== ✅ data preparation thread starts =========")
-    packing_future = executor.submit(
-        data_preparation_thread,
-        reward_fn,
-        inference_results_Q,
-        packed_sequences_Q,
-        pending_queries_map,
-        args,
-        tokenizer,
-        args.num_training_steps,
-        generation_configs["train"],
-        resume_training_step,
-        actor_manager,
-        model_dims,
-    )
+    logger.info("======== ✅ Dataloaders already initialized in actors =========")
 
-    logger.info("======== ✅ generation thread starts =========")
-    generation_future = executor.submit(
-        generate_thread, args, vllm_engines, resume_training_step, stop_event, generate_metrics_Q
-    )
-
-    # setup health check function to check that everything is still alive
     def health_check_fn():
-        [f.result() for f in [packing_future, generation_future, weight_sync_thread_future] if f.done()]
-
-    # Send initial data to ensure we have a N-step offset.
-    for _ in range(args.async_steps):
-        dataset_indices = next(iter_dataloader)
-        batch = next_batch(dataset_indices, train_dataset)
-        split_and_insert_batch(
-            batch,
-            resume_training_step,
-            pending_queries_map,
-            param_prompt_Q,
-            generation_configs["train"],
-            is_eval=False,
+        [f.result() for f in [weight_sync_thread_future] if f.done()]
+        ray_get_with_progress(
+            [engine.check_background_threads.remote() for engine in vllm_engines],
+            desc="Checking vLLM engine health",
+            enable=False,
         )
+
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
         logger.info(f"Restored num_total_tokens: {num_total_tokens}")
     else:
         num_total_tokens = 0
 
+    if eval_dataset is not None:
+        eval_data_loader = data_loader_lib.HFDataLoader(
+            dataset=eval_dataset,
+            batch_size=1,
+            seed=args.seed,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=args.output_dir,
+            automatic_reshuffle=False,
+            collator=lambda x: x[0],
+        )
+    else:
+        eval_data_loader = None
     training_start_time = time.perf_counter()  # Track overall training start time
+    maybe_update_beaker_description(
+        current_step=resume_training_step - 1,
+        total_steps=args.num_training_steps,
+        start_time=training_start_time,
+        wandb_url=wandb_url,
+    )
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
-        if (
-            training_step == resume_training_step
-            or training_step % args.update_progress_every == 0
-            or training_step == args.num_training_steps
-        ):
-            maybe_update_beaker_description(
-                current_step=training_step,
-                total_steps=args.num_training_steps,
-                start_time=training_start_time,
-                wandb_url=wandb_url,
-            )
-
         # Check if any of the threads have raised an exception.
+        health_check_start = time.perf_counter()
         health_check_fn()
+        health_check_time = time.perf_counter() - health_check_start
 
-        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        weight_sync_trigger_event.set()
-
-        episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-        batch = next_batch(next(iter_dataloader), train_dataset)
-        split_and_insert_batch(
-            batch, training_step, pending_queries_map, param_prompt_Q, generation_configs["train"], is_eval=False
-        )
         if (
             training_step % args.local_eval_every == 0
-            and eval_batch is not None
+            and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
-            split_and_insert_batch(
-                eval_batch,
-                training_step,
-                eval_pending_queries_map,
-                param_prompt_Q,
-                generation_configs["eval"],
-                is_eval=True,
-            )
+            for eval_example in iter(eval_data_loader):
+                add_prompt_to_generator(eval_example, 0, prompt_Q, generation_configs["eval"], is_eval=True)
 
-        # The generate_thread is now handling vLLM processing asynchronously
-        collated_data, data_thread_metrics, num_total_tokens, num_step_tokens, prompt_lengths, response_lengths = (
-            load_data_from_packing_thread(packed_sequences_Q, num_total_tokens, stop_event, health_check_fn)
-        )
-        if collated_data is None:
-            continue
+        episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
-        for metrics_Q in [generate_metrics_Q, weight_sync_metrics_Q]:
-            try:
-                data_thread_metrics |= metrics_Q.get_nowait()
-            except Empty:
-                logger.info("[Main Thread] didn't get train generation metrics")
+        data_thread_metrics = {}
+        try:
+            data_thread_metrics |= weight_sync_metrics_Q.get_nowait()
+        except Empty:
+            logger.info("[Main Thread] didn't get train generation metrics")
 
-        one_training_step(
+        data_thread_metrics["time/health_check"] = health_check_time
+
+        num_step_tokens = one_training_step(
             args,
+            streaming_config,
             policy_group,
-            collated_data,
             tokenizer,
             data_thread_metrics,
             episode,
             training_step,
             num_total_tokens,
-            num_step_tokens,
             start_time,
             train_dataset,
             training_start_time,
             wandb_url,
             tc.chat_template_name,
             model_dims,
-            prompt_lengths,
-            response_lengths,
             actor_manager,
-            iter_dataloader,
         )
+        num_total_tokens += num_step_tokens
 
         # Checkpoint after one_training_step (or even if it was skipped)
         # This ensures we checkpoint progress even if the exact checkpoint step has no data
@@ -2890,17 +2186,21 @@ def run_training(
             and training_step % args.checkpoint_state_freq == 0
             and args.checkpoint_state_dir is not None
         ):
+            utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
             with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                # Save comprehensive client state including ShufflingIterator state
+                # Save comprehensive client state including dataloader state
                 client_state = {
                     "training_step": training_step,
                     "episode": episode,
                     "num_total_tokens": num_total_tokens,
                 }
 
-                # Save ShufflingIterator state
-                if iter_dataloader is not None:
-                    client_state["shuffling_iterator_state"] = iter_dataloader.get_state()
+                # Save dataloader state from Ray actor
+                client_state["dataloader_state"] = ray.get(policy_group.models[0].get_dataloader_state.remote())
+
+                # Save DataPreparationActor state
+                data_prep_actor = ray.get_actor("data_prep_singleton")
+                client_state["data_prep_actor_state"] = ray.get(data_prep_actor.get_state.remote())
 
                 ray_get_with_progress(
                     [
@@ -2911,19 +2211,26 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
+        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
+        weight_sync_trigger_event.set()
+
         maybe_evaluate(
             args,
             training_step,
             evaluation_inference_results_Q,
             tokenizer,
-            reward_fn,
             episode,
-            eval_pending_queries_map,
+            eval_dataset,
             generation_configs["eval"],
-            generate_metrics_Q,
-            len(eval_batch.queries) if eval_batch else 0,
             model_dims,
             actor_manager,
+        )
+
+        maybe_update_beaker_description(
+            current_step=training_step,
+            total_steps=args.num_training_steps,
+            start_time=training_start_time,
+            wandb_url=wandb_url,
         )
 
     if resume_training_step > args.num_training_steps:
@@ -2932,14 +2239,69 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, list[str]]:
+    """Initialize tool actors and get tool definitions and stop sequences.
+
+    Args:
+        tools_config: Configuration for tools.
+        tokenizer: Tokenizer for the model.
+
+    Returns:
+        Tuple of (tool_actors, tool_definitions, stop_sequences).
+    """
+    tool_actors = create_tools(tools_config._parsed_tools)
+    tool_definitions = (
+        ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
+    )
+
+    # Create parser temporarily to get stop sequences for generation config
+    # The actual parser used during generation will be created inside vLLM actors
+    stop_sequences = []
+    if tool_actors:
+        stop_sequences = create_tool_parser(
+            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
+        ).stop_sequences
+
+    return tool_actors, tool_definitions, stop_sequences
+
+
+def main(
+    args: Args,
+    tc: TokenizerConfig,
+    model_config: ModelConfig,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
+    tools_config: ToolsConfig,
+):
     tokenizer = make_tokenizer(tc, model_config)
-    args = setup_runtime_variables(args)
+    args = setup_runtime_variables(args, streaming_config, tools_config)
+    validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        for handler in logging.getLogger().handlers:
+            handler.setLevel(logging.DEBUG)
+
     beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
-    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
+    # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
+    ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
-    if len(train_dataset) < (needed := max(args.async_steps, 1) * args.num_unique_prompts_rollout):
+    tool_actors, tool_definitions, tool_stop_sequences = initialize_tools(tools_config, tokenizer)
+    logger.info(
+        f"Initialized {len(tool_actors)} tool actors with definitions: {[d['function']['name'] for d in tool_definitions]}"
+    )
+    if tool_stop_sequences:
+        logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
+        streaming_config.stop_strings.extend(tool_stop_sequences)
+
+    train_dataset, eval_dataset = setup_datasets(
+        args, tc, tokenizer, streaming_config, tool_definitions if tools_config.pass_tools_to_chat_template else []
+    )
+
+    if len(train_dataset) < (
+        needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
+    ):
         raise ValueError(
             f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed to have enough prompts for bsz and prefill. Try reducing async_steps or num_unique_prompts_rollout, or increasing the dataset size."
         )
@@ -2947,21 +2309,48 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     if args.cache_dataset_only:
         return
 
-    pprint([args, model_config])
-
-    # Initialize Ray before creating Ray objects
-    ray.init(dashboard_host="0.0.0.0")
+    pprint([args, model_config, streaming_config, vllm_config, tools_config])
 
     # Create Ray queues.
     # Since we now send/receive individual prompts, queue size should accommodate
-    # all prompts from async_steps + 1 training steps
-    queue_size = (args.async_steps + 1) * args.num_unique_prompts_rollout
+    # - all prompts from async_steps + 1 training steps
+    # - all eval prompts
+    num_eval_prompts = len(eval_dataset) if eval_dataset is not None else 0
+    queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts_rollout + num_eval_prompts
     inference_results_Q = ray_queue.Queue(maxsize=queue_size)
-    param_prompt_Q = ray_queue.Queue(maxsize=queue_size)
+    prompt_Q = ray_queue.Queue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
-    policy_group, vllm_engines, tool_objects, resume_training_step, episode, actor_manager = (
+    reward_config = RewardConfig(
+        apply_r1_style_format_reward=streaming_config.apply_r1_style_format_reward,
+        r1_style_format_reward=streaming_config.r1_style_format_reward,
+        apply_verifiable_reward=streaming_config.apply_verifiable_reward,
+        verification_reward=streaming_config.verification_reward,
+        non_stop_penalty=streaming_config.non_stop_penalty,
+        non_stop_penalty_value=streaming_config.non_stop_penalty_value,
+        only_reward_good_outputs=tools_config.only_reward_good_outputs,
+        additive_format_reward=streaming_config.additive_format_reward,
+        verifier_functions=build_all_verifiers(args, streaming_config),
+    )
+
+    # AFTER potentially adding tool stop sequences, create generation configs
+    generation_configs = create_generation_configs(args, streaming_config)
+
+    checkpoint_state = None
+    data_prep_actor_state = None
+    if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
+        checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
+        if os.path.exists(checkpoint_path):
+            checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+            logger.info(f"Loaded checkpoint state from {checkpoint_path}")
+            data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")
+            if data_prep_actor_state:
+                # Use trainer's authoritative training_step for DataPreparationActor.
+                # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
+                data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
+
+    (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
             tc,
@@ -2970,48 +2359,26 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             wandb_url,
             tokenizer,
             inference_results_Q,
-            param_prompt_Q,
+            prompt_Q,
             evaluation_inference_results_Q,
+            streaming_config,
+            vllm_config,
+            train_dataset,
+            eval_dataset,
+            reward_config,
+            generation_configs["train"],
+            data_prep_actor_state,
+            tool_actors,
+            tools_config,
         )
     )
 
-    # Get the model dimensions from one of the engines without loading weights
-    model_dims_dict = ray.get(vllm_engines[0].get_model_dims_dict.remote())
-    model_dims = utils.ModelDims(**model_dims_dict)
-
-    generation_configs = create_generation_configs(args)
-
-    checkpoint_state = None
-    if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
-        # Try to load the checkpoint state from the first rank
-        checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
-        if os.path.exists(checkpoint_path):
-            checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-            logger.info(f"Loaded checkpoint state from {checkpoint_path}")
-
-            episode = checkpoint_state["episode"]
-            logger.info(f"Restored episode count: {episode}")
-
-    train_dataset_idxs = np.arange(len(train_dataset))
-    iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
-
-    if checkpoint_state and "shuffling_iterator_state" in checkpoint_state:
-        iter_dataloader.set_state(checkpoint_state["shuffling_iterator_state"])
-        logger.info("Restored ShufflingIterator state from checkpoint")
+    if checkpoint_state:
+        episode = checkpoint_state["episode"]
+        logger.info(f"Restored episode count: {episode}")
 
     # Create additional queues (main queues already created above)
-    packed_sequences_Q = Queue(maxsize=args.async_steps)
-    pending_queries_map = PendingQueriesMap()
-    eval_pending_queries_map = PendingQueriesMap()
-    generate_metrics_Q = Queue(maxsize=args.async_steps)
-    weight_sync_metrics_Q = Queue(maxsize=args.async_steps)
-
-    if eval_dataset is None:
-        eval_batch = None
-    else:
-        eval_dataset_indices = list(range(len(eval_dataset)))
-        eval_batch = next_batch(eval_dataset_indices, eval_dataset)
-    reward_fn = make_reward_fn(args)
+    weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
 
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
@@ -3019,14 +2386,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     try:
         episode = run_training(
             args,
+            streaming_config,
             tokenizer,
             train_dataset,
-            eval_batch,
+            eval_dataset,
             policy_group,
             vllm_engines,
             generation_configs,
-            iter_dataloader,
-            reward_fn,
             resume_training_step,
             episode,
             wandb_url,
@@ -3034,20 +2400,23 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             stop_event,
             executor,
             inference_results_Q,
-            param_prompt_Q,
+            prompt_Q,
             evaluation_inference_results_Q,
-            packed_sequences_Q,
-            pending_queries_map,
-            eval_pending_queries_map,
-            generate_metrics_Q,
             weight_sync_metrics_Q,
             actor_manager,
             model_dims,
             checkpoint_state,
         )
+
+        if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
+            push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+    except Exception as e:
+        if args.send_slack_alerts:
+            utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
+        raise
     finally:
         cleanup_training_resources(
-            stop_event, executor, [inference_results_Q, param_prompt_Q, evaluation_inference_results_Q], actor_manager
+            stop_event, executor, [inference_results_Q, prompt_Q, evaluation_inference_results_Q], actor_manager
         )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
@@ -3062,12 +2431,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
     logger.info("finished training")
 
-    accelerator = Namespace()
-    accelerator.is_main_process = True  # hack
-    if args.push_to_hub:
-        logger.info("Pushing model to hub")
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
-
     # Check for runtime leaks before exiting
     logger.info("Checking for runtime leaks...")
 
@@ -3077,10 +2440,24 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 if __name__ == "__main__":
     utils.check_oe_eval_internal()
 
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
-    args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
+    parser = ArgumentParserPlus(
+        (
+            Args,
+            TokenizerConfig,
+            ModelConfig,
+            data_loader_lib.StreamingDataLoaderConfig,
+            data_loader_lib.VLLMConfig,
+            ToolsConfig,
+        )
+    )
+    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
+        parser.parse_args_into_dataclasses()
+    )
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
+    assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
+    assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
+    assert isinstance(tools_config, ToolsConfig)
 
-    main(args, tokenizer_config, model_config)
+    main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config)

@@ -10,7 +10,7 @@ echo "Training model using $NUM_GPUS GPUs, $BATCH_SIZE_PER_GPU batch size per GP
 accelerate launch \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
-    open_instruct/dpo_tune.py \
+    open_instruct/dpo_tune_cache.py \
     --model_name_or_path allenai/tulu-2-7b \
     --use_qlora \
     --use_lora \
@@ -29,10 +29,9 @@ accelerate launch \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
     --weight_decay 0. \
-    --num_train_epochs 5 \
+    --num_epochs 5 \
     --output_dir output/tulu_v2_dpo_qlora/ \
     --with_tracking \
-    --report_to tensorboard \
     --logging_steps 1 &&
 
 python open_instruct/merge_lora.py \

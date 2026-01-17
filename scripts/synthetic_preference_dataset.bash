@@ -45,12 +45,12 @@ do
     # Calculate start and end indices for this shard
     start_idx=$((i * prompts_per_shard))
     end_idx=$(((i + 1) * prompts_per_shard))
-    
+
     # Adjust the end index for the last shard to include any remaining prompts
     if [ $i -eq $((num_shards - 1)) ]; then
         end_idx=$num_prompts
     fi
-    
+
     # Build the command string for this shard
     shard_command="python open_instruct/rejection_sampling/generation.py \
     --dataset_mixer_list $dataset_mixer_list \
@@ -88,34 +88,34 @@ echo $command
 echo "Submitting all shards in one command"
 if [ "$deploy_mode" = "docker_weka" ]; then
     python mason.py \
-        --cluster ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/jupiter-cirrascale-2 \
+        --cluster ai2/neptune ai2/saturn ai2/jupiter \
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
-        --budget ai2/allennlp \
+        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "docker_nfs" ]; then
     python mason.py \
-        --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/s2-cirrascale \
+        --cluster ai2/jupiter \
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
-        --budget ai2/allennlp \
+        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "docker" ]; then
     python mason.py \
-        --cluster ai2/allennlp-cirrascale ai2/neptune-cirrascale \
+        --cluster ai2/jupiter ai2/neptune \
         --image costah/open_instruct_synth_pref --pure_docker_mode \
         --priority low \
         --preemptible \
-        --budget ai2/allennlp \
+        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 elif [ "$deploy_mode" = "nfs" ]; then
     python mason.py \
-        --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/s2-cirrascale \
+        --cluster ai2/jupiter \
         --priority low \
         --preemptible \
-        --budget ai2/allennlp \
+        --budget ai2/jupiter \
         --gpus $num_gpus -- $command
 else
     echo "Invalid deploy_mode"

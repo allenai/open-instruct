@@ -48,7 +48,7 @@ set -ex
 # Function to print usage
 usage() {
     echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
-    echo "TASK_SUITE should be one of: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)"
+    echo "TASK_SUITE should be one of: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN, SAFETY_EVAL, SAFETY_EVAL_REASONING (default: NEXT_MODEL_DEV)"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
     echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
     echo "PROCESS_OUTPUT should be a string specifying how to process the model output (e.g., 'r1_style')"
@@ -75,10 +75,18 @@ while [[ "$#" -gt 0 ]]; do
         --beaker-image) BEAKER_IMAGE="$2"; shift ;;
         --cluster) CLUSTER="$2"; shift ;;
         --process-output) PROCESS_OUTPUT="$2"; shift ;;
+        --beaker-workspace) BEAKER_WORKSPACE="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
 done
+
+# Default beaker workspace if not provided; does not override user input.
+BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/tulu-3-results}"
+if ! [[ "$BEAKER_WORKSPACE" =~ ^[^/]+/[^/]+$ ]]; then
+    echo "Error: --beaker-workspace must be fully qualified as '<org>/<workspace>' (e.g., 'ai2/tulu-3-results'). Received: '$BEAKER_WORKSPACE'"
+    exit 1
+fi
 
 # cluster/weka mount logic: default true (to use non-augusta)
 # if model starts with gs://, set evaluate_on_weka to false.
@@ -129,8 +137,8 @@ WANDB_ARG=""
 if [[ -n "$WANDB_RUN_PATH" ]]; then
     beaker_user=$(beaker account whoami --format text | awk 'NR==2 {print $2}')
     echo "Using WANDB_API_KEY from ${beaker_user}"
-    if ! beaker secret list --workspace ai2/tulu-3-results | grep -q "${beaker_user}_WANDB_API_KEY"; then
-        echo "WARNING: No ${beaker_user}_WANDB_API_KEY secret found in workspace ai2/tulu-3-results."
+    if ! beaker secret list --workspace "$BEAKER_WORKSPACE" | grep -q "${beaker_user}_WANDB_API_KEY"; then
+        echo "WARNING: No ${beaker_user}_WANDB_API_KEY secret found in workspace $BEAKER_WORKSPACE."
         echo "add your WANDB_API_KEY as a secret to this workspace in order to log oe-eval results to wandb"
     else
         WANDB_ARG=" --wandb-run-path $WANDB_RUN_PATH --gantry-secret-wandb-api-key ${beaker_user}_WANDB_API_KEY"
@@ -176,7 +184,7 @@ TULU_3_DEV=(
     "mmlu:mc::tulu"
     "mmlu:cot::summarize"
     "alpaca_eval_v3::tulu" # GPT 4.1 judge on OpenAI
-    # "alpaca_eval_v4::tulu" # GPT 4.1, judge on Azure 
+    # "alpaca_eval_v4::tulu" # GPT 4.1, judge on Azure
     "truthfulqa::tulu"
 )
 TULU_3_UNSEEN=(
@@ -195,32 +203,33 @@ NEXT_MODEL_DEV=(
     # Knowledge
     "mmlu:cot::hamish_zs_reasoning_deepseek"
     "popqa::hamish_zs_reasoning_deepseek"
-    "simpleqa::tulu-thinker_deepseek"
-    
+    # "simpleqa::tulu-thinker_deepseek"
+
     # Reasoning
-    "bbh:cot::hamish_zs_reasoning_deepseek"
-    "gpqa:0shot_cot::hamish_zs_reasoning_deepseek"
+    "bbh:cot::hamish_zs_reasoning_deepseek_v2" # OLD: "bbh:cot::hamish_zs_reasoning_deepseek"
+    "gpqa:0shot_cot::qwen3-instruct"
     "zebralogic::hamish_zs_reasoning_deepseek"
     "agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek"
 
     # Math
     # [faster] minerva_math_500::hamish_zs_reasoning
     "minerva_math::hamish_zs_reasoning_deepseek"
-    "gsm8k::zs_cot_latex_deepseek"
-    "omega_500:0-shot-chat_deepseek" # OLD: "omega:0-shot-chat"
+    # "gsm8k::zs_cot_latex_deepseek"
+    "omega_500:0-shot-chat_deepseek" # FULL: "omega:0-shot-chat"
     "aime:zs_cot_r1::pass_at_32_2024_deepseek"
-    "aime:zs_cot_r1::pass_at_32_2025_deepseek"  # OLD: "aime::hamish_zs_reasoning"
-    
+    "aime:zs_cot_r1::pass_at_32_2025_deepseek"
+
     # Coding
     "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek"
     "mbppplus:0-shot-chat::tulu-thinker_deepseek"
-    "livecodebench_codegeneration::tulu-thinker_deepseek"
+    "livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags"
     # [TODO not merged] codeeditorbench - requires separate server
     # [TODO, maybe] cruxeval
-    
+
     # Chat / IF / Vibes
     "alpaca_eval_v3::hamish_zs_reasoning_deepseek"
     "ifeval::hamish_zs_reasoning_deepseek"
+    "ifeval_ood::tulu-thinker-deepseek"
     # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
     # [expensive, typos vibes] styled_evals::tulu
     # [optional, typos compare] styled_math500::tulu
@@ -236,8 +245,16 @@ NEXT_MODEL_UNSEEN=(
     # [TODO, not implemented] Humanity's Last Exam
     # [TODO, not implemented] SuperGPQA
     # [TODO, not implemented] BigBenchExtraHard
-    "livecodebench_codegeneration::tulu-thinker-hidden"
+    "livecodebench_codegeneration::tulu-thinker-hidden_no_think_tags"
     "ifbench::tulu"
+)
+
+SAFETY_EVAL=(
+    "safety::olmo3"
+)
+
+SAFETY_EVAL_REASONING=(
+    "safety_reasoning::olmo3"
 )
 
 # If custom tasks provided, convert comma-separated string to array
@@ -257,6 +274,12 @@ else
             ;;
         TULU_3_UNSEEN)
             TASKS=("${TULU_3_UNSEEN[@]}")
+            ;;
+        SAFETY_EVAL)
+            TASKS=("${SAFETY_EVAL[@]}")
+            ;;
+        SAFETY_EVAL_REASONING)
+            TASKS=("${SAFETY_EVAL_REASONING[@]}")
             ;;
         *)
             echo "Error: Unknown task suite '$TASK_SUITE'"
@@ -338,7 +361,7 @@ for TASK in "${TASKS[@]}"; do
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
         python oe-eval-internal/oe_eval/launch.py \
             --model "$MODEL_NAME" \
-            --beaker-workspace "ai2/tulu-3-results" \
+            --beaker-workspace "$BEAKER_WORKSPACE" \
             --beaker-budget ai2/oe-adapt \
             --beaker-timeout 48h \
             --task "$TASK" \
@@ -360,7 +383,7 @@ for TASK in "${TASKS[@]}"; do
     else
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \
-        --beaker-workspace "ai2/tulu-3-results" \
+        --beaker-workspace "$BEAKER_WORKSPACE" \
         --beaker-budget ai2/oe-adapt \
         --beaker-timeout 48h \
         --task "$TASK" \

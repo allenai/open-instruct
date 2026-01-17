@@ -1,7 +1,7 @@
 export CURRENT_DATETIME=$(python -c "import datetime; import pytz; print(datetime.datetime.now(pytz.timezone('America/Los_Angeles')).strftime('%m%d%y_%H%M%S'))")
 export PYTHONPATH=$REPO_PATH
 export PATH="/root/.local/bin:$PATH"
-# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see: 
+# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 export NCCL_CUMEM_ENABLE=0
 
@@ -15,6 +15,7 @@ echo PATH=$PATH
 BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
 
 RAY_NODE_PORT=8888
+mkdir -p "$HOME/.triton/autotune"  # Create Triton autotune cache directory to silence warnings
 ray stop --force
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then

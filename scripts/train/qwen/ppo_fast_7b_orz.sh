@@ -1,17 +1,17 @@
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 3 \
     --budget ai2/oe-adapt \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_fast.py \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo.py \
     --exp_name qwen2.5_7b_ppo_fast_zero_orz \
     --beta 0.0 \
     --num_unique_prompts_rollout 128 \
     --num_samples_per_prompt_rollout 64 \
-    --kl_estimator kl3 \
+    --kl_estimator 2 \
     --learning_rate 1e-6 \
     --value_learning_rate 5e-6 \
     --dataset_mixer_list ai2-adapt-dev/rlvr_open_reasoner_math 1.0 \

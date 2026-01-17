@@ -20,22 +20,32 @@ git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
 # Sanitize the branch name to remove invalid characters for Beaker names
 # Beaker names can only contain letters, numbers, -_. and may not start with -
-sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/^-//')
+sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
 image_name=open-instruct-integration-test-${sanitized_branch}
-
-# Build the Docker image exactly like push-image.yml does, passing git info as build args
-docker build --platform=linux/amd64 \
-  --build-arg GIT_COMMIT="$git_hash" \
-  --build-arg GIT_BRANCH="$git_branch" \
-  . -t "$image_name"
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 
+existing_image_desc=$(beaker image get "$beaker_user/$image_name" --format json 2>/dev/null | jq -r '.[0].description // ""' || echo "")
 
-beaker image rename "$beaker_user/$image_name" "" || echo "Image not found, skipping rename."
+if [[ -n "$existing_image_desc" ]] && [[ "$existing_image_desc" == *"$git_hash"* ]]; then
+  echo "Beaker image already exists for commit $git_hash, skipping Docker build and upload."
+else
+  echo "Creating new beaker image for commit $git_hash..."
+  CACHE_REPO="${DOCKER_CACHE_REPO:-ghcr.io/allenai/open-instruct:buildcache}"
+  CACHE_ARGS="--cache-from type=registry,ref=$CACHE_REPO"
+  [ "${DOCKER_CACHE_PUSH:-}" = "1" ] && CACHE_ARGS="$CACHE_ARGS --cache-to type=registry,ref=$CACHE_REPO,mode=max"
 
-# Create the image in the same workspace used for jobs
-beaker image create "$image_name" -n "$image_name" -w "ai2/$beaker_user"
+  docker buildx build --platform=linux/amd64 \
+    --build-arg GIT_COMMIT="$git_hash" \
+    --build-arg GIT_BRANCH="$git_branch" \
+    $CACHE_ARGS \
+    --load \
+    . -t "$image_name"
+
+  beaker image rename "$beaker_user/$image_name" "" || echo "Image not found, skipping rename."
+
+  beaker image create "$image_name" -n "$image_name" -w "ai2/$beaker_user" --description "Git commit: $git_hash"
+fi
 
 # Ensure uv is installed and sync dependencies before running the script
 if ! command -v uv &> /dev/null; then

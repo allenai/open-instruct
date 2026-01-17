@@ -24,12 +24,12 @@ do
     # Calculate start and end indices for this shard
     start_idx=$((i * prompts_per_shard))
     end_idx=$(((i + 1) * prompts_per_shard))
-    
+
     # Adjust the end index for the last shard to include any remaining prompts
     if [ $i -eq $((num_shards - 1)) ]; then
         end_idx=$num_prompts
     fi
-    
+
     # Build the command string for this shard
     shard_command="python open_instruct/rejection_sampling/generation.py \
     --dataset_name $sft_dataset \
@@ -67,10 +67,10 @@ echo $command
 # Run the combined command
 echo "Submitting all shards in one command"
 python mason.py \
-    --cluster ai2/general-cirrascale-a5000 ai2/allennlp-cirrascale ai2/s2-cirrascale ai2/mosaic-cirrascale \
+    --cluster ai2/jupiter \
     --priority low \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/jupiter \
     --gpus $num_gpus -- $command
 
 echo "All shards submitted"

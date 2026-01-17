@@ -20,13 +20,15 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from ray.util import queue as ray_queue
 
-from open_instruct import logger_utils
+from open_instruct import data_loader, logger_utils
 
 
 def find_free_port():
@@ -41,10 +43,16 @@ def find_free_port():
 class ActorManager:
     """Centralized manager for controlling evaluation and weight updates across all LLMRayActors."""
 
-    def __init__(self, queues: dict, args):
+    def __init__(
+        self,
+        queues: dict[str, ray_queue.Queue],
+        args: Any,
+        streaming_config: data_loader.StreamingDataLoaderConfig,
+        vllm_config: data_loader.VLLMConfig,
+    ):
         self._should_stop = False
         self._last_updated = datetime.now()
-        self._dashboard_port = None
+        self._dashboard_port: int | None = None
         self._queues = queues or {}
         self._queue_sizes = {}
         self._queue_info = {}
@@ -54,8 +62,10 @@ class ActorManager:
         self._total_decode_tokens = 0
         self._training_step_history = collections.deque(maxlen=self._sample_window)
         self._generation_batch_history = collections.deque(maxlen=self._sample_window)
-        self._kv_cache_max_concurrency = None
+        self._kv_cache_max_concurrency = 0
         self._args = args
+        self._streaming_config = streaming_config
+        self._vllm_config = vllm_config
         if self._args.enable_queue_dashboard:
             self._setup_queue_monitoring()
             self._start_dashboard()
@@ -84,6 +94,7 @@ class ActorManager:
             self._dashboard_port = find_free_port()
         else:
             self._dashboard_port = self._args.queue_dashboard_port
+        assert self._dashboard_port is not None
         app = FastAPI(title="ActorManager Dashboard")
 
         static_dir = Path(__file__).parent / "static"
@@ -93,7 +104,7 @@ class ActorManager:
         async def dashboard():
             """Serve the HTML dashboard."""
             html_path = Path(__file__).parent / "static" / "dashboard.html"
-            with open(html_path, "r") as f:
+            with open(html_path) as f:
                 return f.read()
 
         @app.get("/api/status")
@@ -110,12 +121,14 @@ class ActorManager:
                 "queues": queues_data,
                 "token_stats": self.get_token_stats(),
                 "timing_stats": self.get_timing_stats(),
-                "kv_cache_max_concurrency": self._kv_cache_max_concurrency,
-                # This is less confusing to users.
-                "inference_batch_size": self._args.inference_batch_size * self._args.num_samples_per_prompt_rollout,
+                "concurrency_per_engine": self._kv_cache_max_concurrency,
+                "total_concurrency": self._kv_cache_max_concurrency * self._vllm_config.vllm_num_engines,
+                "batch_size": self._streaming_config.num_unique_prompts_rollout
+                * self._streaming_config.num_samples_per_prompt_rollout,
             }
 
         def run_server():
+            assert self._dashboard_port is not None
             uvicorn.run(app, host="0.0.0.0", port=self._dashboard_port, log_level="error")
 
         self._server_thread = threading.Thread(target=run_server, daemon=True)

@@ -12,7 +12,7 @@ for split_var in split_int_mix_3; do
     exp_name="${exp_name}_${RANDOM}"
 
     uv run python mason.py \
-        --cluster ai2/augusta-google-1 \
+        --cluster ai2/augusta \
         --image "$BEAKER_IMAGE" \
         --pure_docker_mode \
         --workspace ai2/olmo-instruct \
@@ -37,12 +37,11 @@ for split_var in split_int_mix_3; do
         --learning_rate 1e-6 \
         --per_device_train_batch_size 1 \
         --output_dir /output \
-        --kl_estimator kl3 \
+        --kl_estimator 2 \
         --dataset_mixer_list "${split_value}" \
         --dataset_mixer_list_splits "train" \
         --dataset_mixer_eval_list "hamishivi/omega-combined 8 allenai/IF_multi_constraints_upto5 8 saurabh5/rlvr_acecoder_filtered 8 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2 4 hamishivi/virtuoussy_multi_subject_rlvr 4" \
         --dataset_mixer_eval_list_splits train \
-        --max_token_length 10240 \
         --max_prompt_token_length 2048 \
         --response_length 8192 \
         --pack_length 12384 \
@@ -73,7 +72,6 @@ for split_var in split_int_mix_3; do
         --llm_judge_max_tokens 2048 \
         --llm_judge_max_context_length 131072 \
         --clip_higher 0.272 \
-        --allow_world_padding False \
         --oe_eval_max_length 32768 \
         --oe_eval_tasks "minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,ifeval::hamish_zs_reasoning,popqa::hamish_zs_reasoning,mmlu:cot::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,mbppplus:0-shot-chat::tulu-thinker,codex_humanevalplus:0-shot-chat-v1::tulu-thinker"
 done

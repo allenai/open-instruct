@@ -1,0 +1,72 @@
+BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
+
+# our released olmo3 thinker model actually doesnt use pipelinerl, but using it should do just as well.
+python mason.py \
+    --budget ai2/oe-adapt \
+    --cluster ai2/jupiter \
+    --image hamishivi/open_instruct_testing_1110 \
+    --pure_docker_mode \
+    --workspace ai2/olmo-instruct \
+    --priority urgent \
+    --preemptible \
+    --num_nodes 9 \
+    --gpus 8 \
+    --max_retries 0 \
+    --env RAY_CGRAPH_get_timeout=300 \
+    --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --env HOSTED_VLLM_API_BASE=http://ceres-cs-aus-447.reviz.ai2.in:8001/v1 \
+    -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
+        --exp_name 7b_olmo3_thinker_no_pipeline \
+        --beta 0.0 \
+        --num_samples_per_prompt_rollout 8 \
+        --num_unique_prompts_rollout 64 \
+        --num_mini_batches 1 \
+        --num_epochs 1 \
+        --learning_rate 1e-6 \
+        --per_device_train_batch_size 1 \
+        --output_dir /output \
+        --kl_estimator 2 \
+        --dataset_mixer_list allenai/Dolci-Think-RL-7B 1.0 \
+        --dataset_mixer_list_splits train \
+        --dataset_mixer_eval_list allenai/Dolci-Think-RL-7B 8 \
+        --dataset_mixer_eval_list_splits train \
+        --max_token_length 10240 \
+        --max_prompt_token_length 2048 \
+        --response_length 32768 \
+        --pack_length 35840 \
+        --model_name_or_path allenai/Olmo-3-7B-Think-DPO \
+        --chat_template_name olmo_thinker \
+        --non_stop_penalty False \
+        --mask_truncated_completions False \
+        --temperature 1.0 \
+        --ground_truths_key ground_truth \
+        --sft_messages_key messages \
+        --total_episodes 10000000 \
+        --deepspeed_stage 3 \
+        --num_learners_per_node 8 8 \
+        --vllm_num_engines 56 \
+        --vllm_tensor_parallel_size 1 \
+        --lr_scheduler_type constant \
+        --apply_verifiable_reward true \
+        --seed 1 \
+        --local_eval_every 50 \
+        --save_freq 25 \
+        --beaker_eval_freq 50 \
+        --eval_priority urgent \
+        --try_launch_beaker_eval_jobs_on_weka True \
+        --gradient_checkpointing \
+        --with_tracking \
+        --llm_judge_model hosted_vllm/Qwen/Qwen3-32B \
+        --llm_judge_timeout 600 \
+        --llm_judge_max_tokens 2048 \
+        --llm_judge_max_context_length 32768 \
+        --clip_higher 0.272 \
+        --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
+        --code_pass_rate_reward_threshold 0.99 \
+        --oe_eval_max_length 32768 \
+        --checkpoint_state_freq 100 \
+        --backend_timeout 1200 \
+        --inflight_updates false \
+        --async_steps 1 \
+        --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto \
+        --oe_eval_tasks mmlu:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek,simpleqa::tulu-thinker_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,gpqa:0shot_cot::hamish_zs_reasoning_deepseek,zebralogic::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,minerva_math::hamish_zs_reasoning_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,gsm8k::zs_cot_latex_deepseek,omega_500:0-shot-chat_deepseek,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek

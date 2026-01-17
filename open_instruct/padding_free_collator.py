@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Dict, List, Union
 
 import torch
 from transformers import DefaultDataCollator
@@ -74,26 +73,32 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
 
 @dataclass
 class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
-    def __call__(self, features, return_tensors=None):
+    def __call__(self, features, return_tensors=None, separator_id=None):
         # call the original collator on chosen and rejected separately, then combine
         def filter_batch(match_string, features):
             return [{k.replace(match_string, ""): v for k, v in f.items() if match_string in k} for f in features]
 
-        chosen_features = super().__call__(filter_batch("chosen_", features), return_tensors=return_tensors)
-        rejected_features = super().__call__(filter_batch("rejected_", features), return_tensors=return_tensors)
+        chosen_features = super().__call__(
+            filter_batch("chosen_", features), return_tensors=return_tensors, separator_id=separator_id
+        )
+        rejected_features = super().__call__(
+            filter_batch("rejected_", features), return_tensors=return_tensors, separator_id=separator_id
+        )
 
         result = {}
         for k in chosen_features:
             result["chosen_" + k] = chosen_features[k]
         for k in rejected_features:
             result["rejected_" + k] = rejected_features[k]
+        if "index" in features[0]:
+            result["index"] = torch.tensor([f["index"] for f in features])
         return result
 
 
 # - dpo concatenation  for padding free
 def concatenated_inputs(
-    batch: Dict[str, Union[List, torch.LongTensor]], tag: str = "concatenated_"
-) -> Dict[str, torch.LongTensor]:
+    batch: dict[str, list | torch.Tensor], tag: str = "concatenated_"
+) -> tuple[dict[str, torch.Tensor], int]:
     chosen_features, rejected_features = {}, {}
     for k in batch:
         if k.startswith("chosen_"):
@@ -102,9 +107,9 @@ def concatenated_inputs(
             rejected_features[k.replace("rejected_", "")] = batch[k]
 
     # - need to return chosen
-    ret = {f"{tag}input_ids": torch.cat([chosen_features["input_ids"], rejected_features["input_ids"]], axis=-1)}
+    ret = {f"{tag}input_ids": torch.cat([chosen_features["input_ids"], rejected_features["input_ids"]], dim=-1)}
     if "labels" in chosen_features:
-        ret[f"{tag}labels"] = torch.cat([chosen_features["labels"], rejected_features["labels"]], axis=-1)
+        ret[f"{tag}labels"] = torch.cat([chosen_features["labels"], rejected_features["labels"]], dim=-1)
 
     if "cu_seq_lens_q" in chosen_features:
         ret[f"{tag}cu_seq_lens_q"] = torch.cat(
@@ -137,8 +142,8 @@ def concatenated_inputs(
 
 # for dpo - padding free
 def get_batch_logps(
-    logits: torch.FloatTensor, labels: torch.LongTensor, cu_seq_lens: torch.LongTensor, average_log_prob: bool = False
-) -> torch.FloatTensor:
+    logits: torch.Tensor, labels: torch.Tensor, cu_seq_lens: torch.Tensor, average_log_prob: bool = False
+) -> torch.Tensor:
     assert logits.shape[:-1] == labels.shape
 
     # - we are going to get crossings at labels / logits

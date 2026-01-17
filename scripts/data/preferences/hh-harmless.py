@@ -57,19 +57,11 @@ def filter_fn(data):
 def main(push_to_hub: bool, hf_entity: str | None):
     api = HfApi()
 
-    ds = datasets.load_dataset("Anthropic/hh-rlhf", data_dir="harmless-base")
+    ds = datasets.load_dataset("Anthropic/hh-rlhf", data_dir="harmless-base", num_proc=max_num_processes())
 
-    ds = ds.map(
-        extract,
-        num_proc=multiprocessing.cpu_count(),
-        load_from_cache_file=False,
-    )
+    ds = ds.map(extract, num_proc=multiprocessing.cpu_count(), load_from_cache_file=False)
 
-    ds = ds.filter(
-        filter_fn,
-        num_proc=multiprocessing.cpu_count(),
-        load_from_cache_file=False,
-    )
+    ds = ds.filter(filter_fn, num_proc=multiprocessing.cpu_count(), load_from_cache_file=False)
 
     print(f"{multiprocessing.cpu_count()=}")
 
@@ -83,10 +75,7 @@ def main(push_to_hub: bool, hf_entity: str | None):
         ds.push_to_hub(repo_id)
 
         api.upload_file(
-            path_or_fileobj=__file__,
-            path_in_repo="create_dataset.py",
-            repo_id=repo_id,
-            repo_type="dataset",
+            path_or_fileobj=__file__, path_in_repo="create_dataset.py", repo_id=repo_id, repo_type="dataset"
         )
     else:
         print("Dataset processed locally (not pushed to Hub)")

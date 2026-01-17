@@ -36,10 +36,9 @@ tasks:
         --lr_scheduler_type linear
         --warmup_ratio 0.1
         --weight_decay 0.
-        --num_train_epochs 3
+        --num_epochs 3
         --output_dir /output/
         --with_tracking
-        --report_to tensorboard
         --logging_steps 1
     ']
     envVars:
@@ -68,6 +67,6 @@ tasks:
     resources:
       gpuCount: 8
     context:
-      cluster: ai2/allennlp-cirrascale
+      cluster: ai2/jupiter
       priority: high
       preemptible: false

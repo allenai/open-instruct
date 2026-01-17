@@ -64,37 +64,18 @@ from transformers import (
     LlamaTokenizerFast,
     PreTrainedTokenizer,
 )
-from transformers.utils.hub import _CACHED_NO_EXIST, TRANSFORMERS_CACHE, extract_commit_hash, try_to_load_from_cache
+from transformers.utils.hub import extract_commit_hash
 
-from open_instruct.utils import hf_whoami
+from open_instruct import launch_utils
+from open_instruct.utils import hf_whoami, max_num_processes
 
 
 # ----------------------------------------------------------------------------
 # Utilities
-def custom_cached_file(model_name_or_path: str, filename: str, revision: str = None, repo_type: str = "model"):
-    """@vwxyzjn: HF's `cached_file` no longer works for `repo_type="dataset"`."""
-    # local_file = os.path.join(model_name_or_path, filename)
-
-    if os.path.isdir(model_name_or_path):
-        resolved_file = os.path.join(model_name_or_path, filename)
-        if os.path.isfile(resolved_file):
-            return resolved_file
-        else:
-            return None
-    else:
-        resolved_file = try_to_load_from_cache(
-            model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type
-        )
-        # special return value from try_to_load_from_cache
-        if resolved_file == _CACHED_NO_EXIST:
-            return None
-        return resolved_file
-
-
 def get_commit_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
-    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+    file = launch_utils.custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     commit_hash = extract_commit_hash(file, None)
     return commit_hash
 
@@ -102,12 +83,10 @@ def get_commit_hash(
 def get_file_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
-    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+    file = launch_utils.custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     if isinstance(file, str):
         with open(file, "rb") as f:
             return hashlib.sha256(f.read()).hexdigest()
-    elif file is _CACHED_NO_EXIST:
-        return f"{filename} not found"
     elif file is None:
         return f"{filename} not found"
     else:
@@ -127,7 +106,7 @@ FILTER_EXAMPLE_PER_SECOND_PER_CPU = 1130
 
 def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_per_cpu) -> int:
     num_required_cpus = max(1, dataset_len // example_per_second_per_cpu)
-    return min(num_required_cpus, num_available_cpus)
+    return min(num_required_cpus, num_available_cpus, dataset_len)
 
 
 COLORS = ["on red", "on green", "on blue", "on yellow", "on magenta"]
@@ -318,7 +297,7 @@ CHAT_TEMPLATES = {
     ),
     # olmo-core-compatible chat templates:
     # TODO: unify these 3 chat templates and send variables through the tokenizer's apply_chat_template kwargs
-    "olmo": (
+    "olmo_old": (
         "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
         "{% if not has_system %}"
         "{{ '<|im_start|>system\nYou are OLMo, a helpful function-calling AI assistant built by Ai2. Your date cutoff is November 2024, and your model weights are available at https://huggingface.co/allenai. You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
@@ -361,7 +340,7 @@ CHAT_TEMPLATES = {
     "olmo_thinker": (
         "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
         "{% if not has_system %}"
-        "{{ '<|im_start|>system\nYou are OLMo, a helpful function-calling AI assistant built by Ai2. Your date cutoff is November 2024, and your model weights are available at https://huggingface.co/allenai. You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
+        "{{ '<|im_start|>system\nYou are a helpful AI assistant.<|im_end|>\n' }}"
         "{% endif %}"
         "{% for message in messages %}"
         "{% if message['role'] == 'system' %}"
@@ -398,22 +377,18 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
-    "olmo_thinker_r1_style": (
-        "A conversation between user and assistant. "
-        "The user asks a question, and the assistant solves it. "
-        "The assistant first thinks and reasons about the question "
-        "and after thinking provides the user with the answer. "
-        "The reasoning process is enclosed in <think> </think> tags "
-        "and the answer is enclosed in <answer> </answer> tags "
-        "so the full response is <think> reasoning process here </think> "
-        "<answer> answer here </answer>."
-        "\n\n"
+    "olmo_thinker_no_think_7b": (
+        "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
+        "{% if not has_system %}"
+        "{{ '<|im_start|>system\nYou are Olmo, a helpful AI assistant built by Ai2. Your date cutoff is December 2024, and your model weights are available at https://huggingface.co/allenai.<|im_end|>\n' }}"
+        "{% endif %}"
         "{% for message in messages %}"
         "{% if message['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + message['content'] }}"
         "{% if message.get('functions', none) is not none %}"
-        "{{ '<|im_start|>system\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{{ ' <functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
         "{% else %}"
-        "{{ '<|im_start|>system\n' + message['content']  + '<|im_end|>\n' }}"
+        "{{ ' You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
         "{% endif %}"
         "{% elif message['role'] == 'user' %}"
         "{% if message.get('functions', none) is not none %}"
@@ -438,7 +413,116 @@ CHAT_TEMPLATES = {
         "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
         "{% endif %}"
         "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "olmo_thinker_remove_intermediate_thinking": (
+        "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
+        "{% if not has_system %}"
+        "{{ '<|im_start|>system\nYou are a helpful AI assistant.<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + message['content'] }}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ ' <functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ ' You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'user' %}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% set content = message.get('content', none) %}"
+        "{% if content is not none %}"
+        "{% set content = content | string %}"
+        "{% if not loop.last and '</think>' in content and '<think>' in content %}"
+        "{% set content = content.split('</think>')[-1].lstrip('\\n') %}"
+        "{% endif %}"
+        "{{ content }}"
+        "{% endif %}"
+        "{% if message.get('function_calls', none) is not none %}"
+        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ '<|im_end|>' + '\n' }}"
+        "{% else %}"
+        "{{ eos_token }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'environment' %}"
+        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
         "{{ '<|im_start|>assistant\n<think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "olmo_thinker_no_think_sft_tokenization": (
+        "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
+        "{% if not has_system %}"
+        "{{ '<|im_start|>system\nYou are a helpful AI assistant.<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + message['content'] }}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ ' <functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ ' You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'user' %}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% if message.get('content', none) is not none %}"
+        "{{ message['content'] }}"
+        "{% endif %}"
+        "{% if message.get('function_calls', none) is not none %}"
+        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ '<|im_end|>' + '\n' }}"
+        "{% else %}"
+        "{{ eos_token }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'environment' %}"
+        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "olmo_thinker_rlzero": (
+        "Solve the following problem step by step. "
+        "The last line of your response should be the answer to the problem in form Answer: $Answer (without quotes) where $Answer is the answer to the problem."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '\nRemember to put your answer on its own line after \"Answer:\"' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "olmo_thinker_code_rlzero": (
+        "Solve the following code problem step by step. "
+        f"The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        f"\nRemember to put your solution inside the ```\npython\nCODE\n``` tags"
         "{% endif %}"
         "{% endfor %}"
     ),
@@ -1236,6 +1320,48 @@ def rlvr_tokenize_v2(
     return row
 
 
+def rlvr_tokenize_v3(
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
+    ground_truths_key: str = GROUND_TRUTHS_KEY,
+    verifier_source_key: str = VERIFIER_SOURCE_KEY,
+    system_prompt_override: Optional[str] = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
+):
+    prompt = row.pop(sft_messages_key)
+    assert len(prompt) > 0, "Empty prompt in dataset"
+    # if the prompt has multiple messages, make sure we don't end in an assistant message.
+    if len(prompt) > 1 and prompt[-1]["role"] == "assistant":
+        prompt = prompt[:-1]
+    # override the system prompt if we have a new one provided.
+    if system_prompt_override:
+        if prompt[0]["role"] == "system":
+            del prompt[0]
+        prompt = [{"role": "system", "content": system_prompt_override}] + prompt
+
+    chat_template_kwargs = {"add_generation_prompt": True}
+    if tool_definitions:
+        chat_template_kwargs["tools"] = tool_definitions
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
+    if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
+        row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
+    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
+    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
+    row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
+    # some basic transformations:
+    # if ground truths is a string, make it a list
+    if isinstance(row[ground_truths_key], str):
+        row[ground_truths_key] = [row[ground_truths_key]]
+    # if dataset source is a string, make it a list
+    if isinstance(row[verifier_source_key], str):
+        row[verifier_source_key] = [row[verifier_source_key]]
+    return row
+
+
 def rlvr_filter_v1(
     row: Dict[str, Any],
     tokenizer: PreTrainedTokenizer,
@@ -1255,6 +1381,14 @@ def rlvr_filter_v1(
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
+def rlvr_max_length_filter_v2(
+    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: Optional[int] = None
+):
+    if max_prompt_token_length is None:
+        return True
+    return len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
+
+
 TRANSFORM_FNS = {
     "sft_tokenize_v1": (sft_tokenize_v1, "map"),
     "sft_tokenize_mask_out_prompt_v1": (sft_tokenize_mask_out_prompt_v1, "map"),
@@ -1265,8 +1399,8 @@ TRANSFORM_FNS = {
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
-    "rlvr_tokenize_v1": (rlvr_tokenize_v2, "map"),
-    "rlvr_filter_v1": (rlvr_filter_v1, "filter"),
+    "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
+    "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
 }
 
 
@@ -1333,16 +1467,25 @@ class DatasetConfig:
         # if the file exists locally, use the local file
         if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
             assert self.dataset_split == "train", "Only train split is supported for local jsonl files."
-            self.dataset = load_dataset("json", data_files=self.dataset_name, split=self.dataset_split)
+            self.dataset = load_dataset(
+                "json", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
+            )
         elif os.path.exists(self.dataset_name) and self.dataset_name.endswith(".parquet"):
             assert self.dataset_split == "train", "Only train split is supported for local parquet files."
-            self.dataset = load_dataset("parquet", data_files=self.dataset_name, split=self.dataset_split)
+            self.dataset = load_dataset(
+                "parquet", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
+            )
         else:
             # commit hash only works for hf datasets
             self.dataset_commit_hash = get_commit_hash(
                 self.dataset_name, self.dataset_revision, "README.md", "dataset"
             )
-            self.dataset = load_dataset(self.dataset_name, split=self.dataset_split, revision=self.dataset_revision)
+            self.dataset = load_dataset(
+                self.dataset_name,
+                split=self.dataset_split,
+                revision=self.dataset_revision,
+                num_proc=max_num_processes(),
+            )
         if self.dataset_range is None:
             dataset_range = len(self.dataset)
             self.update_range(dataset_range)
@@ -1466,7 +1609,15 @@ class DatasetTransformationCache:
                 print("dataset_skip_cache is True, so we will not load the dataset from cache")
             else:
                 # Use the split from the first dataset config as default
-                return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash)
+                dataset = load_dataset(
+                    repo_name,
+                    split=DEFAULT_SPLIT_FOR_CACHED_DATASET,
+                    revision=self.config_hash,
+                    num_proc=max_num_processes(),
+                )
+                if "index" not in dataset.column_names:
+                    dataset = dataset.add_column("index", range(len(dataset)))
+                return dataset
 
         print(f"Cache not found, transforming datasets...")
 
@@ -1478,6 +1629,7 @@ class DatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+        combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
         if dataset_skip_cache:
             return combined_dataset
 
@@ -1519,7 +1671,9 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
 
         # NOTE: Load the dataset again to make sure it's downloaded to the HF cache
         print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
-        return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash)
+        return load_dataset(
+            repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash, num_proc=max_num_processes()
+        )
 
 
 class LocalDatasetTransformationCache:
@@ -1556,6 +1710,8 @@ class LocalDatasetTransformationCache:
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
             dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
+            if "index" not in dataset.column_names:
+                dataset = dataset.add_column("index", range(len(dataset)))
             # Load statistics from cache if available
             stats_path = os.path.join(cache_path, "dataset_statistics.json")
             if os.path.exists(stats_path):
@@ -1617,6 +1773,7 @@ class LocalDatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+        combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
 
         # Prepare return statistics
         all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
@@ -1640,18 +1797,61 @@ class LocalDatasetTransformationCache:
         return loaded_dataset, all_statistics
 
 
-def get_cached_dataset(
-    dcs: List[DatasetConfig],
-    tc: TokenizerConfig,
-    hf_entity: Optional[str] = None,
-    dataset_local_cache_dir: Optional[str] = None,
-    dataset_skip_cache: bool = False,
-) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
-    if dataset_local_cache_dir is not None:
-        cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
+def load_dataset_configs(
+    dataset_mixer_list: List[str],
+    dataset_mixer_list_splits: List[str],
+    dataset_transform_fn: List[str],
+    transform_fn_args: List[Dict[str, Any]],
+    target_columns: Optional[List[str]] = None,
+    dataset_config_seed: int = 42,
+) -> List[DatasetConfig]:
+    dcs = []
+    if len(dataset_mixer_list_splits) == 1:
+        print("by default, we will use the same split for all datasets")
+        dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
     else:
-        cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
+        if len(dataset_mixer_list_splits) != len(dataset_mixer_list):
+            raise ValueError(
+                f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}"
+            )
+    assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
+    for i in range(0, len(dataset_mixer_list), 2):
+        dataset_name = dataset_mixer_list[i]
+        frac_or_num_samples = dataset_mixer_list[i + 1]
+        if "." in frac_or_num_samples:
+            frac_or_num_samples = float(frac_or_num_samples)
+        else:
+            frac_or_num_samples = int(frac_or_num_samples)
+        # Uses dataset_mixer_list_splits[i] where i increments by 2 (0, 2, 4...). This works because
+        # all current usage provides a single split that gets replicated to len(dataset_mixer_list).
+        # If different splits per dataset are needed, use dataset_mixer_list_splits[i // 2] instead.
+        assert i % 2 == 0, f"Index {i} must be even"
+        assert i < len(dataset_mixer_list_splits), (
+            f"Index {i} out of bounds for dataset_mixer_list_splits of length {len(dataset_mixer_list_splits)}"
+        )
+        dataset_config = DatasetConfig(
+            dataset_name=dataset_name,
+            dataset_split=dataset_mixer_list_splits[i],
+            dataset_revision="main",
+            transform_fn=dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=target_columns,
+            frac_or_num_samples=frac_or_num_samples,
+            dataset_config_seed=dataset_config_seed,
+        )
+
+        original_size = len(dataset_config.dataset)
+        if isinstance(frac_or_num_samples, int) and frac_or_num_samples > original_size:
+            new_range = frac_or_num_samples
+        elif isinstance(frac_or_num_samples, float):
+            new_range = int(frac_or_num_samples * original_size)
+        else:
+            new_range = int(frac_or_num_samples)
+
+        print(f"Dataset {dataset_name}: {original_size} -> {new_range} samples (factor: {frac_or_num_samples})")
+        dataset_config.update_range(new_range)
+        dcs.append(dataset_config)
+    return dcs
 
 
 def get_cached_dataset_tulu_with_statistics(
@@ -1668,52 +1868,20 @@ def get_cached_dataset_tulu_with_statistics(
     dataset_skip_cache: bool = False,
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
+    system_prompt_override: Optional[str] = None,
 ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
-    dcs = []
     if dataset_config_hash is None:
-        if len(dataset_mixer_list_splits) == 1:
-            print("by default, we will use the same split for all datasets")
-            dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
-        else:
-            if len(dataset_mixer_list_splits) != len(dataset_mixer_list):
-                raise ValueError(
-                    f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}"
-                )
-        assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
-        for i in range(0, len(dataset_mixer_list), 2):
-            dataset_name = dataset_mixer_list[i]
-            frac_or_num_samples = dataset_mixer_list[i + 1]
-            if "." in frac_or_num_samples:
-                frac_or_num_samples = float(frac_or_num_samples)
-            else:
-                frac_or_num_samples = int(frac_or_num_samples)
-            dataset_config = DatasetConfig(
-                dataset_name=dataset_name,
-                dataset_split=dataset_mixer_list_splits[i],
-                dataset_revision="main",
-                transform_fn=dataset_transform_fn,
-                transform_fn_args=transform_fn_args,
-                target_columns=target_columns,
-                frac_or_num_samples=frac_or_num_samples,
-                dataset_config_seed=dataset_config_seed,
-            )
-
-            # Calculate target size properly handling fractional upsampling
-            original_size = len(dataset_config.dataset)
-            if isinstance(frac_or_num_samples, int) and frac_or_num_samples > original_size:
-                # Absolute number larger than dataset size - use as-is for upsampling
-                new_range = frac_or_num_samples
-            elif isinstance(frac_or_num_samples, float):
-                # Fractional sampling (can be > 1.0 for upsampling)
-                new_range = int(frac_or_num_samples * original_size)
-            else:
-                # Integer <= dataset size, use as absolute count
-                new_range = int(frac_or_num_samples)
-
-            print(f"Dataset {dataset_name}: {original_size} -> {new_range} samples (factor: {frac_or_num_samples})")
-            dataset_config.update_range(new_range)
-            dcs.append(dataset_config)
+        dcs = load_dataset_configs(
+            dataset_mixer_list,
+            dataset_mixer_list_splits,
+            dataset_transform_fn,
+            transform_fn_args,
+            target_columns,
+            dataset_config_seed,
+        )
         dataset_config_hash = compute_config_hash(dcs, tc)
+    else:
+        dcs = []
     if dataset_cache_mode == "local":
         cache = LocalDatasetTransformationCache(
             config_hash=dataset_config_hash, dataset_local_cache_dir=dataset_local_cache_dir
@@ -1742,214 +1910,21 @@ def get_cached_dataset_tulu(
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
+    system_prompt_override: Optional[str] = None,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
-        dataset_mixer_list,
-        dataset_mixer_list_splits,
-        tc,
-        dataset_transform_fn,
-        transform_fn_args,
-        target_columns,
-        dataset_cache_mode,
-        dataset_config_hash,
-        hf_entity,
-        dataset_local_cache_dir,
-        dataset_skip_cache,
-        True,
-        dataset_config_seed,
+        dataset_mixer_list=dataset_mixer_list,
+        dataset_mixer_list_splits=dataset_mixer_list_splits,
+        tc=tc,
+        dataset_transform_fn=dataset_transform_fn,
+        transform_fn_args=transform_fn_args,
+        target_columns=target_columns,
+        dataset_cache_mode=dataset_cache_mode,
+        dataset_config_hash=dataset_config_hash,
+        hf_entity=hf_entity,
+        dataset_local_cache_dir=dataset_local_cache_dir,
+        dataset_skip_cache=dataset_skip_cache,
+        drop_dataset_source=True,
+        dataset_config_seed=dataset_config_seed,
+        system_prompt_override=system_prompt_override,
     )[0]
-
-
-def test_sft_dpo_same_tokenizer():
-    base_to_sft_tc = TokenizerConfig(
-        tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu"
-    )
-    sft_to_dpo_tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT", tokenizer_revision="main", chat_template_name="tulu"
-    )
-    dpo_to_rl_tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-DPO", tokenizer_revision="main", chat_template_name="tulu"
-    )
-
-    def equal_tokenizer(tc1, tc2):
-        tok1 = tc1.tokenizer
-        tok2 = tc2.tokenizer
-        assert tok1.vocab_size == tok2.vocab_size, "Vocab size should be the same"
-        assert tok1.model_max_length == tok2.model_max_length, "Model max length should be the same"
-        assert tok1.is_fast == tok2.is_fast, "is_fast should be the same"
-        assert tok1.padding_side == tok2.padding_side, "padding_side should be the same"
-        assert tok1.truncation_side == tok2.truncation_side, "truncation_side should be the same"
-        assert tok1.clean_up_tokenization_spaces == tok2.clean_up_tokenization_spaces, (
-            "clean_up_tokenization_spaces should be the same"
-        )
-        assert tok1.added_tokens_decoder == tok2.added_tokens_decoder, "added_tokens_decoder should be the same"
-
-    equal_tokenizer(base_to_sft_tc, sft_to_dpo_tc)
-    equal_tokenizer(sft_to_dpo_tc, dpo_to_rl_tc)
-    equal_tokenizer(base_to_sft_tc, dpo_to_rl_tc)
-
-
-def test_sft_dpo_same_tokenizer_olmo():
-    base_to_sft_tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/OLMo-2-1124-7B",
-        tokenizer_revision="main",
-        chat_template_name="tulu",
-        add_bos=True,
-    )
-    sft_to_dpo_tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/OLMo-2-1124-7B-SFT",
-        tokenizer_revision="main",
-        chat_template_name="tulu",
-        add_bos=True,
-    )
-    dpo_to_rl_tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/OLMo-2-1124-7B-DPO",
-        tokenizer_revision="main",
-        chat_template_name="tulu",
-        add_bos=True,
-    )
-    print("vocab size", base_to_sft_tc.tokenizer.vocab_size, len(base_to_sft_tc.tokenizer.vocab))
-
-    def equal_tokenizer(tc1, tc2):
-        tok1 = tc1.tokenizer
-        tok2 = tc2.tokenizer
-        assert tok1.vocab_size == tok2.vocab_size, "Vocab size should be the same"
-        assert tok1.model_max_length == tok2.model_max_length, "Model max length should be the same"
-        assert tok1.is_fast == tok2.is_fast, "is_fast should be the same"
-        assert tok1.padding_side == tok2.padding_side, "padding_side should be the same"
-        assert tok1.truncation_side == tok2.truncation_side, "truncation_side should be the same"
-        assert tok1.clean_up_tokenization_spaces == tok2.clean_up_tokenization_spaces, (
-            "clean_up_tokenization_spaces should be the same"
-        )
-        assert tok1.added_tokens_decoder == tok2.added_tokens_decoder, "added_tokens_decoder should be the same"
-
-    equal_tokenizer(base_to_sft_tc, sft_to_dpo_tc)
-    equal_tokenizer(sft_to_dpo_tc, dpo_to_rl_tc)
-    equal_tokenizer(base_to_sft_tc, dpo_to_rl_tc)
-
-
-def test_config_hash_different():
-    """Test that different configurations produce different hashes."""
-    tc = TokenizerConfig(
-        tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu"
-    )
-
-    dcs1 = [
-        DatasetConfig(
-            dataset_name="allenai/tulu-3-sft-personas-algebra",
-            dataset_split="train",
-            dataset_revision="main",
-            transform_fn=["sft_tokenize_v1"],
-            transform_fn_args={},
-        )
-    ]
-
-    dcs2 = [
-        DatasetConfig(
-            dataset_name="allenai/tulu-3-sft-personas-algebra",
-            dataset_split="train",
-            dataset_revision="main",
-            transform_fn=["sft_tokenize_mask_out_prompt_v1"],
-            transform_fn_args={},
-        )
-    ]
-    hash1 = compute_config_hash(dcs1, tc)
-    hash2 = compute_config_hash(dcs2, tc)
-    assert hash1 != hash2, "Different configs should have different hashes"
-
-
-def test_get_cached_dataset_tulu_sft():
-    tc = TokenizerConfig(
-        tokenizer_name_or_path="meta-llama/Llama-3.1-8B",
-        tokenizer_revision="main",
-        use_fast=True,
-        chat_template_name="tulu",
-        add_bos=False,
-    )
-    dataset_mixer_list = ["allenai/tulu-3-sft-mixture", "1.0"]
-    dataset_mixer_list_splits = ["train"]
-    dataset_transform_fn = ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
-
-    # our standard tulu setting
-    transform_fn_args = [{"max_seq_length": 4096}, {}]
-    dataset = get_cached_dataset_tulu(
-        dataset_mixer_list,
-        dataset_mixer_list_splits,
-        tc,
-        dataset_transform_fn,
-        transform_fn_args,
-        TOKENIZED_SFT_DATASET_KEYS,
-        dataset_skip_cache=True,
-    )
-
-    gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="61ac38e052")
-    assert len(dataset) == len(gold_tokenized_dataset)
-    for i in range(len(dataset)):
-        assert dataset[i]["input_ids"] == gold_tokenized_dataset[i]["input_ids"]
-    return True
-
-
-def test_get_cached_dataset_tulu_preference():
-    tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT",
-        tokenizer_revision="main",
-        use_fast=False,
-        chat_template_name="tulu",
-        add_bos=False,
-    )
-    dataset_mixer_list = ["allenai/llama-3.1-tulu-3-8b-preference-mixture", "1.0"]
-    dataset_mixer_list_splits = ["train"]
-    dataset_transform_fn = ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
-    transform_fn_args = [{"max_seq_length": 2048}, {}]
-    dataset = get_cached_dataset_tulu(
-        dataset_mixer_list,
-        dataset_mixer_list_splits,
-        tc,
-        dataset_transform_fn,
-        transform_fn_args,
-        TOKENIZED_PREFERENCE_DATASET_KEYS,
-        dataset_skip_cache=True,
-    )
-    gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="9415479293")
-    assert len(dataset) == len(gold_tokenized_dataset)
-    for i in range(len(dataset)):
-        assert dataset[i]["chosen_input_ids"] == gold_tokenized_dataset[i]["chosen_input_ids"]
-    return True
-
-
-def test_get_cached_dataset_tulu_rlvr():
-    tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-DPO",
-        tokenizer_revision="main",
-        use_fast=False,
-        chat_template_name="tulu",
-        add_bos=False,
-    )
-    dataset_mixer_list = ["allenai/RLVR-GSM-MATH-IF-Mixed-Constraints", "1.0"]
-    dataset_mixer_list_splits = ["train"]
-    dataset_transform_fn = ["rlvr_tokenize_v1", "rlvr_filter_v1"]
-    transform_fn_args = [{}, {"max_token_length": 2048, "max_prompt_token_length": 2048}]
-    # allenai/dataset-mix-cached/tree/0ff0043e56
-    dataset = get_cached_dataset_tulu(
-        dataset_mixer_list,
-        dataset_mixer_list_splits,
-        tc,
-        dataset_transform_fn,
-        transform_fn_args,
-        dataset_skip_cache=True,
-    )
-    gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="0ff0043e56")
-    assert len(dataset) == len(gold_tokenized_dataset)
-    for i in range(len(dataset)):
-        assert dataset[i][INPUT_IDS_PROMPT_KEY] == gold_tokenized_dataset[i][INPUT_IDS_PROMPT_KEY]
-    return True
-
-
-if __name__ == "__main__":
-    test_sft_dpo_same_tokenizer()
-    test_sft_dpo_same_tokenizer_olmo()
-    test_config_hash_different()
-    # test_get_cached_dataset_tulu_sft() # takes a long time to run
-    # test_get_cached_dataset_tulu_preference() # takes a long time to run
-    # test_get_cached_dataset_tulu_rlvr() # takes ~ 30 seconds
-    print("All tests passed!")

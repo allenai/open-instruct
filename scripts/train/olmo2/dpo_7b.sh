@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
@@ -20,7 +20,7 @@ python mason.py \
     --tokenizer_revision main \
     --use_slow_tokenizer False \
     --add_bos \
-    --dataset_mixer_list allenai/olmo-2-1124-7b-preference-mix 1.0 \
+    --mixer_list allenai/olmo-2-1124-7b-preference-mix 1.0 \
     --max_seq_length 2048 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
@@ -28,11 +28,10 @@ python mason.py \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
-    --num_train_epochs 1 \
+    --num_epochs 1 \
     --logging_steps 1 \
-    --dpo_loss_type dpo_norm \
-    --dpo_beta 5 \
+    --loss_type dpo_norm \
+    --beta 5 \
     --use_flash_attn \
     --gradient_checkpointing \
-    --report_to wandb \
     --with_tracking \

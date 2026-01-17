@@ -44,13 +44,13 @@ Examples:
     # Set environment variables
     export AZURE_OPENAI_API_KEY="your-api-key"
     export AZURE_OPENAI_ENDPOINT="https://your-endpoint.openai.azure.com/"
-    
+
     # Run the script
     python code_create_batch.py
-    
+
     # The script will output a batch job ID like:
     # "Batch job submitted with ID: batch_abc123def456"
-    
+
     # Use this ID later with code_upload_batch.py:
     # python code_upload_batch.py batch_abc123def456
     ```
@@ -90,20 +90,22 @@ Note:
     The script includes caching logic to avoid reprocessing previously handled data.
     Cached results are stored locally and checked before creating new batch requests.
 """
+
 import json
 import os
 import random
 import time
-from typing import List
 
 from datasets import load_dataset
 from openai import AzureOpenAI
 from pydantic import BaseModel
 
+import open_instruct.utils as open_instruct_utils
+
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
     azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
-    api_version="2024-12-01-preview"
+    api_version="2024-12-01-preview",
 )
 
 MODEL = "gpt-4.1"
@@ -118,11 +120,12 @@ OUTPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr-2"
 SPLIT = "python"
 
 hf_datasets = {
-    "taco": load_dataset("BAAI/TACO", trust_remote_code=True),
-    "apps": load_dataset("codeparrot/apps", trust_remote_code=True),
-    "code_contests": load_dataset("deepmind/code_contests"),
-    "open-r1/codeforces": load_dataset("open-r1/codeforces")
+    "taco": load_dataset("BAAI/TACO", trust_remote_code=True, num_proc=open_instruct_utils.max_num_processes()),
+    "apps": load_dataset("codeparrot/apps", trust_remote_code=True, num_proc=open_instruct_utils.max_num_processes()),
+    "code_contests": load_dataset("deepmind/code_contests", num_proc=open_instruct_utils.max_num_processes()),
+    "open-r1/codeforces": load_dataset("open-r1/codeforces", num_proc=open_instruct_utils.max_num_processes()),
 }
+
 
 def extract_python_code(model_output: str) -> str:
     """Extract the last code block between ``` markers from the model output."""
@@ -166,11 +169,13 @@ def get_question(ds_name, split, index):
 
     return None
 
+
 def get_input(row):
     ds_name, ds_split, ds_index = row["dataset"], row["split"], int(row["index"])
     if ds_name not in hf_datasets:
         return None
     return get_question(ds_name, ds_split, ds_index)
+
 
 def get_solution(row):
     """
@@ -179,16 +184,19 @@ def get_solution(row):
             return message['content']
     return None
     """
-    return row['solution']
+    return row["solution"]
+
 
 def get_id(row):
-    return row['question_id']
+    return row["question_id"]
+
 
 class OpenAIStructuredOutput(BaseModel):
     rewritten_input: str
     rewritten_solution: str
-    test_cases: List[str]
+    test_cases: list[str]
     good_program: bool
+
 
 def create_batch_file(prompts):
     """Create a batch file in the format required by Azure OpenAI Batch API."""
@@ -203,7 +211,7 @@ def create_batch_file(prompts):
                     "model": MODEL,
                     "messages": [
                         {"role": "system", "content": "You are a helpful assistant that can write code in Python."},
-                        {"role": "user", "content": prompt}
+                        {"role": "user", "content": prompt},
                     ],
                     "max_tokens": 8192,
                     "response_format": {
@@ -216,18 +224,15 @@ def create_batch_file(prompts):
                                 "properties": {
                                     "rewritten_input": {"type": "string"},
                                     "rewritten_solution": {"type": "string"},
-                                    "test_cases": {
-                                        "type": "array",
-                                        "items": {"type": "string"}
-                                    },
-                                    "good_program": {"type": "boolean"}
+                                    "test_cases": {"type": "array", "items": {"type": "string"}},
+                                    "good_program": {"type": "boolean"},
                                 },
                                 "required": ["rewritten_input", "rewritten_solution", "test_cases", "good_program"],
-                                "additionalProperties": False
-                            }
-                        }
-                    }
-                }
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                },
             }
             f.write(json.dumps(batch_request) + "\n")
 
@@ -244,10 +249,10 @@ def find_cached_results(id: str):
     all_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
 
     if all_files:
-        with open(all_files[0], "r") as f:
+        with open(all_files[0]) as f:
             try:
                 response = json.load(f)
-                rewritten_input = response['rewritten_input']
+                rewritten_input = response["rewritten_input"]
                 if type(rewritten_input) == dict:
                     return None
                 return response
@@ -256,16 +261,19 @@ def find_cached_results(id: str):
 
     return None
 
+
 def main():
     global SAMPLE_LIMIT
-    input_dataset = load_dataset(INPUT_HF_DATASET, "train", split=SPLIT)
+    input_dataset = load_dataset(
+        INPUT_HF_DATASET, "train", split=SPLIT, num_proc=open_instruct_utils.max_num_processes()
+    )
 
     # First get all unique IDs
     unique_ids = set()
     unique_rows = []
     for row in input_dataset:
-        if row['question_id'] not in unique_ids:
-            unique_ids.add(row['question_id'])
+        if row["question_id"] not in unique_ids:
+            unique_ids.add(row["question_id"])
             unique_rows.append(row)
 
     print(f"Found {len(unique_rows)} unique rows out of {len(input_dataset)} total rows")
@@ -330,7 +338,6 @@ Output should be a JSON object with this structure:
             continue
         prompts.append((get_id(row), master_prompt.replace("{input}", input).replace("{solution}", get_solution(row))))
 
-
     print(f"Creating batch file with {len(prompts)} prompts...")
     print(f"First prompt: {prompts[0]}")
     breakpoint()
@@ -339,19 +346,15 @@ Output should be a JSON object with this structure:
 
     # Submit the batch job
     print("Submitting batch job to Azure OpenAI...")
-    batch_file = client.files.create(
-        file=open(BATCH_FILE_NAME, "rb"),
-        purpose="batch"
-    )
+    batch_file = client.files.create(file=open(BATCH_FILE_NAME, "rb"), purpose="batch")
 
     batch_job = client.batches.create(
-        input_file_id=batch_file.id,
-        endpoint="/v1/chat/completions",
-        completion_window="24h"
+        input_file_id=batch_file.id, endpoint="/v1/chat/completions", completion_window="24h"
     )
 
     print(f"Batch job submitted with ID: {batch_job.id}")
     print("You can check the status of your batch job using the ID above.")
+
 
 if __name__ == "__main__":
     main()

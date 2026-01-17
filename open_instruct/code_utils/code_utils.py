@@ -8,7 +8,7 @@ import shutil
 import sys
 import time
 import zlib
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from open_instruct import logger_utils
 
@@ -92,13 +92,13 @@ def decode_tests(tests: Any) -> list:
 # -------------------------------------------------------------
 
 
-def run_tests_against_program_helper_2(func: str, tests: List[str], shared_results) -> None:
+def run_tests_against_program_helper_2(func: str, tests: list[str], shared_results) -> None:
     """Run all tests against the program and store results in shared array"""
     # Apply reliability guard in the child process
     reliability_guard()
 
     try:
-        execution_context: Dict[str, Any] = {}
+        execution_context: dict[str, Any] = {}
         execution_context.update({"__builtins__": __builtins__})
 
         try:
@@ -143,8 +143,8 @@ def run_individual_test_helper(func: str, test: str, result_array, index: int, r
 
 
 def get_successful_tests_fast(
-    program: str, tests: List[str], max_execution_time: float = 1.0
-) -> Tuple[List[int], List[float]]:
+    program: str, tests: list[str], max_execution_time: float = 1.0
+) -> tuple[list[int], list[float]]:
     """Run a program against a list of tests, if the program exited successfully then we consider
     the test to be passed. Note that you SHOULD ONLY RUN THIS FUNCTION IN A VIRTUAL ENVIRONMENT
     as we do not guarantee the safety of the program provided.
@@ -195,7 +195,7 @@ def get_successful_tests_fast(
 
 
 def run_tests_stdio_helper(
-    program: str, tests: List[Any], max_execution_time: float, stdio_test_results, stdio_runtimes
+    program: str, tests: list[Any], max_execution_time: float, stdio_test_results, stdio_runtimes
 ):
     """Helper to run stdio tests in a separate process."""
     reliability_guard()
@@ -219,8 +219,8 @@ def run_tests_stdio_helper(
 
 
 def get_successful_tests_stdio(
-    program: str, tests: List[Any], max_execution_time: float = 1.0
-) -> Tuple[List[int], List[float]]:
+    program: str, tests: list[Any], max_execution_time: float = 1.0
+) -> tuple[list[int], list[float]]:
     """Same as above but for stdio format.
     Parameter:
         program: a string representation of the python program you want to run
@@ -267,7 +267,7 @@ def get_successful_tests_stdio(
 # -------------------------------------------------------------
 
 
-def should_execute(program: str, tests: List[Any]) -> bool:
+def should_execute(program: str, tests: list[Any]) -> bool:
     """Determine if we should try to execute this program at all for safety
     reasons."""
     dangerous_commands = [
@@ -282,10 +282,7 @@ def should_execute(program: str, tests: List[Any]) -> bool:
         "import sklearn",
         "from sklearn",
     ]
-    for comm in dangerous_commands:
-        if comm in program:
-            return False  # assume the program fails
-    return True
+    return all(comm not in program for comm in dangerous_commands)
 
 
 # -------------------------------------------------------------
@@ -313,7 +310,7 @@ def partial_undo_reliability_guard():
     shutil.rmtree = tmp_rm_tree
 
 
-def reliability_guard(maximum_memory_bytes: Optional[int] = None):
+def reliability_guard(maximum_memory_bytes: int | None = None):
     """
     This function is copied from https://github.com/openai/human-eval/blob/master/human_eval/execution.py.
     It disables various destructive functions and prevents the generated code
@@ -334,7 +331,7 @@ def reliability_guard(maximum_memory_bytes: Optional[int] = None):
 
         resource.setrlimit(resource.RLIMIT_AS, (maximum_memory_bytes, maximum_memory_bytes))
         resource.setrlimit(resource.RLIMIT_DATA, (maximum_memory_bytes, maximum_memory_bytes))
-        if not platform.uname().system == "Darwin":
+        if platform.uname().system != "Darwin":
             resource.setrlimit(resource.RLIMIT_STACK, (maximum_memory_bytes, maximum_memory_bytes))
 
     faulthandler.disable()
