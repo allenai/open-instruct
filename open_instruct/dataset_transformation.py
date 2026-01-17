@@ -1426,7 +1426,7 @@ def rlvr_tokenize_v3(
     pass_tools_to_chat_template: bool = True,
 ):
     # DEBUG: Write at very start of function
-    with open("/tmp/v3_start_debug.txt", "a") as f:
+    with open("/weka/oe-adapt-default/allennlp/v3_start_debug.txt", "a") as f:
         f.write(f"v3 called! row.keys()={list(row.keys())}, pass_tools={pass_tools_to_chat_template}, tool_defs={len(tool_definitions) if tool_definitions else 0}\n")
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
@@ -1444,7 +1444,7 @@ def rlvr_tokenize_v3(
         # Filter tool definitions to only include active tools for this sample
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
         # DEBUG: Write to file to see row state
-        with open("/tmp/v3_debug.txt", "a") as f:
+        with open("/weka/oe-adapt-default/allennlp/v3_filter_debug.txt", "a") as f:
             f.write(f"row.keys()={list(row.keys())}, TOOLS_COLUMN_KEY={TOOLS_COLUMN_KEY}, sample_active_tools={sample_active_tools}\n")
         if sample_active_tools is not None:
             # Only include tools that are in the sample's active tools list
