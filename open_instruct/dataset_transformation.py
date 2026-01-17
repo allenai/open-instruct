@@ -1415,9 +1415,6 @@ def rlvr_tokenize_v3(
     if pass_tools_to_chat_template and tool_definitions:
         # Filter tool definitions to only include active tools for this sample
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
-        # DEBUG: Write to stderr which works in multiprocessing
-        import sys
-        print(f"[TOOLS FILTER] row_keys={list(row.keys())}, tools_col={TOOLS_COLUMN_KEY}, sample_active_tools={sample_active_tools}", file=sys.stderr)
         if sample_active_tools is not None:
             # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
@@ -1647,6 +1644,12 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
             target_columns = target_columns + [TOOLS_COLUMN_KEY]
 
         if fn_type == "map":
+            # Debug: show what's being passed to the transform function
+            if fn_name == "rlvr_tokenize_v1":
+                print(f"🔧 [DEBUG] Calling {fn_name} with fn_kwargs keys: {list(fn_kwargs.keys())}")
+                print(f"🔧 [DEBUG] pass_tools_to_chat_template={fn_kwargs.get('pass_tools_to_chat_template')}")
+                print(f"🔧 [DEBUG] tool_definitions count={len(fn_kwargs.get('tool_definitions', []))}")
+                print(f"🔧 [DEBUG] dataset columns: {dataset.column_names}")
             dataset = dataset.map(
                 fn,
                 fn_kwargs=fn_kwargs,
