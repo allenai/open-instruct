@@ -1510,6 +1510,13 @@ def rlvr_max_length_filter_v2(
     return len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
 
 
+def rlvr_tokenize_v3_wrapper(row, **kwargs):
+    """Wrapper to ensure fresh function execution"""
+    row["_debug_wrapper_called"] = True
+    result = rlvr_tokenize_v3(row, **kwargs)
+    return result
+
+
 TRANSFORM_FNS = {
     "sft_tokenize_v1": (sft_tokenize_v1, "map"),
     "sft_tokenize_mask_out_prompt_v1": (sft_tokenize_mask_out_prompt_v1, "map"),
@@ -1520,7 +1527,7 @@ TRANSFORM_FNS = {
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
-    "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
+    "rlvr_tokenize_v1": (rlvr_tokenize_v3_wrapper, "map"),
     "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
 }
 
@@ -1721,6 +1728,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         print(f"📋 [DEBUG] Tools found in decoded prompt: {tool_mentions}")
         print(f"📋 [DEBUG] First 500 chars of prompt: {decoded_prompt[:500]}")
         # Show debug fields from v3
+        print(f"📋 [DEBUG] _debug_wrapper_called: {first_sample.get('_debug_wrapper_called', 'NOT SET')}")
         print(f"📋 [DEBUG] _debug_v3_called: {first_sample.get('_debug_v3_called', 'NOT SET')}")
         print(f"📋 [DEBUG] _debug_row_keys: {first_sample.get('_debug_row_keys', 'NOT SET')}")
         print(f"📋 [DEBUG] _debug_sample_active_tools: {first_sample.get('_debug_sample_active_tools', 'NOT SET')}")
