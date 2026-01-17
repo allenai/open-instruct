@@ -1440,14 +1440,24 @@ def rlvr_tokenize_v3(
     if pass_tools_to_chat_template and tool_definitions:
         # Filter tool definitions to only include active tools for this sample
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
-        # DEBUG: Show what we're working with
+        # DEBUG: Show what we're working with (use stderr to bypass multiprocessing capture)
+        import sys
+
         tool_def_names = [t.get("function", {}).get("name") for t in tool_definitions]
-        print(f"[V3 FILTER] sample_active_tools={sample_active_tools}, tool_def_names={tool_def_names}", flush=True)
+        print(
+            f"[V3 FILTER] sample_active_tools={sample_active_tools}, tool_def_names={tool_def_names}",
+            file=sys.stderr,
+            flush=True,
+        )
         if sample_active_tools is not None:
             # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
             filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
-            print(f"[V3 FILTER] filtered to {len(filtered_tools)} tools: {[t.get('function',{}).get('name') for t in filtered_tools]}", flush=True)
+            print(
+                f"[V3 FILTER] filtered to {len(filtered_tools)} tools: {[t.get('function', {}).get('name') for t in filtered_tools]}",
+                file=sys.stderr,
+                flush=True,
+            )
             if filtered_tools:
                 chat_template_kwargs["tools"] = filtered_tools
             # If sample_active_tools is empty list [], no tools are passed
