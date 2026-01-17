@@ -1686,7 +1686,6 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     if len(dataset) == 0:
         raise ValueError("No examples left after transformation")
-
     return dataset
 
 
