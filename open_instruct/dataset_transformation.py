@@ -1419,8 +1419,14 @@ def rlvr_tokenize_v3(
             # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
             filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
+            logger.debug(
+                f"Filtering tools: sample_active_tools={sample_active_tools}, "
+                f"definition_names={[t.get('function', {}).get('name') for t in tool_definitions]}, "
+                f"filtered={[t.get('function', {}).get('name') for t in filtered_tools]}"
+            )
             if filtered_tools:
                 chat_template_kwargs["tools"] = filtered_tools
+            # If sample_active_tools is empty list [], no tools are passed
         else:
             # No tools column or None value means all tools are active
             chat_template_kwargs["tools"] = tool_definitions
