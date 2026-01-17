@@ -1425,9 +1425,11 @@ def rlvr_tokenize_v3(
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
 ):
-    # DEBUG: Write at very start of function
-    with open("/weka/oe-adapt-default/allennlp/v3_start_debug.txt", "a") as f:
-        f.write(f"v3 called! row.keys()={list(row.keys())}, pass_tools={pass_tools_to_chat_template}, tool_defs={len(tool_definitions) if tool_definitions else 0}\n")
+    # DEBUG: Store debug info in row (only way to get data out of workers)
+    row["_debug_v3_called"] = True
+    row["_debug_row_keys"] = str(list(row.keys()))
+    row["_debug_pass_tools"] = pass_tools_to_chat_template
+    row["_debug_tool_defs_count"] = len(tool_definitions) if tool_definitions else 0
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
@@ -1443,9 +1445,9 @@ def rlvr_tokenize_v3(
     if pass_tools_to_chat_template and tool_definitions:
         # Filter tool definitions to only include active tools for this sample
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
-        # DEBUG: Write to file to see row state
-        with open("/weka/oe-adapt-default/allennlp/v3_filter_debug.txt", "a") as f:
-            f.write(f"row.keys()={list(row.keys())}, TOOLS_COLUMN_KEY={TOOLS_COLUMN_KEY}, sample_active_tools={sample_active_tools}\n")
+        # DEBUG: Store filter state in row
+        row["_debug_sample_active_tools"] = str(sample_active_tools)
+        row["_debug_tools_column_key"] = TOOLS_COLUMN_KEY
         if sample_active_tools is not None:
             # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
@@ -1707,16 +1709,21 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     # DEBUG: Show first sample's prompt to verify tool filtering
     if INPUT_IDS_PROMPT_KEY in dataset.column_names and len(dataset) > 0:
-        first_prompt_ids = dataset[0][INPUT_IDS_PROMPT_KEY]
+        first_sample = dataset[0]
+        first_prompt_ids = first_sample[INPUT_IDS_PROMPT_KEY]
         decoded_prompt = tokenizer.decode(first_prompt_ids, skip_special_tokens=False)
         # Check which tool names appear in the prompt
         tool_mentions = []
         for tool_name in ["code", "search", "browse"]:
             if tool_name in decoded_prompt.lower():
                 tool_mentions.append(tool_name)
-        print(f"📋 [DEBUG] First sample tools column: {dataset[0].get(TOOLS_COLUMN_KEY, 'N/A')}")
+        print(f"📋 [DEBUG] First sample tools column: {first_sample.get(TOOLS_COLUMN_KEY, 'N/A')}")
         print(f"📋 [DEBUG] Tools found in decoded prompt: {tool_mentions}")
         print(f"📋 [DEBUG] First 500 chars of prompt: {decoded_prompt[:500]}")
+        # Show debug fields from v3
+        print(f"📋 [DEBUG] _debug_v3_called: {first_sample.get('_debug_v3_called', 'NOT SET')}")
+        print(f"📋 [DEBUG] _debug_row_keys: {first_sample.get('_debug_row_keys', 'NOT SET')}")
+        print(f"📋 [DEBUG] _debug_sample_active_tools: {first_sample.get('_debug_sample_active_tools', 'NOT SET')}")
 
     return dataset
 
