@@ -1478,7 +1478,7 @@ class TestGenericMCPToolInit(unittest.TestCase):
 
         self.assertEqual(GenericMCPTool.config_name, "generic_mcp")
 
-    @patch("open_instruct.tools.tools.MCPToolFactory")
+    @patch("open_instruct.tools.generic_mcp.MCPToolFactory")
     def test_initialization_creates_factory(self, MockFactory):
         """Test initialization creates MCPToolFactory."""
         from open_instruct.tools.tools import GenericMCPTool
@@ -1517,7 +1517,7 @@ class TestGenericMCPToolExecution(unittest.TestCase):
             }
         }
 
-        with patch("open_instruct.tools.tools.MCPToolFactory", return_value=mock_factory):
+        with patch("open_instruct.tools.generic_mcp.MCPToolFactory", return_value=mock_factory):
             tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool")
 
             description = tool.description
@@ -1534,7 +1534,7 @@ class TestGenericMCPToolExecution(unittest.TestCase):
             "my_tool": {"name": "my_tool", "description": "My tool", "input_schema": expected_schema}
         }
 
-        with patch("open_instruct.tools.tools.MCPToolFactory", return_value=mock_factory):
+        with patch("open_instruct.tools.generic_mcp.MCPToolFactory", return_value=mock_factory):
             tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool")
 
             params = tool.parameters
@@ -1551,7 +1551,7 @@ class TestGenericMCPToolExecution(unittest.TestCase):
         expected_output = ToolOutput(output="result", called=True, error="", timeout=False, runtime=0.1)
         mock_factory.call_tool = AsyncMock(return_value=expected_output)
 
-        with patch("open_instruct.tools.tools.MCPToolFactory", return_value=mock_factory):
+        with patch("open_instruct.tools.generic_mcp.MCPToolFactory", return_value=mock_factory):
             tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool")
 
             result = asyncio.run(tool.execute(query="test"))
@@ -1569,7 +1569,7 @@ class TestGenericMCPToolExecution(unittest.TestCase):
             "second_tool": {"name": "second_tool", "description": "Second", "input_schema": {"type": "object"}},
         }
 
-        with patch("open_instruct.tools.tools.MCPToolFactory", return_value=mock_factory):
+        with patch("open_instruct.tools.generic_mcp.MCPToolFactory", return_value=mock_factory):
             tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name=None)
 
             # Trigger discovery
@@ -1584,7 +1584,7 @@ class TestGenericMCPToolExecution(unittest.TestCase):
         mock_factory = MagicMock()
         mock_factory.discover_tools.return_value = {"other_tool": {"name": "other_tool", "description": "Other"}}
 
-        with patch("open_instruct.tools.tools.MCPToolFactory", return_value=mock_factory):
+        with patch("open_instruct.tools.generic_mcp.MCPToolFactory", return_value=mock_factory):
             tool = GenericMCPTool(
                 call_name="search", server_url="http://localhost:8000/mcp", tool_name="nonexistent_tool"
             )
@@ -1641,7 +1641,7 @@ class TestGenericMCPToolConfig(unittest.TestCase):
         self.assertEqual(len(expanded), 1)
         self.assertEqual(expanded[0].tool_name, "my_tool")
 
-    @patch("open_instruct.tools.tools.MCPToolFactory")
+    @patch("open_instruct.tools.generic_mcp.MCPToolFactory")
     def test_expand_tools_discovers_all_tools(self, MockFactory):
         """Test expand_tools discovers and creates configs for all tools."""
         mock_factory = MagicMock()
