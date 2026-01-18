@@ -1394,7 +1394,9 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
 def _validate_and_log_dataset_tools(dataset, configured_tool_names: list[str] | None, dataset_name: str) -> None:
     """Validate and log per-sample tool configuration for a dataset."""
     if dataset and dataset_has_tools_column(dataset) and configured_tool_names:
-        logger.info(f"{dataset_name} has '{TOOLS_COLUMN_KEY}' column - validating configured tools against dataset tools")
+        logger.info(
+            f"{dataset_name} has '{TOOLS_COLUMN_KEY}' column - validating configured tools against dataset tools"
+        )
         validate_dataset_tools(dataset, configured_tool_names, dataset_name)
         logger.info(f"{dataset_name} has '{TOOLS_COLUMN_KEY}' column - per-sample tool activation enabled")
 
