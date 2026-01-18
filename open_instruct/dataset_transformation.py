@@ -1361,17 +1361,13 @@ def rlvr_tokenize_v1(
 
     chat_template_kwargs = {"add_generation_prompt": True}
     if pass_tools_to_chat_template and tool_definitions:
-        # Filter tool definitions to only include active tools for this sample
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
         if sample_active_tools is not None:
-            # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
             filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
             if filtered_tools:
                 chat_template_kwargs["tools"] = filtered_tools
-            # If sample_active_tools is empty list [], no tools are passed
         else:
-            # No tools column or None value means all tools are active
             chat_template_kwargs["tools"] = tool_definitions
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
@@ -1451,17 +1447,13 @@ def rlvr_tokenize_v3(
 
     chat_template_kwargs = {"add_generation_prompt": True}
     if pass_tools_to_chat_template and tool_definitions:
-        # Filter tool definitions to only include active tools for this sample
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
         if sample_active_tools is not None:
-            # Only include tools that are in the sample's active tools list
             active_tool_names = set(sample_active_tools)
             filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
             if filtered_tools:
                 chat_template_kwargs["tools"] = filtered_tools
-            # If sample_active_tools is empty list [], no tools are passed
         else:
-            # No tools column or None value means all tools are active
             chat_template_kwargs["tools"] = tool_definitions
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
