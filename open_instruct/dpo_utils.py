@@ -196,7 +196,7 @@ class LoRAConfig:
 class LoggingConfig:
     """Configuration for logging and experiment tracking."""
 
-    logging_steps: int | None = None
+    logging_steps: int = 10
     """Log the training loss and learning rate every logging_steps steps."""
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
@@ -296,6 +296,7 @@ class ExperimentConfig(
     HubConfig,
     CheckpointConfig,
     EvalConfig,
+    config.Config,
 ):
     """Full arguments class for DPO fine-tuning jobs."""
 
@@ -332,6 +333,18 @@ class ExperimentConfig(
     oe_eval_gpu_multiplier: int | None = None
     eval_workspace: str | None = "ai2/tulu-3-results"
     eval_priority: str | None = "high"
+    async_checkpointing: bool = False
+
+    @property
+    def dpo_config(self) -> DPOConfig:
+        return DPOConfig(
+            beta=self.beta,
+            loss_type=DPOLossType(self.loss_type),
+            gamma_beta_ratio=self.gamma_beta_ratio,
+            label_smoothing=self.label_smoothing,
+            load_balancing_loss=self.load_balancing_loss,
+            load_balancing_weight=self.load_balancing_weight,
+        )
 
     def __post_init__(self):
         if isinstance(self.loss_type, str):

@@ -10,7 +10,6 @@ import os
 import pathlib
 import shutil
 import time
-from dataclasses import dataclass
 from functools import partial
 from typing import Any, cast
 
@@ -20,7 +19,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import transformers
 from huggingface_hub import HfApi
-from olmo_core import config, train
+from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
@@ -60,26 +59,20 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
 }
 
 
-def get_transformer_config(
-    model_name_or_path: str, vocab_size: int, config_name_override: str | None = None
-) -> TransformerConfig:
+def get_transformer_config(model_name_or_path: str, vocab_size: int) -> TransformerConfig:
     """Get the appropriate TransformerConfig for a given model name.
 
     Args:
         model_name_or_path: HuggingFace model name or path.
         vocab_size: Vocabulary size for the model.
-        config_name_override: Optional override for the config name. If provided, this
-            takes precedence over the automatic lookup in OLMO_MODEL_CONFIG_MAP.
-            Must be a valid TransformerConfig method name (e.g., 'olmo2_7B').
 
     Returns:
         TransformerConfig for the specified model.
 
     Raises:
-        ValueError: If model not in OLMO_MODEL_CONFIG_MAP and no override provided.
-        AttributeError: If config_name_override is not a valid TransformerConfig method.
+        ValueError: If model not in OLMO_MODEL_CONFIG_MAP.
     """
-    config_name = config_name_override or OLMO_MODEL_CONFIG_MAP.get(model_name_or_path)
+    config_name = OLMO_MODEL_CONFIG_MAP.get(model_name_or_path)
     if config_name is None:
         available_models = ", ".join(OLMO_MODEL_CONFIG_MAP.keys())
         available_configs = [
@@ -88,7 +81,6 @@ def get_transformer_config(
         raise ValueError(
             f"Model '{model_name_or_path}' not found in OLMO_MODEL_CONFIG_MAP. "
             f"Available models: {available_models}. "
-            f"You can also use --olmo_config_name to specify a config directly. "
             f"Available config names: {', '.join(available_configs)}"
         )
     config_fn = getattr(TransformerConfig, config_name)
@@ -212,35 +204,7 @@ class DPOTrainModule(TrainModule):
         loss.backward()
 
 
-@dataclass
-class DPOExperimentConfig(dpo_utils.ExperimentConfig, config.Config):
-    """Configuration for a DPO training experiment."""
-
-    olmo_config_name: str | None = None
-    """Override for OLMo-core TransformerConfig name (e.g., 'olmo2_7B'). If not set, auto-detected from model_name_or_path."""
-
-    def get_dpo_config(self) -> dpo_utils.DPOConfig:
-        return dpo_utils.DPOConfig(
-            beta=self.beta,
-            loss_type=dpo_utils.DPOLossType(self.loss_type),
-            gamma_beta_ratio=self.gamma_beta_ratio,
-            label_smoothing=self.label_smoothing,
-            load_balancing_loss=self.load_balancing_loss,
-            load_balancing_weight=self.load_balancing_weight,
-        )
-
-    checkpointing_steps: int = 250
-    async_checkpointing: bool = False
-
-    save_folder: str | None = None
-    checkpoint_every: int = 500
-
-    log_every: int = 10
-
-    reference_logprobs_cache_path: str = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
-
-
-def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) -> None:
+def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerConfig) -> None:
     """Main entry point for DPO training with OLMo-core."""
     if args.model_name_or_path is None:
         raise ValueError("--model_name_or_path is required. Specify a HuggingFace model name or path.")
@@ -266,7 +230,7 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
         "use_qlora": args.use_qlora,
     }
     ref_cache_hash = dpo_utils.compute_reference_cache_hash(config_dict, tc, args, args.max_seq_length)
-    reference_cache_path = pathlib.Path(args.reference_logprobs_cache_path) / f"{ref_cache_hash}.pt"
+    reference_cache_path = pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt"
     logger.info(f"Reference logprobs cache path: {reference_cache_path}")
 
     if args.cache_dataset_only:
@@ -369,7 +333,7 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
     hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
     vocab_size = hf_config.vocab_size
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
-    model_config = get_transformer_config(args.model_name_or_path, vocab_size, args.olmo_config_name)
+    model_config = get_transformer_config(args.model_name_or_path, vocab_size)
     model = model_config.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
@@ -482,7 +446,7 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
     train_module = DPOTrainModule(
         model=model,
         optim=optim,
-        dpo_config=args.get_dpo_config(),
+        dpo_config=args.dpo_config,
         reference_cache=reference_cache,
         scheduler=scheduler,
         concatenated_forward=args.concatenated_forward,
@@ -516,11 +480,10 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
         save_interval=args.checkpointing_steps, save_async=args.async_checkpointing
     )
 
-    metrics_collect_interval = args.logging_steps if args.logging_steps is not None else args.log_every
     trainer = train.TrainerConfig(
-        save_folder=args.save_folder if args.save_folder else args.output_dir,
+        save_folder=args.output_dir,
         max_duration=train.Duration.epochs(args.num_epochs),
-        metrics_collect_interval=metrics_collect_interval,
+        metrics_collect_interval=args.logging_steps,
         callbacks=trainer_callbacks,
         save_overwrite=True,
     ).build(train_module, data_loader_instance)
@@ -573,8 +536,8 @@ def main(args: DPOExperimentConfig, tc: dataset_transformation.TokenizerConfig) 
 
 
 if __name__ == "__main__":
-    parser = utils.ArgumentParserPlus([DPOExperimentConfig, dataset_transformation.TokenizerConfig])
+    parser = utils.ArgumentParserPlus([dpo_utils.ExperimentConfig, dataset_transformation.TokenizerConfig])
     args, tc = cast(
-        tuple[DPOExperimentConfig, dataset_transformation.TokenizerConfig], parser.parse_args_into_dataclasses()
+        tuple[dpo_utils.ExperimentConfig, dataset_transformation.TokenizerConfig], parser.parse_args_into_dataclasses()
     )
     main(args, tc)
