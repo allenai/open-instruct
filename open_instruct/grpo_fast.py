@@ -1391,6 +1391,14 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
     return beaker_config, wandb_url
 
 
+def _validate_and_log_dataset_tools(dataset, configured_tool_names: list[str] | None, dataset_name: str) -> None:
+    """Validate and log per-sample tool configuration for a dataset."""
+    if dataset and dataset_has_tools_column(dataset) and configured_tool_names:
+        logger.info(f"{dataset_name} has '{TOOLS_COLUMN_KEY}' column - validating configured tools against dataset tools")
+        validate_dataset_tools(dataset, configured_tool_names, dataset_name)
+        logger.info(f"{dataset_name} has '{TOOLS_COLUMN_KEY}' column - per-sample tool activation enabled")
+
+
 def setup_datasets(
     args: Args,
     tc: TokenizerConfig,
@@ -1441,12 +1449,7 @@ def setup_datasets(
         system_prompt_override=system_prompt_override,
     )
 
-    # Validate that configured tools match per-sample tools in dataset (if tools column exists)
-    if dataset_has_tools_column(train_dataset) and configured_tool_call_names:
-        logger.info(f"Dataset has '{TOOLS_COLUMN_KEY}' column - validating configured tools against dataset tools")
-        validate_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
-        logger.info(f"Dataset has '{TOOLS_COLUMN_KEY}' column - per-sample tool activation enabled")
-
+    _validate_and_log_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
     train_dataset = train_dataset.shuffle(seed=args.seed)
 
     if len(streaming_config.dataset_mixer_eval_list) > 0:
@@ -1464,14 +1467,7 @@ def setup_datasets(
             system_prompt_override=system_prompt_override,
         )
 
-        # Validate eval dataset tools as well
-        if dataset_has_tools_column(eval_dataset) and configured_tool_call_names:
-            logger.info(
-                f"Eval dataset has '{TOOLS_COLUMN_KEY}' column - validating configured tools against dataset tools"
-            )
-            validate_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
-            logger.info(f"Eval dataset has '{TOOLS_COLUMN_KEY}' column - per-sample tool activation enabled")
-
+        _validate_and_log_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
         if streaming_config.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
     else:
