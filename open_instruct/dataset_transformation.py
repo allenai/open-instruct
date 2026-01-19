@@ -38,6 +38,9 @@ The main things we are looking for are:
     * Sometimes we also launch on places that don't have a shared cache (e.g., GCP), so we would
     download individual datasets 32 times, and wait for concatenation and tokenization (actually
     twice because the `with accelerator.main_process_first()` function assumes a shared cache)
+
+
+## TODO: We should just simplify the tokenization setups. We have multiple "rlvr_tokenize", etc. This came from a previous version of version handling that prioritised backwards compatibility, but I think in practice we should just directly edit these functions + invalidate caches.
 """
 
 import copy
@@ -99,6 +102,12 @@ def get_files_hash_if_exists(
     model_name_or_path: str, revision: str, filenames: List[str], repo_type: str = "model"
 ) -> List[str]:
     return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
+
+
+def _preserve_column(column_name: str):
+    if column_name in dataset.column_names and column_name not in target_columns:
+        target_columns = target_columns + [column_name]
+    return target_columns
 
 
 # Performance tuning. Some rough numbers:
@@ -948,17 +957,15 @@ def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], d
 
     dataset_tool_names: set[str] = set()
     for tools in dataset[TOOLS_COLUMN_KEY]:
-        if tools:
-            for tool_name in tools:
-                if tool_name:
-                    dataset_tool_names.add(tool_name)
-    configured_set = set(configured_tool_names) if configured_tool_names else set()
+        for tool_name in tools:
+            if tool_name:
+                dataset_tool_names.add(tool_name)
 
-    unconfigured_tools = dataset_tool_names - configured_set
+    unconfigured_tools = dataset_tool_names - set(configured_tool_names)
     if unconfigured_tools:
         raise ValueError(
             f"Dataset '{dataset_name}' contains tools {sorted(unconfigured_tools)} that are not configured. "
-            f"Configured tools: {sorted(configured_set)}. "
+            f"Configured tools: {configured_tool_names}. "
             f"All tools in the dataset must be configured for execution."
         )
 
@@ -1646,10 +1653,8 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # perform the transformation
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         # Always preserve dataset_source if it exists
-        if DATASET_ORIGIN_KEY in dataset.column_names and DATASET_ORIGIN_KEY not in target_columns:
-            target_columns = target_columns + [DATASET_ORIGIN_KEY]
-        if TOOLS_COLUMN_KEY in dataset.column_names and TOOLS_COLUMN_KEY not in target_columns:
-            target_columns = target_columns + [TOOLS_COLUMN_KEY]
+        target_columns = _preserve_column(DATASET_ORIGIN_KEY)
+        target_columns = _preserve_column(TOOLS_COLUMN_KEY)
 
         if fn_type == "map":
             dataset = dataset.map(
