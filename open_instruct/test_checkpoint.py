@@ -9,14 +9,14 @@ import json
 import os
 import tempfile
 
-import pytest
-
 # Checkpoint functions copied here to avoid importing from convert_sft_data_for_olmocore.py
 # which has heavy dependencies (datasets, transformers, etc.)
-from typing import Any, Dict, Optional
+from typing import Any
+
+import pytest
 
 
-def save_checkpoint(output_dir: str, checkpoint_data: Dict[str, Any]) -> None:
+def save_checkpoint(output_dir: str, checkpoint_data: dict[str, Any]) -> None:
     """Save checkpoint to disk atomically."""
     checkpoint_path = os.path.join(output_dir, "_checkpoint.json")
     tmp_path = checkpoint_path + ".tmp"
@@ -25,7 +25,7 @@ def save_checkpoint(output_dir: str, checkpoint_data: Dict[str, Any]) -> None:
     os.rename(tmp_path, checkpoint_path)  # Atomic on POSIX
 
 
-def load_checkpoint(output_dir: str) -> Optional[Dict[str, Any]]:
+def load_checkpoint(output_dir: str) -> dict[str, Any] | None:
     """Load checkpoint from disk if it exists."""
     checkpoint_path = os.path.join(output_dir, "_checkpoint.json")
     if os.path.exists(checkpoint_path):
@@ -173,10 +173,7 @@ class TestCheckpointFunctions:
 
     def test_document_boundaries_tuple_conversion(self, tmp_path):
         """Test that document boundaries are properly serialized (tuples become lists in JSON)."""
-        checkpoint_data = {
-            "samples_processed": 100,
-            "document_boundaries": [(0, 10), (10, 20), (20, 30)],
-        }
+        checkpoint_data = {"samples_processed": 100, "document_boundaries": [(0, 10), (10, 20), (20, 30)]}
         save_checkpoint(str(tmp_path), checkpoint_data)
         loaded = load_checkpoint(str(tmp_path))
 

@@ -171,6 +171,9 @@ class ConvertSFTDataArguments:
     """Checkpoint save interval (number of samples)"""
     checkpoint_interval: int = field(default=100_000)
 
+    """Shuffle seed for reproducible dataset ordering"""
+    shuffle_seed: int = field(default=42)
+
 
 def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
@@ -234,7 +237,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     )
 
     # Use fixed seed for reproducible shuffling (required for resume)
-    train_dataset = train_dataset.shuffle(seed=42)
+    train_dataset = train_dataset.shuffle(seed=args.shuffle_seed)
 
     if args.visualize:
         print("Visualizing first example...")
