@@ -77,4 +77,4 @@ python mason.py \
     --oe_eval_tasks $EVALS \
     --eval_on_step_0 True \
     --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto \
-    --output_dir /output/olmo3-7b-rlzero-if/checkpoints $@
+    --output_dir /output/olmo3-7b-rlzero-if/checkpoints "$@"

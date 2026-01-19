@@ -1,3 +1,4 @@
+#!/bin/bash
 BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 
 # our released olmo3 thinker model actually doesnt use pipelinerl, but using it should do just as well.
