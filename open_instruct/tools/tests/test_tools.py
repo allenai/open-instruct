@@ -266,11 +266,11 @@ class TestTruncateHelper(unittest.TestCase):
             ("custom_max_length", "Hello, World! This is a test.", 10, "Hello, Wor", True),
         ]
     )
-    def testtruncate(self, name, text, max_length, expected_result, shouldtruncate):
+    def test_truncate(self, name, text, max_length, expected_result, should_truncate):
         """Test truncate with various inputs."""
         result = truncate(text, max_length=max_length)
 
-        if shouldtruncate:
+        if should_truncate:
             self.assertTrue(result.startswith(text[:max_length]))
             self.assertIn("more chars", result)
             if text == "a" * 600:
