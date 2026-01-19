@@ -103,7 +103,7 @@ from open_instruct.model_utils import (
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.tools.parsers import create_tool_parser
 from open_instruct.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.tools.utils import ParsedToolConfig, ToolsConfig
+from open_instruct.tools.utils import BaseToolConfig, ParsedToolConfig, ToolsConfig
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -1477,7 +1477,7 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.A
 
         # Collect (config, call_name, tool_class) tuples to process
         # special logic for MCP tools: we ask the mcp server what tools it has, and then create actors for each.
-        configs_to_create: list[tuple[GenericMCPToolConfig, str, type]] = []
+        configs_to_create: list[tuple[BaseToolConfig, str, type]] = []
 
         if isinstance(config, GenericMCPToolConfig) and config.tool_name is None:
             logger.info(f"Auto-discovering tools from MCP server for '{parsed_tool.name}'...")
