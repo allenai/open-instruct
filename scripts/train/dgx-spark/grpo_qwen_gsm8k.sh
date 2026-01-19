@@ -38,7 +38,7 @@ export PYTORCH_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"
 
 # Training parameters
-MODEL="Qwen/Qwen2.5-0.5B"
+MODEL="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B}"
 DATASET="ai2-adapt-dev/rlvr_gsm8k_zs"
 TOTAL_EPISODES=20000
 BATCH_SIZE=4
@@ -53,6 +53,16 @@ EXP_SUFFIX="no_fp32"
 if [ "$FP32_LM_HEAD" = "1" ]; then
     FP32_FLAG="--fp32_lm_head"
     EXP_SUFFIX="fp32"
+fi
+WANDB_ENTITY="${WANDB_ENTITY:-}"
+WANDB_ENTITY_FLAG=""
+if [ -n "$WANDB_ENTITY" ]; then
+    WANDB_ENTITY_FLAG="--wandb_entity ${WANDB_ENTITY}"
+fi
+WITH_TRACKING="${WITH_TRACKING:-1}"
+WITH_TRACKING_FLAG=""
+if [ "$WITH_TRACKING" = "1" ]; then
+    WITH_TRACKING_FLAG="--with_tracking"
 fi
 OUTPUT_DIR="/tmp/grpo_qwen_gsm8k_${EXP_SUFFIX}"
 EXP_NAME="dgx_spark_grpo_qwen_gsm8k_${EXP_SUFFIX}"
@@ -69,7 +79,7 @@ echo "  Output dir: ${OUTPUT_DIR}"
 echo ""
 
 # Run training
-uv run python open_instruct/grpo_fast.py \
+uv run --active python open_instruct/grpo_fast.py \
     --model_name_or_path "$MODEL" \
     --dataset_mixer_list "$DATASET" 5000 \
     --dataset_mixer_list_splits train \
@@ -105,9 +115,10 @@ uv run python open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --attn_implementation sdpa \
     --output_dir "$OUTPUT_DIR" \
-    --with_tracking \
+    $WITH_TRACKING_FLAG \
     --push_to_hub false \
-    --exp_name "$EXP_NAME"
+    --exp_name "$EXP_NAME" \
+    $WANDB_ENTITY_FLAG
 
 echo ""
 echo "=============================================="
