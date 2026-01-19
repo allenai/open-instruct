@@ -902,7 +902,7 @@ torch==2.9.0+cu130 ; platform_machine == 'aarch64' and sys_platform == 'linux'
     #   torchvision
     #   vllm
     #   xgrammar
-torchao==0.15.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+torchao==0.15.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
 torchaudio==2.9.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm

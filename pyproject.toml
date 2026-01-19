@@ -38,7 +38,7 @@ dependencies = [
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
-    "torchao",
+    "torchao>=0.15.0",
 ]
 
 [build-system]
