@@ -875,7 +875,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     base_request_id = split_request_id(sub_request_id)["base_id"]
     request_metadata = actor.request_metadata[base_request_id]
     original_prompt = request_metadata["prompt_token_ids"]
-    active_tools = request_metadata.get("active_tools")
+    active_tools = request_metadata["active_tools"]
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
