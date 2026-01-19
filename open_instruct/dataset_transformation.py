@@ -976,22 +976,6 @@ def dataset_has_tools_column(dataset: Dataset) -> bool:
     return TOOLS_COLUMN_KEY in dataset.column_names
 
 
-def get_active_tools_from_sample(sample_tools: list[str] | None) -> list[str] | None:
-    """Get active tool names from a sample's tools column.
-
-    The tools column is a list of tool call names that are active for this sample.
-
-    Args:
-        sample_tools: List of tool names from the sample's tools column, or None.
-
-    Returns:
-        The list of tool names (empty list means no tools active), or None if not provided.
-    """
-    if sample_tools is None:
-        return None
-    return list(sample_tools)
-
-
 # Preference dataset
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `CHOSEN_ATTENTION_MASK_KEY` and `REJECTED_ATTENTION_MASK_KEY`
