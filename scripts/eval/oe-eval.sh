@@ -203,7 +203,7 @@ NEXT_MODEL_DEV=(
     # Knowledge
     "mmlu:cot::hamish_zs_reasoning_deepseek"
     "popqa::hamish_zs_reasoning_deepseek"
-    "simpleqa::tulu-thinker_deepseek"
+    # "simpleqa::tulu-thinker_deepseek"
 
     # Reasoning
     "bbh:cot::hamish_zs_reasoning_deepseek_v2" # OLD: "bbh:cot::hamish_zs_reasoning_deepseek"
@@ -214,10 +214,10 @@ NEXT_MODEL_DEV=(
     # Math
     # [faster] minerva_math_500::hamish_zs_reasoning
     "minerva_math::hamish_zs_reasoning_deepseek"
-    "gsm8k::zs_cot_latex_deepseek"
-    "omega_500:0-shot-chat_deepseek" # OLD: "omega:0-shot-chat"
+    # "gsm8k::zs_cot_latex_deepseek"
+    "omega_500:0-shot-chat_deepseek" # FULL: "omega:0-shot-chat"
     "aime:zs_cot_r1::pass_at_32_2024_deepseek"
-    "aime:zs_cot_r1::pass_at_32_2025_deepseek"  # OLD: "aime::hamish_zs_reasoning"
+    "aime:zs_cot_r1::pass_at_32_2025_deepseek"
 
     # Coding
     "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek"
@@ -229,6 +229,7 @@ NEXT_MODEL_DEV=(
     # Chat / IF / Vibes
     "alpaca_eval_v3::hamish_zs_reasoning_deepseek"
     "ifeval::hamish_zs_reasoning_deepseek"
+    "ifeval_ood::tulu-thinker-deepseek"
     # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
     # [expensive, typos vibes] styled_evals::tulu
     # [optional, typos compare] styled_math500::tulu

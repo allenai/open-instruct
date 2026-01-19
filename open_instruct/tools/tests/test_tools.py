@@ -1,13 +1,17 @@
-"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, and SerperSearchTool from tools.py)."""
+"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, and Crawl4AIBrowseTool from tools.py)."""
 
 import asyncio
 import dataclasses
+import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
 from parameterized import parameterized
 
 from open_instruct.tools.tools import (
+    Crawl4AIBrowseTool,
+    Crawl4AIBrowseToolConfig,
     JinaBrowseTool,
     JinaBrowseToolConfig,
     PythonCodeTool,
@@ -18,7 +22,13 @@ from open_instruct.tools.tools import (
     SerperSearchToolConfig,
     _truncate,
 )
-from open_instruct.tools.utils import ParsedToolConfig, ToolOutput, ToolsConfig, get_openai_tool_definitions
+from open_instruct.tools.utils import (
+    ParsedToolConfig,
+    ToolOutput,
+    ToolsConfig,
+    ToolStatistics,
+    get_openai_tool_definitions,
+)
 
 
 class TestPythonCodeToolInit(unittest.TestCase):
@@ -840,6 +850,476 @@ class TestSerperSearchToolConfig(unittest.TestCase):
     def test_tool_class_attribute(self):
         """Test tool_class is set to SerperSearchTool."""
         self.assertEqual(SerperSearchToolConfig.tool_class, SerperSearchTool)
+
+
+class TestCrawl4AIBrowseToolInit(unittest.TestCase):
+    """Tests for Crawl4AIBrowseTool initialization and properties."""
+
+    def setUp(self):
+        """Create a temporary blocklist file for tests."""
+        fd, self.blocklist_path = tempfile.mkstemp(suffix=".txt")
+        with os.fdopen(fd, "w") as f:
+            f.write("blocked-domain.com\nspam-site.net\n")
+
+    def tearDown(self):
+        """Clean up temporary blocklist file."""
+        os.unlink(self.blocklist_path)
+
+    @parameterized.expand([("defaults", None, 180), ("custom_values", 60, 60)])
+    def test_initialization(self, name, timeout, expected_timeout):
+        """Test tool initializes with correct values."""
+        with patch.dict(
+            "os.environ",
+            {
+                "CRAWL4AI_API_URL": "http://localhost:11235",
+                "CRAWL4AI_API_KEY": "test_key",
+                "CRAWL4AI_BLOCKLIST_PATH": self.blocklist_path,
+            },
+        ):
+            kwargs = {"call_name": "browse"}
+            if timeout is not None:
+                kwargs["timeout"] = timeout
+            tool = Crawl4AIBrowseTool(**kwargs)
+
+            self.assertEqual(tool.timeout, expected_timeout)
+            self.assertEqual(tool.call_name, "browse")
+            self.assertEqual(tool.config_name, "crawl4ai_browse")
+            self.assertEqual(tool.api_url, "http://localhost:11235")
+            self.assertEqual(tool.api_key, "test_key")
+            self.assertEqual(tool.blocklist, ["blocked-domain.com", "spam-site.net"])
+
+    def test_tool_description(self):
+        """Test tool description is set correctly."""
+        with patch.dict(
+            "os.environ",
+            {
+                "CRAWL4AI_API_URL": "http://localhost:11235",
+                "CRAWL4AI_API_KEY": "test_key",
+                "CRAWL4AI_BLOCKLIST_PATH": self.blocklist_path,
+            },
+        ):
+            tool = Crawl4AIBrowseTool(call_name="browse")
+            self.assertEqual(tool.description, "Fetches and converts webpage content to clean markdown using Crawl4AI")
+
+    def test_tool_parameters_schema(self):
+        """Test tool parameters schema is correct."""
+        with patch.dict(
+            "os.environ",
+            {
+                "CRAWL4AI_API_URL": "http://localhost:11235",
+                "CRAWL4AI_API_KEY": "test_key",
+                "CRAWL4AI_BLOCKLIST_PATH": self.blocklist_path,
+            },
+        ):
+            tool = Crawl4AIBrowseTool(call_name="browse")
+            params = tool.parameters
+
+            self.assertEqual(params["type"], "object")
+            self.assertIn("url", params["properties"])
+            self.assertIn("url", params["required"])
+            self.assertEqual(params["properties"]["url"]["description"], "The URL of the webpage to fetch")
+
+    def test_get_openai_tool_definitions(self):
+        """Test OpenAI tool definition format."""
+        with patch.dict(
+            "os.environ",
+            {
+                "CRAWL4AI_API_URL": "http://localhost:11235",
+                "CRAWL4AI_API_KEY": "test_key",
+                "CRAWL4AI_BLOCKLIST_PATH": self.blocklist_path,
+            },
+        ):
+            tool = Crawl4AIBrowseTool(call_name="browse")
+            definition = get_openai_tool_definitions(tool)
+
+            self.assertEqual(definition["type"], "function")
+            self.assertEqual(definition["function"]["name"], "browse")
+            self.assertIn("parameters", definition["function"])
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_missing_api_url_raises_error_on_init(self):
+        """Test that missing CRAWL4AI_API_URL raises a ValueError on initialization."""
+        with self.assertRaisesRegex(ValueError, "Missing CRAWL4AI_API_URL environment variable."):
+            Crawl4AIBrowseTool(call_name="browse")
+
+    @patch.dict("os.environ", {"CRAWL4AI_API_URL": "http://localhost:11235"}, clear=True)
+    def test_missing_api_key_raises_error_on_init(self):
+        """Test that missing CRAWL4AI_API_KEY raises a ValueError on initialization."""
+        with self.assertRaisesRegex(ValueError, "Missing CRAWL4AI_API_KEY environment variable."):
+            Crawl4AIBrowseTool(call_name="browse")
+
+    @patch.dict(
+        "os.environ", {"CRAWL4AI_API_URL": "http://localhost:11235", "CRAWL4AI_API_KEY": "test_key"}, clear=True
+    )
+    def test_missing_blocklist_raises_error_on_init(self):
+        """Test that missing CRAWL4AI_BLOCKLIST_PATH raises a ValueError on initialization."""
+        with self.assertRaisesRegex(ValueError, "Missing CRAWL4AI_BLOCKLIST_PATH environment variable."):
+            Crawl4AIBrowseTool(call_name="browse")
+
+
+class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
+    """Tests for Crawl4AIBrowseTool execution (async execute)."""
+
+    def setUp(self):
+        """Set up test fixture."""
+        fd, self.blocklist_path = tempfile.mkstemp(suffix=".txt")
+        with os.fdopen(fd, "w") as f:
+            f.write("blocked-domain.com\n")
+
+        patcher = patch.dict(
+            "os.environ",
+            {
+                "CRAWL4AI_API_URL": "http://localhost:11235",
+                "CRAWL4AI_API_KEY": "test_key",
+                "CRAWL4AI_BLOCKLIST_PATH": self.blocklist_path,
+            },
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(lambda: os.unlink(self.blocklist_path))
+        self.tool = Crawl4AIBrowseTool(call_name="browse", timeout=180)
+
+    @parameterized.expand([("empty", ""), ("whitespace", "   \n\t  "), ("none", None)])
+    def test_empty_url_returns_error(self, name, url_input):
+        """Test that empty/whitespace/None URL returns an error without calling API."""
+        result = asyncio.run(self.tool.execute(url_input))
+
+        self.assertIsInstance(result, ToolOutput)
+        self.assertEqual(result.output, "")
+        self.assertEqual(result.error, "Empty URL. Please provide a URL to fetch.")
+        self.assertTrue(result.called)
+        self.assertFalse(result.timeout)
+
+    @parameterized.expand(
+        [
+            (
+                "with_title",
+                {
+                    "results": [
+                        {
+                            "success": True,
+                            "markdown": "This is the page content.",
+                            "metadata": {"title": "Example Page"},
+                        }
+                    ]
+                },
+                ["# Example Page", "This is the page content."],
+            ),
+            (
+                "without_title",
+                {"results": [{"success": True, "markdown": "Just content without a title.", "metadata": {}}]},
+                ["Just content without a title."],
+            ),
+            (
+                "fit_markdown_preferred",
+                {
+                    "results": [
+                        {
+                            "success": True,
+                            "markdown": {"raw_markdown": "Full content here.", "fit_markdown": "Pruned content here."},
+                            "metadata": {"title": "Test"},
+                        }
+                    ]
+                },
+                ["Pruned content here."],
+            ),
+        ]
+    )
+    @patch("open_instruct.tools.tools.make_api_request")
+    def test_successful_fetch(self, name, api_data, expected_in_output, mock_api_request):
+        """Test successful webpage fetch with various response types."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data=api_data)
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(self.tool.execute("https://example.com"))
+
+        self.assertIsInstance(result, ToolOutput)
+        for expected in expected_in_output:
+            self.assertIn(expected, result.output)
+        self.assertEqual(result.error, "")
+        self.assertTrue(result.called)
+        self.assertFalse(result.timeout)
+
+    @patch("open_instruct.tools.tools.make_api_request")
+    def test_crawl4ai_api_error_response(self, mock_api_request):
+        """Test handling of Crawl4AI API error response (success=False)."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"results": [{"success": False, "error_message": "Failed to fetch URL"}]})
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(self.tool.execute("https://invalid-url"))
+
+        self.assertTrue(result.called)
+        self.assertIn("Crawl4AI error", result.error)
+        self.assertIn("Failed to fetch URL", result.error)
+        self.assertIn("Crawl4AI error", result.output)
+
+    @parameterized.expand(
+        [
+            ("timeout", {"error": "Timeout after 180 seconds", "timed_out": True}, True, "Timeout after 180 seconds"),
+            (
+                "connection_error",
+                {"error": "Connection error: Connection refused", "timed_out": False},
+                False,
+                "Connection error",
+            ),
+            (
+                "http_error",
+                {"error": "HTTP error: 500 Internal Server Error", "timed_out": False},
+                False,
+                "HTTP error",
+            ),
+        ]
+    )
+    @patch("open_instruct.tools.tools.make_api_request")
+    def test_error_handling(self, name, api_response, expected_timeout, expected_error_contains, mock_api_request):
+        """Test error handling for various API error types."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(**api_response)
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(self.tool.execute("https://example.com"))
+
+        self.assertTrue(result.called)
+        self.assertEqual(result.timeout, expected_timeout)
+        self.assertIn(expected_error_contains, result.error)
+        self.assertIn(expected_error_contains, result.output)
+
+    @patch("open_instruct.tools.tools.make_api_request")
+    def test_uses_post_method_and_correct_endpoint(self, mock_api_request):
+        """Test that Crawl4AIBrowseTool uses POST method and correct endpoint."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"results": [{"success": True, "markdown": "OK", "metadata": {}}]})
+
+        mock_api_request.side_effect = mock_response
+
+        asyncio.run(self.tool.execute("https://example.com"))
+
+        mock_api_request.assert_called_once()
+        call_args = mock_api_request.call_args
+        self.assertEqual(call_args[1]["url"], "http://localhost:11235/crawl")
+
+    @patch("open_instruct.tools.tools.make_api_request")
+    def test_payload_contains_url(self, mock_api_request):
+        """Test that the request payload contains the URL in a list."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"results": [{"success": True, "markdown": "OK", "metadata": {}}]})
+
+        mock_api_request.side_effect = mock_response
+
+        asyncio.run(self.tool.execute("https://example.com/page"))
+
+        mock_api_request.assert_called_once()
+        call_args = mock_api_request.call_args
+        self.assertEqual(call_args[1]["json_payload"]["urls"], ["https://example.com/page"])
+
+    @patch("open_instruct.tools.tools.make_api_request")
+    def test_api_key_in_headers(self, mock_api_request):
+        """Test that API key is included in headers."""
+        from open_instruct.tools.utils import APIResponse
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"results": [{"success": True, "markdown": "OK", "metadata": {}}]})
+
+        mock_api_request.side_effect = mock_response
+
+        asyncio.run(self.tool.execute("https://example.com"))
+
+        mock_api_request.assert_called_once()
+        call_args = mock_api_request.call_args
+        self.assertEqual(call_args[1]["headers"]["x-api-key"], "test_key")
+
+    @patch("open_instruct.tools.tools.make_api_request")
+    def test_content_truncation(self, mock_api_request):
+        """Test that content is truncated when exceeding max_content_length."""
+        from open_instruct.tools.utils import APIResponse
+
+        tool = Crawl4AIBrowseTool(call_name="browse", max_content_length=50)
+
+        long_content = "A" * 100
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"results": [{"success": True, "markdown": long_content, "metadata": {}}]})
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(tool.execute("https://example.com"))
+
+        self.assertLess(len(result.output), 100)
+        self.assertTrue(result.output.startswith("A" * 50))
+        self.assertIn("[Content truncated]", result.output)
+
+    @patch("open_instruct.tools.tools.make_api_request")
+    def test_no_truncation_when_under_limit(self, mock_api_request):
+        """Test that content is not truncated when under max_content_length."""
+        from open_instruct.tools.utils import APIResponse
+
+        tool = Crawl4AIBrowseTool(call_name="browse", max_content_length=100)
+
+        short_content = "A" * 50
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"results": [{"success": True, "markdown": short_content, "metadata": {}}]})
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(tool.execute("https://example.com"))
+
+        self.assertEqual(result.output, short_content)
+        self.assertNotIn("[Content truncated]", result.output)
+
+    @patch("open_instruct.tools.tools.make_api_request")
+    def test_no_truncation_when_limit_is_none(self, mock_api_request):
+        """Test that content is not truncated when max_content_length is None."""
+        from open_instruct.tools.utils import APIResponse
+
+        tool = Crawl4AIBrowseTool(call_name="browse", max_content_length=None)
+
+        long_content = "A" * 10000
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"results": [{"success": True, "markdown": long_content, "metadata": {}}]})
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(tool.execute("https://example.com"))
+
+        self.assertEqual(result.output, long_content)
+        self.assertNotIn("[Content truncated]", result.output)
+
+
+class TestCrawl4AIBrowseToolConfig(unittest.TestCase):
+    """Tests for Crawl4AIBrowseToolConfig."""
+
+    def test_config_default_values(self):
+        """Test config has correct default values."""
+        config = Crawl4AIBrowseToolConfig()
+        self.assertEqual(config.timeout, 180)
+        self.assertTrue(config.ignore_links)
+        self.assertFalse(config.bypass_cache)
+        self.assertFalse(config.include_html)
+        self.assertEqual(config.max_content_length, 5000)
+
+    def test_config_custom_values(self):
+        """Test config accepts custom values."""
+        config = Crawl4AIBrowseToolConfig(
+            timeout=60, ignore_links=False, bypass_cache=True, include_html=True, max_content_length=10000
+        )
+        self.assertEqual(config.timeout, 60)
+        self.assertFalse(config.ignore_links)
+        self.assertTrue(config.bypass_cache)
+        self.assertTrue(config.include_html)
+        self.assertEqual(config.max_content_length, 10000)
+
+    def test_tool_class_attribute(self):
+        """Test tool_class is set to Crawl4AIBrowseTool."""
+        self.assertEqual(Crawl4AIBrowseToolConfig.tool_class, Crawl4AIBrowseTool)
+
+
+class TestToolStatistics(unittest.TestCase):
+    """Tests for ToolStatistics class."""
+
+    def test_add_rollout_without_excess_calls(self):
+        """Test add_rollout works without excess_tool_calls."""
+        from open_instruct.data_types import ToolCallStats
+
+        stats = ToolStatistics()
+        stats.add_rollout([ToolCallStats(tool_name="python", success=True, runtime=0.5)])
+        stats.add_rollout([ToolCallStats(tool_name="python", success=False, runtime=0.3)])
+
+        self.assertEqual(stats.num_rollouts, 2)
+        self.assertIn("python", stats.tool_names)
+        self.assertEqual(stats._counts["python"], 2)
+        self.assertEqual(stats._failures["python"], 1)
+        self.assertEqual(stats._excess_calls["python"], 0)
+
+    def test_add_rollout_with_excess_calls(self):
+        """Test add_rollout correctly tracks excess_tool_calls."""
+        from open_instruct.data_types import ToolCallStats
+
+        stats = ToolStatistics()
+        stats.add_rollout(
+            [ToolCallStats(tool_name="python", success=True, runtime=0.5)],
+            excess_tool_calls={"python": 2, "search": 1},
+        )
+
+        self.assertEqual(stats.num_rollouts, 1)
+        self.assertIn("python", stats.tool_names)
+        self.assertIn("search", stats.tool_names)
+        self.assertEqual(stats._excess_calls["python"], 2)
+        self.assertEqual(stats._excess_calls["search"], 1)
+
+    def test_compute_metrics_includes_excess_calls(self):
+        """Test compute_metrics includes avg_excess_calls_per_rollout."""
+        from open_instruct.data_types import ToolCallStats
+
+        stats = ToolStatistics()
+        # Rollout 1: 1 successful call, 2 excess python calls
+        stats.add_rollout(
+            [ToolCallStats(tool_name="python", success=True, runtime=0.5)], excess_tool_calls={"python": 2}
+        )
+        # Rollout 2: 1 failed call, 1 excess python call
+        stats.add_rollout(
+            [ToolCallStats(tool_name="python", success=False, runtime=0.3)], excess_tool_calls={"python": 1}
+        )
+
+        metrics = stats.compute_metrics()
+
+        # 3 total excess calls / 2 rollouts = 1.5
+        self.assertEqual(metrics["tools/python/avg_excess_calls_per_rollout"], 1.5)
+        self.assertEqual(metrics["tools/aggregate/avg_excess_calls_per_rollout"], 1.5)
+
+    def test_compute_metrics_multiple_tools_with_excess(self):
+        """Test compute_metrics with multiple tools having excess calls."""
+        from open_instruct.data_types import ToolCallStats
+
+        stats = ToolStatistics()
+        stats.add_rollout(
+            [
+                ToolCallStats(tool_name="python", success=True, runtime=0.5),
+                ToolCallStats(tool_name="search", success=True, runtime=0.2),
+            ],
+            excess_tool_calls={"python": 3, "search": 1},
+        )
+        stats.add_rollout(
+            [ToolCallStats(tool_name="python", success=True, runtime=0.4)], excess_tool_calls={"python": 1}
+        )
+
+        metrics = stats.compute_metrics()
+
+        # python: 4 excess / 2 rollouts = 2.0
+        self.assertEqual(metrics["tools/python/avg_excess_calls_per_rollout"], 2.0)
+        # search: 1 excess / 2 rollouts = 0.5
+        self.assertEqual(metrics["tools/search/avg_excess_calls_per_rollout"], 0.5)
+        # aggregate: 5 excess / 2 rollouts = 2.5
+        self.assertEqual(metrics["tools/aggregate/avg_excess_calls_per_rollout"], 2.5)
+
+    def test_compute_metrics_no_excess_calls(self):
+        """Test compute_metrics when no excess calls occurred."""
+        from open_instruct.data_types import ToolCallStats
+
+        stats = ToolStatistics()
+        stats.add_rollout([ToolCallStats(tool_name="python", success=True, runtime=0.5)])
+        stats.add_rollout([ToolCallStats(tool_name="python", success=True, runtime=0.3)])
+
+        metrics = stats.compute_metrics()
+
+        self.assertEqual(metrics["tools/python/avg_excess_calls_per_rollout"], 0.0)
+        self.assertEqual(metrics["tools/aggregate/avg_excess_calls_per_rollout"], 0.0)
 
 
 class TestToolsConfig(unittest.TestCase):

@@ -50,6 +50,9 @@ class ToolsConfig:
     only_reward_good_outputs: bool = False
     """Only apply rewards to outputs from tools that didn't error."""
 
+    pass_tools_to_chat_template: bool = True
+    """Pass tool definitions to the chat template. Set to False if using a custom system prompt."""
+
     _parsed_tools: list[ParsedToolConfig] = field(default_factory=list, init=False)
     """Parsed tool configurations. Populated during __post_init__."""
 
@@ -119,12 +122,16 @@ class ToolStatistics:
         self._counts: defaultdict[str, int] = defaultdict(int)
         self._failures: defaultdict[str, int] = defaultdict(int)
         self._runtimes: defaultdict[str, float] = defaultdict(float)
+        self._excess_calls: defaultdict[str, int] = defaultdict(int)
 
-    def add_rollout(self, tool_call_stats: list[ToolCallStats]) -> None:
+    def add_rollout(
+        self, tool_call_stats: list[ToolCallStats], excess_tool_calls: dict[str, int] | None = None
+    ) -> None:
         """Add statistics from a single rollout.
 
         Args:
             tool_call_stats: List of ToolCallStats from a single rollout.
+            excess_tool_calls: Dict mapping tool name to count of calls that exceeded the limit.
         """
         self.num_rollouts += 1
         for s in tool_call_stats:
@@ -132,6 +139,11 @@ class ToolStatistics:
             self._counts[s.tool_name] += 1
             self._failures[s.tool_name] += not s.success
             self._runtimes[s.tool_name] += s.runtime
+
+        if excess_tool_calls:
+            for tool_name, count in excess_tool_calls.items():
+                self.tool_names.add(tool_name)
+                self._excess_calls[tool_name] += count
 
     def compute_metrics(self) -> dict[str, float]:
         """Compute per-tool and aggregate metrics.
@@ -141,9 +153,11 @@ class ToolStatistics:
             - tools/{name}/avg_calls_per_rollout
             - tools/{name}/failure_rate
             - tools/{name}/avg_runtime
+            - tools/{name}/avg_excess_calls_per_rollout
             - tools/aggregate/avg_calls_per_rollout
             - tools/aggregate/failure_rate
             - tools/aggregate/avg_runtime
+            - tools/aggregate/avg_excess_calls_per_rollout
         """
         if not self.num_rollouts or not self.tool_names:
             return {}
@@ -152,19 +166,24 @@ class ToolStatistics:
         total_calls = 0
         total_failures = 0
         total_runtime = 0.0
+        total_excess = 0
 
         for name in self.tool_names:
             calls, failures, runtime = self._counts[name], self._failures[name], self._runtimes[name]
+            excess = self._excess_calls[name]
             metrics[f"tools/{name}/avg_calls_per_rollout"] = calls / self.num_rollouts
             metrics[f"tools/{name}/failure_rate"] = failures / calls if calls else 0.0
             metrics[f"tools/{name}/avg_runtime"] = runtime / calls if calls else 0.0
+            metrics[f"tools/{name}/avg_excess_calls_per_rollout"] = excess / self.num_rollouts
             total_calls += calls
             total_failures += failures
             total_runtime += runtime
+            total_excess += excess
 
         metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / self.num_rollouts
         metrics["tools/aggregate/failure_rate"] = total_failures / total_calls if total_calls else 0.0
         metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls if total_calls else 0.0
+        metrics["tools/aggregate/avg_excess_calls_per_rollout"] = total_excess / self.num_rollouts
 
         return metrics
 

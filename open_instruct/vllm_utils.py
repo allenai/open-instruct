@@ -125,6 +125,8 @@ class CompletionOutput:
     tool_runtime: float = 0.0
     tool_called: bool = False
     tool_call_stats: list[ToolCallStats] = dataclasses.field(default_factory=list)
+    excess_tool_calls: dict[str, int] = dataclasses.field(default_factory=dict)
+    """Dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
 
 
 @dataclasses.dataclass
@@ -310,6 +312,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in final_output.outputs]
         tool_calleds = [getattr(out, "tool_called", False) for out in final_output.outputs]
         tool_call_stats = [out.tool_call_stats for out in final_output.outputs]
+        excess_tool_calls = [getattr(out, "excess_tool_calls", {}) for out in final_output.outputs]
     else:
         # Use default values when tools are not used
         masks = [[1] * len(resp) for resp in response_ids]
@@ -320,6 +323,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_runtimes = [0.0] * len(response_ids)
         tool_calleds = [False] * len(response_ids)
         tool_call_stats = [[] for _ in response_ids]
+        excess_tool_calls = [{} for _ in response_ids]
 
     result = GenerationResult(
         responses=response_ids,
@@ -333,6 +337,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
             tool_runtimes=tool_runtimes,
             tool_calleds=tool_calleds,
             tool_call_stats=tool_call_stats,
+            excess_tool_calls=excess_tool_calls,
         ),
         index=metadata["index"],
         prompt_id=metadata["prompt_id"],
@@ -864,6 +869,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     tool_runtime = 0.0
     tool_called = False
     tool_call_stats: list[ToolCallStats] = []
+    excess_tool_calls: dict[str, int] = {}
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
     original_prompt = actor.request_metadata[base_request_id]["prompt_token_ids"]
@@ -913,10 +919,19 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         # Execute tool calls
         outputs: list[str] = []
         for tool_call in tool_calls:
-            tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].execute.remote(**tool_call.args)
-
             tool_called = True
             num_calls += 1
+
+            # Check if we've exceeded max tool calls
+            if num_calls > actor.max_tool_calls:
+                exceeded_message = "Max tool calls exceeded"
+                tool_error += exceeded_message
+                outputs.append(exceeded_message)
+                excess_tool_calls[tool_call.name] = excess_tool_calls.get(tool_call.name, 0) + 1
+                continue
+
+            tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].execute.remote(**tool_call.args)
+
             timeout = timeout or tool_result.timeout
             tool_error += tool_result.error or ""
             tool_output += tool_result.output
@@ -973,6 +988,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         complete_output.tool_runtime = tool_runtime
         complete_output.tool_called = tool_called
         complete_output.tool_call_stats = tool_call_stats
+        complete_output.excess_tool_calls = excess_tool_calls
 
     actor.active_tasks.pop(sub_request_id, None)
 

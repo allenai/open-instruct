@@ -5,6 +5,7 @@ Includes:
 - Base ToolParser ABC
 - VllmToolParser: Wraps vLLM's native tool parsers
 - OpenInstructLegacyToolParser: <tool_name>content</tool_name> style
+- DRTuluToolParser: <call_tool name="...">query</call_tool> style
 
 For vLLM parsers, add to VLLM_PARSERS!
 See: https://docs.vllm.ai/en/latest/features/tool_calling/
@@ -232,7 +233,7 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
 
 def create_vllm_parser(
     parser_name: str,
-    tokenizer: "PreTrainedTokenizer | PreTrainedTokenizerFast",
+    tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
     output_template: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
 ) -> VllmToolParser:
@@ -269,33 +270,69 @@ def create_vllm_parser(
     )
 
 
+class DRTuluToolParser(ToolParser):
+    """
+    Parser for DR Tulu style tool calls. Delegates actual parsing to the tool itself.
+    Only detects that a tool call occurred (via stop strings) and passes text to the tool.
+    """
+
+    def __init__(self, tool_actors: list[ray.actor.ActorHandle]):
+        if len(tool_actors) != 1:
+            raise ValueError(f"DRTuluToolParser requires exactly one tool (dr_agent_mcp), got {len(tool_actors)}")
+
+        actor = tool_actors[0]
+        self.tool_call_name = ray.get(actor.get_call_name.remote())
+
+        if self.tool_call_name != "dr_agent_mcp":
+            raise ValueError(f"DRTuluToolParser requires dr_agent_mcp tool, got {self.tool_call_name}")
+
+        stop_strings = ray.get(actor.get_stop_strings.remote())
+        # Use dict.fromkeys to deduplicate while preserving order
+        self.stop_sequences = list(dict.fromkeys(stop_strings)) if stop_strings else []
+
+    def get_tool_calls(self, text: str) -> list[ToolCall]:
+        for stop in self.stop_sequences:
+            if stop in text:
+                return [ToolCall(name=self.tool_call_name, args={"text": text})]
+        return []
+
+    def format_tool_outputs(self, tool_outputs: list[str]) -> str:
+        return "\n".join(f"<tool_output>\n{output}\n</tool_output>\n" for output in tool_outputs)
+
+
 def get_available_parsers() -> list[str]:
     """Return list of available parser types."""
-    return ["legacy"] + list(VLLM_PARSERS.keys())
+    return ["legacy", "dr_tulu"] + list(VLLM_PARSERS.keys())
 
 
 def create_tool_parser(
     parser_type: str,
-    tokenizer: "PreTrainedTokenizer | PreTrainedTokenizerFast",
+    tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
     tool_actors: list[ray.actor.ActorHandle],
     tool_definitions: list[dict[str, Any]] | None = None,
 ) -> ToolParser:
-    """Create a tool parser based on configuration.
+    """Create a tool parser instance by type.
 
     Args:
-        parser_type: Type of parser to use.
-        tool_actors: List of Ray actor handles for tools.
-        tokenizer: Tokenizer for the model.
-        tool_definitions: Tool definitions in OpenAI format.
+        parser_type: Type of parser to create. Options:
+            - "legacy": OpenInstructLegacyToolParser for <tool_name>content</tool_name> format
+            - "dr_tulu": DRTuluToolParser for <call_tool name="...">content</call_tool> format
+            - "vllm_*": VllmToolParser variants (vllm_hermes, vllm_llama3_json, vllm_olmo3)
+        tokenizer: Tokenizer for the model (required for all parser types).
+        tool_actors: List of Ray actor handles for the tools.
+        tool_definitions: OpenAI-format tool definitions (required for vllm_* parsers).
 
     Returns:
-        A ToolParser instance.
+        A ToolParser instance configured for the specified type.
 
     Raises:
-        ValueError: If parser type is not supported or required arguments are missing.
+        ValueError: If parser_type is unknown.
     """
     if parser_type == "legacy":
         return OpenInstructLegacyToolParser(tool_actors, output_wrap_name="output")
+
+    if parser_type == "dr_tulu":
+        return DRTuluToolParser(tool_actors)
 
     if parser_type in VLLM_PARSERS:
         return create_vllm_parser(parser_type, tokenizer, tool_definitions=tool_definitions)
