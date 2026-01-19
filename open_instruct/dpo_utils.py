@@ -37,12 +37,12 @@ from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, model_utils
+from open_instruct import dataset_transformation, logger_utils, model_utils
 from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
     compute_config_hash,
-    load_dataset_configs_from_args,
+    load_dataset_configs,
 )
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
@@ -177,6 +177,19 @@ class DatasetConfig:
     config_hash: str | None = None
     """The hash of the dataset configuration."""
 
+    def to_dataset_configs(
+        self, transform_fn_args: list[dict], dataset_config_seed: int = 42
+    ) -> list[dataset_transformation.DatasetConfig]:
+        """Convert this config to a list of per-dataset DatasetConfig objects."""
+        return load_dataset_configs(
+            dataset_mixer_list=self.mixer_list,
+            dataset_mixer_list_splits=self.mixer_list_splits,
+            dataset_transform_fn=self.transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=self.target_columns,
+            dataset_config_seed=dataset_config_seed,
+        )
+
 
 @dataclass
 class LoRAConfig:
@@ -261,6 +274,33 @@ class EvalConfig:
 
 
 @dataclass
+class FrameworkConfig:
+    """Configuration for DeepSpeed and framework-specific settings."""
+
+    zero_stage: int | None = None
+    """DeepSpeed ZeRO optimization stage (0, 1, 2, or 3). None disables DeepSpeed."""
+    offload_optimizer: bool = False
+    """Offload optimizer state to CPU (DeepSpeed ZeRO)."""
+    offload_param: bool = False
+    """Offload parameters to CPU (DeepSpeed ZeRO-3 only)."""
+    zero_hpz_partition_size: int = 8
+    """Partition size for ZeRO-3 hierarchical partitioning."""
+    timeout: int = 1800
+    """Timeout in seconds for process group initialization."""
+    sync_each_batch: bool = False
+    """Synchronize gradients after each batch (for debugging)."""
+    async_checkpointing: bool = False
+    """Use asynchronous checkpointing."""
+
+    def __post_init__(self):
+        if self.zero_stage is not None:
+            if self.zero_stage not in [0, 1, 2, 3]:
+                raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
+            if self.offload_param and self.zero_stage != 3:
+                raise ValueError("offload_param can only be used with zero_stage 3")
+
+
+@dataclass
 class ModelConfig:
     """Configuration for model loading."""
 
@@ -285,94 +325,49 @@ class ModelConfig:
 
 
 @dataclass
-class ExperimentConfig(
-    TrackingConfig,
-    ModelConfig,
-    DPOConfig,
-    TrainingConfig,
-    DatasetConfig,
-    LoRAConfig,
-    LoggingConfig,
-    HubConfig,
-    CheckpointConfig,
-    EvalConfig,
-    config.Config,
-):
-    """Full arguments class for DPO fine-tuning jobs."""
+class ExperimentConfig(config.Config):
+    """Full arguments class for DPO fine-tuning jobs using composition."""
 
     _VALID_DICT_FIELDS = ["additional_model_arguments"]
 
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
-    do_not_randomize_output_dir: bool = False
+    tracking: TrackingConfig = field(default_factory=TrackingConfig)
+    model: ModelConfig = field(default_factory=ModelConfig)
+    dpo: DPOConfig = field(default_factory=DPOConfig)
+    training: TrainingConfig = field(default_factory=TrainingConfig)
+    dataset: DatasetConfig = field(default_factory=DatasetConfig)
+    lora: LoRAConfig = field(default_factory=LoRAConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
+    hub: HubConfig = field(default_factory=HubConfig)
+    checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
+    eval: EvalConfig = field(default_factory=EvalConfig)
+    framework: FrameworkConfig = field(default_factory=FrameworkConfig)
+
     config_name: str | None = field(default=None)
     additional_model_arguments: dict | str | None = field(default_factory=dict)
-    sync_each_batch: bool = False
-    dataset_name: str | None = field(default=None)
-    dataset_mixer: dict | None = field(default=None)
-    dataset_mix_dir: str | None = field(default=None)
-    dataset_config_name: str | None = field(default=None)
+    do_not_randomize_output_dir: bool = False
     max_train_samples: int | None = field(default=None)
     preprocessing_num_workers: int | None = field(default=None)
-    max_seq_length: int | None = field(default=None)
     overwrite_cache: bool = field(default=False)
     use_qlora: bool = field(default=False)
-    timeout: int = field(default=1800)
-    resume_from_checkpoint: str | None = field(default=None)
     save_to_hub: str | None = field(default=None)
     use_liger_kernel: bool = field(default=False)
-    checkpointing_steps: str | None = field(default=None)
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
-    zero_stage: int | None = field(default=None)
-    offload_optimizer: bool = field(default=False)
-    offload_param: bool = field(default=False)
-    zero_hpz_partition_size: int = field(default=8)
-    try_auto_save_to_beaker: bool = True
-    gs_bucket_path: str | None = None
-    oe_eval_tasks: list[str] | None = None
-    oe_eval_max_length: int = 4096
-    oe_eval_gpu_multiplier: int | None = None
-    eval_workspace: str | None = "ai2/tulu-3-results"
-    eval_priority: str | None = "high"
-    async_checkpointing: bool = False
-
-    @property
-    def dpo_config(self) -> DPOConfig:
-        return DPOConfig(
-            beta=self.beta,
-            loss_type=DPOLossType(self.loss_type),
-            gamma_beta_ratio=self.gamma_beta_ratio,
-            label_smoothing=self.label_smoothing,
-            load_balancing_loss=self.load_balancing_loss,
-            load_balancing_weight=self.load_balancing_weight,
-        )
 
     def __post_init__(self):
-        if isinstance(self.loss_type, str):
-            self.loss_type = DPOLossType(self.loss_type)
+        if isinstance(self.dpo.loss_type, str):
+            self.dpo.loss_type = DPOLossType(self.dpo.loss_type)
 
-        if self.dataset_name is None and self.dataset_mixer is None and self.mixer_list is None:
-            raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
-        if (
-            (self.dataset_name is not None and (self.dataset_mixer is not None or self.mixer_list is not None))
-            or (self.dataset_name is not None)
-            or (self.dataset_mixer is not None and self.mixer_list is not None)
-        ):
-            raise ValueError("Cannot provide two dataset selection mechanisms.")
-        if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
+        if self.dataset.mixer_list is None:
+            raise ValueError("Need a dataset mixer list.")
+        if self.eval.try_launch_beaker_eval_jobs and not self.hub.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
-        for dict_feld in self._VALID_DICT_FIELDS:
-            passed_value = getattr(self, dict_feld)
+        for dict_field in self._VALID_DICT_FIELDS:
+            passed_value = getattr(self, dict_field)
             if isinstance(passed_value, str) and passed_value.startswith("{"):
                 loaded_dict = json.loads(passed_value)
                 loaded_dict = _convert_str_dict(loaded_dict)
-                setattr(self, dict_feld, loaded_dict)
-
-        if self.zero_stage is not None:
-            if self.zero_stage not in [0, 1, 2, 3]:
-                raise ValueError(f"zero_stage must be 0, 1, 2, or 3, got {self.zero_stage}")
-            if self.offload_param and self.zero_stage != 3:
-                raise ValueError("offload_param can only be used with zero_stage 3")
+                setattr(self, dict_field, loaded_dict)
 
 
 def compute_reference_cache_hash(
@@ -390,7 +385,7 @@ def compute_reference_cache_hash(
         max_seq_length: Maximum sequence length for tokenization
     """
     transform_fn_args = [{"max_seq_length": max_seq_length}, {}]
-    dcs = load_dataset_configs_from_args(dataset_args, transform_fn_args)
+    dcs = dataset_args.to_dataset_configs(transform_fn_args)
     dataset_config_hash = dataset_args.config_hash or compute_config_hash(dcs, tc)
     config_str = json.dumps(config_dict | {"dataset_config_hash": dataset_config_hash}, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]

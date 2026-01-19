@@ -206,68 +206,70 @@ class DPOTrainModule(TrainModule):
 
 def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerConfig) -> None:
     """Main entry point for DPO training with OLMo-core."""
-    if args.model_name_or_path is None:
-        raise ValueError("--model_name_or_path is required. Specify a HuggingFace model name or path.")
+    if args.model.model_name_or_path is None:
+        raise ValueError("--model.model_name_or_path is required. Specify a HuggingFace model name or path.")
 
     tc.tokenizer_name_or_path = (
-        args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+        args.model.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
     )
     tokenizer = tc.tokenizer
 
-    args.local_cache_dir = os.path.abspath(args.local_cache_dir)
+    args.dataset.local_cache_dir = os.path.abspath(args.dataset.local_cache_dir)
     if utils.is_beaker_job():
-        args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        args.dataset.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
 
-    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
     config_dict = {
-        "concatenated_forward": args.concatenated_forward,
-        "dpo_loss_type": str(args.loss_type),
+        "concatenated_forward": args.model.concatenated_forward,
+        "dpo_loss_type": str(args.dpo.loss_type),
         "max_train_samples": None,
-        "model_name_or_path": args.model_name_or_path,
-        "model_revision": args.model_revision,
-        "packing": args.packing,
-        "use_lora": args.use_lora,
+        "model_name_or_path": args.model.model_name_or_path,
+        "model_revision": args.model.model_revision,
+        "packing": args.model.packing,
+        "use_lora": args.lora.use_lora,
         "use_qlora": args.use_qlora,
     }
-    ref_cache_hash = dpo_utils.compute_reference_cache_hash(config_dict, tc, args, args.max_seq_length)
+    ref_cache_hash = dpo_utils.compute_reference_cache_hash(
+        config_dict, tc, args.dataset, args.training.max_seq_length
+    )
     reference_cache_path = pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt"
     logger.info(f"Reference logprobs cache path: {reference_cache_path}")
 
-    if args.cache_dataset_only:
+    if args.dataset.cache_dataset_only:
         dataset = dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=args.mixer_list,
-            dataset_mixer_list_splits=args.mixer_list_splits,
+            dataset_mixer_list=args.dataset.mixer_list,
+            dataset_mixer_list_splits=args.dataset.mixer_list_splits,
             tc=tc,
-            dataset_transform_fn=args.transform_fn,
+            dataset_transform_fn=args.dataset.transform_fn,
             transform_fn_args=transform_fn_args,
-            target_columns=args.target_columns,
-            dataset_cache_mode=args.cache_mode,
-            dataset_config_hash=args.config_hash,
-            hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.local_cache_dir,
-            dataset_skip_cache=args.skip_cache,
+            target_columns=args.dataset.target_columns,
+            dataset_cache_mode=args.dataset.cache_mode,
+            dataset_config_hash=args.dataset.config_hash,
+            hf_entity=args.hub.hf_entity,
+            dataset_local_cache_dir=args.dataset.local_cache_dir,
+            dataset_skip_cache=args.dataset.skip_cache,
         )
-        logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
+        logger.info("Dataset cached successfully. Exiting because --dataset.cache_dataset_only was set.")
         return
 
-    train.prepare_training_environment(seed=args.seed)
+    train.prepare_training_environment(seed=args.tracking.seed)
 
     dp_rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
     is_main_process = dp_rank == 0
 
     if is_main_process:
         dataset = dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=args.mixer_list,
-            dataset_mixer_list_splits=args.mixer_list_splits,
+            dataset_mixer_list=args.dataset.mixer_list,
+            dataset_mixer_list_splits=args.dataset.mixer_list_splits,
             tc=tc,
-            dataset_transform_fn=args.transform_fn,
+            dataset_transform_fn=args.dataset.transform_fn,
             transform_fn_args=transform_fn_args,
-            target_columns=args.target_columns,
-            dataset_cache_mode=args.cache_mode,
-            dataset_config_hash=args.config_hash,
-            hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.local_cache_dir,
-            dataset_skip_cache=args.skip_cache,
+            target_columns=args.dataset.target_columns,
+            dataset_cache_mode=args.dataset.cache_mode,
+            dataset_config_hash=args.dataset.config_hash,
+            hf_entity=args.hub.hf_entity,
+            dataset_local_cache_dir=args.dataset.local_cache_dir,
+            dataset_skip_cache=args.dataset.skip_cache,
         )
 
     if distributed_utils.is_distributed():
@@ -275,103 +277,105 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     if not is_main_process:
         dataset = dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=args.mixer_list,
-            dataset_mixer_list_splits=args.mixer_list_splits,
+            dataset_mixer_list=args.dataset.mixer_list,
+            dataset_mixer_list_splits=args.dataset.mixer_list_splits,
             tc=tc,
-            dataset_transform_fn=args.transform_fn,
+            dataset_transform_fn=args.dataset.transform_fn,
             transform_fn_args=transform_fn_args,
-            target_columns=args.target_columns,
-            dataset_cache_mode=args.cache_mode,
-            dataset_config_hash=args.config_hash,
-            hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.local_cache_dir,
-            dataset_skip_cache=args.skip_cache,
+            target_columns=args.dataset.target_columns,
+            dataset_cache_mode=args.dataset.cache_mode,
+            dataset_config_hash=args.dataset.config_hash,
+            hf_entity=args.hub.hf_entity,
+            dataset_local_cache_dir=args.dataset.local_cache_dir,
+            dataset_skip_cache=args.dataset.skip_cache,
         )
 
-    dataset = dataset.shuffle(seed=args.seed)
+    dataset = dataset.shuffle(seed=args.tracking.seed)
     dataset.set_format(type="pt")
 
     dp_world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
 
     logger_utils.setup_logger(rank=dp_rank)
 
-    if args.add_seed_and_date_to_exp_name:
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    args.output_dir = os.path.join(args.output_dir, args.exp_name)
+    if args.tracking.add_seed_and_date_to_exp_name:
+        args.tracking.exp_name = f"{args.tracking.exp_name}__{args.tracking.seed}__{int(time.time())}"
+    args.checkpoint.output_dir = os.path.join(args.checkpoint.output_dir, args.tracking.exp_name)
 
     if distributed_utils.is_distributed():
-        path_list = [args.output_dir]
+        path_list = [args.checkpoint.output_dir]
         dist.broadcast_object_list(path_list, src=0)  # type: ignore[attr-defined]
-        args.output_dir = path_list[0]
+        args.checkpoint.output_dir = path_list[0]
 
     beaker_config = None
     if utils.is_beaker_job() and is_main_process:
         beaker_config = utils.maybe_get_beaker_config()
 
-    if args.push_to_hub and is_main_process:
-        if args.hf_repo_id is None:
-            args.hf_repo_id = "open_instruct_dev"
-        if args.hf_entity is None:
-            args.hf_entity = utils.maybe_use_ai2_hf_entity()
-        if args.hf_entity is None:
-            args.hf_entity = HfApi().whoami()["name"]
-        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:
-            args.hf_repo_revision = args.exp_name
-        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+    if args.hub.push_to_hub and is_main_process:
+        if args.hub.hf_repo_id is None:
+            args.hub.hf_repo_id = "open_instruct_dev"
+        if args.hub.hf_entity is None:
+            args.hub.hf_entity = utils.maybe_use_ai2_hf_entity()
+        if args.hub.hf_entity is None:
+            args.hub.hf_entity = HfApi().whoami()["name"]
+        args.hub.hf_repo_id = f"{args.hub.hf_entity}/{args.hub.hf_repo_id}"
+        if args.hub.hf_repo_revision is None:
+            args.hub.hf_repo_revision = args.tracking.exp_name
+        args.hub.hf_repo_url = f"https://huggingface.co/{args.hub.hf_repo_id}/tree/{args.hub.hf_repo_revision}"
 
-    if args.wandb_entity is None:
-        args.wandb_entity = utils.maybe_use_ai2_wandb_entity()
+    if args.logging.wandb_entity is None:
+        args.logging.wandb_entity = utils.maybe_use_ai2_wandb_entity()
 
     if is_main_process:
-        os.makedirs(args.output_dir, exist_ok=True)
+        os.makedirs(args.checkpoint.output_dir, exist_ok=True)
     if distributed_utils.is_distributed():
         dist.barrier()  # type: ignore[attr-defined]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
+    hf_config = transformers.AutoConfig.from_pretrained(args.model.model_name_or_path)
     vocab_size = hf_config.vocab_size
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
-    model_config = get_transformer_config(args.model_name_or_path, vocab_size)
+    model_config = get_transformer_config(args.model.model_name_or_path, vocab_size)
     model = model_config.build(init_device="cpu")
 
-    logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
-    load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
+    logger.info(f"Loading HuggingFace weights from {args.model.model_name_or_path}")
+    load_hf_model(args.model.model_name_or_path, model.state_dict(), work_dir=args.checkpoint.output_dir)
     model = model.to(device=device, dtype=torch.bfloat16)
 
-    if args.gradient_checkpointing:
+    if args.training.gradient_checkpointing:
         from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 
         logger.info("Enabling activation checkpointing...")
         model.apply_activation_checkpointing(TransformerActivationCheckpointingMode.full)
 
-    if args.packing:
+    if args.model.packing:
         collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
         collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
-    global_batch_size = args.per_device_train_batch_size * dp_world_size
+    global_batch_size = args.training.per_device_train_batch_size * dp_world_size
     data_loader_instance = data_loader.HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size,
-        seed=args.seed,
+        seed=args.tracking.seed,
         dp_rank=dp_rank,
         dp_world_size=dp_world_size,
-        work_dir=args.output_dir,
+        work_dir=args.checkpoint.output_dir,
         collator=collator,
         device=device,
     )
 
-    forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
-    if args.packing:
+    forward_fn = (
+        dpo_utils.concatenated_forward_olmo if args.model.concatenated_forward else dpo_utils.separate_forward_olmo
+    )
+    if args.model.packing:
         forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
-    average_log_prob = args.loss_type.is_average_loss
+    average_log_prob = args.dpo.loss_type.is_average_loss
 
     logger.info("Caching reference logprobs (before HSDP)...")
 
     def make_disable_adapter_context() -> contextlib.AbstractContextManager:
-        if args.use_lora:
+        if args.lora.use_lora:
             assert isinstance(model, peft.PeftModel)
             return model.disable_adapter()
         return contextlib.nullcontext()
@@ -385,7 +389,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         average_log_prob=average_log_prob,
         forward_fn=forward_fn,
         full_dataset_size=len(dataset),
-        use_lora=args.use_lora,
+        use_lora=args.lora.use_lora,
         device=device,
         cache_path=reference_cache_path,
         disable_adapter_context=make_disable_adapter_context,
@@ -418,27 +422,29 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     optimizer_grouped_parameters = [
         {
             "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-            "weight_decay": args.weight_decay,
+            "weight_decay": args.training.weight_decay,
         },
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
     ]
-    if args.dpo_use_paged_optimizer:
+    if args.training.dpo_use_paged_optimizer:
         from bitsandbytes.optim import AdamW  # type: ignore[import-unresolved]
 
         optim = AdamW(
             optimizer_grouped_parameters,
-            lr=args.learning_rate,
-            optim_bits=8 if args.use_8bit_optimizer else 32,
+            lr=args.training.learning_rate,
+            optim_bits=8 if args.training.use_8bit_optimizer else 32,
             is_paged=True,
         )
     else:
-        optim = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
+        optim = torch.optim.AdamW(
+            optimizer_grouped_parameters, lr=args.training.learning_rate, fused=args.training.fused_optimizer
+        )
 
-    num_training_steps = len(data_loader_instance) * args.num_epochs
-    warmup_steps = int(num_training_steps * args.warmup_ratio)
-    if args.lr_scheduler_type == "cosine":
+    num_training_steps = len(data_loader_instance) * args.training.num_epochs
+    warmup_steps = int(num_training_steps * args.training.warmup_ratio)
+    if args.training.lr_scheduler_type == "cosine":
         scheduler = CosWithWarmup(warmup_steps=warmup_steps)
-    elif args.lr_scheduler_type == "linear":
+    elif args.training.lr_scheduler_type == "linear":
         scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
     else:
         scheduler = ConstantWithWarmup(warmup_steps=warmup_steps)
@@ -446,13 +452,13 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     train_module = DPOTrainModule(
         model=model,
         optim=optim,
-        dpo_config=args.dpo_config,
+        dpo_config=args.dpo,
         reference_cache=reference_cache,
         scheduler=scheduler,
-        concatenated_forward=args.concatenated_forward,
-        packing=args.packing,
+        concatenated_forward=args.model.concatenated_forward,
+        packing=args.model.packing,
         device=device,
-        max_grad_norm=args.max_grad_norm,
+        max_grad_norm=args.training.max_grad_norm,
     )
 
     json_config = dpo_utils.config_to_json_serializable(args.as_dict())
@@ -460,30 +466,30 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     device_name = utils.get_device_name(torch.cuda.get_device_name(0))
     device_peak_flops = int(utils.GPU_SPECS[device_name]["flops"])
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback(
-        num_flops_per_token=model.num_flops_per_token(args.max_seq_length),
+        num_flops_per_token=model.num_flops_per_token(args.training.max_seq_length),
         device_peak_flops_per_second=device_peak_flops,
     )
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if slack_webhook_url:
         trainer_callbacks["slack"] = callbacks.SlackNotifierCallback(
-            name=args.run_name or args.exp_name, webhook_url=slack_webhook_url
+            name=args.tracking.run_name or args.tracking.exp_name, webhook_url=slack_webhook_url
         )
-    if args.with_tracking:
+    if args.logging.with_tracking:
         trainer_callbacks["wandb"] = callbacks.WandBCallback(
-            name=args.run_name or args.exp_name,
-            project=args.wandb_project,
-            entity=args.wandb_entity,
+            name=args.tracking.run_name or args.tracking.exp_name,
+            project=args.logging.wandb_project,
+            entity=args.logging.wandb_entity,
             config=json_config,
         )
     trainer_callbacks["checkpointer"] = CheckpointerCallback(
-        save_interval=args.checkpointing_steps, save_async=args.async_checkpointing
+        save_interval=args.checkpoint.checkpointing_steps, save_async=args.framework.async_checkpointing
     )
 
     trainer = train.TrainerConfig(
-        save_folder=args.output_dir,
-        max_duration=train.Duration.epochs(args.num_epochs),
-        metrics_collect_interval=args.logging_steps,
+        save_folder=args.checkpoint.output_dir,
+        max_duration=train.Duration.epochs(args.training.num_epochs),
+        metrics_collect_interval=args.logging.logging_steps,
         callbacks=trainer_callbacks,
         save_overwrite=True,
     ).build(train_module, data_loader_instance)
@@ -493,10 +499,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     logger.info("Training complete.")
 
     distributed_utils.barrier()
-    output_path = pathlib.Path(args.output_dir).resolve()
+    output_path = pathlib.Path(args.checkpoint.output_dir).resolve()
     beaker_output_path = pathlib.Path("/output").resolve()
     if (
-        args.try_auto_save_to_beaker
+        args.eval.try_auto_save_to_beaker
         and is_main_process
         and utils.is_beaker_job()
         and beaker_config is not None
@@ -505,32 +511,32 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     ):
         if distributed_utils.is_distributed():
             dist.barrier()
-        shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
+        shutil.copytree(args.checkpoint.output_dir, "/output", dirs_exist_ok=True)
 
-    if utils.is_beaker_job() and is_main_process and args.try_launch_beaker_eval_jobs:
+    if utils.is_beaker_job() and is_main_process and args.eval.try_launch_beaker_eval_jobs:
         wandb_url = None
-        if args.with_tracking:
+        if args.logging.with_tracking:
             wandb_tracker = trainer_callbacks.get("wandb")
             if wandb_tracker is not None and hasattr(wandb_tracker, "run") and wandb_tracker.run is not None:
                 wandb_url = wandb_tracker.run.get_url()  # type: ignore[union-attr]
-        if args.hf_repo_revision is not None:
-            eval_path = args.output_dir
+        if args.hub.hf_repo_revision is not None:
+            eval_path = args.checkpoint.output_dir
             if beaker_config is not None and beaker_config.beaker_dataset_ids:
                 eval_path = beaker_config.beaker_dataset_ids[-1]
             utils.launch_ai2_evals_on_weka(
                 path=eval_path,
-                leaderboard_name=args.hf_repo_revision,
-                oe_eval_max_length=args.oe_eval_max_length,
+                leaderboard_name=args.hub.hf_repo_revision,
+                oe_eval_max_length=args.eval.oe_eval_max_length,
                 wandb_url=wandb_url,
-                oe_eval_tasks=args.oe_eval_tasks,
-                gs_bucket_path=args.gs_bucket_path,
-                eval_workspace=args.eval_workspace,
-                eval_priority=args.eval_priority,
-                oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
+                oe_eval_tasks=args.eval.oe_eval_tasks,
+                gs_bucket_path=args.eval.gs_bucket_path,
+                eval_workspace=args.eval.eval_workspace,
+                eval_priority=args.eval.eval_priority,
+                oe_eval_gpu_multiplier=args.eval.oe_eval_gpu_multiplier,
             )
 
-    if args.push_to_hub and is_main_process:
-        model_utils.push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+    if args.hub.push_to_hub and is_main_process:
+        model_utils.push_folder_to_hub(args.checkpoint.output_dir, args.hub.hf_repo_id, args.hub.hf_repo_revision)
 
     train.teardown_training_environment()
 

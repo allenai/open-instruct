@@ -1797,27 +1797,6 @@ class LocalDatasetTransformationCache:
         return loaded_dataset, all_statistics
 
 
-def load_dataset_configs_from_args(
-    dataset_args: Any, transform_fn_args: List[Dict[str, Any]], dataset_config_seed: int = 42
-) -> List["DatasetConfig"]:
-    """Load dataset configurations from a dataset arguments object.
-
-    The `dataset_args` object should have:
-    - mixer_list: List of dataset names and fractions/counts
-    - mixer_list_splits: List of dataset splits
-    - transform_fn: List of transform function names
-    - target_columns: Optional list of target columns
-    """
-    return load_dataset_configs(
-        dataset_mixer_list=dataset_args.mixer_list,
-        dataset_mixer_list_splits=dataset_args.mixer_list_splits,
-        dataset_transform_fn=dataset_args.transform_fn,
-        transform_fn_args=transform_fn_args,
-        target_columns=dataset_args.target_columns,
-        dataset_config_seed=dataset_config_seed,
-    )
-
-
 def load_dataset_configs(
     dataset_mixer_list: List[str],
     dataset_mixer_list_splits: List[str],

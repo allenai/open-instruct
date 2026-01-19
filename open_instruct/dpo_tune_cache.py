@@ -122,19 +122,19 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
     accelerator_log_kwargs = {}
-    if args.with_tracking:
+    if args.logging.with_tracking:
         accelerator_log_kwargs["log_with"] = "wandb"
-        accelerator_log_kwargs["project_dir"] = args.output_dir
+        accelerator_log_kwargs["project_dir"] = args.checkpoint.output_dir
     # if you get timeouts (e.g. due to long tokenization) increase this.
-    timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
+    timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.framework.timeout))
     dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
     deepspeed_plugin = None
-    if args.zero_stage is not None:
+    if args.framework.zero_stage is not None:
         deepspeed_config = build_deepspeed_config(
-            zero_stage=args.zero_stage,
-            offload_optimizer=args.offload_optimizer,
-            offload_param=args.offload_param,
-            zero_hpz_partition_size=args.zero_hpz_partition_size,
+            zero_stage=args.framework.zero_stage,
+            offload_optimizer=args.framework.offload_optimizer,
+            offload_param=args.framework.offload_param,
+            zero_hpz_partition_size=args.framework.zero_hpz_partition_size,
         )
         deepspeed_plugin = DeepSpeedPlugin(hf_ds_config=deepspeed_config)
 
@@ -143,79 +143,80 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
         gradient_accumulation_plugin=GradientAccumulationPlugin(
-            num_steps=args.gradient_accumulation_steps, sync_each_batch=args.sync_each_batch
+            num_steps=args.training.gradient_accumulation_steps, sync_each_batch=args.framework.sync_each_batch
         ),
         deepspeed_plugin=deepspeed_plugin,
     )
 
     # ------------------------------------------------------------
     # Setup tokenizer
-    tc.tokenizer_revision = args.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
+    tc.tokenizer_revision = args.model.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
     tc.tokenizer_name_or_path = (
-        args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+        args.model.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
     )
-    if tc.tokenizer_revision != args.model_revision and tc.tokenizer_name_or_path != args.model_name_or_path:
+    if (
+        tc.tokenizer_revision != args.model.model_revision
+        and tc.tokenizer_name_or_path != args.model.model_name_or_path
+    ):
         # Warn user if tokenizer and model use different revisions; this is an unusual
         # use case.
         warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
-                   from the model revision `{args.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
-                   is different from the model name `{args.model_name_or_path=}`."""
+                   from the model revision `{args.model.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
+                   is different from the model name `{args.model.model_name_or_path=}`."""
         logger.warning(warning)
     tokenizer = tc.tokenizer
 
     # ------------------------------------------------------------
     # Set up runtime variables
-    if args.add_seed_and_date_to_exp_name:
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    else:
-        args.exp_name = args.exp_name
+    if args.tracking.add_seed_and_date_to_exp_name:
+        args.tracking.exp_name = f"{args.tracking.exp_name}__{args.tracking.seed}__{int(time.time())}"
     if not args.do_not_randomize_output_dir:
-        args.output_dir = os.path.join(args.output_dir, args.exp_name)
-    logger.info("using the output directory: %s", args.output_dir)
-    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+        args.checkpoint.output_dir = os.path.join(args.checkpoint.output_dir, args.tracking.exp_name)
+    logger.info("using the output directory: %s", args.checkpoint.output_dir)
+    args.dataset.local_cache_dir = os.path.abspath(args.dataset.local_cache_dir)
     if is_beaker_job():
-        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
-    if args.push_to_hub and accelerator.is_main_process:
-        if args.hf_repo_id is None:  # auto-generate one
-            args.hf_repo_id = "open_instruct_dev"
-        if args.hf_entity is None:  # first try to use AI2 entity
-            args.hf_entity = maybe_use_ai2_hf_entity()
-        if args.hf_entity is None:  # then try to use the user's entity
-            args.hf_entity = HfApi().whoami()["name"]
-        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:
-            args.hf_repo_revision = args.exp_name
-        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+        args.dataset.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+    if args.hub.push_to_hub and accelerator.is_main_process:
+        if args.hub.hf_repo_id is None:  # auto-generate one
+            args.hub.hf_repo_id = "open_instruct_dev"
+        if args.hub.hf_entity is None:  # first try to use AI2 entity
+            args.hub.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hub.hf_entity is None:  # then try to use the user's entity
+            args.hub.hf_entity = HfApi().whoami()["name"]
+        args.hub.hf_repo_id = f"{args.hub.hf_entity}/{args.hub.hf_repo_id}"
+        if args.hub.hf_repo_revision is None:
+            args.hub.hf_repo_revision = args.tracking.exp_name
+        args.hub.hf_repo_url = f"https://huggingface.co/{args.hub.hf_repo_id}/tree/{args.hub.hf_repo_revision}"
         if is_beaker_job():
             beaker_config = maybe_get_beaker_config()
 
     # ------------------------------------------------------------
     # Initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
-    if args.with_tracking:
-        experiment_config = vars(args)
+    if args.logging.with_tracking:
+        experiment_config = args.as_dict()
         # TensorBoard cannot log Enums, need the raw value
-        experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"]
+        experiment_config["training"]["lr_scheduler_type"] = experiment_config["training"]["lr_scheduler_type"]
 
         # (Optional) Ai2 internal tracking
-        if args.wandb_entity is None:
-            args.wandb_entity = maybe_use_ai2_wandb_entity()
+        if args.logging.wandb_entity is None:
+            args.logging.wandb_entity = maybe_use_ai2_wandb_entity()
         if accelerator.is_main_process and is_beaker_job():
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
         accelerator.init_trackers(
-            args.wandb_project,
+            args.logging.wandb_project,
             experiment_config,
             init_kwargs={
                 "wandb": {
-                    "name": args.exp_name,
-                    "entity": args.wandb_entity,
-                    "tags": [args.exp_name] + get_wandb_tags(),
+                    "name": args.tracking.exp_name,
+                    "entity": args.logging.wandb_entity,
+                    "tags": [args.tracking.exp_name] + get_wandb_tags(),
                 }
             },
         )
 
-    if args.with_tracking:
+    if args.logging.with_tracking:
         wandb_tracker = accelerator.get_tracker("wandb")
         if accelerator.is_main_process:
             maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
@@ -240,51 +241,49 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         transformers.utils.logging.set_verbosity_error()
 
     # If passed along, set the training seed now.
-    if args.seed is not None:
-        set_seed(args.seed)
+    if args.tracking.seed is not None:
+        set_seed(args.tracking.seed)
 
-    if accelerator.is_main_process and args.output_dir is not None:
-        os.makedirs(args.output_dir, exist_ok=True)
+    if accelerator.is_main_process and args.checkpoint.output_dir is not None:
+        os.makedirs(args.checkpoint.output_dir, exist_ok=True)
 
     accelerator.wait_for_everyone()
 
-    if args.dataset_mixer is not None:
-        args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
-        transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+        transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
         train_dataset = get_cached_dataset_tulu(
-            dataset_mixer_list=args.dataset_mixer_list,
-            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            dataset_mixer_list=args.dataset.mixer_list,
+            dataset_mixer_list_splits=args.dataset.mixer_list_splits,
             tc=tc,
-            dataset_transform_fn=args.dataset_transform_fn,
+            dataset_transform_fn=args.dataset.transform_fn,
             transform_fn_args=transform_fn_args,
-            target_columns=args.dataset_target_columns,
-            dataset_cache_mode=args.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_hash,
-            hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.dataset_local_cache_dir,
-            dataset_skip_cache=args.dataset_skip_cache,
+            target_columns=args.dataset.target_columns,
+            dataset_cache_mode=args.dataset.cache_mode,
+            dataset_config_hash=args.dataset.config_hash,
+            hf_entity=args.hub.hf_entity,
+            dataset_local_cache_dir=args.dataset.local_cache_dir,
+            dataset_skip_cache=args.dataset.skip_cache,
         )
-        train_dataset = train_dataset.shuffle(seed=args.seed)
+        train_dataset = train_dataset.shuffle(seed=args.tracking.seed)
         train_dataset.set_format(type="pt")
     if accelerator.is_main_process:
         visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
 
-    if args.cache_dataset_only:
+    if args.dataset.cache_dataset_only:
         return
 
     # Load pretrained model and tokenizer
     if args.config_name:
         config = AutoConfig.from_pretrained(
             args.config_name,
-            revision=args.model_revision,
+            revision=args.model.model_revision,
             trust_remote_code=tc.trust_remote_code,
             **args.additional_model_arguments,
         )
-    elif args.model_name_or_path:
+    elif args.model.model_name_or_path:
         config = AutoConfig.from_pretrained(
-            args.model_name_or_path,
-            revision=args.model_revision,
+            args.model.model_name_or_path,
+            revision=args.model.model_revision,
             trust_remote_code=tc.trust_remote_code,
             **args.additional_model_arguments,
         )
@@ -294,7 +293,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         )
 
     def load_model():
-        if args.model_name_or_path:
+        if args.model.model_name_or_path:
             if args.use_qlora:
                 bnb_config = BitsAndBytesConfig(
                     load_in_4bit=True,
@@ -305,15 +304,15 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                 device_index = accelerator.local_process_index
                 device_map = {"": device_index}  # force data-parallel training.
                 model = AutoModelForCausalLM.from_pretrained(
-                    args.model_name_or_path,
-                    revision=args.model_revision,
-                    from_tf=bool(".ckpt" in args.model_name_or_path),
+                    args.model.model_name_or_path,
+                    revision=args.model.model_revision,
+                    from_tf=bool(".ckpt" in args.model.model_name_or_path),
                     config=config,
                     trust_remote_code=tc.trust_remote_code,
                     quantization_config=bnb_config,
                     device_map=device_map,
                     dtype=torch.bfloat16,
-                    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                    attn_implementation="flash_attention_2" if args.model.use_flash_attn else "eager",
                 )
             elif args.use_liger_kernel:
                 from liger_kernel.transformers import AutoLigerKernelForCausalLM
@@ -322,26 +321,26 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
                 # Supported models: https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/monkey_patch.py#L948
                 model = AutoLigerKernelForCausalLM.from_pretrained(
-                    args.model_name_or_path,
-                    revision=args.model_revision,
-                    from_tf=bool(".ckpt" in args.model_name_or_path),
+                    args.model.model_name_or_path,
+                    revision=args.model.model_revision,
+                    from_tf=bool(".ckpt" in args.model.model_name_or_path),
                     config=config,
                     trust_remote_code=tc.trust_remote_code,
-                    low_cpu_mem_usage=args.low_cpu_mem_usage,
-                    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                    low_cpu_mem_usage=args.model.low_cpu_mem_usage,
+                    attn_implementation="flash_attention_2" if args.model.use_flash_attn else "eager",
                     # liger-kernel specific args
                     fused_linear_cross_entropy=False,  # don't fuse the linear layer with CE loss, since we want logits
                 )
             else:
                 model = AutoModelForCausalLM.from_pretrained(
-                    args.model_name_or_path,
-                    revision=args.model_revision,
-                    from_tf=bool(".ckpt" in args.model_name_or_path),
+                    args.model.model_name_or_path,
+                    revision=args.model.model_revision,
+                    from_tf=bool(".ckpt" in args.model.model_name_or_path),
                     config=config,
                     trust_remote_code=tc.trust_remote_code,
-                    low_cpu_mem_usage=args.low_cpu_mem_usage,
+                    low_cpu_mem_usage=args.model.low_cpu_mem_usage,
                     dtype=torch.bfloat16,
-                    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                    attn_implementation="flash_attention_2" if args.model.use_flash_attn else "eager",
                 )
         else:
             logger.info("Training new model from scratch")
@@ -362,22 +361,24 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     if len(tokenizer) > embedding_size:
         model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
 
-    if args.use_lora:
+    if args.lora.use_lora:
         if args.use_qlora:
-            model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+            model = prepare_model_for_kbit_training(
+                model, use_gradient_checkpointing=args.training.gradient_checkpointing
+            )
 
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(
             task_type=TaskType.CAUSAL_LM,
             inference_mode=False,
-            r=args.lora_rank,
-            lora_alpha=args.lora_alpha,
-            lora_dropout=args.lora_dropout,
+            r=args.lora.lora_rank,
+            lora_alpha=args.lora.lora_alpha,
+            lora_dropout=args.lora.lora_dropout,
             target_modules=["q_proj", "o_proj", "v_proj", "k_proj", "gate_proj", "up_proj", "down_proj"],
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
-    elif args.gradient_checkpointing:
+    elif args.training.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
     model_dims = ModelDims(
@@ -403,14 +404,14 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
 
     # DataLoaders creation:
-    if args.packing:
+    if args.model.packing:
         accelerator.print("Using packing/padding-free collation")
         collate_fn = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
         collate_fn = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
 
     train_dataloader = DataLoader(
-        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
+        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.training.per_device_train_batch_size
     )
 
     # Optimizer
@@ -419,28 +420,30 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     optimizer_grouped_parameters = [
         {
             "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-            "weight_decay": args.weight_decay,
+            "weight_decay": args.training.weight_decay,
         },
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
     ]
-    if args.use_qlora or args.dpo_use_paged_optimizer:
+    if args.use_qlora or args.training.dpo_use_paged_optimizer:
         from bitsandbytes.optim import AdamW
 
         optimizer = AdamW(
             optimizer_grouped_parameters,
-            lr=args.learning_rate,
-            optim_bits=8 if args.use_8bit_optimizer else 32,
+            lr=args.training.learning_rate,
+            optim_bits=8 if args.training.use_8bit_optimizer else 32,
             is_paged=True,
         )
     else:
-        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
+        optimizer = torch.optim.AdamW(
+            optimizer_grouped_parameters, lr=args.training.learning_rate, fused=args.training.fused_optimizer
+        )
     logger.info("=============optimizer loaded")
     print_gpu_stats(init_gpu_memory)
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
-    if args.max_train_steps is None:
-        args.max_train_steps = args.num_epochs * num_update_steps_per_epoch
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.training.gradient_accumulation_steps)
+    if args.training.max_train_steps is None:
+        args.training.max_train_steps = args.training.num_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
 
     # Create the learning rate scheduler.
@@ -456,13 +459,15 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     # num_training_steps by num_processes so that the total number of
     # updates matches the num_training_steps.
     num_training_steps_for_scheduler = (
-        args.max_train_steps if overrode_max_train_steps else args.max_train_steps * accelerator.num_processes
+        args.training.max_train_steps
+        if overrode_max_train_steps
+        else args.training.max_train_steps * accelerator.num_processes
     )
     lr_scheduler = get_scheduler(
-        name=args.lr_scheduler_type,
+        name=args.training.lr_scheduler_type,
         optimizer=optimizer,
         num_training_steps=num_training_steps_for_scheduler,
-        num_warmup_steps=int(num_training_steps_for_scheduler * args.warmup_ratio),
+        num_warmup_steps=int(num_training_steps_for_scheduler * args.training.warmup_ratio),
     )
     # Prepare everything with `accelerator`.
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -472,32 +477,36 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     print_gpu_stats(init_gpu_memory)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.training.gradient_accumulation_steps)
     if overrode_max_train_steps:
-        args.max_train_steps = args.num_epochs * num_update_steps_per_epoch
+        args.training.max_train_steps = args.training.num_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
-    args.num_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+    args.training.num_epochs = math.ceil(args.training.max_train_steps / num_update_steps_per_epoch)
 
     # Figure out how many steps we should save the Accelerator states
-    checkpointing_steps = args.checkpointing_steps
+    checkpointing_steps = args.checkpoint.checkpointing_steps
     if checkpointing_steps is not None and str(checkpointing_steps).lower() != "epoch":
         checkpointing_steps = int(checkpointing_steps)
 
     # Train!
-    total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
+    total_batch_size = (
+        args.training.per_device_train_batch_size
+        * accelerator.num_processes
+        * args.training.gradient_accumulation_steps
+    )
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
-    logger.info(f"  Num Epochs = {args.num_epochs}")
-    logger.info(f"  Instantaneous batch size per device = {args.per_device_train_batch_size}")
+    logger.info(f"  Num Epochs = {args.training.num_epochs}")
+    logger.info(f"  Instantaneous batch size per device = {args.training.per_device_train_batch_size}")
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
-    logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
-    logger.info(f"  Total optimization steps = {args.max_train_steps}")
+    logger.info(f"  Gradient Accumulation steps = {args.training.gradient_accumulation_steps}")
+    logger.info(f"  Total optimization steps = {args.training.max_train_steps}")
     completed_steps = 0
     starting_epoch = 0
 
     # Potentially load in the weights and states from a previous save
-    last_checkpoint_path = get_last_checkpoint_path(args)
+    last_checkpoint_path = get_last_checkpoint_path(args.checkpoint)
     resume_step = None
     if last_checkpoint_path:
         accelerator.print(f"Resumed from checkpoint: {last_checkpoint_path}")
@@ -512,9 +521,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             completed_steps = starting_epoch * num_update_steps_per_epoch
         else:
             # need to multiply `gradient_accumulation_steps` to reflect real steps
-            resume_step = int(training_difference.replace("step_", "")) * args.gradient_accumulation_steps
+            resume_step = int(training_difference.replace("step_", "")) * args.training.gradient_accumulation_steps
             starting_epoch = resume_step // len(train_dataloader)
-            completed_steps = resume_step // args.gradient_accumulation_steps
+            completed_steps = resume_step // args.training.gradient_accumulation_steps
             resume_step -= starting_epoch * len(train_dataloader)
 
     logger.info(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
@@ -523,30 +532,33 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     print_gpu_stats(init_gpu_memory)
 
     # Cache the logprobs
-    if args.dpo_loss_type.needs_reference_model:
+    if args.dpo.loss_type.needs_reference_model:
         config_dict = {
-            "concatenated_forward": args.concatenated_forward,
-            "dpo_loss_type": str(args.loss_type),
+            "concatenated_forward": args.model.concatenated_forward,
+            "dpo_loss_type": str(args.dpo.loss_type),
             "max_train_samples": args.max_train_samples,
-            "model_name_or_path": args.model_name_or_path,
-            "model_revision": args.model_revision,
-            "packing": args.packing,
-            "use_lora": args.use_lora,
+            "model_name_or_path": args.model.model_name_or_path,
+            "model_revision": args.model.model_revision,
+            "packing": args.model.packing,
+            "use_lora": args.lora.use_lora,
             "use_qlora": args.use_qlora,
         }
-        ref_cache_hash = dpo_utils.compute_reference_cache_hash(config_dict, tc, args, args.max_seq_length)
+        ref_cache_hash = dpo_utils.compute_reference_cache_hash(
+            config_dict, tc, args.dataset, args.training.max_seq_length
+        )
         reference_cache_path = pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt"
 
         def make_disable_adapter_context():
             return accelerator.unwrap_model(model).disable_adapter()
 
+        forward_fn = args.model.forward_fn
         reference_cache = dpo_utils.build_reference_logprobs_cache(
             model=model,
             dataloader=train_dataloader,
-            average_log_prob=args.dpo_loss_type.is_average_loss,
-            forward_fn=args.forward_fn,
+            average_log_prob=args.dpo.loss_type.is_average_loss,
+            forward_fn=forward_fn,
             full_dataset_size=original_dataset_size,
-            use_lora=args.use_lora,
+            use_lora=args.lora.use_lora,
             device=accelerator.device,
             cache_path=reference_cache_path,
             disable_adapter_context=make_disable_adapter_context,
@@ -563,7 +575,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     # Only show the progress bar once on each machine.
     start_time = time.perf_counter()
     progress_bar = tqdm(
-        range(args.max_train_steps), disable=not accelerator.is_local_main_process, bar_format="{l_bar}{bar}{r_bar}\n"
+        range(args.training.max_train_steps),
+        disable=not accelerator.is_local_main_process,
+        bar_format="{l_bar}{bar}{r_bar}\n",
     )
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
@@ -572,7 +586,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     episode = 0
     total_tokens_processed = 0
     mfu_interval_start = time.perf_counter()
-    for epoch in range(starting_epoch, args.num_epochs):
+    forward_fn = args.model.forward_fn
+    for epoch in range(starting_epoch, args.training.num_epochs):
         model.train()
         train_dataloader.set_epoch(epoch)
         if last_checkpoint_path and resume_step is not None:
@@ -585,27 +600,27 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
             with accelerator.accumulate(model):
-                policy_chosen_logps, policy_rejected_logps, aux_loss = args.forward_fn(
+                policy_chosen_logps, policy_rejected_logps, aux_loss = forward_fn(
                     model,
                     batch,
-                    average_log_prob=args.dpo_loss_type.is_average_loss,
-                    output_router_logits=args.load_balancing_loss,
-                )  # `aux_loss` is only used when `args.load_balancing_loss = True`
+                    average_log_prob=args.dpo.loss_type.is_average_loss,
+                    output_router_logits=args.dpo.load_balancing_loss,
+                )  # `aux_loss` is only used when `args.dpo.load_balancing_loss = True`
                 losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
-                    args,
+                    args.dpo,
                     batch,
                     policy_chosen_logps,
                     policy_rejected_logps,
-                    reference_cache if args.dpo_loss_type.needs_reference_model else None,
+                    reference_cache if args.dpo.loss_type.needs_reference_model else None,
                 )
                 loss = losses.mean()
-                if args.load_balancing_loss:
-                    weighted_aux_loss = args.load_balancing_weight * aux_loss
+                if args.dpo.load_balancing_loss:
+                    weighted_aux_loss = args.dpo.load_balancing_weight * aux_loss
                     loss += weighted_aux_loss
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
-                if accelerator.sync_gradients and args.max_grad_norm > 0:
-                    accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                if accelerator.sync_gradients and args.training.max_grad_norm > 0:
+                    accelerator.clip_grad_norm_(model.parameters(), args.training.max_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()
@@ -613,7 +628,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                 # We keep track of the loss at each logged step
                 with torch.no_grad():
                     local_metrics["train_loss"] += loss
-                    if args.dpo_loss_type.computes_reward_metrics:
+                    if args.dpo.loss_type.computes_reward_metrics:
                         average_rewards = (chosen_rewards + rejected_rewards) / 2
                         accuracy = (chosen_rewards > rejected_rewards).float()
                         margin = chosen_rewards - rejected_rewards
@@ -624,7 +639,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                         local_metrics["rewards/margin"] += margin
                     local_metrics["logps/chosen"] += policy_chosen_logps.mean()
                     local_metrics["logps/rejected"] += policy_rejected_logps.mean()
-                    if args.load_balancing_loss:
+                    if args.dpo.load_balancing_loss:
                         local_metrics["aux_loss"] += weighted_aux_loss
 
                     chosen_lengths = (batch["chosen_labels"] != -100).sum(dim=1)
@@ -635,10 +650,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 completed_steps += 1
-                if args.logging_steps and completed_steps % args.logging_steps == 0:
+                if args.logging.logging_steps and completed_steps % args.logging.logging_steps == 0:
                     # single all reduce to save time, avoiding per metric all reduce
                     global_metrics_tensor = accelerator.reduce(local_metrics.metrics, reduction="mean")
-                    global_metrics_tensor /= args.gradient_accumulation_steps * args.logging_steps
+                    global_metrics_tensor /= args.training.gradient_accumulation_steps * args.logging.logging_steps
                     global_metrics_tensor[local_metrics.names2idx["token_count"]] *= accelerator.num_processes
                     global_metrics = {
                         name: global_metrics_tensor[index].item() for name, index in local_metrics.names2idx.items()
@@ -649,10 +664,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     total_tokens_step = int(global_metrics["token_count"])
                     total_tokens_processed += total_tokens_step
                     avg_sequence_length = total_tokens_step / (
-                        args.per_device_train_batch_size
+                        args.training.per_device_train_batch_size
                         * accelerator.num_processes
-                        * args.gradient_accumulation_steps
-                        * args.logging_steps
+                        * args.training.gradient_accumulation_steps
+                        * args.logging.logging_steps
                         * 2
                     )
 
@@ -668,7 +683,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                         "logps/chosen": global_metrics["logps/chosen"],
                         "logps/rejected": global_metrics["logps/rejected"],
                     }
-                    if args.dpo_loss_type.computes_reward_metrics:
+                    if args.dpo.loss_type.computes_reward_metrics:
                         metrics_to_log.update(
                             {
                                 "rewards/chosen": global_metrics["rewards/chosen"],
@@ -679,7 +694,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                             }
                         )
                     logger_str = f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics['train_loss']}"
-                    if args.load_balancing_loss:
+                    if args.dpo.load_balancing_loss:
                         logger_str += f" Aux Loss: {global_metrics['aux_loss']}"
                         metrics_to_log["aux_loss"] = global_metrics["aux_loss"]
 
@@ -693,12 +708,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     metrics_to_log["perf/tokens_per_second_total"] = total_tokens_per_second
 
                     logger.info(logger_str)
-                    if args.with_tracking:
+                    if args.logging.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
                     if accelerator.is_main_process:
                         maybe_update_beaker_description(
                             current_step=completed_steps,
-                            total_steps=args.max_train_steps,
+                            total_steps=args.training.max_train_steps,
                             start_time=start_time,
                             wandb_url=None if wandb_tracker is None else wandb_tracker.run.get_url(),
                         )
@@ -708,65 +723,72 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
                 if isinstance(checkpointing_steps, int) and completed_steps % checkpointing_steps == 0:
                     output_dir = f"step_{completed_steps}"
-                    if args.output_dir is not None:
-                        output_dir = os.path.join(args.output_dir, output_dir)
+                    if args.checkpoint.output_dir is not None:
+                        output_dir = os.path.join(args.checkpoint.output_dir, output_dir)
                     accelerator.save_state(output_dir)
                     # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
-                    with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                    with open(
+                        os.path.join(get_last_checkpoint_path(args.checkpoint, incomplete=True), "COMPLETED"), "w"
+                    ) as f:
                         f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
                     if accelerator.is_local_main_process:
-                        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+                        clean_last_n_checkpoints(args.checkpoint.output_dir, args.checkpoint.keep_last_n_checkpoints)
                     accelerator.wait_for_everyone()
 
-                if completed_steps >= args.max_train_steps:
+                if completed_steps >= args.training.max_train_steps:
                     break
 
         if checkpointing_steps == "epoch":
             output_dir = f"epoch_{epoch}"
-            if args.output_dir is not None:
-                output_dir = os.path.join(args.output_dir, output_dir)
+            if args.checkpoint.output_dir is not None:
+                output_dir = os.path.join(args.checkpoint.output_dir, output_dir)
             accelerator.save_state(output_dir)
             # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
-            with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+            with open(os.path.join(get_last_checkpoint_path(args.checkpoint, incomplete=True), "COMPLETED"), "w") as f:
                 f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
             if accelerator.is_local_main_process:
-                clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+                clean_last_n_checkpoints(args.checkpoint.output_dir, args.checkpoint.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
 
-    if args.output_dir is not None:
+    if args.checkpoint.output_dir is not None:
         model_utils.save_with_accelerate(
-            accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
+            accelerator,
+            model,
+            tokenizer,
+            args.checkpoint.output_dir,
+            args.lora.use_lora,
+            chat_template_name=tc.chat_template_name,
         )
 
     # remove all checkpoints to save space
     if accelerator.is_local_main_process:
-        clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
+        clean_last_n_checkpoints(args.checkpoint.output_dir, keep_last_n_checkpoints=0)
 
     if (
-        args.try_auto_save_to_beaker
+        args.eval.try_auto_save_to_beaker
         and accelerator.is_main_process
         and is_beaker_job()
         and len(beaker_config.beaker_dataset_id_urls) > 0
-        and args.output_dir.rstrip("/") != "/output"
+        and args.checkpoint.output_dir.rstrip("/") != "/output"
     ):
-        shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
+        shutil.copytree(args.checkpoint.output_dir, "/output", dirs_exist_ok=True)
 
-    if is_beaker_job() and accelerator.is_main_process and args.try_launch_beaker_eval_jobs:
+    if is_beaker_job() and accelerator.is_main_process and args.eval.try_launch_beaker_eval_jobs:
         launch_ai2_evals_on_weka(
-            path=args.output_dir,
-            leaderboard_name=args.hf_repo_revision,
-            oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=wandb_tracker.run.get_url() if args.with_tracking else None,
-            oe_eval_tasks=args.oe_eval_tasks,
-            gs_bucket_path=args.gs_bucket_path,
-            eval_workspace=args.eval_workspace,
-            eval_priority=args.eval_priority,
-            oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
+            path=args.checkpoint.output_dir,
+            leaderboard_name=args.hub.hf_repo_revision,
+            oe_eval_max_length=args.eval.oe_eval_max_length,
+            wandb_url=wandb_tracker.run.get_url() if args.logging.with_tracking else None,
+            oe_eval_tasks=args.eval.oe_eval_tasks,
+            gs_bucket_path=args.eval.gs_bucket_path,
+            eval_workspace=args.eval.eval_workspace,
+            eval_priority=args.eval.eval_priority,
+            oe_eval_gpu_multiplier=args.eval.oe_eval_gpu_multiplier,
         )
-    if args.push_to_hub and accelerator.is_main_process:
-        model_utils.push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+    if args.hub.push_to_hub and accelerator.is_main_process:
+        model_utils.push_folder_to_hub(args.checkpoint.output_dir, args.hub.hf_repo_id, args.hub.hf_repo_revision)
     accelerator.wait_for_everyone()
-    if args.with_tracking:
+    if args.logging.with_tracking:
         accelerator.end_training()
 
 
