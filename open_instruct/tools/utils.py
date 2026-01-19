@@ -7,13 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 import aiohttp
-from tenacity import (
-    AsyncRetrying,
-    before_sleep_log,
-    retry_if_exception,
-    stop_after_attempt,
-    wait_exponential_jitter,
-)
+from tenacity import AsyncRetrying, before_sleep_log, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats

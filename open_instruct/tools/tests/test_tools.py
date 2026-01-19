@@ -1420,10 +1420,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
 
             if status >= 400:
                 mock_response.raise_for_status.side_effect = aiohttp.ClientResponseError(
-                    request_info=unittest.mock.MagicMock(),
-                    history=(),
-                    status=status,
-                    message=reason,
+                    request_info=unittest.mock.MagicMock(), history=(), status=status, message=reason
                 )
             return mock_response
 
@@ -1452,7 +1449,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
                     timeout_seconds=10,
                     base_delay=0.001,  # Use very short delay for tests
                     max_delay=0.01,
-                    **request_kwargs
+                    **request_kwargs,
                 )
                 return result
 
@@ -1461,10 +1458,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
 
     def test_successful_request_no_retry(self):
         """Test that successful requests don't retry."""
-        result, count = self._run_with_mock_responses(
-            [(200, {"result": "ok"}, "OK")],
-            max_retries=3
-        )
+        result, count = self._run_with_mock_responses([(200, {"result": "ok"}, "OK")], max_retries=3)
 
         self.assertEqual(result.data, {"result": "ok"})
         self.assertEqual(result.error, "")
@@ -1473,11 +1467,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
     def test_429_triggers_retry(self):
         """Test that 429 status triggers retries."""
         result, count = self._run_with_mock_responses(
-            [
-                (429, None, "Too Many Requests"),
-                (200, {"result": "ok"}, "OK"),
-            ],
-            max_retries=3
+            [(429, None, "Too Many Requests"), (200, {"result": "ok"}, "OK")], max_retries=3
         )
 
         self.assertEqual(result.data, {"result": "ok"})
@@ -1486,12 +1476,8 @@ class TestMakeApiRequestRetry(unittest.TestCase):
     def test_5xx_triggers_retry(self):
         """Test that 5xx status codes trigger retries."""
         result, count = self._run_with_mock_responses(
-            [
-                (500, None, "Internal Server Error"),
-                (503, None, "Service Unavailable"),
-                (200, {"result": "ok"}, "OK"),
-            ],
-            max_retries=3
+            [(500, None, "Internal Server Error"), (503, None, "Service Unavailable"), (200, {"result": "ok"}, "OK")],
+            max_retries=3,
         )
 
         self.assertEqual(result.data, {"result": "ok"})
@@ -1499,20 +1485,14 @@ class TestMakeApiRequestRetry(unittest.TestCase):
 
     def test_4xx_does_not_retry(self):
         """Test that non-429 4xx errors do not trigger retries."""
-        result, count = self._run_with_mock_responses(
-            [(400, None, "Bad Request")],
-            max_retries=3
-        )
+        result, count = self._run_with_mock_responses([(400, None, "Bad Request")], max_retries=3)
 
         self.assertIn("400", result.error)
         self.assertEqual(count, 1)
 
     def test_404_does_not_retry(self):
         """Test that 404 errors do not trigger retries."""
-        result, count = self._run_with_mock_responses(
-            [(404, None, "Not Found")],
-            max_retries=3
-        )
+        result, count = self._run_with_mock_responses([(404, None, "Not Found")], max_retries=3)
 
         self.assertIn("404", result.error)
         self.assertEqual(count, 1)
@@ -1520,12 +1500,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
     def test_timeout_triggers_retry(self):
         """Test that timeouts trigger retries."""
         result, count = self._run_with_mock_responses(
-            [
-                asyncio.TimeoutError(),
-                asyncio.TimeoutError(),
-                (200, {"result": "ok"}, "OK"),
-            ],
-            max_retries=3
+            [asyncio.TimeoutError(), asyncio.TimeoutError(), (200, {"result": "ok"}, "OK")], max_retries=3
         )
 
         self.assertEqual(result.data, {"result": "ok"})
@@ -1535,12 +1510,10 @@ class TestMakeApiRequestRetry(unittest.TestCase):
         """Test that connection errors trigger retries."""
         result, count = self._run_with_mock_responses(
             [
-                aiohttp.ClientConnectorError(
-                    unittest.mock.MagicMock(), OSError("Connection refused")
-                ),
+                aiohttp.ClientConnectorError(unittest.mock.MagicMock(), OSError("Connection refused")),
                 (200, {"result": "ok"}, "OK"),
             ],
-            max_retries=3
+            max_retries=3,
         )
 
         self.assertEqual(result.data, {"result": "ok"})
@@ -1548,10 +1521,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
 
     def test_max_retries_respected(self):
         """Test that the number of retries respects max_retries."""
-        result, count = self._run_with_mock_responses(
-            [(500, None, "Internal Server Error")] * 10,
-            max_retries=2
-        )
+        result, count = self._run_with_mock_responses([(500, None, "Internal Server Error")] * 10, max_retries=2)
 
         # Should have made initial attempt + 2 retries = 3 total attempts
         self.assertEqual(count, 3)
@@ -1559,20 +1529,14 @@ class TestMakeApiRequestRetry(unittest.TestCase):
 
     def test_zero_retries_means_single_attempt(self):
         """Test that max_retries=0 means only one attempt."""
-        result, count = self._run_with_mock_responses(
-            [(500, None, "Internal Server Error")],
-            max_retries=0
-        )
+        result, count = self._run_with_mock_responses([(500, None, "Internal Server Error")], max_retries=0)
 
         self.assertEqual(count, 1)
         self.assertIn("500", result.error)
 
     def test_timeout_error_returns_timed_out_flag(self):
         """Test that timeout errors set timed_out=True in response."""
-        result, count = self._run_with_mock_responses(
-            [asyncio.TimeoutError()] * 5,
-            max_retries=2
-        )
+        result, count = self._run_with_mock_responses([asyncio.TimeoutError()] * 5, max_retries=2)
 
         self.assertTrue(result.timed_out)
         self.assertIn("Timeout", result.error)
