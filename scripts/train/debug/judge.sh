@@ -1,3 +1,4 @@
+#!/bin/bash
 export HOSTED_VLLM_API_BASE=http://saturn-cs-aus-230.reviz.ai2.in:8001/v1
 
 # new version

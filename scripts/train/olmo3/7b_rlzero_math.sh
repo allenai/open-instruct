@@ -78,4 +78,4 @@ python mason.py \
     --oe_eval_tasks $EVALS \
     --oe_eval_gpu_multiplier 4 \
     --oe_eval_beaker_image michaeln/oe_eval_rlzero \
-    --output_dir /output/olmo3-7b-rlzero-math/checkpoints $@
+    --output_dir /output/olmo3-7b-rlzero-math/checkpoints "$@"
