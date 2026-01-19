@@ -1449,17 +1449,13 @@ def setup_datasets(
 def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.ActorHandle], list[str]]:
     """Create tool actors based on tool configuration using the TOOL_REGISTRY.
 
-    For GenericMCPToolConfig without a specific tool_name, this will auto-discover
-    all tools from the MCP server and create actors for each discovered tool.
-
     Args:
         parsed_tools: List of ParsedTool instances containing name, call_name, and config.
 
     Returns:
         A tuple of (tool_actors, tool_call_names) where:
         - tool_actors: List of Ray actor handles for the requested tools.
-        - tool_call_names: List of call names for each tool (may differ from input
-          if MCP tools were auto-expanded).
+        - tool_call_names: List of call names for each tool (may differ from input for MCP tools, which decide their own call names).
 
     Raises:
         ValueError: If an unknown tool is requested, configs are invalid, or required fields are missing.
@@ -1480,7 +1476,7 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.A
             raise ValueError(f"Invalid config for tool '{parsed_tool.name}': {e}") from e
 
         # Collect (config, call_name, tool_class) tuples to process
-        # For GenericMCPToolConfig without tool_name, expand to discover all tools from MCP server
+        # special logic for MCP tools: we ask the mcp server what tools it has, and then create actors for each.
         configs_to_create: list[tuple[GenericMCPToolConfig, str, type]] = []
 
         if isinstance(config, GenericMCPToolConfig) and config.tool_name is None:
@@ -1494,7 +1490,6 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.A
         else:
             configs_to_create.append((config, parsed_tool.call_name, tool_config_class.tool_class))
 
-        # Create actors for all collected configs
         for cfg, call_name, tool_class in configs_to_create:
             _kwarg_dict = asdict(cfg) | {"call_name": call_name}
             tool_actors.append(ray.remote(tool_class).options(max_concurrency=512).remote(**_kwarg_dict))

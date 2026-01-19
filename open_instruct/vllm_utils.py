@@ -495,20 +495,7 @@ def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.F
     actor.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
 
     if len(actor.request_outputs[base_request_id]["outputs"]) == expected_n:
-        future = asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
-
-        # Add callback to log exceptions from the Future
-        def log_exception(f):
-            try:
-                f.result()  # This will raise if the coroutine raised
-            except Exception as e:
-                import traceback
-
-                print(f"[finalize_completed_request] ERROR: {e}", flush=True)
-                traceback.print_exc()
-
-        future.add_done_callback(log_exception)
-        return future
+        return asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
 
     return None
 
@@ -765,8 +752,7 @@ class LLMRayActor:
     def process_from_queue(self) -> None:
         finalize_futures: list[futures.Future] = []
         while True:
-            result = self.completion_queue.get()
-            completion_future = accumulate_completions(self, result)
+            completion_future = accumulate_completions(self, self.completion_queue.get())
             if completion_future is not None:
                 finalize_futures.append(completion_future)
 

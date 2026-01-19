@@ -1307,22 +1307,14 @@ def rlvr_tokenize_v2(
     ground_truths_val = row[ground_truths_key]
     verifier_source_val = row[verifier_source_key]
 
-    # Ensure ground_truths and dataset source are wrapped in lists for 1:1 correspondence.
-    # If dataset source is a string (single verifier), wrap both in lists so that the single
-    # verifier receives the entire list of acceptable ground truths.
+    # if the verifier source is a string, we wrap it in a list (compatibility with multi-verifier datasets)
+    # we also then wrap ground truths in a list to match.
     if isinstance(verifier_source_val, str):
         verifier_source_val = [verifier_source_val]
-        # Wrap ground_truths in a list so that the entire list of acceptable answers
-        # is passed to the single verifier (maintains 1:1 correspondence)
-        if not isinstance(ground_truths_val, str):
-            ground_truths_val = [ground_truths_val]
-    # if ground truths is a string, make it a list
-    if isinstance(ground_truths_val, str):
         ground_truths_val = [ground_truths_val]
-
-    # Now set the standard keys with the processed values
     row[GROUND_TRUTHS_KEY] = ground_truths_val
     row[VERIFIER_SOURCE_KEY] = verifier_source_val
+
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
     # drop the messages field as it often causes issues.
@@ -1360,22 +1352,18 @@ def rlvr_tokenize_v3(
     ground_truths_val = row[ground_truths_key]
     verifier_source_val = row[verifier_source_key]
 
-    # Ensure ground_truths and dataset source are wrapped in lists for 1:1 correspondence.
-    # If dataset source is a string (single verifier), wrap both in lists so that the single
-    # verifier receives the entire list of acceptable ground truths.
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # if the verifier source is a string, we wrap it in a list (compatibility with multi-verifier datasets)
+    # we also then wrap ground truths in a list to match.
     if isinstance(verifier_source_val, str):
         verifier_source_val = [verifier_source_val]
-        # Wrap ground_truths in a list so that the entire list of acceptable answers
-        # is passed to the single verifier (maintains 1:1 correspondence)
-        if not isinstance(ground_truths_val, str):
-            ground_truths_val = [ground_truths_val]
-    # if ground truths is a string, make it a list
-    if isinstance(ground_truths_val, str):
         ground_truths_val = [ground_truths_val]
-
-    # Now set the standard keys with the processed values
     row[GROUND_TRUTHS_KEY] = ground_truths_val
     row[VERIFIER_SOURCE_KEY] = verifier_source_val
+
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
     return row
