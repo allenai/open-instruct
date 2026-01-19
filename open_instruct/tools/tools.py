@@ -16,7 +16,6 @@ from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, make_api
 logger = logger_utils.setup_logger(__name__)
 
 
-# Optional dr_agent imports for legacy MCP tools
 try:
     from dr_agent.tool_interface.mcp_tools import (
         Crawl4AIBrowseTool,
