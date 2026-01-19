@@ -11,11 +11,9 @@ from typing import Any, ClassVar
 
 from open_instruct import logger_utils
 from open_instruct.tools.generic_mcp import GenericMCPToolConfig
-from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, log_tool_call, make_api_request, truncate
+from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, log_tool_call, make_api_request
 
 logger = logger_utils.setup_logger(__name__)
-
-_truncate = truncate  # backwards compat
 
 
 try:
