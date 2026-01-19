@@ -1302,19 +1302,29 @@ def rlvr_tokenize_v2(
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
-    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
-    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
-    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
-    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # Ensure ground_truths and dataset source are wrapped in lists for 1:1 correspondence.
+    # If dataset source is a string (single verifier), wrap both in lists so that the single
+    # verifier receives the entire list of acceptable ground truths.
+    if isinstance(verifier_source_val, str):
+        verifier_source_val = [verifier_source_val]
+        # Wrap ground_truths in a list so that the entire list of acceptable answers
+        # is passed to the single verifier (maintains 1:1 correspondence)
+        if not isinstance(ground_truths_val, str):
+            ground_truths_val = [ground_truths_val]
+    # if ground truths is a string, make it a list
+    if isinstance(ground_truths_val, str):
+        ground_truths_val = [ground_truths_val]
+
+    # Now set the standard keys with the processed values
+    row[GROUND_TRUTHS_KEY] = ground_truths_val
+    row[VERIFIER_SOURCE_KEY] = verifier_source_val
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
-    # some basic transformations:
-    # if ground truths is a string, make it a list
-    if isinstance(row[ground_truths_key], str):
-        row[ground_truths_key] = [row[ground_truths_key]]
-    # if dataset source is a string, make it a list
-    if isinstance(row[verifier_source_key], str):
-        row[verifier_source_key] = [row[verifier_source_key]]
     # drop the messages field as it often causes issues.
     row.pop(sft_messages_key)
     return row
@@ -1346,19 +1356,28 @@ def rlvr_tokenize_v3(
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
-    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
-    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
-    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
-    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # Ensure ground_truths and dataset source are wrapped in lists for 1:1 correspondence.
+    # If dataset source is a string (single verifier), wrap both in lists so that the single
+    # verifier receives the entire list of acceptable ground truths.
+    if isinstance(verifier_source_val, str):
+        verifier_source_val = [verifier_source_val]
+        # Wrap ground_truths in a list so that the entire list of acceptable answers
+        # is passed to the single verifier (maintains 1:1 correspondence)
+        if not isinstance(ground_truths_val, str):
+            ground_truths_val = [ground_truths_val]
+    # if ground truths is a string, make it a list
+    if isinstance(ground_truths_val, str):
+        ground_truths_val = [ground_truths_val]
+
+    # Now set the standard keys with the processed values
+    row[GROUND_TRUTHS_KEY] = ground_truths_val
+    row[VERIFIER_SOURCE_KEY] = verifier_source_val
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
-    # some basic transformations:
-    # if ground truths is a string, make it a list
-    if isinstance(row[ground_truths_key], str):
-        row[ground_truths_key] = [row[ground_truths_key]]
-    # if dataset source is a string, make it a list
-    if isinstance(row[verifier_source_key], str):
-        row[verifier_source_key] = [row[verifier_source_key]]
     return row
 
 
@@ -1563,12 +1582,14 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
                 fn_kwargs=fn_kwargs,
                 remove_columns=[col for col in dataset.column_names if col not in target_columns],
                 num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+                load_from_cache_file=False,  # Force re-transformation to pick up code changes
             )
         elif fn_type == "filter":
             dataset = dataset.filter(
                 fn,
                 fn_kwargs=fn_kwargs,
                 num_proc=get_num_proc(len(dataset), num_proc, FILTER_EXAMPLE_PER_SECOND_PER_CPU),
+                load_from_cache_file=False,  # Force re-transformation to pick up code changes
             )
         # NOTE: elif we can implement packing here to create a packed SFT dataset. Low priority for now.
         else:

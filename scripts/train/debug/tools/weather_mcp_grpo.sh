@@ -7,7 +7,7 @@
 #
 # The weather MCP server provides 3 tools:
 # - get_current_weather(city): Get current weather for a city
-# - get_weather_forecast(city, days): Get a multi-day weather forecast  
+# - get_weather_forecast(city, days): Get a multi-day weather forecast
 # - compare_weather(city1, city2): Compare weather between two cities
 #
 # The script will automatically start the weather server if it's not running.
@@ -40,7 +40,7 @@ else
     uv run python server.py "$WEATHER_SERVER_PORT" > /dev/null 2>&1 &
     WEATHER_SERVER_PID=$!
     cd "$REPO_ROOT"
-    
+
     # Wait for server to be ready (max 30 seconds)
     echo "Waiting for server to be ready..."
     for i in {1..30}; do
@@ -81,7 +81,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --vllm_tensor_parallel_size 1 \
     --beta 0.01 \
     --seed 42 \
-    --local_eval_every 5 \
+    --local_eval_every 1 \
     --vllm_sync_backend gloo \
     --single_gpu_mode \
     --vllm_gpu_memory_utilization 0.3 \
@@ -94,4 +94,5 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --max_tool_calls 3 \
     --verbose true \
     --push_to_hub false \
-    --output_dir output/weather_mcp_debug
+    --output_dir output/weather_mcp_debug \
+    --dataset_skip_cache

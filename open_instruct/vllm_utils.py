@@ -495,7 +495,20 @@ def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.F
     actor.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
 
     if len(actor.request_outputs[base_request_id]["outputs"]) == expected_n:
-        return asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
+        future = asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
+
+        # Add callback to log exceptions from the Future
+        def log_exception(f):
+            try:
+                f.result()  # This will raise if the coroutine raised
+            except Exception as e:
+                import traceback
+
+                print(f"[finalize_completed_request] ERROR: {e}", flush=True)
+                traceback.print_exc()
+
+        future.add_done_callback(log_exception)
+        return future
 
     return None
 
@@ -752,7 +765,8 @@ class LLMRayActor:
     def process_from_queue(self) -> None:
         finalize_futures: list[futures.Future] = []
         while True:
-            completion_future = accumulate_completions(self, self.completion_queue.get())
+            result = self.completion_queue.get()
+            completion_future = accumulate_completions(self, result)
             if completion_future is not None:
                 finalize_futures.append(completion_future)
 
@@ -930,7 +944,11 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 excess_tool_calls[tool_call.name] = excess_tool_calls.get(tool_call.name, 0) + 1
                 continue
 
-            tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].execute.remote(**tool_call.args)
+            # Use asyncio.to_thread to run ray.get() without blocking the event loop.
+            # We can't await Ray ObjectRefs directly (they're not coroutines), but we also can't
+            # call ray.get() directly since that would block the event loop thread.
+            object_ref = actor.tool_actor_map[tool_call.name].execute.remote(**tool_call.args)
+            tool_result: ToolOutput = await asyncio.to_thread(ray.get, object_ref)
 
             timeout = timeout or tool_result.timeout
             tool_error += tool_result.error or ""
