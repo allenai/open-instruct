@@ -33,7 +33,7 @@ try:
     }
 except ImportError:
     DR_AGENT_MCP_AVAILABLE = False
-    DR_AGENT_MCP_TOOLS = {}
+    DR_AGENT_MCP_TOOLS: dict[str, type] = {}
 
 
 def _truncate(text: str, max_length: int = 500) -> str:
