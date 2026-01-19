@@ -15,6 +15,9 @@ jobs:
     name: CHANGELOG
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
 
     steps:
     - uses: actions/checkout@v4
