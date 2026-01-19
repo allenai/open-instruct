@@ -5,24 +5,22 @@ import dataclasses
 import os
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from parameterized import parameterized
 
+from open_instruct.tools.generic_mcp import GenericMCPTool, GenericMCPToolConfig, MCPTransport
 from open_instruct.tools.tools import (
     Crawl4AIBrowseTool,
     Crawl4AIBrowseToolConfig,
-    GenericMCPToolConfig,
     JinaBrowseTool,
     JinaBrowseToolConfig,
-    MCPTransport,
     PythonCodeTool,
     PythonCodeToolConfig,
     S2SearchTool,
     S2SearchToolConfig,
     SerperSearchTool,
     SerperSearchToolConfig,
-    _truncate,
 )
 from open_instruct.tools.utils import (
     ParsedToolConfig,
@@ -30,6 +28,7 @@ from open_instruct.tools.utils import (
     ToolsConfig,
     ToolStatistics,
     get_openai_tool_definitions,
+    truncate,
 )
 
 
@@ -257,7 +256,7 @@ class TestPythonCodeToolConfig(unittest.TestCase):
 
 
 class TestTruncateHelper(unittest.TestCase):
-    """Tests for _truncate helper function."""
+    """Tests for truncate helper function."""
 
     @parameterized.expand(
         [
@@ -267,11 +266,11 @@ class TestTruncateHelper(unittest.TestCase):
             ("custom_max_length", "Hello, World! This is a test.", 10, "Hello, Wor", True),
         ]
     )
-    def test_truncate(self, name, text, max_length, expected_result, should_truncate):
-        """Test _truncate with various inputs."""
-        result = _truncate(text, max_length=max_length)
+    def testtruncate(self, name, text, max_length, expected_result, shouldtruncate):
+        """Test truncate with various inputs."""
+        result = truncate(text, max_length=max_length)
 
-        if should_truncate:
+        if shouldtruncate:
             self.assertTrue(result.startswith(text[:max_length]))
             self.assertIn("more chars", result)
             if text == "a" * 600:
@@ -1402,195 +1401,89 @@ class TestMCPTransport(unittest.TestCase):
         self.assertEqual(MCPTransport("stdio"), MCPTransport.STDIO)
 
 
-class TestMCPToolFactoryInit(unittest.TestCase):
-    """Tests for MCPToolFactory initialization."""
-
-    def test_http_transport_requires_server_url(self):
-        """Test HTTP transport requires server_url."""
-        from open_instruct.tools.tools import MCPToolFactory
-
-        with self.assertRaisesRegex(ValueError, "server_url is required for http transport"):
-            MCPToolFactory(transport="http")
-
-    def test_sse_transport_requires_server_url(self):
-        """Test SSE transport requires server_url."""
-        from open_instruct.tools.tools import MCPToolFactory
-
-        with self.assertRaisesRegex(ValueError, "server_url is required for sse transport"):
-            MCPToolFactory(transport="sse")
-
-    def test_stdio_transport_requires_command(self):
-        """Test STDIO transport requires command."""
-        from open_instruct.tools.tools import MCPToolFactory
-
-        with self.assertRaisesRegex(ValueError, "command is required for stdio transport"):
-            MCPToolFactory(transport="stdio")
-
-    def test_valid_http_initialization(self):
-        """Test valid HTTP initialization."""
-        from open_instruct.tools.tools import MCPToolFactory
-
-        factory = MCPToolFactory(server_url="http://localhost:8000/mcp", transport="http")
-        self.assertEqual(factory.server_url, "http://localhost:8000/mcp")
-        self.assertEqual(factory.transport, MCPTransport.HTTP)
-        self.assertEqual(factory.timeout, 60)
-        self.assertEqual(factory.max_retries, 3)
-
-    def test_valid_stdio_initialization(self):
-        """Test valid STDIO initialization."""
-        from open_instruct.tools.tools import MCPToolFactory
-
-        factory = MCPToolFactory(transport="stdio", command="python", args=["server.py"], env={"DEBUG": "1"})
-        self.assertEqual(factory.transport, MCPTransport.STDIO)
-        self.assertEqual(factory.command, "python")
-        self.assertEqual(factory.args, ["server.py"])
-        self.assertEqual(factory.env, {"DEBUG": "1"})
-
-
-class TestMCPToolFactoryDiscovery(unittest.TestCase):
-    """Tests for MCPToolFactory tool discovery."""
-
-    def test_discover_tools_caches_results(self):
-        """Test that discover_tools caches results."""
-        from open_instruct.tools.tools import MCPToolFactory
-
-        factory = MCPToolFactory(server_url="http://localhost:8000/mcp", transport="http")
-
-        mock_tools = {
-            "tool1": {"name": "tool1", "description": "Tool 1", "input_schema": {"type": "object", "properties": {}}},
-            "tool2": {"name": "tool2", "description": "Tool 2", "input_schema": {"type": "object", "properties": {}}},
-        }
-
-        # Set the cache directly
-        factory._discovered_tools = mock_tools
-
-        # Should return cached result without hitting server
-        result = factory.discover_tools()
-        self.assertEqual(result, mock_tools)
-
-
 class TestGenericMCPToolInit(unittest.TestCase):
     """Tests for GenericMCPTool initialization."""
 
     def test_tool_config_name(self):
         """Test tool has correct config_name."""
-        from open_instruct.tools.tools import GenericMCPTool
-
         self.assertEqual(GenericMCPTool.config_name, "generic_mcp")
 
-    @patch("open_instruct.tools.generic_mcp.MCPToolFactory")
-    def test_initialization_creates_factory(self, MockFactory):
-        """Test initialization creates MCPToolFactory."""
-        from open_instruct.tools.tools import GenericMCPTool
+    def test_http_transport_requires_server_url(self):
+        """Test HTTP transport requires server_url."""
+        with self.assertRaisesRegex(ValueError, "server_url is required for http transport"):
+            GenericMCPTool(call_name="test", transport="http")
 
+    def test_sse_transport_requires_server_url(self):
+        """Test SSE transport requires server_url."""
+        with self.assertRaisesRegex(ValueError, "server_url is required for sse transport"):
+            GenericMCPTool(call_name="test", transport="sse")
+
+    def test_stdio_transport_requires_command(self):
+        """Test STDIO transport requires command."""
+        with self.assertRaisesRegex(ValueError, "command is required for stdio transport"):
+            GenericMCPTool(call_name="test", transport="stdio")
+
+    def test_valid_http_initialization(self):
+        """Test valid HTTP initialization."""
         tool = GenericMCPTool(
             call_name="search", server_url="http://localhost:8000/mcp", transport="http", tool_name="my_tool"
         )
-
         self.assertEqual(tool.call_name, "search")
-        self.assertEqual(tool._requested_tool_name, "my_tool")
-        MockFactory.assert_called_once_with(
-            server_url="http://localhost:8000/mcp",
-            transport="http",
-            command=None,
-            args=None,
-            env=None,
-            timeout=60,
-            max_retries=3,
-            retry_backoff=0.5,
+        self.assertEqual(tool.server_url, "http://localhost:8000/mcp")
+        self.assertEqual(tool.transport, MCPTransport.HTTP)
+        self.assertEqual(tool.tool_name, "my_tool")
+
+    def test_valid_stdio_initialization(self):
+        """Test valid STDIO initialization."""
+        tool = GenericMCPTool(
+            call_name="test", transport="stdio", command="python", args=["server.py"], env={"DEBUG": "1"}
         )
+        self.assertEqual(tool.transport, MCPTransport.STDIO)
+        self.assertEqual(tool.command, "python")
+        self.assertEqual(tool.args, ["server.py"])
+        self.assertEqual(tool.env, {"DEBUG": "1"})
+
+    def test_tool_info_from_init(self):
+        """Test tool_info can be passed in init."""
+        tool_info = {"description": "My tool", "input_schema": {"type": "object"}}
+        tool = GenericMCPTool(
+            call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool", tool_info=tool_info
+        )
+        self.assertEqual(tool.description, "My tool")
+        self.assertEqual(tool.parameters, {"type": "object"})
 
 
 class TestGenericMCPToolExecution(unittest.TestCase):
     """Tests for GenericMCPTool execution."""
 
-    def test_description_triggers_discovery(self):
-        """Test accessing description triggers tool discovery."""
-        from open_instruct.tools.tools import GenericMCPTool
+    @patch("open_instruct.tools.generic_mcp._call_mcp_tool")
+    def test_execute_success(self, mock_call):
+        """Test successful tool execution."""
+        mock_result = MagicMock()
+        mock_result.content = [MagicMock(type="text", text="result text")]
+        mock_result.structuredContent = None
+        mock_call.return_value = mock_result
 
-        mock_factory = MagicMock()
-        mock_factory.discover_tools.return_value = {
-            "my_tool": {
-                "name": "my_tool",
-                "description": "My tool description",
-                "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}},
-            }
-        }
+        tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool")
+        result = asyncio.run(tool.execute(query="test"))
 
-        with patch("open_instruct.tools.generic_mcp.MCPToolFactory", return_value=mock_factory):
-            tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool")
+        self.assertTrue(result.called)
+        self.assertEqual(result.output, "result text")
+        self.assertEqual(result.error, "")
 
-            description = tool.description
-            self.assertEqual(description, "My tool description")
-            mock_factory.discover_tools.assert_called_once()
+    @patch("open_instruct.tools.generic_mcp._call_mcp_tool")
+    def test_execute_timeout(self, mock_call):
+        """Test tool execution timeout."""
+        mock_call.side_effect = asyncio.TimeoutError()
 
-    def test_parameters_from_discovered_tool(self):
-        """Test parameters are from discovered tool schema."""
-        from open_instruct.tools.tools import GenericMCPTool
+        tool = GenericMCPTool(
+            call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool", timeout=1
+        )
+        result = asyncio.run(tool.execute(query="test"))
 
-        mock_factory = MagicMock()
-        expected_schema = {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
-        mock_factory.discover_tools.return_value = {
-            "my_tool": {"name": "my_tool", "description": "My tool", "input_schema": expected_schema}
-        }
-
-        with patch("open_instruct.tools.generic_mcp.MCPToolFactory", return_value=mock_factory):
-            tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool")
-
-            params = tool.parameters
-            self.assertEqual(params, expected_schema)
-
-    def test_execute_calls_factory(self):
-        """Test execute calls factory.call_tool."""
-        from open_instruct.tools.tools import GenericMCPTool
-
-        mock_factory = MagicMock()
-        mock_factory.discover_tools.return_value = {
-            "my_tool": {"name": "my_tool", "description": "My tool", "input_schema": {"type": "object"}}
-        }
-        expected_output = ToolOutput(output="result", called=True, error="", timeout=False, runtime=0.1)
-        mock_factory.call_tool = AsyncMock(return_value=expected_output)
-
-        with patch("open_instruct.tools.generic_mcp.MCPToolFactory", return_value=mock_factory):
-            tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool")
-
-            result = asyncio.run(tool.execute(query="test"))
-
-            self.assertEqual(result, expected_output)
-            mock_factory.call_tool.assert_called_once_with("my_tool", {"query": "test"})
-
-    def test_first_tool_used_when_none_specified(self):
-        """Test first discovered tool is used when tool_name is None."""
-        from open_instruct.tools.tools import GenericMCPTool
-
-        mock_factory = MagicMock()
-        mock_factory.discover_tools.return_value = {
-            "first_tool": {"name": "first_tool", "description": "First", "input_schema": {"type": "object"}},
-            "second_tool": {"name": "second_tool", "description": "Second", "input_schema": {"type": "object"}},
-        }
-
-        with patch("open_instruct.tools.generic_mcp.MCPToolFactory", return_value=mock_factory):
-            tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name=None)
-
-            # Trigger discovery
-            _ = tool.description
-
-            self.assertEqual(tool._tool_name, "first_tool")
-
-    def test_raises_when_tool_not_found(self):
-        """Test raises ValueError when requested tool not found."""
-        from open_instruct.tools.tools import GenericMCPTool
-
-        mock_factory = MagicMock()
-        mock_factory.discover_tools.return_value = {"other_tool": {"name": "other_tool", "description": "Other"}}
-
-        with patch("open_instruct.tools.generic_mcp.MCPToolFactory", return_value=mock_factory):
-            tool = GenericMCPTool(
-                call_name="search", server_url="http://localhost:8000/mcp", tool_name="nonexistent_tool"
-            )
-
-            with self.assertRaisesRegex(ValueError, "Tool 'nonexistent_tool' not found"):
-                _ = tool.description
+        self.assertTrue(result.called)
+        self.assertTrue(result.timeout)
+        self.assertIn("Timeout", result.error)
 
 
 class TestGenericMCPToolConfig(unittest.TestCase):
@@ -1630,38 +1523,15 @@ class TestGenericMCPToolConfig(unittest.TestCase):
 
     def test_tool_class_attribute(self):
         """Test tool_class is set to GenericMCPTool."""
-        from open_instruct.tools.tools import GenericMCPTool
 
         self.assertEqual(GenericMCPToolConfig.tool_class, GenericMCPTool)
 
     def test_expand_tools_returns_self_when_tool_name_set(self):
         """Test expand_tools returns [self] when tool_name is specified."""
         config = GenericMCPToolConfig(server_url="http://localhost:8000/mcp", tool_name="my_tool")
-        expanded = config.expand_tools()
+        expanded = asyncio.run(config.expand_tools())
         self.assertEqual(len(expanded), 1)
         self.assertEqual(expanded[0].tool_name, "my_tool")
-
-    @patch("open_instruct.tools.generic_mcp.MCPToolFactory")
-    def test_expand_tools_discovers_all_tools(self, MockFactory):
-        """Test expand_tools discovers and creates configs for all tools."""
-        mock_factory = MagicMock()
-        mock_factory.discover_tools.return_value = {
-            "tool1": {"name": "tool1"},
-            "tool2": {"name": "tool2"},
-            "tool3": {"name": "tool3"},
-        }
-        MockFactory.return_value = mock_factory
-
-        config = GenericMCPToolConfig(server_url="http://localhost:8000/mcp", tool_name=None)
-        expanded = config.expand_tools()
-
-        self.assertEqual(len(expanded), 3)
-        self.assertEqual(expanded[0].tool_name, "tool1")
-        self.assertEqual(expanded[1].tool_name, "tool2")
-        self.assertEqual(expanded[2].tool_name, "tool3")
-        # All configs should have same server_url
-        for c in expanded:
-            self.assertEqual(c.server_url, "http://localhost:8000/mcp")
 
 
 class TestGenericMCPToolInRegistry(unittest.TestCase):
