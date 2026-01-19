@@ -13,9 +13,6 @@ from open_instruct import logger_utils
 from open_instruct.tools.generic_mcp import GenericMCPTool, GenericMCPToolConfig, MCPToolFactory, MCPTransport
 from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, make_api_request
 
-# Re-export MCP classes for backwards compatibility
-__all__ = ["MCPTransport", "MCPToolFactory", "GenericMCPTool", "GenericMCPToolConfig", "TOOL_REGISTRY"]
-
 logger = logger_utils.setup_logger(__name__)
 
 
