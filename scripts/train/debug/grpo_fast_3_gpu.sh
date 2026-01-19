@@ -1,3 +1,4 @@
+#!/bin/bash
 # debug script using 3 gpus to specifically test sequence parallelism
 # with minimal gpus (2 for training for seq parallel, 1 for inference)
 # useful for debugging multi-gpu training without too many gpus

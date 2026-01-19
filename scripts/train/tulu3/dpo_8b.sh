@@ -1,3 +1,4 @@
+#!/bin/bash
 python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/tulu-3-dev \

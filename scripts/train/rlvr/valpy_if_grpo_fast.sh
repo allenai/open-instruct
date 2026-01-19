@@ -1,3 +1,4 @@
+#!/bin/bash
 python mason.py \
     --cluster ai2/augusta \
     --workspace ai2/tulu-thinker \
