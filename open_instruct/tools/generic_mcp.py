@@ -193,6 +193,7 @@ class GenericMCPToolConfig(BaseToolConfig):
     max_retries: int = 3
     retry_backoff: float = 0.5
     tool_name: str | None = None
+    tool_info: dict[str, Any] = field(default_factory=dict)
 
     async def discover_tools(self) -> dict[str, dict[str, Any]]:
         """Discover tools from the mcp server."""
@@ -223,4 +224,4 @@ class GenericMCPToolConfig(BaseToolConfig):
 
         discovered = await self.discover_tools()
         logger.info(f"MCP server discovered {len(discovered)} tools: {list(discovered.keys())}")
-        return [replace(self, tool_name=name) for name in discovered]
+        return [replace(self, tool_name=name, tool_info=info) for name, info in discovered.items()]
