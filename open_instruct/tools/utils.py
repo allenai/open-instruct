@@ -230,16 +230,21 @@ def _is_retryable_exception(exception: BaseException) -> bool:
 
     Retries on:
     - Timeouts (asyncio.TimeoutError)
-    - Connection errors (aiohttp.ClientConnectorError, ServerDisconnectedError, etc.)
+    - Connection errors (aiohttp.ClientConnectionError - includes ClientConnectorError,
+      ServerDisconnectedError, etc.)
     - Our custom _RetryableHTTPError (for 429/5xx detected before raise_for_status)
 
     Does NOT retry on:
     - aiohttp.ClientResponseError (4xx errors from raise_for_status)
+    - Other non-connection ClientError subclasses
     """
-    if isinstance(exception, (asyncio.TimeoutError, _RetryableHTTPError)):
+    if isinstance(exception, asyncio.TimeoutError):
         return True
-    # Retry on connection-level errors, but not response errors (4xx)
-    if isinstance(exception, aiohttp.ClientError) and not isinstance(exception, aiohttp.ClientResponseError):
+    if isinstance(exception, _RetryableHTTPError):
+        return True
+    # Only retry on connection-level errors (DNS, TCP, TLS failures, server disconnects)
+    # NOT on response errors like 4xx which indicate client mistakes
+    if isinstance(exception, aiohttp.ClientConnectionError):
         return True
     return False
 
