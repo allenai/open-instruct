@@ -10,7 +10,7 @@ import aiohttp
 from tenacity import (
     AsyncRetrying,
     before_sleep_log,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential_jitter,
 )
@@ -225,6 +225,25 @@ def _is_retryable_status(status: int) -> bool:
     return status == 429 or status >= 500
 
 
+def _is_retryable_exception(exception: BaseException) -> bool:
+    """Check if an exception should trigger a retry.
+
+    Retries on:
+    - Timeouts (asyncio.TimeoutError)
+    - Connection errors (aiohttp.ClientConnectorError, ServerDisconnectedError, etc.)
+    - Our custom _RetryableHTTPError (for 429/5xx detected before raise_for_status)
+
+    Does NOT retry on:
+    - aiohttp.ClientResponseError (4xx errors from raise_for_status)
+    """
+    if isinstance(exception, (asyncio.TimeoutError, _RetryableHTTPError)):
+        return True
+    # Retry on connection-level errors, but not response errors (4xx)
+    if isinstance(exception, aiohttp.ClientError) and not isinstance(exception, aiohttp.ClientResponseError):
+        return True
+    return False
+
+
 async def make_api_request(
     url: str,
     timeout_seconds: int,
@@ -268,7 +287,7 @@ async def make_api_request(
     retrying = AsyncRetrying(
         stop=stop_after_attempt(max_retries + 1),
         wait=wait_exponential_jitter(initial=base_delay, max=max_delay),
-        retry=retry_if_exception_type((asyncio.TimeoutError, aiohttp.ClientError, _RetryableHTTPError)),
+        retry=retry_if_exception(_is_retryable_exception),
         before_sleep=before_sleep_log(logger, log_level=logging.DEBUG),
         reraise=True,
     )
@@ -380,6 +399,6 @@ class BaseToolConfig:
     tool_class: ClassVar[type[Tool]]
     """Related tool class for this config."""
 
-    max_concurrency: int = 512
+    max_concurrency: int = field(default=512, kw_only=True)
     """Maximum number of concurrent requests the Ray actor can handle.
     This controls how many parallel calls can be made to this tool across all workers."""

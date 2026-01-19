@@ -24,6 +24,7 @@ dependencies = [
     "peft>=0.13.2",
     "ray[default]>=2.49.2",
     "setuptools>=75.6.0,<80.0.0",
+    "tenacity>=8.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.9.0,<2.10",
     "transformers>=4.57.0",
