@@ -19,8 +19,25 @@ __all__ = ["MCPTransport", "MCPToolFactory", "GenericMCPTool", "GenericMCPToolCo
 logger = logger_utils.setup_logger(__name__)
 
 
-# dr_agent tools are imported lazily to avoid hanging during module load.
-# The dr_agent package may block during import if certain servers are unavailable.
+# Optional dr_agent imports for legacy MCP tools
+try:
+    from dr_agent.tool_interface.mcp_tools import (
+        Crawl4AIBrowseTool,
+        MassiveServeSearchTool,
+        SemanticScholarSnippetSearchTool,
+    )
+    from dr_agent.tool_interface.mcp_tools import SerperSearchTool as DrAgentSerperSearchTool
+
+    DR_AGENT_MCP_AVAILABLE = True
+    DR_AGENT_MCP_TOOLS: dict[str, type] = {
+        "snippet_search": SemanticScholarSnippetSearchTool,
+        "google_search": DrAgentSerperSearchTool,
+        "massive_serve": MassiveServeSearchTool,
+        "browse_webpage": Crawl4AIBrowseTool,
+    }
+except ImportError:
+    DR_AGENT_MCP_AVAILABLE = False
+    DR_AGENT_MCP_TOOLS = {}
 
 
 def _truncate(text: str, max_length: int = 500) -> str:
@@ -525,23 +542,8 @@ class DrAgentMCPTool(Tool):
         base_url: str | None = None,
         num_results: int = 10,
     ) -> None:
-        # Import dr_agent lazily to avoid blocking during module load
-        try:
-            from dr_agent.tool_interface.mcp_tools import (
-                Crawl4AIBrowseTool,
-                MassiveServeSearchTool,
-                SemanticScholarSnippetSearchTool,
-            )
-            from dr_agent.tool_interface.mcp_tools import SerperSearchTool as DrAgentSerperSearchTool
-
-            dr_agent_mcp_tools: dict[str, type] = {
-                "snippet_search": SemanticScholarSnippetSearchTool,
-                "google_search": DrAgentSerperSearchTool,
-                "massive_serve": MassiveServeSearchTool,
-                "browse_webpage": Crawl4AIBrowseTool,
-            }
-        except ImportError as e:
-            raise ImportError("MCP tools require dr_agent package. Install with: uv sync --extra dr-tulu") from e
+        if not DR_AGENT_MCP_AVAILABLE:
+            raise ImportError("MCP tools require dr_agent package. Install with: uv sync --extra dr-tulu")
 
         self.call_name = call_name
         self.mcp_tools: list[Any] = []
@@ -552,10 +554,10 @@ class DrAgentMCPTool(Tool):
         resolved_port = port or int(os.environ.get("MCP_TRANSPORT_PORT", "8000"))
 
         for name in [n.strip() for n in tool_names.split(",") if n.strip()]:
-            if name not in dr_agent_mcp_tools:
-                raise ValueError(f"Unknown MCP tool: {name}. Available: {list(dr_agent_mcp_tools.keys())}")
+            if name not in DR_AGENT_MCP_TOOLS:
+                raise ValueError(f"Unknown MCP tool: {name}. Available: {list(DR_AGENT_MCP_TOOLS.keys())}")
 
-            cls = dr_agent_mcp_tools[name]
+            cls = DR_AGENT_MCP_TOOLS[name]
             valid_params = set(inspect.signature(cls.__init__).parameters.keys())
             kwargs: dict[str, Any] = {}
             if "host" in valid_params:
