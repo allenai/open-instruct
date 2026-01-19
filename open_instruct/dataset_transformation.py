@@ -1582,14 +1582,12 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
                 fn_kwargs=fn_kwargs,
                 remove_columns=[col for col in dataset.column_names if col not in target_columns],
                 num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
-                load_from_cache_file=False,  # Force re-transformation to pick up code changes
             )
         elif fn_type == "filter":
             dataset = dataset.filter(
                 fn,
                 fn_kwargs=fn_kwargs,
                 num_proc=get_num_proc(len(dataset), num_proc, FILTER_EXAMPLE_PER_SECOND_PER_CPU),
-                load_from_cache_file=False,  # Force re-transformation to pick up code changes
             )
         # NOTE: elif we can implement packing here to create a packed SFT dataset. Low priority for now.
         else:
