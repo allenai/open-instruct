@@ -930,11 +930,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 excess_tool_calls[tool_call.name] = excess_tool_calls.get(tool_call.name, 0) + 1
                 continue
 
-            # Use asyncio.to_thread to run ray.get() without blocking the event loop.
-            # We can't await Ray ObjectRefs directly (they're not coroutines), but we also can't
-            # call ray.get() directly since that would block the event loop thread.
-            object_ref = actor.tool_actor_map[tool_call.name].execute.remote(**tool_call.args)
-            tool_result: ToolOutput = await asyncio.to_thread(ray.get, object_ref)
+            tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].execute.remote(**tool_call.args)
 
             timeout = timeout or tool_result.timeout
             tool_error += tool_result.error or ""
