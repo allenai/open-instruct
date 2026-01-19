@@ -46,7 +46,6 @@ NUM_PROMPTS=16
 NUM_SAMPLES=4
 LEARNING_RATE=1e-6
 BETA=0.0
-VALIDATION_HOLDOUT=0.1
 
 FP32_LM_HEAD="${FP32_LM_HEAD:-0}"
 FP32_FLAG=""
@@ -65,7 +64,6 @@ echo "  Total episodes: $TOTAL_EPISODES"
 echo "  Batch size: $BATCH_SIZE"
 echo "  Prompts per rollout: $NUM_PROMPTS"
 echo "  Samples per prompt: $NUM_SAMPLES"
-echo "  Validation holdout: ${VALIDATION_HOLDOUT} (10%)"
 echo "  FP32 LM head: ${FP32_LM_HEAD}"
 echo "  Output dir: ${OUTPUT_DIR}"
 echo ""
@@ -75,7 +73,6 @@ uv run python open_instruct/grpo_fast.py \
     --model_name_or_path "$MODEL" \
     --dataset_mixer_list "$DATASET" 5000 \
     --dataset_mixer_list_splits train \
-    --validation_holdout_ratio $VALIDATION_HOLDOUT \
     --max_prompt_token_length 256 \
     --response_length 512 \
     --pack_length 768 \
