@@ -104,7 +104,7 @@ def get_files_hash_if_exists(
     return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
 
 
-def _preserve_column(column_name: str):
+def _preserve_column(column_name: str, dataset, target_columns: list) -> list:
     if column_name in dataset.column_names and column_name not in target_columns:
         target_columns = target_columns + [column_name]
     return target_columns
@@ -1653,8 +1653,8 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # perform the transformation
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         # Always preserve dataset_source if it exists
-        target_columns = _preserve_column(DATASET_ORIGIN_KEY)
-        target_columns = _preserve_column(TOOLS_COLUMN_KEY)
+        target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
+        target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
 
         if fn_type == "map":
             dataset = dataset.map(
