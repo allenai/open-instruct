@@ -196,13 +196,12 @@ class GenericMCPToolConfig(BaseToolConfig):
 
     async def discover_tools(self) -> dict[str, dict[str, Any]]:
         """Discover tools from the mcp server."""
-        tool_dict = {}
         client = _get_mcp_client(MCPTransport(self.transport), self.server_url, self.command, self.args, self.env)
         async with client as (read_stream, write_stream, *_):  # noqa: SIM117
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 resp = await session.list_tools()
-                tool_dict |= {
+                return {
                     t.name: {
                         "name": t.name,
                         "description": t.description or "",
