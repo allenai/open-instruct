@@ -1485,7 +1485,7 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.A
 
         if isinstance(config, GenericMCPToolConfig) and config.tool_name is None:
             logger.info(f"Auto-discovering tools from MCP server for '{parsed_tool.name}'...")
-            expanded_configs = config.expand_tools()
+            expanded_configs = asyncio.run(config.expand_tools())
             for expanded_config in expanded_configs:
                 configs_to_create.append((expanded_config, expanded_config.tool_name, tool_config_class.tool_class))
             logger.info(
