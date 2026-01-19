@@ -8,11 +8,15 @@ accelerate==1.12.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux')
     #   peft
 ai2-olmo-core==2.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
+aiofiles==25.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via crawl4ai
 aiohappyeyeballs==2.6.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via aiohttp
 aiohttp==3.13.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   aiohttp-cors
+    #   crawl4ai
+    #   dr-agent
     #   fsspec
     #   litellm
     #   ray
@@ -21,6 +25,10 @@ aiohttp-cors==0.8.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux'
     # via ray
 aiosignal==1.4.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via aiohttp
+aiosqlite==0.22.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via crawl4ai
+alphashape==1.3.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via crawl4ai
 annotated-doc==0.0.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via fastapi
 annotated-types==0.7.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -32,19 +40,25 @@ antlr4-python3-runtime==4.11.0 ; (platform_machine == 'aarch64' and sys_platform
 anyio==4.12.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   anthropic
+    #   crawl4ai
     #   httpx
     #   mcp
     #   openai
     #   sse-starlette
     #   starlette
     #   watchfiles
+apache-tvm-ffi==0.1.7 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via flashinfer-python
 astor==0.8.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via depyf
 attrs==25.4.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   aiohttp
+    #   cyclopts
     #   jsonschema
     #   referencing
+authlib==1.6.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via fastmcp
 babel==2.17.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mkdocs-material
 backoff==2.2.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -52,18 +66,26 @@ backoff==2.2.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or 
 backrefs==6.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mkdocs-material
 beaker-py==2.5.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+beautifulsoup4==4.14.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   crawl4ai
+    #   dr-agent
 bettermap==1.3.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via ai2-olmo-core
 bitsandbytes==0.49.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via open-instruct
 blake3==1.0.8 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
+blobfile==3.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via dr-agent
 boto3==1.42.10 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via cached-path
 botocore==1.42.10 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   boto3
     #   s3transfer
+brotli==1.2.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via crawl4ai
 cached-path==1.8.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via ai2-olmo-core
 cachetools==6.2.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -78,16 +100,26 @@ certifi==2025.11.12 ; (platform_machine == 'aarch64' and sys_platform == 'linux'
     #   httpx
     #   requests
     #   sentry-sdk
-cffi==2.0.0 ; (implementation_name == 'pypy' and platform_machine == 'aarch64' and sys_platform == 'linux') or (implementation_name == 'pypy' and platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux')
+cffi==2.0.0 ; (implementation_name == 'pypy' and platform_machine == 'aarch64' and sys_platform == 'linux') or (implementation_name == 'pypy' and platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (platform_python_implementation != 'PyPy' and sys_platform == 'darwin')
     # via
     #   cryptography
     #   pyzmq
 cfgv==3.5.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via pre-commit
+chardet==5.2.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   crawl4ai
+    #   dr-agent
 charset-normalizer==3.4.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via requests
+    # via
+    #   pdfminer-six
+    #   requests
 click==8.2.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
+    #   alphashape
+    #   click-log
+    #   crawl4ai
+    #   flashinfer-python
     #   litellm
     #   mkdocs
     #   nltk
@@ -96,24 +128,52 @@ click==8.2.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (p
     #   typer
     #   uvicorn
     #   wandb
+click-log==0.4.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via alphashape
 cloudpickle==3.1.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
+cohere==5.20.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via dr-agent
 colorama==0.4.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mkdocs-material
 colorful==0.5.8 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via ray
-compressed-tensors==0.13.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+compressed-tensors==0.12.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
 contourpy==1.3.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via matplotlib
-cryptography==46.0.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via pyjwt
+crawl4ai==0.7.8 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via dr-agent
+cryptography==46.0.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   authlib
+    #   pdfminer-six
+    #   pyjwt
+    #   pyopenssl
+cssselect==1.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via crawl4ai
+cuda-bindings==13.1.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via cuda-python
+cuda-pathfinder==1.3.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via
+    #   cuda-bindings
+    #   cuda-python
+cuda-python==13.1.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via nvidia-cutlass-dsl
+cupy-cuda12x==13.6.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via ray
 cycler==0.12.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via matplotlib
+cyclopts==4.4.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via fastmcp
 datasets==4.4.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via open-instruct
+    # via
+    #   dr-agent
+    #   open-instruct
 debugpy==1.8.19 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
+decorator==5.2.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via retry
 deepspeed==0.18.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
 depyf==0.20.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -124,27 +184,42 @@ dill==0.4.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (pl
     #   datasets
     #   depyf
     #   multiprocess
-diskcache==5.6.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via vllm
+diskcache==5.6.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   dr-agent
+    #   vllm
 distlib==0.4.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via virtualenv
 distro==1.9.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   anthropic
     #   openai
-dnspython==2.8.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+dnspython==2.8.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via email-validator
-docstring-parser==0.17.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via anthropic
+docstring-parser==0.17.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   anthropic
+    #   cyclopts
+docutils==0.22.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via rich-rst
+dr-agent==0.1.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via open-instruct
 einops==0.8.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   deepspeed
     #   flash-attn
+    #   flashinfer-python
     #   vllm
-email-validator==2.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+email-validator==2.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   fastapi
     #   pydantic
+exceptiongroup==1.3.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via fastmcp
+fake-http-header==0.3.5 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via tf-playwright-stealth
+fake-useragent==2.2.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via crawl4ai
 fastapi==0.124.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   model-hosting-container-standards
@@ -156,8 +231,15 @@ fastapi-cloud-cli==0.7.0 ; (platform_machine == 'aarch64' and sys_platform == 'l
     # via fastapi-cli
 fastar==0.8.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via fastapi-cloud-cli
+fastavro==1.12.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via cohere
+fastmcp==2.11.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via dr-agent
+fastrlock==0.8.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via cupy-cuda12x
 filelock==3.20.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
+    #   blobfile
     #   cached-path
     #   datasets
     #   huggingface-hub
@@ -168,6 +250,8 @@ filelock==3.20.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   vllm
 flash-attn==2.8.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via open-instruct
+flashinfer-python==0.5.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via vllm
 fonttools==4.61.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via matplotlib
 frozenlist==1.8.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -210,25 +294,29 @@ google-resumable-media==2.8.0 ; (platform_machine == 'aarch64' and sys_platform 
     # via google-cloud-storage
 googleapis-common-protos==1.72.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via google-api-core
+greenlet==3.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   patchright
+    #   playwright
 grpcio==1.76.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   beaker-py
-    #   grpcio-reflection
     #   ray
     #   tensorboard
-    #   vllm
-grpcio-reflection==1.76.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via vllm
 h11==0.16.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   httpcore
     #   uvicorn
+h2==4.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via httpx
 hf-transfer==0.1.9 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
 hf-xet==1.2.0 ; (platform_machine == 'aarch64' and sys_platform == 'darwin') or (platform_machine == 'amd64' and sys_platform == 'darwin') or (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via huggingface-hub
 hjson==3.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via deepspeed
+hpack==4.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via h2
 httpcore==1.0.9 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via httpx
 httptools==0.7.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -236,14 +324,17 @@ httptools==0.7.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
 httpx==0.28.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   anthropic
+    #   cohere
+    #   crawl4ai
     #   datasets
     #   fastapi
     #   fastapi-cloud-cli
+    #   fastmcp
     #   litellm
     #   mcp
     #   model-hosting-container-standards
     #   openai
-httpx-sse==0.4.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+httpx-sse==0.4.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mcp
 huggingface-hub==0.36.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -253,6 +344,10 @@ huggingface-hub==0.36.0 ; (platform_machine == 'aarch64' and sys_platform == 'li
     #   peft
     #   tokenizers
     #   transformers
+humanize==4.15.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via crawl4ai
+hyperframe==6.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via h2
 identify==2.6.15 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via pre-commit
 idna==3.11 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -262,7 +357,7 @@ idna==3.11 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (pla
     #   httpx
     #   requests
     #   yarl
-ijson==3.4.0.post0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+ijson==3.4.0.post0 ; platform_machine == 'aarch64' and sys_platform == 'linux'
     # via vllm
 immutabledict==1.2.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
@@ -274,10 +369,10 @@ importlib-resources==6.5.2 ; (platform_machine == 'aarch64' and sys_platform == 
     # via ai2-olmo-core
 iniconfig==2.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via pytest
-intel-openmp==2024.2.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via vllm
 interegular==0.3.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via lm-format-enforcer
+isodate==0.7.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via openapi-core
 jinja2==3.1.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   fastapi
@@ -301,19 +396,35 @@ jsonschema==4.25.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux')
     #   litellm
     #   mcp
     #   mistral-common
+    #   openapi-core
+    #   openapi-schema-validator
+    #   openapi-spec-validator
     #   ray
+jsonschema-path==0.3.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   openapi-core
+    #   openapi-spec-validator
 jsonschema-specifications==2025.9.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via jsonschema
+    # via
+    #   jsonschema
+    #   openapi-schema-validator
 kiwisolver==1.4.9 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via matplotlib
 langdetect==1.0.9 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
-lark==1.2.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via vllm
+lark==1.2.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   crawl4ai
+    #   vllm
+lazy-object-proxy==1.12.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via openapi-spec-validator
 liger-kernel==0.6.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via open-instruct
 litellm==1.75.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via open-instruct
+    # via
+    #   crawl4ai
+    #   dr-agent
+    #   open-instruct
 llguidance==1.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
 llvmlite==0.44.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -322,6 +433,11 @@ lm-format-enforcer==0.11.3 ; (platform_machine == 'aarch64' and sys_platform == 
     # via vllm
 loguru==0.7.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via compressed-tensors
+lxml==5.4.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   blobfile
+    #   crawl4ai
+    #   dr-agent
 markdown==3.10 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   mkdocs
@@ -337,15 +453,19 @@ markupsafe==3.0.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') 
     #   werkzeug
 matplotlib==3.10.8 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
-mcp==1.25.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via vllm
+mcp==1.25.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   fastmcp
+    #   vllm
 mdurl==0.1.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via markdown-it-py
 mergedeep==1.3.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   mkdocs
     #   mkdocs-get-deps
-mistral-common==1.8.8 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+mistral-common==1.8.6 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via vllm
+mistral-common==1.8.8 ; platform_machine == 'aarch64' and sys_platform == 'linux'
     # via vllm
 mkdocs==1.6.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mkdocs-material
@@ -356,6 +476,8 @@ mkdocs-material-extensions==1.3.1 ; (platform_machine == 'aarch64' and sys_platf
     # via mkdocs-material
 model-hosting-container-standards==0.1.12 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
+more-itertools==10.8.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via openapi-core
 mpmath==1.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via sympy
 msgpack==1.1.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -373,13 +495,20 @@ multiprocess==0.70.17 ; (platform_machine == 'aarch64' and sys_platform == 'linu
     #   datasets
     #   open-instruct
 networkx==3.6.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via torch
+    # via
+    #   alphashape
+    #   torch
 ninja==1.13.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   deepspeed
+    #   flashinfer-python
     #   vllm
+    #   xgrammar
 nltk==3.9.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via open-instruct
+    # via
+    #   crawl4ai
+    #   dr-agent
+    #   open-instruct
 nodeenv==1.9.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via pre-commit
 numba==0.61.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -388,21 +517,30 @@ numpy==1.26.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     # via
     #   accelerate
     #   ai2-olmo-core
+    #   alphashape
     #   bitsandbytes
     #   contourpy
+    #   crawl4ai
+    #   cupy-cuda12x
     #   datasets
     #   deepspeed
+    #   flashinfer-python
     #   gguf
     #   matplotlib
     #   mistral-common
     #   numba
+    #   nvidia-cutlass-dsl
     #   open-instruct
     #   opencv-python-headless
     #   pandas
     #   peft
+    #   rank-bm25
+    #   scipy
+    #   shapely
     #   tensorboard
     #   torchvision
     #   transformers
+    #   trimesh
     #   vllm
     #   xgrammar
 nvidia-cublas==13.0.0.19 ; platform_machine == 'aarch64' and sys_platform == 'linux'
@@ -431,6 +569,8 @@ nvidia-cudnn-cu12==9.10.2.21 ; platform_machine == 'x86_64' and sys_platform == 
     # via torch
 nvidia-cudnn-cu13==9.13.0.50 ; platform_machine == 'aarch64' and sys_platform == 'linux'
     # via torch
+nvidia-cudnn-frontend==1.17.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via flashinfer-python
 nvidia-cufft==12.0.0.15 ; platform_machine == 'aarch64' and sys_platform == 'linux'
     # via torch
 nvidia-cufft-cu12==11.4.1.4 ; platform_machine == 'x86_64' and sys_platform == 'linux'
@@ -459,8 +599,12 @@ nvidia-cusparselt-cu12==0.7.1 ; platform_machine == 'x86_64' and sys_platform ==
     # via torch
 nvidia-cusparselt-cu13==0.8.0 ; platform_machine == 'aarch64' and sys_platform == 'linux'
     # via torch
+nvidia-cutlass-dsl==4.3.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via flashinfer-python
 nvidia-ml-py==13.580.82 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via nvitop
+    # via
+    #   flashinfer-python
+    #   nvitop
 nvidia-nccl-cu12==2.27.5 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
 nvidia-nccl-cu13==2.27.7 ; platform_machine == 'aarch64' and sys_platform == 'linux'
@@ -488,13 +632,25 @@ nvidia-nvtx-cu12==12.9.79 ; platform_machine == 'x86_64' and sys_platform == 'li
 nvitop==1.6.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
 omegaconf==2.0.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via ai2-olmo-core
+    # via
+    #   ai2-olmo-core
+    #   dr-agent
 openai==2.12.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   litellm
     #   vllm
 openai-harmony==0.0.8 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
+openapi-core==0.22.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via fastmcp
+openapi-pydantic==0.5.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via fastmcp
+openapi-schema-validator==0.6.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   openapi-core
+    #   openapi-spec-validator
+openapi-spec-validator==0.7.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via openapi-core
 opencensus==0.11.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via ray
 opencensus-context==0.1.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -529,6 +685,7 @@ packaging==25.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or
     #   cached-path
     #   datasets
     #   deepspeed
+    #   flashinfer-python
     #   huggingface-hub
     #   lm-format-enforcer
     #   matplotlib
@@ -547,14 +704,24 @@ pandas==2.3.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
 parameterized==0.9.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
 partial-json-parser==0.2.1.1.post7 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
+patchright==1.57.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via crawl4ai
+pathable==0.4.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via jsonschema-path
 pathspec==0.12.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mkdocs
+pdfminer-six==20251230 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via pdfplumber
+pdfplumber==0.11.9 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via dr-agent
 peft==0.18.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
 pillow==12.0.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
+    #   crawl4ai
     #   matplotlib
     #   mistral-common
+    #   pdfplumber
     #   tensorboard
     #   torchvision
     #   vllm
@@ -563,6 +730,10 @@ platformdirs==4.5.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux'
     #   mkdocs-get-deps
     #   virtualenv
     #   wandb
+playwright==1.57.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   crawl4ai
+    #   tf-playwright-stealth
 pluggy==1.6.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via pytest
 pre-commit==4.5.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -580,7 +751,7 @@ propcache==0.4.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   yarl
 proto-plus==1.27.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via google-api-core
-protobuf==5.29.5 ; sys_platform == 'darwin'
+protobuf==5.29.5 ; (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   beaker-py
     #   google-api-core
@@ -589,13 +760,13 @@ protobuf==5.29.5 ; sys_platform == 'darwin'
     #   proto-plus
     #   ray
     #   tensorboard
+    #   vllm
     #   wandb
-protobuf==6.33.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+protobuf==6.33.4 ; platform_machine == 'aarch64' and sys_platform == 'linux'
     # via
     #   beaker-py
     #   google-api-core
     #   googleapis-common-protos
-    #   grpcio-reflection
     #   opentelemetry-proto
     #   proto-plus
     #   ray
@@ -605,10 +776,13 @@ protobuf==6.33.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
 psutil==7.1.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   accelerate
+    #   crawl4ai
     #   deepspeed
     #   nvitop
     #   peft
     #   vllm
+py==1.11.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via retry
 py-cpuinfo==9.0.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   deepspeed
@@ -627,15 +801,21 @@ pybase64==1.4.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or
     # via vllm
 pycountry==24.6.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via pydantic-extra-types
-pycparser==2.23 ; (implementation_name != 'PyPy' and platform_machine == 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (implementation_name == 'pypy' and platform_machine == 'aarch64' and platform_python_implementation == 'PyPy' and sys_platform == 'linux') or (implementation_name != 'PyPy' and platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (implementation_name == 'pypy' and platform_machine == 'x86_64' and platform_python_implementation == 'PyPy' and sys_platform == 'linux')
+pycparser==2.23 ; (implementation_name != 'PyPy' and platform_machine == 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (implementation_name == 'pypy' and platform_machine == 'aarch64' and platform_python_implementation == 'PyPy' and sys_platform == 'linux') or (implementation_name != 'PyPy' and platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (implementation_name == 'pypy' and platform_machine == 'x86_64' and platform_python_implementation == 'PyPy' and sys_platform == 'linux') or (implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' and sys_platform == 'darwin')
     # via cffi
+pycryptodomex==3.23.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via blobfile
 pydantic==2.12.5 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   anthropic
+    #   cohere
     #   compressed-tensors
+    #   crawl4ai
     #   deepspeed
+    #   dr-agent
     #   fastapi
     #   fastapi-cloud-cli
+    #   fastmcp
     #   litellm
     #   lm-format-enforcer
     #   mcp
@@ -644,6 +824,7 @@ pydantic==2.12.5 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   open-instruct
     #   openai
     #   openai-harmony
+    #   openapi-pydantic
     #   pydantic-extra-types
     #   pydantic-settings
     #   ray
@@ -651,22 +832,34 @@ pydantic==2.12.5 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   wandb
     #   xgrammar
 pydantic-core==2.41.5 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via pydantic
+    # via
+    #   cohere
+    #   pydantic
 pydantic-extra-types==2.10.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via mistral-common
-pydantic-settings==2.12.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+pydantic-settings==2.12.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mcp
+pyee==13.0.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   patchright
+    #   playwright
 pygments==2.19.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   mkdocs-material
     #   pytest
     #   rich
-pyjwt==2.10.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+pyjwt==2.10.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mcp
 pymdown-extensions==10.19.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mkdocs-material
+pyopenssl==25.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via crawl4ai
 pyparsing==3.2.5 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via matplotlib
+pypdfium2==5.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via pdfplumber
+pyperclip==1.11.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via fastmcp
 pytest==9.0.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
 python-dateutil==2.9.0.post0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -676,12 +869,15 @@ python-dateutil==2.9.0.post0 ; (platform_machine == 'aarch64' and sys_platform =
     #   pandas
 python-dotenv==1.2.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
+    #   crawl4ai
+    #   dr-agent
+    #   fastmcp
     #   litellm
     #   pydantic-settings
     #   uvicorn
 python-json-logger==4.0.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
-python-multipart==0.0.20 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+python-multipart==0.0.20 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   fastapi
     #   mcp
@@ -691,9 +887,12 @@ pyyaml==6.0.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     # via
     #   accelerate
     #   beaker-py
+    #   crawl4ai
     #   datasets
+    #   dr-agent
     #   gguf
     #   huggingface-hub
+    #   jsonschema-path
     #   lm-format-enforcer
     #   mkdocs
     #   mkdocs-get-deps
@@ -712,11 +911,16 @@ pyyaml-env-tag==1.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux'
     # via mkdocs
 pyzmq==27.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
+rank-bm25==0.2.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via crawl4ai
 ray==2.52.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via open-instruct
-referencing==0.37.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   open-instruct
+    #   vllm
+referencing==0.36.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   jsonschema
+    #   jsonschema-path
     #   jsonschema-specifications
 regex==2025.11.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -729,10 +933,15 @@ requests==2.32.5 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   ai2-olmo-core
     #   beaker-py
     #   cached-path
+    #   cohere
+    #   crawl4ai
     #   datasets
+    #   dr-agent
+    #   flashinfer-python
     #   google-api-core
     #   google-cloud-storage
     #   huggingface-hub
+    #   jsonschema-path
     #   mistral-common
     #   mkdocs-material
     #   open-instruct
@@ -743,12 +952,22 @@ requests==2.32.5 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   vllm
     #   wandb
 responses==0.25.8 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+retry==0.9.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via dr-agent
+rfc3339-validator==0.1.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via openapi-schema-validator
 rich==13.9.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   ai2-olmo-core
     #   cached-path
+    #   crawl4ai
+    #   cyclopts
+    #   fastmcp
+    #   rich-rst
     #   rich-toolkit
     #   typer
+rich-rst==1.3.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via cyclopts
 rich-toolkit==0.17.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   fastapi-cli
@@ -761,6 +980,8 @@ rpds-py==0.30.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or
     #   referencing
 rsa==4.9.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via google-auth
+rtree==1.4.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via alphashape
 ruff==0.14.9 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
 s3transfer==0.16.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via boto3
@@ -770,6 +991,10 @@ safetensors==0.7.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux')
     #   ai2-olmo-core
     #   peft
     #   transformers
+scipy==1.16.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   alphashape
+    #   vllm
 sentencepiece==0.2.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
 sentry-sdk==2.48.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -778,25 +1003,25 @@ sentry-sdk==2.48.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux')
     #   wandb
 setproctitle==1.3.7 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
-setuptools==77.0.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+setuptools==79.0.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   model-hosting-container-standards
     #   open-instruct
     #   tensorboard
     #   torch
     #   vllm
-setuptools==79.0.1 ; sys_platform == 'darwin'
+shapely==2.1.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
-    #   open-instruct
-    #   tensorboard
-    #   torch
-shellingham==1.5.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    #   alphashape
+    #   crawl4ai
+shellingham==1.5.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via typer
 six==1.17.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   langdetect
     #   opencensus
     #   python-dateutil
+    #   rfc3339-validator
     #   vllm
 smart-open==7.5.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via ray
@@ -806,7 +1031,11 @@ sniffio==1.3.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or 
     # via
     #   anthropic
     #   openai
-sse-starlette==3.1.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+snowballstemmer==2.2.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via crawl4ai
+soupsieve==2.8.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via beautifulsoup4
+sse-starlette==3.1.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mcp
 starlette==0.50.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -819,17 +1048,30 @@ supervisor==4.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') 
     # via model-hosting-container-standards
 sympy==1.14.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via torch
+tabulate==0.9.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via flashinfer-python
+tenacity==9.1.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via dr-agent
 tensorboard==2.20.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
 tensorboard-data-server==0.7.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via tensorboard
+tf-playwright-stealth==1.2.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via crawl4ai
 tiktoken==0.12.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   litellm
     #   mistral-common
     #   vllm
+tinydb==4.8.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   dr-agent
+    #   tinydb-serialization
+tinydb-serialization==2.2.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via dr-agent
 tokenizers==0.22.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
+    #   cohere
     #   litellm
     #   transformers
     #   vllm
@@ -848,6 +1090,7 @@ torch==2.9.0+cu129 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     #   compressed-tensors
     #   deepspeed
     #   flash-attn
+    #   flashinfer-python
     #   liger-kernel
     #   open-instruct
     #   peft
@@ -862,6 +1105,7 @@ torch==2.9.0+cu130 ; platform_machine == 'aarch64' and sys_platform == 'linux'
     #   bitsandbytes
     #   compressed-tensors
     #   deepspeed
+    #   flashinfer-python
     #   liger-kernel
     #   open-instruct
     #   peft
@@ -877,6 +1121,7 @@ tqdm==4.67.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (p
     # via
     #   datasets
     #   deepspeed
+    #   flashinfer-python
     #   gguf
     #   huggingface-hub
     #   nltk
@@ -887,38 +1132,52 @@ tqdm==4.67.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (p
 transformers==4.57.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   compressed-tensors
+    #   dr-agent
     #   open-instruct
     #   peft
     #   vllm
     #   xgrammar
+trimesh==4.11.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via alphashape
 triton==3.5.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   liger-kernel
     #   torch
     #   xgrammar
 ty==0.0.1a35 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-typer==0.20.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+typer==0.20.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
+    #   dr-agent
     #   fastapi-cli
     #   fastapi-cloud-cli
+types-requests==2.32.4.20260107 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via cohere
 typing-extensions==4.15.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   aiosignal
     #   anthropic
     #   anyio
+    #   apache-tvm-ffi
+    #   beautifulsoup4
+    #   cohere
+    #   exceptiongroup
     #   fastapi
     #   grpcio
     #   huggingface-hub
     #   mcp
     #   mistral-common
+    #   nvidia-cutlass-dsl
     #   omegaconf
     #   openai
+    #   openapi-core
     #   opentelemetry-api
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
     #   pydantic
     #   pydantic-core
     #   pydantic-extra-types
+    #   pyee
+    #   pyopenssl
     #   referencing
     #   rich-toolkit
     #   starlette
@@ -937,10 +1196,12 @@ tzdata==2025.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or 
     # via pandas
 urllib3==2.6.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
+    #   blobfile
     #   botocore
     #   requests
     #   responses
     #   sentry-sdk
+    #   types-requests
 uvicorn==0.38.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   fastapi
@@ -954,7 +1215,9 @@ virtualenv==20.35.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux'
     # via
     #   pre-commit
     #   ray
-vllm @ git+https://github.com/yanhong-lbh/vllm@8b5615cad2558cd4ec2cbe82abd6bcaec8567098 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+vllm==0.12.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via open-instruct
+vllm @ https://wheels.vllm.ai/72506c98349d6bcd32b4e33eec7b5513453c1502/vllm-0.13.0%2Bcu130-cp38-abi3-manylinux_2_35_aarch64.whl ; platform_machine == 'aarch64' and sys_platform == 'linux'
     # via open-instruct
 wandb==0.23.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
@@ -967,13 +1230,17 @@ watchfiles==1.1.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') 
 websockets==15.0.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via uvicorn
 werkzeug==3.1.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via tensorboard
+    # via
+    #   openapi-core
+    #   tensorboard
 wrapt==2.0.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via smart-open
-xgrammar==0.1.29 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+xgrammar==0.1.27 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
 xxhash==3.6.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via datasets
+    # via
+    #   crawl4ai
+    #   datasets
 yarl==1.22.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via aiohttp
 zipp==3.23.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
