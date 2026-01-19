@@ -957,6 +957,8 @@ def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], d
 
     dataset_tool_names: set[str] = set()
     for tools in dataset[TOOLS_COLUMN_KEY]:
+        if tools is None:
+            continue
         for tool_name in tools:
             if tool_name:
                 dataset_tool_names.add(tool_name)
