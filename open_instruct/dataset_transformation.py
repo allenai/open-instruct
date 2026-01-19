@@ -974,11 +974,6 @@ def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], d
         )
 
 
-def dataset_has_tools_column(dataset: Dataset) -> bool:
-    """Check if a dataset has a 'tools' column for per-sample tool definitions."""
-    return TOOLS_COLUMN_KEY in dataset.column_names
-
-
 # Preference dataset
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `CHOSEN_ATTENTION_MASK_KEY` and `REJECTED_ATTENTION_MASK_KEY`

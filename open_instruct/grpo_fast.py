@@ -85,7 +85,6 @@ from open_instruct.dataset_transformation import (
     INPUT_IDS_PROMPT_KEY,
     TOOLS_COLUMN_KEY,
     TokenizerConfig,
-    dataset_has_tools_column,
     get_cached_dataset_tulu,
     validate_dataset_tools,
     visualize_token,
@@ -1393,7 +1392,7 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
 
 def _validate_and_log_dataset_tools(dataset, configured_tool_names: list[str] | None, dataset_name: str) -> None:
     """Validate and log per-sample tool configuration for a dataset."""
-    if dataset and dataset_has_tools_column(dataset) and configured_tool_names:
+    if dataset and TOOLS_COLUMN_KEY in dataset.column_names and configured_tool_names:
         logger.info(
             f"{dataset_name} has '{TOOLS_COLUMN_KEY}' column - validating configured tools against dataset tools"
         )
