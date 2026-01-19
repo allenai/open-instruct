@@ -1041,6 +1041,7 @@ async def apply_verifiable_reward(
         reward_results = await asyncio.gather(*async_tasks)
     else:
         reward_results = []
+    logger.debug(f"Applied {len(reward_results)} ground truth rewards in parallel")
 
     response_rewards = [0] * len(responses)
     response_per_func_rewards = [{} for _ in range(len(responses))]
