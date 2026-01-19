@@ -1,3 +1,4 @@
+#!/bin/bash
 BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 MODEL_NAME=/weka/oe-adapt-default/jacobm/olmo3/32b-merge-configs/checkpoints/32b-1e-4-5e-5/
 NUM_NODES=16

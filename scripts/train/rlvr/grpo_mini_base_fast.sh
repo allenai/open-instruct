@@ -1,3 +1,4 @@
+#!/bin/bash
 exp_name="base_smollm_grpo_${RANDOM}"
 python open_instruct/grpo_fast.py \
     --exp_name $exp_name \

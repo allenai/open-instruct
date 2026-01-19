@@ -1,3 +1,4 @@
+#!/bin/bash
 # Here we use 1 GPU for demonstration, but you can use multiple GPUs and larger eval_batch_size to speed up the evaluation.
 # export CUDA_VISIBLE_DEVICES=0
 

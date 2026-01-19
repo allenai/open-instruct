@@ -15,7 +15,7 @@ repos:
     rev: v0.10.0.1
     hooks:
       - id: shellcheck
-        args: [--severity=warning]
+        args: [--severity=error]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.0

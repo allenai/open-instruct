@@ -1,3 +1,4 @@
+#!/bin/bash
 BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
 for LR in 1e-6

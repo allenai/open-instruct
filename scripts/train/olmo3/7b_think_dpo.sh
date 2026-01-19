@@ -1,3 +1,4 @@
+#!/bin/bash
 BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 MODEL_NAME=/weka/oe-adapt-default/saumyam/checkpoints/olmo2-7B-sft/rl-sft/olmo2.5-6T-LC-sigma-reasoning-mix-decontam-v2-special-tokens-v3-think-FIX
 EXP_NAME=sm0922-rsn-dpo-delta-yolo_scottmix1_150k-8e-8
