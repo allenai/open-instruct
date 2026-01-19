@@ -102,6 +102,7 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelD
 def maybe_enable_fp32_lm_head(enabled: bool) -> None:
     if not enabled:
         return
+    os.environ["OPEN_INSTRUCT_FP32_LM_HEAD"] = "1"
     try:
         from vllm.model_executor.layers.logits_processor import LogitsProcessor
     except Exception:
@@ -125,6 +126,20 @@ def maybe_enable_fp32_lm_head(enabled: bool) -> None:
             and embedding_bias.dtype != torch.float32
         ):
             embedding_bias = embedding_bias.float()
+
+        fp32_weight = getattr(lm_head, "_open_instruct_fp32_weight", None)
+        if (
+            isinstance(hidden_states, torch.Tensor)
+            and isinstance(fp32_weight, torch.Tensor)
+            and fp32_weight.dtype == torch.float32
+            and fp32_weight.device == hidden_states.device
+        ):
+            logits = torch.nn.functional.linear(hidden_states, fp32_weight, embedding_bias)
+            logits = self._gather_logits(logits)
+            if logits is not None:
+                logits = logits[..., : self.org_vocab_size]
+            return logits
+
         return orig_get_logits(self, hidden_states, lm_head, embedding_bias)
 
     LogitsProcessor._get_logits = _get_logits_fp32

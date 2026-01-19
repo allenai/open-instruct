@@ -58,6 +58,7 @@ class WorkerWrap:
             torch.distributed.broadcast(weight, 0, group=self._model_update_group)
 
         self.model_runner.model.load_weights(weights=[(name, weight)])
+        self._maybe_update_fp32_lm_head_cache(name)
 
         del weight
         # TODO: should we empty cache if all weights have updated?
@@ -81,4 +82,52 @@ class WorkerWrap:
         list_args[6] = device_id
         weight = func(*list_args)
         self.model_runner.model.load_weights(weights=[(name, weight)])
+        self._maybe_update_fp32_lm_head_cache(name)
         torch.cuda.synchronize()
+
+    def _maybe_update_fp32_lm_head_cache(self, name):
+        import os
+
+        import torch
+
+        if os.environ.get("OPEN_INSTRUCT_FP32_LM_HEAD") != "1":
+            return
+        if not isinstance(name, str) or not name.endswith(".weight"):
+            return
+
+        model_runner = getattr(self, "model_runner", None)
+        model = getattr(model_runner, "model", None) if model_runner is not None else None
+        if model is None:
+            return
+
+        lm_head = getattr(model, "lm_head", None)
+        if lm_head is None:
+            return
+
+        weight = getattr(lm_head, "weight", None)
+        if not isinstance(weight, torch.Tensor) or not weight.is_floating_point():
+            return
+
+        quant_method = getattr(lm_head, "quant_method", None)
+        if quant_method is not None and quant_method.__class__.__name__ != "UnquantizedEmbeddingMethod":
+            return
+
+        try:
+            module_name, param_name = name.rsplit(".", 1)
+            module = model.get_submodule(module_name)
+            param = getattr(module, param_name, None)
+        except Exception:
+            return
+
+        if param is not weight:
+            return
+
+        fp32_weight = getattr(lm_head, "_open_instruct_fp32_weight", None)
+        if (
+            isinstance(fp32_weight, torch.Tensor)
+            and fp32_weight.shape == weight.shape
+            and fp32_weight.device == weight.device
+        ):
+            fp32_weight.copy_(weight)
+        else:
+            lm_head._open_instruct_fp32_weight = weight.float()

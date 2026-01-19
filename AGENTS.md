@@ -42,7 +42,8 @@ To verify that documentation changes don't alter the generated output:
 - Implementation in repo:
   - Trainer: `enable_fp32_lm_head()` patches output embeddings to run in fp32 without re-allocating weights (tied embeddings preserved).
   - Reference policy: same fp32 head toggle to keep KL alignment.
-  - Generator: vLLM LogitsProcessor `_get_logits` patched to upcast hidden_states (+ bias) before projection.
+- Generator: vLLM LogitsProcessor `_get_logits` patched to upcast hidden_states (+ bias) before projection.
+- Option B (cached weights): vLLM worker caches fp32 LM head weights on update (env `OPEN_INSTRUCT_FP32_LM_HEAD=1`) and `_get_logits` uses the cached weight for fp32 GEMM.
 - Flag: `--fp32_lm_head` (GRPO). Ensure vLLM engines receive the flag too.
 - Sanity check (step 0): compare trainer logprobs vs vLLM logprobs on identical sequences; expect tighter deltas with fp32 head.
 - OOM safety (DGX Spark): check `free -h`, kill leftover Ray/vLLM if needed, set `PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"`.
