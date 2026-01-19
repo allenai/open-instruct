@@ -36,6 +36,10 @@ echo ""
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export PYTORCH_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv-cache}"
+export UV_NO_SYNC="${UV_NO_SYNC:-1}"
+export WANDB_DIR="${WANDB_DIR:-/tmp/wandb}"
+export WANDB_CACHE_DIR="${WANDB_CACHE_DIR:-/tmp/wandb-cache}"
 
 # Training parameters
 MODEL="${MODEL_NAME_OR_PATH:-Qwen/Qwen2.5-0.5B}"
