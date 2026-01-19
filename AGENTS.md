@@ -47,4 +47,5 @@ To verify that documentation changes don't alter the generated output:
 - Sanity check (step 0): compare trainer logprobs vs vLLM logprobs on identical sequences; expect tighter deltas with fp32 head.
 - OOM safety (DGX Spark): check `free -h`, kill leftover Ray/vLLM if needed, set `PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"`.
 - Suggested local debug: `scripts/train/dgx-spark/grpo_qwen_gsm8k.sh` (Qwen2.5-0.5B GSM8K), add `--fp32_lm_head` when testing.
+- Long comparison runs: `FP32_LM_HEAD=0 ./scripts/train/dgx-spark/grpo_qwen_gsm8k.sh` then `FP32_LM_HEAD=1 ./scripts/train/dgx-spark/grpo_qwen_gsm8k.sh`; monitor `debug/vllm_vs_local_logprob_diff_*`.
 - Plugin vs monkey patch: plugin is just a startup hook that can apply the same patch; in-process patch is used unless a vLLM plugin package is added.

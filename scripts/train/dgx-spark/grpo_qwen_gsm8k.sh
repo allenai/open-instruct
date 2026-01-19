@@ -1,14 +1,15 @@
 #!/bin/bash
 # =============================================================================
-# GRPO Training: Qwen2.5-0.5B on GSM8K with Validation Reward Tracking
+# GRPO Training: Qwen2.5-0.5B on GSM8K (DGX Spark)
 # =============================================================================
 #
-# Purpose: Test validation reward tracking with a larger model
-# Model: Qwen/Qwen2.5-0.5B (500M params - base model, not instruct)
-# Dataset: ai2-adapt-dev/rlvr_gsm8k_zs (GSM8K math problems)
-# Hardware: DGX Spark (GB10 Blackwell, 128GB unified memory)
+# Usage:
+#   FP32_LM_HEAD=1 ./scripts/train/dgx-spark/grpo_qwen_gsm8k.sh
+#   FP32_LM_HEAD=0 ./scripts/train/dgx-spark/grpo_qwen_gsm8k.sh
 #
-# Expected memory: ~20-25GB total
+# Model: Qwen/Qwen2.5-0.5B (base model)
+# Dataset: ai2-adapt-dev/rlvr_gsm8k_zs
+# Hardware: DGX Spark (GB10 Blackwell, unified memory)
 #
 # =============================================================================
 
@@ -33,18 +34,29 @@ echo ""
 
 # Environment setup for DGX Spark
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
+export PYTORCH_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"
 
 # Training parameters
 MODEL="Qwen/Qwen2.5-0.5B"
 DATASET="ai2-adapt-dev/rlvr_gsm8k_zs"
-TOTAL_EPISODES=20000     # 10x longer run
-BATCH_SIZE=4             # Increased from 1
-NUM_PROMPTS=16           # Doubled from 8
-NUM_SAMPLES=4            # Per prompt
-LEARNING_RATE=1e-6       # Slightly higher for faster learning
-BETA=0.0                 # No KL penalty initially
-VALIDATION_HOLDOUT=0.1   # 10% of training data held out for validation
+TOTAL_EPISODES=20000
+BATCH_SIZE=4
+NUM_PROMPTS=16
+NUM_SAMPLES=4
+LEARNING_RATE=1e-6
+BETA=0.0
+VALIDATION_HOLDOUT=0.1
+
+FP32_LM_HEAD="${FP32_LM_HEAD:-0}"
+FP32_FLAG=""
+EXP_SUFFIX="no_fp32"
+if [ "$FP32_LM_HEAD" = "1" ]; then
+    FP32_FLAG="--fp32_lm_head"
+    EXP_SUFFIX="fp32"
+fi
+OUTPUT_DIR="/tmp/grpo_qwen_gsm8k_${EXP_SUFFIX}"
+EXP_NAME="dgx_spark_grpo_qwen_gsm8k_${EXP_SUFFIX}"
 
 echo "Configuration:"
 echo "  Model: $MODEL"
@@ -54,6 +66,8 @@ echo "  Batch size: $BATCH_SIZE"
 echo "  Prompts per rollout: $NUM_PROMPTS"
 echo "  Samples per prompt: $NUM_SAMPLES"
 echo "  Validation holdout: ${VALIDATION_HOLDOUT} (10%)"
+echo "  FP32 LM head: ${FP32_LM_HEAD}"
+echo "  Output dir: ${OUTPUT_DIR}"
 echo ""
 
 # Run training
@@ -83,7 +97,7 @@ uv run python open_instruct/grpo_fast.py \
     --vllm_tensor_parallel_size 1 \
     --beta $BETA \
     --load_ref_policy false \
-    --fp32_lm_head \
+    $FP32_FLAG \
     --seed 42 \
     --local_eval_every 10 \
     --save_freq 100 \
@@ -93,10 +107,10 @@ uv run python open_instruct/grpo_fast.py \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --attn_implementation sdpa \
-    --output_dir /tmp/grpo_qwen_gsm8k \
+    --output_dir "$OUTPUT_DIR" \
     --with_tracking \
     --push_to_hub false \
-    --exp_name dgx_spark_grpo_qwen_gsm8k
+    --exp_name "$EXP_NAME"
 
 echo ""
 echo "=============================================="
