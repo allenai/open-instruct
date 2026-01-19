@@ -35,3 +35,16 @@ To verify that documentation changes don't alter the generated output:
 2. Switch to main branch and build: `cd /path/to/main && uv run mkdocs build`
 3. Compare the builds: `diff -rq site-branch /path/to/main/site`
 4. If no output, the docs are identical. If differences exist, review with: `diff -r site-branch /path/to/main/site`
+
+# TEMP: FP32 LM head rollout notes (ScaleRL alignment)
+- Goal: reduce generator↔trainer logprob mismatch; apply fp32 at LM head on both sides.
+- References: TRL GRPO `cast_lm_head_to_fp32` (PR #4303, #4446); vLLM patch point is `LogitsProcessor._get_logits`; vLLM plugin system can host the patch; LLaMA-Factory upcast_lmhead_output.
+- Implementation in repo:
+  - Trainer: `enable_fp32_lm_head()` patches output embeddings to run in fp32 without re-allocating weights (tied embeddings preserved).
+  - Reference policy: same fp32 head toggle to keep KL alignment.
+  - Generator: vLLM LogitsProcessor `_get_logits` patched to upcast hidden_states (+ bias) before projection.
+- Flag: `--fp32_lm_head` (GRPO). Ensure vLLM engines receive the flag too.
+- Sanity check (step 0): compare trainer logprobs vs vLLM logprobs on identical sequences; expect tighter deltas with fp32 head.
+- OOM safety (DGX Spark): check `free -h`, kill leftover Ray/vLLM if needed, set `PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"`.
+- Suggested local debug: `scripts/train/dgx-spark/grpo_qwen_gsm8k.sh` (Qwen2.5-0.5B GSM8K), add `--fp32_lm_head` when testing.
+- Plugin vs monkey patch: plugin is just a startup hook that can apply the same patch; in-process patch is used unless a vLLM plugin package is added.

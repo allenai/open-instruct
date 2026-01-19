@@ -91,6 +91,7 @@ from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, 
 from open_instruct.model_utils import (
     ModelConfig,
     disable_dropout_in_model,
+    enable_fp32_lm_head,
     entropy_from_logits,
     estimate_kl,
     get_olmo3_generation_config,
@@ -213,6 +214,8 @@ class Args:
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
+    fp32_lm_head: bool = False
+    """Force FP32 LM head projection in trainer and vLLM generator to reduce logprob mismatch."""
 
     # Ray
     single_gpu_mode: bool = False
@@ -465,6 +468,8 @@ class PolicyTrainerRayProcess(RayProcess):
             use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
+        if args.fp32_lm_head:
+            enable_fp32_lm_head(self.policy)
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
@@ -566,6 +571,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 mpu=self.mpu,
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
+                fp32_lm_head=args.fp32_lm_head,
             )
         self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
 
@@ -1587,6 +1593,7 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        fp32_lm_head=args.fp32_lm_head,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 

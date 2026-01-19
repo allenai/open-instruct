@@ -99,6 +99,40 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelD
     )
 
 
+def maybe_enable_fp32_lm_head(enabled: bool) -> None:
+    if not enabled:
+        return
+    try:
+        from vllm.model_executor.layers.logits_processor import LogitsProcessor
+    except Exception:
+        logger.warning("Unable to import vLLM LogitsProcessor for fp32 lm head patch.", exc_info=True)
+        return
+
+    if getattr(LogitsProcessor, "_open_instruct_fp32_lm_head", False):
+        return
+
+    orig_get_logits = getattr(LogitsProcessor, "_get_logits", None)
+    if orig_get_logits is None:
+        logger.warning("vLLM LogitsProcessor has no _get_logits; fp32 lm head patch skipped.")
+        return
+
+    def _get_logits_fp32(self, hidden_states, lm_head, embedding_bias):
+        if isinstance(hidden_states, torch.Tensor) and hidden_states.dtype != torch.float32:
+            hidden_states = hidden_states.float()
+        if (
+            embedding_bias is not None
+            and isinstance(embedding_bias, torch.Tensor)
+            and embedding_bias.dtype != torch.float32
+        ):
+            embedding_bias = embedding_bias.float()
+        return orig_get_logits(self, hidden_states, lm_head, embedding_bias)
+
+    LogitsProcessor._get_logits = _get_logits_fp32
+    LogitsProcessor._open_instruct_fp32_lm_head = True
+    LogitsProcessor._open_instruct_fp32_lm_head_orig_get_logits = orig_get_logits
+    logger.info("Enabled vLLM fp32 LM head patch.")
+
+
 @dataclasses.dataclass
 class SamplingConfig:
     temperature: float = 0.7
@@ -565,6 +599,7 @@ class LLMRayActor:
         reward_config: RewardConfig | None = None,
         train_dataset=None,
         eval_dataset=None,
+        fp32_lm_head: bool = False,
         **kwargs,
     ):
         assert_threaded_actor(self)
@@ -572,10 +607,12 @@ class LLMRayActor:
             tool_actors, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+        self.fp32_lm_head = fp32_lm_head
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
+        maybe_enable_fp32_lm_head(self.fp32_lm_head)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
@@ -1050,6 +1087,7 @@ def create_vllm_engines(
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
+    fp32_lm_head: bool = False,
 ) -> list[ray.actor.ActorHandle]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     vllm_engines = []
@@ -1121,6 +1159,7 @@ def create_vllm_engines(
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
+                fp32_lm_head=fp32_lm_head,
             )
         )
 

@@ -18,6 +18,7 @@ import asyncio
 import itertools
 import pathlib
 import tempfile
+import types
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from typing import Literal, Union
 import deepspeed
 import pandas as pd
 import torch
+import torch.nn.functional as F
 import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
@@ -42,6 +44,45 @@ from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
+
+
+def enable_fp32_lm_head(model: torch.nn.Module) -> bool:
+    """Force LM head projection to run in fp32 without re-allocating weights."""
+    target = model.module if hasattr(model, "module") else model
+    get_output_embeddings = getattr(target, "get_output_embeddings", None)
+    if get_output_embeddings is None:
+        logger.warning("Cannot enable fp32 lm head: model has no get_output_embeddings().")
+        return False
+
+    lm_head = target.get_output_embeddings()
+    if lm_head is None:
+        logger.warning("Cannot enable fp32 lm head: model has no output embeddings.")
+        return False
+
+    if getattr(lm_head, "_open_instruct_fp32_lm_head", False):
+        return True
+
+    orig_forward = lm_head.forward
+
+    def fp32_forward(self, hidden_states, *args, **kwargs):
+        if not isinstance(hidden_states, torch.Tensor):
+            return orig_forward(hidden_states, *args, **kwargs)
+        device_type = "cuda" if hidden_states.is_cuda else "cpu"
+        with torch.autocast(device_type=device_type, enabled=False):
+            if hasattr(self, "weight") and self.weight is not None and not args and not kwargs:
+                weight = self.weight.float()
+                bias = self.bias.float() if getattr(self, "bias", None) is not None else None
+                return F.linear(hidden_states.float(), weight, bias)
+            output = orig_forward(hidden_states.float(), *args, **kwargs)
+        if isinstance(output, torch.Tensor) and output.dtype != torch.float32:
+            output = output.float()
+        return output
+
+    lm_head.forward = types.MethodType(fp32_forward, lm_head)
+    lm_head._open_instruct_fp32_lm_head = True
+    lm_head._open_instruct_fp32_lm_head_orig_forward = orig_forward
+    logger.info("Enabled fp32 LM head projection.")
+    return True
 
 
 @dataclass
@@ -224,6 +265,7 @@ def load_ref_policy(
     mpu: torch.distributed.distributed_c10d.ProcessGroup | None = None,
     ref_policy_update_freq: int | None = None,
     alpha: float = 0.0,
+    fp32_lm_head: bool = False,
 ) -> transformers.PreTrainedModel:
     """Loads a reference policy model for evaluation.
 
@@ -252,6 +294,8 @@ def load_ref_policy(
         use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
+    if fp32_lm_head:
+        enable_fp32_lm_head(ref_policy)
     disable_dropout_in_model(ref_policy)
     ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
     ref_policy.eval()

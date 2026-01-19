@@ -284,6 +284,7 @@ def setup_vllm_engines(
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
         inflight_updates=streaming_config.inflight_updates,
+        fp32_lm_head=args.fp32_lm_head,
     )
 
     logger.info("vLLM engines ready")
