@@ -129,45 +129,43 @@ def maybe_enable_fp32_lm_head(enabled: bool) -> None:
         return
 
     def _get_logits_fp32(self, hidden_states, lm_head, embedding_bias):
-        # Always cast hidden_states to fp32 for consistent precision
-        if isinstance(hidden_states, torch.Tensor) and hidden_states.dtype != torch.float32:
-            hidden_states = hidden_states.float()
-        if (
-            embedding_bias is not None
-            and isinstance(embedding_bias, torch.Tensor)
-            and embedding_bias.dtype != torch.float32
-        ):
-            embedding_bias = embedding_bias.float()
-
         # Check for cached fp32 weight (cache mode) or permanent fp32 weight
         fp32_weight = getattr(lm_head, "_open_instruct_fp32_weight", None)
         lm_head_weight = getattr(lm_head, "weight", None)
 
-        # Use cached fp32 weight if available (cache mode)
+        # Determine which fp32 weight to use (if any)
+        use_fp32_weight = None
         if (
             isinstance(fp32_weight, torch.Tensor)
             and fp32_weight.dtype == torch.float32
             and fp32_weight.device == hidden_states.device
         ):
-            logits = torch.nn.functional.linear(hidden_states, fp32_weight, embedding_bias)
-            logits = self._gather_logits(logits)
-            if logits is not None:
-                logits = logits[..., : self.org_vocab_size]
-            return logits
-
-        # Use lm_head weight directly if it's already fp32 (permanent mode)
-        if (
+            use_fp32_weight = fp32_weight  # Cache mode
+        elif (
             isinstance(lm_head_weight, torch.Tensor)
             and lm_head_weight.dtype == torch.float32
             and lm_head_weight.device == hidden_states.device
         ):
-            logits = torch.nn.functional.linear(hidden_states, lm_head_weight, embedding_bias)
+            use_fp32_weight = lm_head_weight  # Permanent mode
+
+        # If we have fp32 weight, cast inputs and compute
+        if use_fp32_weight is not None:
+            if isinstance(hidden_states, torch.Tensor) and hidden_states.dtype != torch.float32:
+                hidden_states = hidden_states.float()
+            if (
+                embedding_bias is not None
+                and isinstance(embedding_bias, torch.Tensor)
+                and embedding_bias.dtype != torch.float32
+            ):
+                embedding_bias = embedding_bias.float()
+
+            logits = torch.nn.functional.linear(hidden_states, use_fp32_weight, embedding_bias)
             logits = self._gather_logits(logits)
             if logits is not None:
                 logits = logits[..., : self.org_vocab_size]
             return logits
 
-        # Fallback to original implementation with fp32 hidden_states
+        # Fallback to original implementation (no fp32 weight available yet)
         return orig_get_logits(self, hidden_states, lm_head, embedding_bias)
 
     LogitsProcessor._get_logits = _get_logits_fp32
