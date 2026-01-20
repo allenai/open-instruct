@@ -8,7 +8,6 @@ import unittest
 from unittest.mock import patch
 
 import aiohttp
-
 from parameterized import parameterized
 
 from open_instruct.tools.tools import (

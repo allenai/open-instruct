@@ -238,9 +238,7 @@ def _is_retryable_exception(exception: BaseException) -> bool:
         return True
     # Only retry on connection-level errors (DNS, TCP, TLS failures, server disconnects)
     # NOT on response errors like 4xx which indicate client mistakes
-    if isinstance(exception, aiohttp.ClientConnectionError):
-        return True
-    return False
+    return isinstance(exception, aiohttp.ClientConnectionError)
 
 
 async def make_api_request(
