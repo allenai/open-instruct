@@ -45,7 +45,7 @@ class ExperimentConfig:
     loss_fn: Literal["dapo", "cispo"] = "dapo"
     record_entropy: bool = False
     use_vllm_logprobs: bool = False
-    temperature: float = 1.0
+    temperature: float = field(default=1.0, init=False)
 
     single_gpu_mode: bool = False
     num_learners_per_node: list[int] = field(default_factory=lambda: [1])
