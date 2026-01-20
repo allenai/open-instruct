@@ -111,10 +111,6 @@ class DPOConfig:
     """Whether to include a load balancing loss (for OLMoE) or not."""
     load_balancing_weight: float = 0.001
     """Weight for load balancing loss if applicable."""
-    concatenated_forward: bool = True
-    """Whether to concatenate chosen and rejected for DPO training."""
-    packing: bool = False
-    """Whether to use packing/padding-free collation."""
 
 
 @dataclass
@@ -271,6 +267,10 @@ class ModelConfig:
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     low_cpu_mem_usage: bool = False
     """Create the model as an empty shell, then materialize parameters when pretrained weights are loaded."""
+    concatenated_forward: bool = True
+    """Whether to concatenate chosen and rejected for DPO training."""
+    packing: bool = False
+    """Whether to use packing/padding-free collation."""
 
 
 REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
@@ -334,15 +334,6 @@ class ExperimentConfig(
     preprocessing_num_workers: int | None = field(
         default=None, metadata={"help": "The number of processes to use for the preprocessing."}
     )
-    max_seq_length: int | None = field(
-        default=None,
-        metadata={
-            "help": (
-                "The maximum total input sequence length after tokenization. "
-                "Sequences longer than this will be truncated,"
-            )
-        },
-    )
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
     )
@@ -357,19 +348,10 @@ class ExperimentConfig(
             "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
         },
     )
-    resume_from_checkpoint: str | None = field(
-        default=None, metadata={"help": "If the training should continue from a checkpoint folder."}
-    )
     save_to_hub: str | None = field(
         default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
     )
     use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
-    checkpointing_steps: str | None = field(
-        default=None,
-        metadata={
-            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
-        },
-    )
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
@@ -389,21 +371,6 @@ class ExperimentConfig(
     zero_hpz_partition_size: int = field(
         default=8, metadata={"help": "Hierarchical partition size for ZeRO stage 3. Only used with zero_stage 3."}
     )
-
-    try_auto_save_to_beaker: bool = True
-    """Whether to try to save the model to Beaker dataset `/output` after training"""
-    gs_bucket_path: str | None = None
-    """The path to the gs bucket to save the model to"""
-    oe_eval_tasks: list[str] | None = None
-    """The beaker evaluation tasks to launch"""
-    oe_eval_max_length: int = 4096
-    """the max generation length for evaluation for oe-eval"""
-    oe_eval_gpu_multiplier: int | None = None
-    """the multiplier for the number of GPUs for evaluation"""
-    eval_workspace: str | None = "ai2/tulu-3-results"
-    """The workspace to launch evaluation jobs on"""
-    eval_priority: str | None = "high"
-    """The priority of auto-launched evaluation jobs"""
 
     @property
     def forward_fn(self) -> Callable:
