@@ -448,6 +448,7 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
     print("[_prefetch_worker] Starting prefetch worker loop", flush=True)
     print(f"[_prefetch_worker] prompt_queue type: {type(actor.prompt_queue)}", flush=True)
     print(f"[_prefetch_worker] prompt_queue: {actor.prompt_queue}", flush=True)
+    print(f"[_prefetch_worker] prompt_queue actor: {actor.prompt_queue.actor}", flush=True)
     try:
         qsize = actor.prompt_queue.qsize()
         print(f"[_prefetch_worker] prompt_queue size: {qsize}", flush=True)
