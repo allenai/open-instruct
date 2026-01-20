@@ -230,6 +230,7 @@ def main(
         tokenizer,
         streaming_config,
         tool_definitions if tools_config.pass_tools_to_chat_template else [],
+        tools_config.pass_tools_to_chat_template,
     )
 
     if len(train_dataset) < (
