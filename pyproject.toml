@@ -177,6 +177,7 @@ include = [
     "open_instruct/code_utils/api.py",
     "open_instruct/context_window_checker.py",
     "open_instruct/dataset_processor.py",
+    "open_instruct/dataset_transformation.py",
     "open_instruct/data_loader.py",
     "open_instruct/data_types.py",
     "open_instruct/dpo_config.py",
