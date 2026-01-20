@@ -6,6 +6,7 @@ Merges all existing test functionality and ensures good coverage.
 
 import os
 import sys
+import traceback
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -577,8 +578,6 @@ def run_all_tests():
 
     except Exception as e:
         print(f"\n❌ TEST FAILED: {e}")
-        import traceback
-
         traceback.print_exc()
         return False
 

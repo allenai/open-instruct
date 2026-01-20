@@ -56,6 +56,7 @@ import ray
 import torch
 import torch.utils
 import torch.utils.data
+import wandb
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -74,7 +75,7 @@ from transformers import (
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
-from open_instruct import utils
+from open_instruct import olmo_adapter, utils
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -103,6 +104,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, calculate_advantages_packed, pack_sequences
+from open_instruct.tools import search_tool, tools
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -470,14 +472,11 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
-        # Have to use FusedAdam for offloading6 and backloading
-        from deepspeed.ops.adam import FusedAdam  # DeepSpeedCPUAdam
-
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        self.optimizer = FusedAdam(
+        self.optimizer = deepspeed.ops.adam.FusedAdam(
             optim_params, lr=args.learning_rate, betas=(0.9, 0.95), weight_decay=args.weight_decay
         )
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
@@ -500,15 +499,12 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model.train()
 
         # value model
-        from open_instruct.olmo_adapter import (
-            Olmo2Config,
-            Olmo2ForSequenceClassification,
-            OlmoeConfig,
-            OlmoeForSequenceClassification,
+        AutoModelForSequenceClassification.register(
+            olmo_adapter.Olmo2Config, olmo_adapter.Olmo2ForSequenceClassification
         )
-
-        AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
-        AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
+        AutoModelForSequenceClassification.register(
+            olmo_adapter.OlmoeConfig, olmo_adapter.OlmoeForSequenceClassification
+        )
         self.value_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
             args.value_model_name_or_path,
             revision=args.value_model_revision,
@@ -536,7 +532,7 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = get_optimizer_grouped_parameters(self.value_model, args.weight_decay)
         else:
             optim_params = self.value_model.parameters()
-        self.value_optimizer = FusedAdam(
+        self.value_optimizer = deepspeed.ops.adam.FusedAdam(
             optim_params, lr=args.value_learning_rate, betas=(0.9, 0.95), weight_decay=args.weight_decay
         )
         value_scheduler = get_scheduler(
@@ -1445,8 +1441,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
     if args.with_tracking:
-        import wandb
-
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
@@ -1524,9 +1518,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if args.tools:
         for tool in args.tools:
             if tool.lower() == "search":
-                from open_instruct.tools.search_tool import SearchTool
-
-                tool = SearchTool(
+                tool = search_tool.SearchTool(
                     start_str="<query>",
                     end_str="</query>",
                     api_endpoint=args.search_api_endpoint,
@@ -1534,9 +1526,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
                 tool_objects[tool.end_str] = tool
             elif tool.lower() == "code":
-                from open_instruct.tools.tools import PythonCodeTool
-
-                tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
+                tool = tools.PythonCodeTool(
+                    start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint
+                )
                 tool_objects[tool.end_str] = tool
             else:
                 raise ValueError(f"Unknown tool: {tool}")

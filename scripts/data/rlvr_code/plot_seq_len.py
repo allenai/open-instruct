@@ -42,6 +42,7 @@ Examples:
 
 import argparse
 import sys
+import traceback
 
 import datasets
 import matplotlib.pyplot as plt
@@ -160,8 +161,6 @@ def main(args):
         sys.exit(1)
     except Exception as e:
         logger.error(f"Error calculating sequence lengths: {e}")
-        import traceback
-
         traceback.print_exc()  # Print stack trace for debugging
         sys.exit(1)
 

@@ -533,7 +533,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
             )
         elif args.use_liger_kernel:
-            from liger_kernel.transformers import AutoLigerKernelForCausalLM
+            from liger_kernel.transformers import AutoLigerKernelForCausalLM  # noqa: PLC0415
 
             logger.info("Attempting to apply liger-kernel. fused_linear_cross_entropy=True")
 
@@ -622,7 +622,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
     ]
     if args.use_qlora:
-        from bitsandbytes.optim import AdamW
+        from bitsandbytes.optim import AdamW  # noqa: PLC0415
 
         optimizer = AdamW(
             optimizer_grouped_parameters,
