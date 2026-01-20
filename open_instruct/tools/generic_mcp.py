@@ -7,7 +7,8 @@ This module provides classes for connecting to any MCP server and exposing its t
 import asyncio
 import time
 from dataclasses import dataclass, field, replace
-from typing import Any, ClassVar, strEnum
+from enum import StrEnum
+from typing import Any, ClassVar
 
 from mcp import ClientSession
 from mcp.client.sse import sse_client
@@ -21,7 +22,7 @@ from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, log_tool
 logger = logger_utils.setup_logger(__name__)
 
 
-class MCPTransport(strEnum):
+class MCPTransport(StrEnum):
     """Transport types for MCP connections."""
 
     HTTP = "http"
