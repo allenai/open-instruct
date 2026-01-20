@@ -1,3 +1,4 @@
+#!/bin/bash
 python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --dataset_mixer_list allenai/IF_multi_constraints_upto5 1.0 \
     --dataset_mixer_list_splits train \
