@@ -1,0 +1,83 @@
+export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 saurabh5/code_rlvr_mixture_dpo 1.0 allenai/IF_multi_constraints_upto5_filtered_dpo_0625_filter-keyword-filtered-topic-char-topic-filtered 30186 allenai/rlvr_general_mix-keyword-filtered-topic-chars-char-filt-topic-filtered 21387"
+
+# data for hardcoded name data: allenai/hardcoded-olmo-rl-string-f1
+
+export exp_name=olmo3_thnk_65k_mix_${RANDOM}
+
+# /weka/oe-adapt-default/allennlp/deletable_checkpoint/hamishivi/olmo3_dpo_1810_rl_fun_mix_6838__1__1760815889_checkpoints/step_1350
+# /weka/oe-adapt-default/hamishi/model_checkpoints/sm0922-rsn-dpo-delta-yolo_scottmix1_150k-8e-8__42__1758585338_olmo25 
+# /weka/oe-adapt-default/saumyam/checkpoints/olmo2-7B-sft/rl-sft/olmo2.5-6T-LC-sigma-reasoning-mix-decontam-v2-special-tokens-v3-think-FIX
+
+
+python mason.py \
+    --budget ai2/oe-adapt \
+    --cluster ai2/jupiter \
+    --image hamishivi/open_instruct_seq_para \
+    --pure_docker_mode \
+    --workspace ai2/olmo-instruct \
+    --priority urgent \
+    --preemptible \
+    --num_nodes 8 \
+    --gpus 8 \
+    --max_retries 0 \
+    --env RAY_CGRAPH_get_timeout=300 \
+    --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --env HOSTED_VLLM_API_BASE=http://saturn-cs-aus-235.reviz.ai2.in:8001/v1 \
+    -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
+        --exp_name ${exp_name} \
+        --beta 0.0 \
+        --num_samples_per_prompt_rollout 8 \
+        --num_unique_prompts_rollout 128 \
+        --num_mini_batches 1 \
+        --num_epochs 1 \
+        --learning_rate 2e-6 \
+        --per_device_train_batch_size 1 \
+        --output_dir /output \
+        --kl_estimator 2 \
+        --dataset_mixer_list ${data_mix} \
+        --dataset_mixer_list_splits train \
+        --dataset_mixer_eval_list hamishivi/math_rlvr_mixture_dpo 8 saurabh5/code_rlvr_mixture_dpo 8 allenai/IF_multi_constraints_upto5_filtered_dpo_0625_filter-keyword-filtered-topic-char-topic-filtered 8 allenai/rlvr_general_mix-keyword-filtered-topic-chars-char-filt-topic-filtered 8 \
+        --dataset_mixer_eval_list_splits train \
+        --max_prompt_token_length 2048 \
+        --response_length 63488 \
+        --pack_length 65536 \
+        --model_name_or_path allenai/Olmo-3-7B-Think-DPO \
+        --chat_template_name olmo_thinker \
+        --non_stop_penalty False \
+        --mask_truncated_completions False \
+        --temperature 1.0 \
+        --ground_truths_key ground_truth \
+        --sft_messages_key messages \
+        --total_episodes 10000000 \
+        --deepspeed_stage 3 \
+        --num_learners_per_node 8 \
+        --sequence_parallel_size 4 \
+        --vllm_num_engines 56 \
+        --vllm_tensor_parallel_size 1 \
+        --lr_scheduler_type constant \
+        --apply_verifiable_reward true \
+        --seed 1 \
+        --local_eval_every 50 \
+        --save_freq 50 \
+        --eval_priority urgent \
+        --try_launch_beaker_eval_jobs_on_weka True \
+        --gradient_checkpointing \
+        --with_tracking \
+        --llm_judge_model hosted_vllm/Qwen/Qwen3-32B \
+        --llm_judge_timeout 600 \
+        --llm_judge_max_tokens 2048 \
+        --llm_judge_max_context_length 32768 \
+        --clip_higher 0.272 \
+        --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
+        --code_pass_rate_reward_threshold 0.99 \
+        --oe_eval_max_length 63488 \
+        --checkpoint_state_freq 100 \
+        --backend_timeout 1200 \
+        --inflight_updates true \
+        --async_steps 8 \
+        --active_sampling \
+        --no_resampling_pass_rate 0.875 \
+        --advantage_normalization_type centered \
+        --oe_eval_gpu_multiplier 2 \
+        --truncated_importance_sampling_ratio_cap 2.0 \
+        --oe_eval_tasks mmlu:cot::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,gpqa:0shot_cot::qwen3-instruct,zebralogic::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek
