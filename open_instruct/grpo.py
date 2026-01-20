@@ -329,6 +329,7 @@ def main(
     ray_get_with_progress(model_setup_futures, desc="Setting up OLMo-core models")
     logger.info("======== OLMo-core models initialized =========")
 
+    assert tc.tokenizer_name_or_path is not None, "tokenizer_name_or_path must be set after make_tokenizer"
     vllm_engines = vllm_utils.create_vllm_engines(
         vllm_config.vllm_num_engines,
         vllm_config.vllm_tensor_parallel_size,
