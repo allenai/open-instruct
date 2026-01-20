@@ -363,12 +363,6 @@ class ExperimentConfig(
         default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
     )
     use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
-    checkpointing_steps: str | None = field(
-        default=None,
-        metadata={
-            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
-        },
-    )
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
