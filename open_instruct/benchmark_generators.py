@@ -55,8 +55,13 @@ def get_inference_result_with_timeout(
     If the timeout is reached, performs a health check on vLLM engines
     to detect silent failures.
     """
+    logger.info(f"[get_inference_result_with_timeout] Waiting for result (timeout={timeout}s)...")
     try:
-        return inference_results_Q.get(timeout=timeout)
+        result = inference_results_Q.get(timeout=timeout)
+        logger.info(
+            f"[get_inference_result_with_timeout] Got result: prompt_id={result.prompt_id}, index={result.index}"
+        )
+        return result
     except queue.Empty as err:
         logger.error(f"Timeout ({timeout}s) waiting for inference result. Checking vLLM health...")
         utils.ray_get_with_progress(
@@ -434,10 +439,9 @@ def run_benchmark(
     )
 
     try:
-        logger.info("Running warmup batch...")
-
-        # Collect all warmup results (one per prompt) using non-blocking polling
         warmup_batch_size = warmup_end_idx - warmup_start_idx
+        logger.info(f"Running warmup batch: expecting {warmup_batch_size} results...")
+
         warmup_results = [
             get_inference_result_with_timeout(inference_results_Q, vllm_engines) for _ in range(warmup_batch_size)
         ]
