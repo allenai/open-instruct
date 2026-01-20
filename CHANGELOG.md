@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Added a new changelog Github Action that makes sure you contribute to the changelog! https://github.com/allenai/open-instruct/pull/1276
 - Now, we type check `open_instruct/dataset_transformation.py` (https://github.com/allenai/open-instruct/pull/1390).
 - Added a linter rule that imports go at the top of the file (https://github.com/allenai/open-instruct/pull/1394).
+- Refactors GRPO config into a grpo_utils.py file in preparation for Olmo-core implementation (https://github.com/allenai/open-instruct/pull/1396_.
 
 ### Changed
 

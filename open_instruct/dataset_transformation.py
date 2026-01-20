@@ -1826,6 +1826,7 @@ class LocalDatasetTransformationCache:
         config_path = os.path.join(self.get_cache_path(), "config.json")
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
 
+        # Filter out `dataset` field because HuggingFace Dataset objects are not JSON serializable
         config_dict = {
             "tokenizer_config": asdict(tc),
             "dataset_configs": [_get_serializable_dataset_config_dict(dc) for dc in dcs],
