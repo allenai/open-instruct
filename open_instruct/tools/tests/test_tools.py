@@ -1386,77 +1386,78 @@ class TestToolsConfig(unittest.TestCase):
             ToolsConfig(tools=["python"], tool_configs=["not valid json"])
 
 
+def _run_with_mock_responses(responses: list, **request_kwargs):
+    """Run make_api_request with mocked responses.
+
+    Args:
+        responses: List of (status, json_data, reason) tuples or Exception instances.
+        **request_kwargs: Additional kwargs for make_api_request.
+
+    Returns:
+        Tuple of (result, call_count).
+    """
+    call_count = {"count": 0}
+
+    async def mock_request(*args, **kwargs):
+        idx = min(call_count["count"], len(responses) - 1)
+        call_count["count"] += 1
+        response_spec = responses[idx]
+
+        if isinstance(response_spec, Exception):
+            raise response_spec
+
+        status, json_data, reason = response_spec
+        mock_response = unittest.mock.MagicMock()
+        mock_response.status = status
+        mock_response.reason = reason
+        mock_response.headers = {}
+        mock_response.json = unittest.mock.AsyncMock(return_value=json_data)
+
+        if status >= 400:
+            mock_response.raise_for_status.side_effect = aiohttp.ClientResponseError(
+                request_info=unittest.mock.MagicMock(), history=(), status=status, message=reason
+            )
+        return mock_response
+
+    # Create a mock that properly handles nested async context managers
+    async def run_test():
+        with patch("open_instruct.tools.utils.aiohttp.ClientSession") as mock_session_class:
+            # Mock the ClientSession context manager
+            mock_session = unittest.mock.MagicMock()
+
+            # Create response context manager mock
+            response_cm = unittest.mock.MagicMock()
+            response_cm.__aenter__ = mock_request
+            response_cm.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+
+            mock_session.post.return_value = response_cm
+            mock_session.get.return_value = response_cm
+
+            # Mock ClientSession as context manager
+            session_cm = unittest.mock.MagicMock()
+            session_cm.__aenter__ = unittest.mock.AsyncMock(return_value=mock_session)
+            session_cm.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+            mock_session_class.return_value = session_cm
+
+            result = await make_api_request(
+                "http://test.com",
+                timeout_seconds=10,
+                base_delay=0.001,  # Use very short delay for tests
+                max_delay=0.01,
+                **request_kwargs,
+            )
+            return result
+
+    result = asyncio.run(run_test())
+    return result, call_count["count"]
+
+
 class TestMakeApiRequestRetry(unittest.TestCase):
     """Tests for make_api_request retry behavior."""
 
-    def _run_with_mock_responses(self, responses: list, **request_kwargs):
-        """Run make_api_request with mocked responses.
-
-        Args:
-            responses: List of (status, json_data, reason) tuples or Exception instances.
-            **request_kwargs: Additional kwargs for make_api_request.
-
-        Returns:
-            Tuple of (result, call_count).
-        """
-        call_count = {"count": 0}
-
-        async def mock_request(*args, **kwargs):
-            idx = min(call_count["count"], len(responses) - 1)
-            call_count["count"] += 1
-            response_spec = responses[idx]
-
-            if isinstance(response_spec, Exception):
-                raise response_spec
-
-            status, json_data, reason = response_spec
-            mock_response = unittest.mock.MagicMock()
-            mock_response.status = status
-            mock_response.reason = reason
-            mock_response.headers = {}
-            mock_response.json = unittest.mock.AsyncMock(return_value=json_data)
-
-            if status >= 400:
-                mock_response.raise_for_status.side_effect = aiohttp.ClientResponseError(
-                    request_info=unittest.mock.MagicMock(), history=(), status=status, message=reason
-                )
-            return mock_response
-
-        # Create a mock that properly handles nested async context managers
-        async def run_test():
-            with patch("open_instruct.tools.utils.aiohttp.ClientSession") as mock_session_class:
-                # Mock the ClientSession context manager
-                mock_session = unittest.mock.MagicMock()
-
-                # Create response context manager mock
-                response_cm = unittest.mock.MagicMock()
-                response_cm.__aenter__ = mock_request
-                response_cm.__aexit__ = unittest.mock.AsyncMock(return_value=None)
-
-                mock_session.post.return_value = response_cm
-                mock_session.get.return_value = response_cm
-
-                # Mock ClientSession as context manager
-                session_cm = unittest.mock.MagicMock()
-                session_cm.__aenter__ = unittest.mock.AsyncMock(return_value=mock_session)
-                session_cm.__aexit__ = unittest.mock.AsyncMock(return_value=None)
-                mock_session_class.return_value = session_cm
-
-                result = await make_api_request(
-                    "http://test.com",
-                    timeout_seconds=10,
-                    base_delay=0.001,  # Use very short delay for tests
-                    max_delay=0.01,
-                    **request_kwargs,
-                )
-                return result
-
-        result = asyncio.run(run_test())
-        return result, call_count["count"]
-
     def test_successful_request_no_retry(self):
         """Test that successful requests don't retry."""
-        result, count = self._run_with_mock_responses([(200, {"result": "ok"}, "OK")], max_retries=3)
+        result, count = _run_with_mock_responses([(200, {"result": "ok"}, "OK")], max_retries=3)
 
         self.assertEqual(result.data, {"result": "ok"})
         self.assertEqual(result.error, "")
@@ -1472,7 +1473,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
     )
     def test_retryable_status_codes(self, name, responses, expected_count):
         """Test that retryable status codes (429, 5xx) trigger retries and eventually succeed."""
-        result, count = self._run_with_mock_responses(responses, max_retries=3)
+        result, count = _run_with_mock_responses(responses, max_retries=3)
 
         self.assertEqual(result.data, {"result": "ok"})
         self.assertEqual(count, expected_count)
@@ -1488,7 +1489,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
     )
     def test_non_retryable_4xx_errors(self, name, status, reason):
         """Test that non-429 4xx errors do not trigger retries."""
-        result, count = self._run_with_mock_responses([(status, None, reason)], max_retries=3)
+        result, count = _run_with_mock_responses([(status, None, reason)], max_retries=3)
 
         self.assertIn(str(status), result.error)
         self.assertEqual(count, 1)
@@ -1506,7 +1507,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
                 aiohttp.ClientConnectorError(unittest.mock.MagicMock(), OSError("Connection refused")),
                 (200, {"result": "ok"}, "OK"),
             ]
-        result, count = self._run_with_mock_responses(responses, max_retries=3)
+        result, count = _run_with_mock_responses(responses, max_retries=3)
 
         self.assertEqual(result.data, {"result": "ok"})
         self.assertEqual(count, expected_count)
@@ -1520,7 +1521,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
     )
     def test_max_retries_respected(self, name, max_retries, expected_count):
         """Test that the number of retries respects max_retries."""
-        result, count = self._run_with_mock_responses(
+        result, count = _run_with_mock_responses(
             [(500, None, "Internal Server Error")] * 10, max_retries=max_retries
         )
 
@@ -1529,7 +1530,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
 
     def test_timeout_error_returns_timed_out_flag(self):
         """Test that timeout errors set timed_out=True in response."""
-        result, count = self._run_with_mock_responses([asyncio.TimeoutError()] * 5, max_retries=2)
+        result, count = _run_with_mock_responses([asyncio.TimeoutError()] * 5, max_retries=2)
 
         self.assertTrue(result.timed_out)
         self.assertIn("Timeout", result.error)

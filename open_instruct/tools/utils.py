@@ -316,6 +316,9 @@ async def make_api_request(
     except aiohttp.ClientError as e:
         return APIResponse(error=f"Connection error: {e}")
 
+    # we should never reach this point, so raise an error if we do
+    raise RuntimeError(f"Failed to make API request to {url}")
+
 
 def get_openai_tool_definitions(tool: "Tool") -> dict[str, Any]:
     """Helper function to export tool definition in OpenAI function calling format.
