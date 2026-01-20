@@ -420,7 +420,9 @@ def run_benchmark(
     warmup_data = dataset[warmup_start_idx:warmup_end_idx]
     warmup_prompts = warmup_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
     # Create individual PromptRequest for each warmup prompt
+    logger.info(f"Putting {len(warmup_prompts)} prompts into param_prompt_Q...")
     for i, prompt in enumerate(warmup_prompts):
+        logger.info(f"Putting warmup_prompt_{i} into queue (before put, size={param_prompt_Q.qsize()})")
         param_prompt_Q.put(
             PromptRequest(
                 prompt=prompt,
@@ -429,7 +431,9 @@ def run_benchmark(
                 generation_config=generation_config,
             )
         )
+        logger.info(f"Put warmup_prompt_{i} into queue (after put, size={param_prompt_Q.qsize()})")
 
+    logger.info(f"All warmup prompts put into queue. Final queue size: {param_prompt_Q.qsize()}")
     utils.ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Checking if engines are ready.")
 
     # Check background threads before warmup to ensure they're healthy
