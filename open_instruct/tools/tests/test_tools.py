@@ -1463,74 +1463,69 @@ class TestMakeApiRequestRetry(unittest.TestCase):
         self.assertEqual(result.error, "")
         self.assertEqual(count, 1)
 
-    def test_429_triggers_retry(self):
-        """Test that 429 status triggers retries."""
-        result, count = self._run_with_mock_responses(
-            [(429, None, "Too Many Requests"), (200, {"result": "ok"}, "OK")], max_retries=3
-        )
+    @parameterized.expand(
+        [
+            ("429_rate_limit", [(429, None, "Too Many Requests"), (200, {"result": "ok"}, "OK")], 2),
+            ("500_server_error", [(500, None, "Internal Server Error"), (200, {"result": "ok"}, "OK")], 2),
+            ("503_unavailable", [(503, None, "Service Unavailable"), (200, {"result": "ok"}, "OK")], 2),
+            ("multiple_5xx", [(500, None, "Error"), (503, None, "Error"), (200, {"result": "ok"}, "OK")], 3),
+        ]
+    )
+    def test_retryable_status_codes(self, name, responses, expected_count):
+        """Test that retryable status codes (429, 5xx) trigger retries and eventually succeed."""
+        result, count = self._run_with_mock_responses(responses, max_retries=3)
 
         self.assertEqual(result.data, {"result": "ok"})
-        self.assertEqual(count, 2)
+        self.assertEqual(count, expected_count)
 
-    def test_5xx_triggers_retry(self):
-        """Test that 5xx status codes trigger retries."""
-        result, count = self._run_with_mock_responses(
-            [(500, None, "Internal Server Error"), (503, None, "Service Unavailable"), (200, {"result": "ok"}, "OK")],
-            max_retries=3,
-        )
-
-        self.assertEqual(result.data, {"result": "ok"})
-        self.assertEqual(count, 3)
-
-    def test_4xx_does_not_retry(self):
+    @parameterized.expand(
+        [
+            ("400_bad_request", 400, "Bad Request"),
+            ("401_unauthorized", 401, "Unauthorized"),
+            ("403_forbidden", 403, "Forbidden"),
+            ("404_not_found", 404, "Not Found"),
+            ("422_unprocessable", 422, "Unprocessable Entity"),
+        ]
+    )
+    def test_non_retryable_4xx_errors(self, name, status, reason):
         """Test that non-429 4xx errors do not trigger retries."""
-        result, count = self._run_with_mock_responses([(400, None, "Bad Request")], max_retries=3)
+        result, count = self._run_with_mock_responses([(status, None, reason)], max_retries=3)
 
-        self.assertIn("400", result.error)
+        self.assertIn(str(status), result.error)
         self.assertEqual(count, 1)
 
-    def test_404_does_not_retry(self):
-        """Test that 404 errors do not trigger retries."""
-        result, count = self._run_with_mock_responses([(404, None, "Not Found")], max_retries=3)
-
-        self.assertIn("404", result.error)
-        self.assertEqual(count, 1)
-
-    def test_timeout_triggers_retry(self):
-        """Test that timeouts trigger retries."""
-        result, count = self._run_with_mock_responses(
-            [asyncio.TimeoutError(), asyncio.TimeoutError(), (200, {"result": "ok"}, "OK")], max_retries=3
-        )
-
-        self.assertEqual(result.data, {"result": "ok"})
-        self.assertEqual(count, 3)
-
-    def test_connection_error_triggers_retry(self):
-        """Test that connection errors trigger retries."""
-        result, count = self._run_with_mock_responses(
-            [
+    @parameterized.expand(
+        [
+            ("timeout", [asyncio.TimeoutError(), asyncio.TimeoutError(), (200, {"result": "ok"}, "OK")], 3),
+            ("connection_refused", "connection_error", 2),  # Special case handled below
+        ]
+    )
+    def test_retryable_exceptions(self, name, responses, expected_count):
+        """Test that retryable exceptions trigger retries."""
+        if responses == "connection_error":
+            responses = [
                 aiohttp.ClientConnectorError(unittest.mock.MagicMock(), OSError("Connection refused")),
                 (200, {"result": "ok"}, "OK"),
-            ],
-            max_retries=3,
-        )
+            ]
+        result, count = self._run_with_mock_responses(responses, max_retries=3)
 
         self.assertEqual(result.data, {"result": "ok"})
-        self.assertEqual(count, 2)
+        self.assertEqual(count, expected_count)
 
-    def test_max_retries_respected(self):
+    @parameterized.expand(
+        [
+            ("max_retries_2", 2, 3),  # 1 initial + 2 retries = 3 attempts
+            ("max_retries_0", 0, 1),  # No retries, just 1 attempt
+            ("max_retries_1", 1, 2),  # 1 initial + 1 retry = 2 attempts
+        ]
+    )
+    def test_max_retries_respected(self, name, max_retries, expected_count):
         """Test that the number of retries respects max_retries."""
-        result, count = self._run_with_mock_responses([(500, None, "Internal Server Error")] * 10, max_retries=2)
+        result, count = self._run_with_mock_responses(
+            [(500, None, "Internal Server Error")] * 10, max_retries=max_retries
+        )
 
-        # Should have made initial attempt + 2 retries = 3 total attempts
-        self.assertEqual(count, 3)
-        self.assertIn("500", result.error)
-
-    def test_zero_retries_means_single_attempt(self):
-        """Test that max_retries=0 means only one attempt."""
-        result, count = self._run_with_mock_responses([(500, None, "Internal Server Error")], max_retries=0)
-
-        self.assertEqual(count, 1)
+        self.assertEqual(count, expected_count)
         self.assertIn("500", result.error)
 
     def test_timeout_error_returns_timed_out_flag(self):
