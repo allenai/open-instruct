@@ -522,8 +522,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
 
 if __name__ == "__main__":
-    from open_instruct.utils import ArgumentParserPlus
+    import simple_parsing
 
-    parser = ArgumentParserPlus((dpo_utils.ExperimentConfig, dataset_transformation.TokenizerConfig))
-    args, tc = parser.parse()
-    main(args, tc)
+    parser = simple_parsing.ArgumentParser()
+    parser.add_arguments(dpo_utils.ExperimentConfig, dest="args")
+    parser.add_arguments(dataset_transformation.TokenizerConfig, dest="tc")
+    namespace = parser.parse_args()
+    main(namespace.args, namespace.tc)
