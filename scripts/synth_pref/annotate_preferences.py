@@ -8,11 +8,11 @@ from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
 from openai import OpenAI
+from scripts.synth_pref.utils.openai_api import format_for_openai_batch
+from scripts.synth_pref.utils.ultrafeedback_template import system_prompt
 from tqdm import tqdm
 
 from open_instruct import logger_utils
-from scripts.synth_pref.utils.openai_api import format_for_openai_batch
-from scripts.synth_pref.utils.ultrafeedback_template import system_prompt
 
 logger = logger_utils.setup_logger(__name__)
 

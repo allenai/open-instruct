@@ -4,10 +4,10 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scripts.synth_pref.utils.ultrafeedback_template import parser
 from tqdm import tqdm
 
 from open_instruct import logger_utils
-from scripts.synth_pref.utils.ultrafeedback_template import parser
 
 logger = logger_utils.setup_logger(__name__)
 

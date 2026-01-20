@@ -395,8 +395,8 @@ class PolicyTrainerRayProcess(RayProcess):
         # Monkey patch to load checkpoints with `weights_only=False`
         # otherwise it errors out with:
         # `_pickle.UnpicklingError: Weights only load failed. ` with pytorch 2.6.0
-        from deepspeed.runtime.checkpoint_engine import torch_checkpoint_engine
-        from deepspeed.utils import logger
+        from deepspeed.runtime.checkpoint_engine import torch_checkpoint_engine  # noqa: PLC0415
+        from deepspeed.utils import logger  # noqa: PLC0415
 
         def load(self, path: str, map_location=None):
             logger.info(f"[Torch] Loading checkpoint from {path}...")
