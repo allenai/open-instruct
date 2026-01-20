@@ -994,8 +994,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         # Save raw logprob samples for alignment analysis (ScaleRL Figure 3)
                         if self.args.save_logprob_samples:
                             self._save_logprob_samples(
-                                vllm_logprobs_BT[valid_mask_BT].cpu().numpy(),
-                                local_logprobs_BT[valid_mask_BT].cpu().numpy(),
+                                vllm_logprobs_BT[valid_mask_BT].float().cpu().numpy(),
+                                local_logprobs_BT[valid_mask_BT].float().cpu().numpy(),
                             )
 
                     new_logprobs_BT = local_logprobs_BT
