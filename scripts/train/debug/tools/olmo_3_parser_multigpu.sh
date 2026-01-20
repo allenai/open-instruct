@@ -9,6 +9,9 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
+export SERPER_API_KEY=$(beaker secret read hamishivi_SERPER_API_KEY --workspace ai2/open-instruct-dev)
+export JINA_API_KEY=$(beaker secret read hamishivi_JINA_API_KEY --workspace ai2/open-instruct-dev)
+
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
@@ -24,6 +27,7 @@ uv run python mason.py \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --budget ai2/oe-adapt \
        --secret SERPER_API_KEY=hamishivi_SERPER_API_KEY \
+       --secret JINA_API_KEY=hamishivi_JINA_API_KEY \
        --gpus 8 \
        -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 1.0 \
@@ -66,7 +70,7 @@ uv run python mason.py \
     --try_launch_beaker_eval_jobs_on_weka False \
     --max_tool_calls 5 \
     --vllm_enable_prefix_caching \
-    --tools python serper_search \
-    --tool_call_names code search \
-    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "timeout": 3}' '{}' \
+    --tools python serper_search jina_browse \
+    --tool_call_names code search browse \
+    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "timeout": 3}' '{}' '{}' \
     --tool_parser_type vllm_olmo3
