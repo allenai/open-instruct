@@ -6,7 +6,6 @@ These callbacks handle:
 - Reference policy Polyak updates
 """
 
-import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -19,9 +18,9 @@ import torch.nn as nn
 from olmo_core.train.callbacks import Callback
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-from open_instruct.actor_manager import ActorManager
+from open_instruct import logger_utils
 
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 def olmo_core_to_hf_name(name: str) -> str:
@@ -71,7 +70,7 @@ class VLLMWeightSyncCallback(Callback):
 
     vllm_engines: list[ray.actor.ActorHandle]
     model_update_group: dist.ProcessGroup | None = None
-    actor_manager: ActorManager | None = None
+    actor_manager: ray.actor.ActorHandle | None = None
     gather_whole_model: bool = True
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
@@ -85,7 +84,7 @@ class VLLMWeightSyncCallback(Callback):
         if self.actor_manager is not None:
             ray.get(self.actor_manager.set_should_stop.remote(True))
 
-        model = self.trainer.train_module.model
+        model = self.trainer.train_module.model  # ty: ignore[unresolved-attribute]
 
         try:
             self._broadcast_weights(model)
@@ -176,7 +175,7 @@ class RefPolicyUpdateCallback(Callback):
         if self.trainer.global_step % self.update_interval != 0:
             return
 
-        model = self.trainer.train_module.model
+        model = self.trainer.train_module.model  # ty: ignore[unresolved-attribute]
         is_fsdp = isinstance(model, FSDP)
 
         if is_fsdp:

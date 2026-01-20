@@ -5,7 +5,6 @@ This module provides a Ray actor that wraps OLMo-core's training infrastructure,
 allowing distributed GRPO training across multiple GPUs and nodes.
 """
 
-import logging
 import os
 import socket
 from datetime import timedelta
@@ -26,12 +25,12 @@ from olmo_core.train.train_module.transformer import (
 )
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import vllm_utils
+from open_instruct import grpo_utils, logger_utils, vllm_utils
 from open_instruct.grpo_callbacks import RefPolicyUpdateCallback, VLLMWeightSyncCallback, olmo_core_to_hf_name
-from open_instruct.grpo_train_module import GRPOConfig, GRPOTrainModule
+from open_instruct.olmo_core_train_modules import GRPOTrainModule
 from open_instruct.utils import RayProcess, is_beaker_job
 
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 @ray.remote(num_gpus=1)
@@ -52,7 +51,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         num_nodes: int,
         local_world_size: int,
         model_name_or_path: str,
-        grpo_config: GRPOConfig,
+        grpo_config: grpo_utils.ExperimentConfig,
         learning_rate: float,
         weight_decay: float,
         max_grad_norm: float,
@@ -101,11 +100,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.vllm_config = vllm_config
         self.data_prep_actor_name = data_prep_actor_name
 
-        self.model = None
         self.ref_policy = None
-        self.train_module = None
-        self.dataloader = None
-        self.dataloader_iter = None
         self.vllm_engines = None
         self.model_update_group = None
         self.local_metrics = {}
@@ -370,7 +365,7 @@ class OLMoCoreModelGroup:
         num_gpus_per_node: list[int],
         single_gpu_mode: bool,
         model_name_or_path: str,
-        grpo_config: GRPOConfig,
+        grpo_config: grpo_utils.ExperimentConfig,
         learning_rate: float,
         weight_decay: float,
         max_grad_norm: float,
@@ -414,7 +409,7 @@ class OLMoCoreModelGroup:
 
         node_idx, local_rank, local_world_size = get_node_info(0, num_gpus_per_node)
 
-        master_policy = PolicyTrainerOLMoCoreProcess.options(
+        master_policy = PolicyTrainerOLMoCoreProcess.options(  # ty: ignore[unresolved-attribute]
             num_cpus=self.num_cpus_per_actor,
             num_gpus=self.num_gpus_per_actor,
             scheduling_strategy=PlacementGroupSchedulingStrategy(placement_group=pg, placement_group_bundle_index=0),
@@ -461,7 +456,7 @@ class OLMoCoreModelGroup:
             scheduling_strategy = PlacementGroupSchedulingStrategy(
                 placement_group=pg, placement_group_bundle_index=node_idx
             )
-            worker_policy = PolicyTrainerOLMoCoreProcess.options(
+            worker_policy = PolicyTrainerOLMoCoreProcess.options(  # ty: ignore[unresolved-attribute]
                 num_cpus=self.num_cpus_per_actor,
                 num_gpus=self.num_gpus_per_actor,
                 scheduling_strategy=scheduling_strategy,

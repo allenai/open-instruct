@@ -856,7 +856,7 @@ RAW_PROMPT_KEY = "prompt"
 
 @dataclass
 class TokenizerConfig:
-    tokenizer_name_or_path: Optional[str] = None
+    tokenizer_name_or_path: str
     tokenizer_revision: Optional[str] = None
     trust_remote_code: bool = False
     use_fast: bool = True

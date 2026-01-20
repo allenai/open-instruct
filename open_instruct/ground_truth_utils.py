@@ -1070,7 +1070,7 @@ class RewardConfig:
     apply_r1_style_format_reward: bool = False
     r1_style_format_reward: float = 1.0
     apply_verifiable_reward: bool = True
-    verification_reward: int = 10
+    verification_reward: float = 10.0
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = -10.0
     only_reward_good_outputs: bool = False

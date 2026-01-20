@@ -25,8 +25,6 @@ import logging
 import os
 import shutil
 import time
-from dataclasses import dataclass, field
-from typing import Literal
 
 import ray
 from huggingface_hub import HfApi
@@ -35,14 +33,15 @@ from ray.util.placement_group import placement_group
 from rich.pretty import pprint
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_fast, logger_utils, utils, vllm_utils
+from open_instruct import grpo_fast, grpo_utils, logger_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_loader import DataPreparationActor
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
-from open_instruct.grpo_train_module import GRPOConfig
 from open_instruct.model_utils import ModelConfig, push_folder_to_hub
-from open_instruct.tool_utils import tools
+from open_instruct.tools.parsers import create_tool_parser
+from open_instruct.tools.tools import TOOL_REGISTRY
+from open_instruct.tools.utils import ParsedToolConfig, ToolsConfig
 from open_instruct.utils import (
     ArgumentParserPlus,
     is_beaker_job,
@@ -53,120 +52,10 @@ from open_instruct.utils import (
     ray_get_with_progress,
 )
 
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
-@dataclass
-class GRPOExperimentConfig:
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
-    seed: int = 1
-    run_name: str | None = None
-
-    learning_rate: float = 2e-5
-    lr_scheduler_type: Literal[
-        "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
-    ] = "linear"
-    warm_up_steps: int = 0
-    warmup_ratio: float = 0.0
-    weight_decay: float = 0.0
-    max_grad_norm: float = 1.0
-    set_weight_decay_on_bias_and_norm: bool = True
-    fused_optimizer: bool = False
-
-    per_device_train_batch_size: int = 1
-    total_episodes: int = 100000
-    world_size: int | None = None
-    num_training_steps: int | None = None
-    local_eval_every: int = 100
-    save_freq: int = 200
-    backend_timeout: int = 120
-
-    num_epochs: int = 1
-    num_mini_batches: int = 1
-    beta: float = 0.05
-    clip_lower: float = 0.2
-    clip_higher: float = 0.2
-    truncated_importance_sampling_ratio_cap: float = 0.0
-    kl_estimator: Literal[0, 1, 2, 3] = 2
-    loss_denominator: str = "token"
-    alpha: float = 0.6
-    ref_policy_update_freq: int | None = None
-    load_ref_policy: bool = True
-    loss_fn: Literal["dapo", "cispo"] = "dapo"
-    record_entropy: bool = False
-    use_vllm_logprobs: bool = False
-
-    single_gpu_mode: bool = False
-    num_learners_per_node: list[int] = field(default_factory=lambda: [1])
-    num_nodes: int = 1
-    deepspeed_stage: int = 0
-    deepspeed_zpg: int = 8
-    deepspeed_offload_param: bool = False
-    deepspeed_offload_optimizer: bool = False
-    gather_whole_model: bool = True
-    enable_queue_dashboard: bool = True
-    queue_dashboard_port: int | None = None
-
-    verbose: bool = False
-    with_tracking: bool = False
-    wandb_project_name: str = "open_instruct_internal"
-    wandb_entity: str | None = None
-    push_to_hub: bool = True
-    hf_entity: str | None = None
-    hf_repo_id: str | None = None
-    hf_repo_revision: str | None = None
-    hf_repo_url: str | None = None
-    output_dir: str = "output"
-    save_traces: bool = False
-    cache_dataset_only: bool = False
-    keep_last_n_checkpoints: int = 3
-    checkpoint_state_freq: int = -1
-    checkpoint_state_dir: str | None = None
-    gs_checkpoint_state_dir: str | None = None
-
-    try_launch_beaker_eval_jobs_on_weka: bool = False
-    try_auto_save_to_beaker: bool = True
-    gs_bucket_path: str | None = None
-    oe_eval_tasks: list[str] | None = None
-    oe_eval_max_length: int = 4096
-    oe_eval_beaker_image: str | None = None
-    oe_eval_gpu_multiplier: int | None = None
-    eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
-    eval_workspace: str = "ai2/tulu-3-results"
-    send_slack_alerts: bool = False
-
-    eval_on_step_0: bool = False
-
-    def __post_init__(self):
-        if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
-            raise ValueError("Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`.")
-        self.loss_denominator = utils.get_denominator(self.loss_denominator)
-        if not self.load_ref_policy and self.beta != 0.0:
-            raise ValueError(
-                "When load_ref_policy=False, beta must be 0.0. "
-                f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
-            )
-
-    @property
-    def grpo_config(self) -> GRPOConfig:
-        return GRPOConfig(
-            beta=self.beta,
-            clip_lower=self.clip_lower,
-            clip_higher=self.clip_higher,
-            num_epochs=self.num_epochs,
-            num_mini_batches=self.num_mini_batches,
-            alpha=self.alpha,
-            loss_fn=self.loss_fn,
-            kl_estimator=self.kl_estimator,
-            load_ref_policy=self.load_ref_policy,
-            truncated_importance_sampling_ratio_cap=self.truncated_importance_sampling_ratio_cap,
-            use_vllm_logprobs=self.use_vllm_logprobs,
-            record_entropy=self.record_entropy,
-            loss_denominator=self.loss_denominator if isinstance(self.loss_denominator, float) else None,
-        )
-
-
-def setup_experiment_tracking(args: GRPOExperimentConfig, tc: TokenizerConfig, model_config: ModelConfig):
+def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, model_config: ModelConfig):
     beaker_config = None
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
@@ -190,7 +79,7 @@ def setup_experiment_tracking(args: GRPOExperimentConfig, tc: TokenizerConfig, m
 
 
 def create_generation_config(
-    args: GRPOExperimentConfig,
+    args: grpo_utils.ExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
 ):
@@ -205,38 +94,98 @@ def create_generation_config(
     )
 
 
-def setup_tools(streaming_config: data_loader_lib.StreamingDataLoaderConfig) -> dict[str, tools.Tool]:
-    tool_objects: dict[str, tools.Tool] = {}
-    if streaming_config.tools:
-        for tool in streaming_config.tools:
-            if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
+def create_tools(parsed_tools: list[ParsedToolConfig]) -> list[ray.actor.ActorHandle]:
+    from dataclasses import asdict
 
-                search_tool = SearchTool(
-                    start_str="<query>",
-                    end_str="</query>",
-                    api_endpoint=streaming_config.search_api_endpoint,
-                    number_documents_to_search=streaming_config.number_documents_to_search,
-                )
-                tool_objects[search_tool.end_str] = search_tool
-                streaming_config.stop_strings.append(search_tool.end_str)
-            elif tool.lower() == "code":
-                from open_instruct.tool_utils.tools import PythonCodeTool
+    tool_actors = []
+    for parsed_tool in parsed_tools:
+        if parsed_tool.name not in TOOL_REGISTRY:
+            available_tools = ", ".join(TOOL_REGISTRY.keys())
+            raise ValueError(f"Unknown tool: {parsed_tool.name}. Available tools: {available_tools}")
 
-                code_tool = PythonCodeTool(
-                    start_str="<code>", end_str="</code>", api_endpoint=streaming_config.code_tool_api_endpoint
-                )
-                tool_objects[code_tool.end_str] = code_tool
-                streaming_config.stop_strings.append(code_tool.end_str)
-    return tool_objects
+        tool_config_class = TOOL_REGISTRY[parsed_tool.name]
+        config = tool_config_class(**parsed_tool.config)
+        _kwarg_dict = asdict(config) | {"call_name": parsed_tool.call_name}
+        tool_actors.append(ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**_kwarg_dict))
+
+    return tool_actors
+
+
+def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, list[str]]:
+    tool_actors = create_tools(tools_config._parsed_tools)
+    tool_definitions = (
+        ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
+    )
+
+    stop_sequences = []
+    if tool_actors:
+        stop_sequences = create_tool_parser(
+            parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
+        ).stop_sequences
+
+    return tool_actors, tool_definitions, stop_sequences
+
+
+def wait_for_gpus(expected_gpus: int, max_attempts: int = 60, poll_interval: int = 5) -> None:
+    logger.info(f"Waiting for {expected_gpus} GPUs to be available in Ray cluster...")
+    for i in range(max_attempts):
+        cluster_resources = ray.cluster_resources()
+        available_gpus = cluster_resources.get("GPU", 0)
+        logger.info(f"Attempt {i + 1}: Ray cluster resources: {cluster_resources}")
+        if available_gpus >= expected_gpus:
+            logger.info(f"Found {available_gpus} GPUs, proceeding with placement group creation")
+            return
+        logger.info(f"Only {available_gpus} GPUs available, waiting for {expected_gpus}...")
+        time.sleep(poll_interval)
+    logger.error(f"Timeout waiting for GPUs. Only {available_gpus} available, needed {expected_gpus}")
+
+
+def save_and_cleanup(
+    args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, policy_group, tokenizer, beaker_config
+) -> None:
+    final_output_dir = args.output_dir
+    ray_get_with_progress(
+        [m.save_model.remote(final_output_dir, tc.chat_template_name, tokenizer) for m in policy_group.models],
+        desc="Saving final model",
+    )
+
+    if args.push_to_hub:
+        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+
+    if (
+        args.try_auto_save_to_beaker
+        and is_beaker_job()
+        and beaker_config is not None
+        and len(beaker_config.beaker_dataset_id_urls) > 0
+        and args.output_dir.rstrip("/") != "/output"
+        and os.path.isdir(args.output_dir)
+    ):
+        shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
+
+    if is_beaker_job() and args.try_launch_beaker_eval_jobs_on_weka and args.hf_repo_revision is not None:
+        eval_path = args.output_dir
+        if beaker_config is not None and beaker_config.beaker_dataset_ids:
+            eval_path = beaker_config.beaker_dataset_ids[-1]
+        launch_ai2_evals_on_weka(
+            path=eval_path,
+            leaderboard_name=args.hf_repo_revision,
+            oe_eval_max_length=args.oe_eval_max_length,
+            wandb_url=None,
+            oe_eval_tasks=args.oe_eval_tasks,
+            gs_bucket_path=args.gs_bucket_path,
+            eval_workspace=args.eval_workspace,
+            eval_priority=args.eval_priority,
+            oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
+        )
 
 
 def main(
-    args: GRPOExperimentConfig,
+    args: grpo_utils.ExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
+    tools_config: ToolsConfig,
 ) -> None:
     """Main entry point for GRPO training with OLMo-core Trainer using Ray actors.
 
@@ -259,7 +208,29 @@ def main(
         logging.getLogger().setLevel(logging.DEBUG)
 
     beaker_config = setup_experiment_tracking(args, tc, model_config)
-    train_dataset, eval_dataset = grpo_fast.setup_datasets(args, tc, tokenizer, streaming_config, tool_definitions=[])
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    pprint([args, model_config])
+
+    ray.init(
+        address="auto", dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)}
+    )
+
+    tool_actors, tool_definitions, tool_stop_sequences = initialize_tools(tools_config, tokenizer)
+    logger.info(
+        f"Initialized {len(tool_actors)} tool actors with definitions: {[d['function']['name'] for d in tool_definitions]}"
+    )
+    if tool_stop_sequences:
+        logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
+        streaming_config.stop_strings.extend(tool_stop_sequences)
+
+    train_dataset, eval_dataset = grpo_fast.setup_datasets(
+        args,  # type: ignore[arg-type]
+        tc,
+        tokenizer,
+        streaming_config,
+        tool_definitions if tools_config.pass_tools_to_chat_template else [],
+    )
 
     if len(train_dataset) < (
         needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
@@ -269,13 +240,6 @@ def main(
     if args.cache_dataset_only:
         logger.info("Dataset cached. Exiting because --cache_dataset_only was set.")
         return
-
-    os.makedirs(args.output_dir, exist_ok=True)
-    pprint([args, model_config])
-
-    ray.init(
-        address="auto", dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)}
-    )
 
     num_eval_prompts = len(eval_dataset) if eval_dataset is not None else 0
     queue_size = (streaming_config.async_steps + 1) * streaming_config.num_unique_prompts_rollout + num_eval_prompts
@@ -290,7 +254,7 @@ def main(
         verification_reward=streaming_config.verification_reward,
         non_stop_penalty=streaming_config.non_stop_penalty,
         non_stop_penalty_value=streaming_config.non_stop_penalty_value,
-        only_reward_good_outputs=streaming_config.only_reward_good_outputs,
+        only_reward_good_outputs=tools_config.only_reward_good_outputs,
         additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
@@ -305,7 +269,7 @@ def main(
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
     data_prep_actor_name = "data_prep_singleton"
-    _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(
+    _data_prep_actor = DataPreparationActor.options(name=data_prep_actor_name, num_cpus=2).remote(  # type: ignore[attr-defined]
         dataset=train_dataset,
         inference_results_Q=inference_results_Q,
         param_prompt_Q=prompt_Q,
@@ -326,21 +290,7 @@ def main(
         allow_world_padding=False,
     )
 
-    tool_objects = setup_tools(streaming_config)
-
-    expected_gpus = sum(args.num_learners_per_node)
-    logger.info(f"Waiting for {expected_gpus} GPUs to be available in Ray cluster...")
-    for i in range(60):
-        cluster_resources = ray.cluster_resources()
-        available_gpus = cluster_resources.get("GPU", 0)
-        logger.info(f"Attempt {i + 1}: Ray cluster resources: {cluster_resources}")
-        if available_gpus >= expected_gpus:
-            logger.info(f"Found {available_gpus} GPUs, proceeding with placement group creation")
-            break
-        logger.info(f"Only {available_gpus} GPUs available, waiting for {expected_gpus}...")
-        time.sleep(5)
-    else:
-        logger.error(f"Timeout waiting for GPUs. Only {available_gpus} available, needed {expected_gpus}")
+    wait_for_gpus(sum(args.num_learners_per_node))
 
     bundles = [{"GPU": n, "CPU": n} for n in args.num_learners_per_node]
     logger.info(f"Requesting bundles: {bundles}")
@@ -352,7 +302,7 @@ def main(
         num_gpus_per_node=args.num_learners_per_node,
         single_gpu_mode=args.single_gpu_mode,
         model_name_or_path=model_config.model_name_or_path,
-        grpo_config=args.grpo_config,
+        grpo_config=args,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         max_grad_norm=args.max_grad_norm,
@@ -392,8 +342,9 @@ def main(
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        tools=tool_objects,
-        max_tool_calls=streaming_config.max_tool_calls,
+        tool_actors=tool_actors,
+        tool_parser_type=tools_config.tool_parser_type,
+        max_tool_calls=tools_config.max_tool_calls,
         mask_tool_use=streaming_config.mask_tool_use,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
@@ -439,54 +390,21 @@ def main(
     ray_get_with_progress([m.fit.remote() for m in policy_group.models], desc="Running OLMo-core GRPO training")
     logger.info("Training complete.")
 
-    final_output_dir = args.output_dir
-    ray_get_with_progress(
-        [m.save_model.remote(final_output_dir, tc.chat_template_name, tokenizer) for m in policy_group.models],
-        desc="Saving final model",
-    )
-
-    if args.push_to_hub:
-        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
-
-    if (
-        args.try_auto_save_to_beaker
-        and is_beaker_job()
-        and beaker_config is not None
-        and len(beaker_config.beaker_dataset_id_urls) > 0
-        and args.output_dir.rstrip("/") != "/output"
-        and os.path.isdir(args.output_dir)
-    ):
-        shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
-
-    if is_beaker_job() and args.try_launch_beaker_eval_jobs_on_weka and args.hf_repo_revision is not None:
-        eval_path = args.output_dir
-        if beaker_config is not None and beaker_config.beaker_dataset_ids:
-            eval_path = beaker_config.beaker_dataset_ids[-1]
-        launch_ai2_evals_on_weka(
-            path=eval_path,
-            leaderboard_name=args.hf_repo_revision,
-            oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=None,
-            oe_eval_tasks=args.oe_eval_tasks,
-            gs_bucket_path=args.gs_bucket_path,
-            eval_workspace=args.eval_workspace,
-            eval_priority=args.eval_priority,
-            oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
-        )
-
+    save_and_cleanup(args, tc, policy_group, tokenizer, beaker_config)
     logger.info("Finished GRPO training")
 
 
 if __name__ == "__main__":
     parser = ArgumentParserPlus(
-        (
-            GRPOExperimentConfig,
+        [  # ty: ignore[invalid-argument-type]
+            grpo_utils.ExperimentConfig,
             TokenizerConfig,
             ModelConfig,
             data_loader_lib.StreamingDataLoaderConfig,
             data_loader_lib.VLLMConfig,
-        )
+            ToolsConfig,
+        ]
     )
-    args, tc, model_config, streaming_config, vllm_config = parser.parse_args_into_dataclasses()
+    args, tc, model_config, streaming_config, vllm_config, tools_config = parser.parse_args_into_dataclasses()
 
-    main(args, tc, model_config, streaming_config, vllm_config)
+    main(args, tc, model_config, streaming_config, vllm_config, tools_config)  # type: ignore[arg-type]

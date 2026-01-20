@@ -5,14 +5,12 @@ This module provides GRPO (Group Relative Policy Optimization) training using
 OLMo-core's native training infrastructure, following TransformerTrainModule patterns.
 """
 
-from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 import torch
 import torch.distributed.checkpoint.state_dict as dist_cp_sd
 import torch.nn as nn
 import torch.nn.functional as F
-from olmo_core import config
 from olmo_core.distributed.parallel import build_world_mesh
 from olmo_core.distributed.utils import is_distributed
 from olmo_core.nn.transformer import Transformer
@@ -25,56 +23,9 @@ from olmo_core.train.train_module.transformer.config import TransformerDataParal
 from olmo_core.utils import get_default_device
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, logger_utils
+from open_instruct import data_types, grpo_utils, logger_utils
 
 logger = logger_utils.setup_logger(__name__)
-
-
-@dataclass
-class GRPOConfig(config.Config):
-    """Configuration for GRPO-specific settings."""
-
-    beta: float = 0.05
-    """The KL coefficient for the GRPO objective."""
-
-    clip_lower: float = 0.2
-    """The lower clip range for importance sampling ratio."""
-
-    clip_higher: float = 0.2
-    """The higher clip range. DAPO uses higher values (e.g., 1.28)."""
-
-    num_epochs: int = 1
-    """The number of PPO-style epochs to train on each batch."""
-
-    num_mini_batches: int = 1
-    """Number of minibatches to split a batch into."""
-
-    alpha: float = 0.6
-    """The alpha value for Polyak updates of reference policy."""
-
-    loss_fn: Literal["dapo", "cispo"] = "dapo"
-    """Loss function variant: DAPO or CISPO."""
-
-    kl_estimator: Literal[0, 1, 2, 3] = 2
-    """The KL divergence estimator to use."""
-
-    load_ref_policy: bool = True
-    """Whether to use a reference policy for KL penalty calculation."""
-
-    truncated_importance_sampling_ratio_cap: float = 0.0
-    """Maximum cap for truncated importance sampling ratio (0 = disabled)."""
-
-    use_vllm_logprobs: bool = False
-    """Whether to use vLLM's logprobs instead of computing via forward pass."""
-
-    record_entropy: bool = False
-    """Whether to record policy entropy during training."""
-
-    loss_denominator: float | None = None
-    """Custom denominator for loss normalization. None = use token count."""
-
-    temperature: float = 1.0
-    """Temperature for computing logprobs."""
 
 
 class GRPOTrainModule(TrainModule):
@@ -94,7 +45,7 @@ class GRPOTrainModule(TrainModule):
         optim: OptimConfig,
         rank_microbatch_size: int,
         max_sequence_length: int,
-        grpo_config: GRPOConfig,
+        grpo_config: grpo_utils.ExperimentConfig,
         tokenizer: PreTrainedTokenizer,
         ref_policy: Transformer | None = None,
         dp_config: TransformerDataParallelConfig | None = None,
@@ -165,7 +116,7 @@ class GRPOTrainModule(TrainModule):
     def optim_step(self) -> None:
         if self.max_grad_norm is not None:
             if hasattr(self.model, "clip_grad_norm_"):
-                grad_norm = self.model.clip_grad_norm_(self.max_grad_norm)
+                grad_norm = self.model.clip_grad_norm_(self.max_grad_norm)  # type: ignore[union-attr]
             else:
                 grad_norm = nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
             self.trainer.record_metric("total grad norm", grad_norm, reduce_type=None, namespace="optim")
@@ -398,4 +349,5 @@ class GRPOTrainModule(TrainModule):
         seq_len = data_BT.query_responses[0].shape[1]
         flops_per_token = self.num_flops_per_token(seq_len)
         global_num_tokens = self.trainer.data_loader.global_num_tokens_in_batch(batch)
+        assert global_num_tokens is not None
         return flops_per_token * global_num_tokens

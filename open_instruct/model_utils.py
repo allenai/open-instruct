@@ -123,7 +123,7 @@ class Batch:
 
 @dataclass
 class ModelConfig:
-    model_name_or_path: str | None = None
+    model_name_or_path: str
     """The model checkpoint for weights initialization."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
