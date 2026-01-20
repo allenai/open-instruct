@@ -79,16 +79,14 @@ logger = logger_utils.setup_logger(__name__)
 # Utilities
 def get_commit_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
-) -> str:
+) -> str | None:
     file = launch_utils.custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     commit_hash = extract_commit_hash(file, None)
-    if commit_hash is None:
-        raise ValueError(f"Could not extract commit hash from {file}")
     return commit_hash
 
 
 def get_file_hash(
-    model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
+    model_name_or_path: str, revision: str | None, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
     file = launch_utils.custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     if isinstance(file, str):
@@ -101,7 +99,7 @@ def get_file_hash(
 
 
 def get_files_hash_if_exists(
-    model_name_or_path: str, revision: str, filenames: list[str], repo_type: str = "model"
+    model_name_or_path: str, revision: str | None, filenames: list[str], repo_type: str = "model"
 ) -> list[str]:
     return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
 
@@ -890,8 +888,6 @@ class TokenizerConfig:
     def tokenizer(self):
         if self.tokenizer_name_or_path is None:
             raise ValueError("tokenizer_name_or_path must be set")
-        if self.tokenizer_revision is None:
-            raise ValueError("tokenizer_revision must be set")
         files_hash = get_files_hash_if_exists(
             self.tokenizer_name_or_path,
             self.tokenizer_revision,
@@ -1326,14 +1322,11 @@ def rlvr_tokenize_v1(
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
-    system_prompt_override: Optional[str] = None,
+    system_prompt_override: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
 ):
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
-        prompt = row[sft_messages_key][:-1]
+    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
     # Override the system prompt if provided
     if system_prompt_override:
@@ -1341,18 +1334,22 @@ def rlvr_tokenize_v1(
             prompt = prompt[1:]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
-    chat_template_kwargs = {"add_generation_prompt": True}
+    tools_for_template: list[dict[str, Any]] | None = None
     if pass_tools_to_chat_template and tool_definitions:
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
         if sample_active_tools is not None:
             active_tool_names = set(sample_active_tools)
             filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
             if filtered_tools:
-                chat_template_kwargs["tools"] = filtered_tools
+                tools_for_template = filtered_tools
         else:
-            chat_template_kwargs["tools"] = tool_definitions
+            tools_for_template = tool_definitions
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
+        prompt,
+        add_generation_prompt=True,
+        tools=tools_for_template,  # type: ignore[arg-type]
+    )
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
@@ -1422,18 +1419,22 @@ def rlvr_tokenize_v3(
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
-    chat_template_kwargs = {"add_generation_prompt": True}
+    tools_for_template: list[dict[str, Any]] | None = None
     if pass_tools_to_chat_template and tool_definitions:
         sample_active_tools = row.get(TOOLS_COLUMN_KEY)
         if sample_active_tools is not None:
             active_tool_names = set(sample_active_tools)
             filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
             if filtered_tools:
-                chat_template_kwargs["tools"] = filtered_tools
+                tools_for_template = filtered_tools
         else:
-            chat_template_kwargs["tools"] = tool_definitions
+            tools_for_template = tool_definitions
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
+        prompt,
+        add_generation_prompt=True,
+        tools=tools_for_template,  # type: ignore[arg-type]
+    )
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
     row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
@@ -1680,13 +1681,16 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     return dataset
 
 
-def compute_config_hash(dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
+def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     """Compute a deterministic hash of both configs for caching.
 
     The hash includes DATASET_CACHE_VERSION to invalidate old caches when
     transformation logic changes significantly.
     """
-    dc_dicts = [{k: v for k, v in asdict(dc).items() if v is not None} for dc in dcs]
+    non_serializable_keys = {"dataset"}
+    dc_dicts = [
+        {k: v for k, v in asdict(dc).items() if v is not None and k not in non_serializable_keys} for dc in dcs
+    ]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
     combined_dict = {"cache_version": DATASET_CACHE_VERSION, "dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
     config_str = json.dumps(combined_dict, sort_keys=True)
