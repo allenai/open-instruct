@@ -27,8 +27,7 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --no-host-networking \
        --gpus 1 \
-       --no_auto_dataset_cache \
-	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k_with_tool_prompt 32 \
@@ -73,5 +72,6 @@ uv run python mason.py \
     --vllm_num_engines 1 \
     --max_tool_calls 5 \
     --vllm_enable_prefix_caching \
-    --tools python \
-    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute"}'
+    --tools code search \
+    --search_api_endpoint "http://saturn-cs-aus-248.reviz.ai2.in:47479/search" \
+    --code_tool_api_endpoint https://open-instruct-tool-server-10554368204.us-central1.run.app/execute
