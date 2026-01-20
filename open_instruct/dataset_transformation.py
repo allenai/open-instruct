@@ -1688,16 +1688,31 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     return dataset
 
 
+def _get_serializable_dataset_config_dict(dc: DatasetConfig, exclude_none: bool = False) -> dict:
+    """Convert DatasetConfig to a JSON-serializable dict.
+
+    Args:
+        dc: The DatasetConfig to convert.
+        exclude_none: If True, exclude keys with None values (useful for hashing).
+
+    Returns:
+        A dictionary representation of the DatasetConfig, excluding the non-serializable
+        'dataset' field.
+    """
+    d = asdict(dc)
+    d.pop("dataset", None)
+    if exclude_none:
+        d = {k: v for k, v in d.items() if v is not None}
+    return d
+
+
 def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     """Compute a deterministic hash of both configs for caching.
 
     The hash includes DATASET_CACHE_VERSION to invalidate old caches when
     transformation logic changes significantly.
     """
-    non_serializable_keys = {"dataset"}
-    dc_dicts = [
-        {k: v for k, v in asdict(dc).items() if v is not None and k not in non_serializable_keys} for dc in dcs
-    ]
+    dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
     combined_dict = {"cache_version": DATASET_CACHE_VERSION, "dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
     config_str = json.dumps(combined_dict, sort_keys=True)
@@ -1813,7 +1828,7 @@ class LocalDatasetTransformationCache:
 
         config_dict = {
             "tokenizer_config": asdict(tc),
-            "dataset_configs": [asdict(dc) for dc in dcs],
+            "dataset_configs": [_get_serializable_dataset_config_dict(dc) for dc in dcs],
             "config_hash": config_hash,
         }
         with open(config_path, "w") as f:
