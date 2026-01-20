@@ -9,14 +9,17 @@ These callbacks handle:
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
+import ray
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from olmo_core.train.callbacks import Callback
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+from open_instruct.actor_manager import ActorManager
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +69,9 @@ class VLLMWeightSyncCallback(Callback):
     4. Resumes vLLM actors
     """
 
-    vllm_engines: list[Any] = field(default_factory=list)
+    vllm_engines: list[ray.actor.ActorHandle]
     model_update_group: dist.ProcessGroup | None = None
-    actor_manager: Any = None
+    actor_manager: ActorManager | None = None
     gather_whole_model: bool = True
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
@@ -76,11 +79,6 @@ class VLLMWeightSyncCallback(Callback):
     def post_step(self) -> None:
         if self.trainer.global_step % self.sync_interval != 0:
             return
-
-        if not self.vllm_engines:
-            return
-
-        import ray
 
         torch.cuda.empty_cache()
 
@@ -97,8 +95,6 @@ class VLLMWeightSyncCallback(Callback):
 
     def _broadcast_weights(self, model: nn.Module) -> None:
         """Broadcast weights from training model to vLLM engines."""
-        import ray
-
         refss = []
         count = 0
         num_params = len(list(model.named_parameters()))
@@ -172,14 +168,11 @@ class RefPolicyUpdateCallback(Callback):
     This is used for KL divergence computation in GRPO.
     """
 
-    ref_policy: nn.Module | None = None
+    ref_policy: nn.Module
     alpha: float = 0.6
     update_interval: int = 1
 
     def post_step(self) -> None:
-        if self.ref_policy is None:
-            return
-
         if self.trainer.global_step % self.update_interval != 0:
             return
 
@@ -203,8 +196,6 @@ class DataPreparationActorCheckpointCallback(Callback):
 
     def pre_checkpoint(self) -> dict[str, Any]:
         """Save DataPreparationActor state before checkpointing."""
-        import ray
-
         try:
             data_prep_actor = ray.get_actor(self.data_prep_actor_name)
             return {"data_prep_state": ray.get(data_prep_actor.get_state.remote())}
@@ -214,8 +205,6 @@ class DataPreparationActorCheckpointCallback(Callback):
 
     def post_checkpoint_load(self, state: dict[str, Any]) -> None:
         """Restore DataPreparationActor state after loading checkpoint."""
-        import ray
-
         if "data_prep_state" not in state:
             return
 
