@@ -77,6 +77,8 @@ def get_commit_hash(
 ) -> str:
     file = launch_utils.custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     commit_hash = extract_commit_hash(file, None)
+    if commit_hash is None:
+        raise ValueError(f"Could not extract commit hash from {file}")
     return commit_hash
 
 
@@ -793,7 +795,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
                 tokenizer.bos_token = tokenizer.eos_token
-                if "olmo" not in tc.chat_template_name:
+                if tc.chat_template_name is None or "olmo" not in tc.chat_template_name:
                     assert tc.add_bos, (
                         "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence "
                         "if using an older chat template."
@@ -877,12 +879,16 @@ class TokenizerConfig:
 
     @cached_property
     def tokenizer(self):
+        if self.tokenizer_name_or_path is None:
+            raise ValueError("tokenizer_name_or_path must be set")
+        if self.tokenizer_revision is None:
+            raise ValueError("tokenizer_revision must be set")
         files_hash = get_files_hash_if_exists(
             self.tokenizer_name_or_path,
             self.tokenizer_revision,
             filenames=["tokenizer_config.json", "tokenizer.json", "special_tokens_map.json", "vocab.json"],
         )
-        self.tokenizer_files_hash = ",".join(files_hash)
+        self.tokenizer_files_hash = files_hash
         if self.tokenizer_name is not None and self.tokenizer_name_or_path is None:
             if self.tokenizer_name != self.tokenizer_name_or_path:
                 raise ValueError(
@@ -1006,7 +1012,7 @@ def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrained
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
-    input_ids = tokenizer.apply_chat_template(
+    input_ids_result = tokenizer.apply_chat_template(
         conversation=messages,
         tokenize=True,
         return_tensors="pt",
@@ -1015,6 +1021,8 @@ def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrained
         max_length=max_seq_length,
         add_generation_prompt=False,
     )
+    assert isinstance(input_ids_result, torch.Tensor)
+    input_ids = input_ids_result
     labels = input_ids.clone()
     # mask the non-assistant part for avoiding loss
     for message_idx, message in enumerate(messages):
@@ -1074,7 +1082,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreT
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
-    input_ids = tokenizer.apply_chat_template(
+    input_ids_result = tokenizer.apply_chat_template(
         conversation=messages,
         tokenize=True,
         return_tensors="pt",
@@ -1083,6 +1091,8 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreT
         max_length=max_seq_length,
         add_generation_prompt=False,
     )
+    assert isinstance(input_ids_result, torch.Tensor)
+    input_ids = input_ids_result
     labels = input_ids.clone()
     # mask all turns but the last for avoiding loss
     for message_idx, message in enumerate(messages):
@@ -1340,7 +1350,7 @@ def rlvr_tokenize_v3(
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
-    chat_template_kwargs = {"add_generation_prompt": True}
+    chat_template_kwargs: Dict[str, Any] = {"add_generation_prompt": True}
     if tool_definitions:
         chat_template_kwargs["tools"] = tool_definitions
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
@@ -1409,7 +1419,7 @@ class SimplePreferenceCollator:
         """Simple collator for preference dataset (always pad from the RIGHT)"""
         self.pad_token_id = pad_token_id
 
-    def __call__(self, batch: List[Dict[str, int]]):
+    def __call__(self, batch: List[Dict[str, List[int]]]):
         """the input will have input_ids_chosen, input_ids_rejected"""
         # Find max length in the batch
         max_length_chosen = -1
@@ -1462,17 +1472,18 @@ class DatasetConfig:
     frac_or_num_samples: Optional[Union[int, float]] = None
     original_dataset_size: Optional[int] = None
     is_upsampled: bool = False
+    dataset: Dataset = field(init=False)
 
     def __post_init__(self):
         # if the file exists locally, use the local file
         if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
             assert self.dataset_split == "train", "Only train split is supported for local jsonl files."
-            self.dataset = load_dataset(
+            dataset = load_dataset(
                 "json", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
         elif os.path.exists(self.dataset_name) and self.dataset_name.endswith(".parquet"):
             assert self.dataset_split == "train", "Only train split is supported for local parquet files."
-            self.dataset = load_dataset(
+            dataset = load_dataset(
                 "parquet", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
         else:
@@ -1480,12 +1491,14 @@ class DatasetConfig:
             self.dataset_commit_hash = get_commit_hash(
                 self.dataset_name, self.dataset_revision, "README.md", "dataset"
             )
-            self.dataset = load_dataset(
+            dataset = load_dataset(
                 self.dataset_name,
                 split=self.dataset_split,
                 revision=self.dataset_revision,
                 num_proc=max_num_processes(),
             )
+        assert isinstance(dataset, Dataset), f"Expected Dataset, got {type(dataset)}"
+        self.dataset = dataset
         if self.dataset_range is None:
             dataset_range = len(self.dataset)
             self.update_range(dataset_range)
@@ -1609,15 +1622,16 @@ class DatasetTransformationCache:
                 print("dataset_skip_cache is True, so we will not load the dataset from cache")
             else:
                 # Use the split from the first dataset config as default
-                dataset = load_dataset(
+                loaded_dataset = load_dataset(
                     repo_name,
                     split=DEFAULT_SPLIT_FOR_CACHED_DATASET,
                     revision=self.config_hash,
                     num_proc=max_num_processes(),
                 )
-                if "index" not in dataset.column_names:
-                    dataset = dataset.add_column("index", range(len(dataset)))
-                return dataset
+                assert isinstance(loaded_dataset, Dataset)
+                if "index" not in loaded_dataset.column_names:
+                    loaded_dataset = loaded_dataset.add_column("index", range(len(loaded_dataset)))
+                return loaded_dataset
 
         print(f"Cache not found, transforming datasets...")
 
@@ -1671,9 +1685,11 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
 
         # NOTE: Load the dataset again to make sure it's downloaded to the HF cache
         print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
-        return load_dataset(
+        final_dataset = load_dataset(
             repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash, num_proc=max_num_processes()
         )
+        assert isinstance(final_dataset, Dataset)
+        return final_dataset
 
 
 class LocalDatasetTransformationCache:
@@ -1747,7 +1763,7 @@ class LocalDatasetTransformationCache:
                 "original_dataset_size": dc.original_dataset_size,
                 "is_upsampled": dc.is_upsampled,
                 "upsampling_factor": dc.dataset_range / dc.original_dataset_size
-                if dc.original_dataset_size and dc.original_dataset_size > 0
+                if dc.dataset_range is not None and dc.original_dataset_size and dc.original_dataset_size > 0
                 else 1.0,
             }
 
@@ -1869,7 +1885,7 @@ def get_cached_dataset_tulu_with_statistics(
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
     system_prompt_override: Optional[str] = None,
-) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
+) -> Tuple[Dataset, Dict[str, Any]]:
     if dataset_config_hash is None:
         dcs = load_dataset_configs(
             dataset_mixer_list,
