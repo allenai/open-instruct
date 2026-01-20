@@ -11,7 +11,7 @@ import pathlib
 import shutil
 import time
 from functools import partial
-from typing import Any, cast
+from typing import Any
 
 import peft
 import torch
@@ -542,8 +542,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
 
 if __name__ == "__main__":
-    parser = utils.ArgumentParserPlus([dpo_utils.ExperimentConfig, dataset_transformation.TokenizerConfig])
-    args, tc = cast(
-        tuple[dpo_utils.ExperimentConfig, dataset_transformation.TokenizerConfig], parser.parse_args_into_dataclasses()
-    )
+    import simple_parsing
+
+    parser = simple_parsing.ArgumentParser()
+    parser.add_arguments(dpo_utils.ExperimentConfig, dest="args")
+    parser.add_arguments(dataset_transformation.TokenizerConfig, dest="tokenizer_config")
+    ns = parser.parse_args()
+    args: dpo_utils.ExperimentConfig = ns.args
+    tc: dataset_transformation.TokenizerConfig = ns.tokenizer_config
     main(args, tc)

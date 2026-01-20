@@ -39,6 +39,7 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
     "torchao>=0.15.0",
+    "simple-parsing>=0.1.7",
 ]
 
 [build-system]

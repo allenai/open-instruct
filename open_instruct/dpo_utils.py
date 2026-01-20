@@ -269,7 +269,7 @@ class EvalConfig:
     """The multiplier for the number of GPUs for evaluation"""
     eval_workspace: str | None = "ai2/tulu-3-results"
     """The workspace to launch evaluation jobs on"""
-    eval_priority: Literal["low", "normal", "high"] | None = "high"
+    eval_priority: Literal["low", "normal", "high"] = "high"
     """The priority of auto-launched evaluation jobs"""
 
 

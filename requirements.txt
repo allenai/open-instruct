@@ -147,8 +147,10 @@ distro==1.9.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     #   openai
 dnspython==2.8.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via email-validator
-docstring-parser==0.17.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via anthropic
+docstring-parser==0.17.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via
+    #   anthropic
+    #   simple-parsing
 einops==0.8.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   deepspeed
@@ -821,6 +823,8 @@ setuptools==79.0.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux')
     #   vllm
 shellingham==1.5.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via typer
+simple-parsing==0.1.7 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via open-instruct
 six==1.17.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   langdetect
@@ -959,6 +963,7 @@ typing-extensions==4.15.0 ; (platform_machine == 'aarch64' and sys_platform == '
     #   pydantic-extra-types
     #   referencing
     #   rich-toolkit
+    #   simple-parsing
     #   starlette
     #   torch
     #   typer
