@@ -5,6 +5,7 @@ LR=1e-6
 EXP_NAME=olmo2-7b-DPO-debug-16k-${LR}
 
 uv run python mason.py \
+    --cluster ai2/saturn \
     --cluster ai2/jupiter \
     --description "2 node DPO run with OLMo2-7B, 16k sequence length (OLMo-core)." \
     --workspace ai2/open-instruct-dev \
