@@ -992,7 +992,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.local_metrics["debug/vllm_local_reverse_kl"] = float(mean_reverse_kl)
 
                         # Save raw logprob samples for alignment analysis (ScaleRL Figure 3)
-                        if self.args.save_logprob_samples:
+                        # Only save on first epoch and first mini-batch when weights match vLLM
+                        if self.args.save_logprob_samples and epoch_idx == 0 and i == 0:
                             self._save_logprob_samples(
                                 vllm_logprobs_BT[valid_mask_BT].float().cpu().numpy(),
                                 local_logprobs_BT[valid_mask_BT].float().cpu().numpy(),
