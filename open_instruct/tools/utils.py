@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 import aiohttp
-from tenacity import AsyncRetrying, before_sleep_log, retry_if_exception, stop_after_attempt, wait_exponential_jitter
+import backoff
 
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats
@@ -219,8 +219,10 @@ def _is_retryable_status(status: int) -> bool:
     return status == 429 or status >= 500
 
 
-def _is_retryable_exception(exception: BaseException) -> bool:
-    """Check if an exception should trigger a retry.
+def _should_giveup(exception: Exception) -> bool:
+    """Determine if we should give up retrying based on the exception type.
+
+    Returns True (give up) for non-retryable errors, False (retry) for retryable ones.
 
     Retries on:
     - Timeouts (asyncio.TimeoutError)
@@ -232,13 +234,8 @@ def _is_retryable_exception(exception: BaseException) -> bool:
     - aiohttp.ClientResponseError (4xx errors from raise_for_status)
     - Other non-connection ClientError subclasses
     """
-    if isinstance(exception, asyncio.TimeoutError):
-        return True
-    if isinstance(exception, _RetryableHTTPError):
-        return True
-    # Only retry on connection-level errors (DNS, TCP, TLS failures, server disconnects)
-    # NOT on response errors like 4xx which indicate client mistakes
-    return isinstance(exception, aiohttp.ClientConnectionError)
+    # Return False (don't give up, retry) for retryable errors, True (give up) for others
+    return not isinstance(exception, (asyncio.TimeoutError, _RetryableHTTPError, aiohttp.ClientConnectionError))
 
 
 async def make_api_request(
@@ -281,32 +278,35 @@ async def make_api_request(
     if method == "GET" and json_payload:
         raise ValueError("JSON payload cannot be provided for GET requests")
 
-    retrying = AsyncRetrying(
-        stop=stop_after_attempt(max_retries + 1),
-        wait=wait_exponential_jitter(initial=base_delay, max=max_delay),
-        retry=retry_if_exception(_is_retryable_exception),
-        before_sleep=before_sleep_log(logger, log_level=logging.DEBUG),
-        reraise=True,
+    @backoff.on_exception(
+        backoff.expo,
+        (asyncio.TimeoutError, aiohttp.ClientError, _RetryableHTTPError),
+        max_tries=max_retries + 1,
+        base=base_delay,
+        max_value=max_delay,
+        giveup=_should_giveup,
+        logger=logger,
+        backoff_log_level=logging.DEBUG,
+        giveup_log_level=logging.DEBUG,
     )
+    async def _do_request() -> dict:
+        timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            if method == "GET":
+                request_context = session.get(url, params=params, headers=headers)
+            else:
+                request_context = session.post(url, params=params, json=json_payload, headers=headers)
+
+            async with request_context as response:
+                if _is_retryable_status(response.status):
+                    raise _RetryableHTTPError(response.status, response.reason or "")
+
+                response.raise_for_status()
+                return await response.json()
 
     try:
-        async for attempt in retrying:
-            with attempt:
-                timeout = aiohttp.ClientTimeout(total=timeout_seconds)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    if method == "GET":
-                        request_context = session.get(url, params=params, headers=headers)
-                    else:
-                        request_context = session.post(url, params=params, json=json_payload, headers=headers)
-
-                    async with request_context as response:
-                        if _is_retryable_status(response.status):
-                            raise _RetryableHTTPError(response.status, response.reason or "")
-
-                        response.raise_for_status()
-                        data = await response.json()
-                        return APIResponse(data=data)
-
+        data = await _do_request()
+        return APIResponse(data=data)
     except asyncio.TimeoutError:
         return APIResponse(error=f"Timeout after {timeout_seconds} seconds", timed_out=True)
     except _RetryableHTTPError as e:
@@ -315,9 +315,6 @@ async def make_api_request(
         return APIResponse(error=f"HTTP error: {e.status} {e.message}")
     except aiohttp.ClientError as e:
         return APIResponse(error=f"Connection error: {e}")
-
-    # This should not be reached, but just in case
-    return APIResponse(error="Unknown error")
 
 
 def get_openai_tool_definitions(tool: "Tool") -> dict[str, Any]:
