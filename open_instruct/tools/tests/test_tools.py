@@ -1386,9 +1386,9 @@ class TestGenericMCPToolConfig(unittest.TestCase):
     def test_config_default_values(self):
         """Test config has correct default values."""
         config = GenericMCPToolConfig()
-        self.assertIsNone(config.server_url)
+        self.assertEqual(config.server_url, "")
         self.assertEqual(config.transport, "http")
-        self.assertIsNone(config.command)
+        self.assertEqual(config.command, "")
         self.assertEqual(config.args, [])
         self.assertEqual(config.env, {})
         self.assertEqual(config.timeout, 60)
