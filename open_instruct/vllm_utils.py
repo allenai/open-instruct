@@ -481,7 +481,18 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
     print(f"[add_request] Processing request_id={request_id}, n={request.generation_config.n}", flush=True)
     print("[add_request] Step 1: Creating sampling_params", flush=True)
-    sampling_params = dataclasses.replace(request.generation_config, n=1)
+    # Use manual construction instead of dataclasses.replace() to avoid
+    # serialization issues with Ray where the dataclass may not be recognized
+    gc = request.generation_config
+    sampling_params = SamplingConfig(
+        temperature=gc.temperature,
+        top_p=gc.top_p,
+        max_tokens=gc.max_tokens,
+        n=1,  # Override n to 1
+        stop=gc.stop,
+        seed=gc.seed,
+        logprobs=gc.logprobs,
+    )
     print("[add_request] Step 2: sampling_params created", flush=True)
 
     print(f"[add_request] Step 3: Converting prompt to list, len={len(request.prompt)}", flush=True)
@@ -502,7 +513,16 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
 
     for j in range(request.generation_config.n):
         seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
-        sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
+        # Manual construction to avoid dataclass serialization issues
+        sub_sampling_params = SamplingConfig(
+            temperature=sampling_params.temperature,
+            top_p=sampling_params.top_p,
+            max_tokens=sampling_params.max_tokens,
+            n=sampling_params.n,
+            stop=sampling_params.stop,
+            seed=seed,
+            logprobs=sampling_params.logprobs,
+        )
         sub_request_id = f"{request_id}_{j}"
         print(f"[add_request] Submitting sub_request_id={sub_request_id}", flush=True)
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
@@ -951,7 +971,16 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     while True:
         logger.info(f"[process_request] {sub_request_id}: Calling completions API, max_tokens={current_max_tokens}")
-        current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+        # Manual construction to avoid dataclass serialization issues
+        current_sampling_params = SamplingConfig(
+            temperature=sampling_params.temperature,
+            top_p=sampling_params.top_p,
+            max_tokens=current_max_tokens,
+            n=sampling_params.n,
+            stop=sampling_params.stop,
+            seed=sampling_params.seed,
+            logprobs=sampling_params.logprobs,
+        )
         api_response = await actor.client.completions.create(
             model=actor.model_name,
             prompt=current_prompt,
