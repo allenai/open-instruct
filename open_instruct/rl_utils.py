@@ -1,12 +1,10 @@
-# flake8: noqa
 import contextlib
 import time
 from dataclasses import dataclass, field
-from typing import Generic, List, TypeVar
+from typing import Generic, TypeVar
 
 import numpy as np
 import torch
-from rich.pretty import pprint
 
 from open_instruct import logger_utils
 
@@ -80,12 +78,12 @@ def reset_position_ids(attention_mask):
 
 
 def pack_sequences(
-    queries: List[List[int]],
-    responses: List[List[int]],
-    masks: List[List[int]],
+    queries: list[list[int]],
+    responses: list[list[int]],
+    masks: list[list[int]],
     pack_length: int,
     pad_token_id: int,
-    vllm_logprobs: List[List[float]],
+    vllm_logprobs: list[list[float]],
     min_num_batches: int = 1,
     mask_tool_use: bool = False,
 ) -> PackedSequences:
@@ -202,10 +200,7 @@ def pack_sequences(
         cur_packed_seq_lens.append(len(query_response))
 
         query_mask = [0] * len(query)
-        if mask_tool_use:
-            response_mask = [(i + 1) if m else 0 for m in response_tool_mask]
-        else:
-            response_mask = [i + 1] * len(response)
+        response_mask = [i + 1 if m else 0 for m in response_tool_mask] if mask_tool_use else [i + 1] * len(response)
         cur_response_mask.extend(query_mask + response_mask)
         cur_attention_mask.extend([i + 1 - offset for _ in range(len(query_response))])
         cur_dones.extend([0 for _ in range(len(query) + len(response) - 1)] + [i + 1])
