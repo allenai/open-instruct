@@ -18,3 +18,4 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 - Removed `open_instruct/ppo.py` and related PPO training scripts (https://github.com/allenai/open-instruct/pull/1395).
+- Removed `scripts/train/debug/tool_grpo_fast.sh`; use `scripts/train/debug/tools/olmo_3_parser_multigpu.sh` for tool use experiments.
