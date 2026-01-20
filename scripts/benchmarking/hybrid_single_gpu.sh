@@ -60,7 +60,6 @@ for model_name_or_path in "$@"; do
         --num_nodes 1 \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-        --env VLLM_USE_V1=0 \
         --budget ai2/oe-adapt \
         --gpus 1 \
         --secret HF_TOKEN=finbarrt_HF_TOKEN \
@@ -81,6 +80,7 @@ for model_name_or_path in "$@"; do
             --vllm_tensor_parallel_size 1 \
             --vllm_gpu_memory_utilization 0.9 \
             --vllm_enforce_eager \
+            --vllm_dtype auto \
             --pack_length 40000 \
             --chat_template_name "tulu_thinker" \
             --trust_remote_code \
