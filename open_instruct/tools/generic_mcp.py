@@ -14,7 +14,7 @@ from mcp import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
-from mcp.types import MCPResult
+from mcp.types import CallToolResult
 
 from open_instruct import logger_utils
 from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, log_tool_call
@@ -41,7 +41,7 @@ def _get_mcp_client(transport: MCPTransport, server_url: str, command: str, args
     raise ValueError(f"Unknown transport type: {transport}")
 
 
-async def _call_mcp_tool(client_context, tool_name: str, arguments: dict[str, Any]) -> MCPResult:
+async def _call_mcp_tool(client_context, tool_name: str, arguments: dict[str, Any]) -> CallToolResult:
     """Call a tool on an MCP server, returning the raw result."""
     async with client_context as (read_stream, write_stream, *_):  # noqa: SIM117
         async with ClientSession(read_stream, write_stream) as session:
@@ -49,7 +49,7 @@ async def _call_mcp_tool(client_context, tool_name: str, arguments: dict[str, An
             return await session.call_tool(tool_name, arguments)
 
 
-def _extract_mcp_result(result: MCPResult) -> str:
+def _extract_mcp_result(result: CallToolResult) -> str:
     """Extract text from an MCP tool result."""
     # TODO: handle other content types (image, audio, resource, resource_link)
     if not hasattr(result, "content"):
