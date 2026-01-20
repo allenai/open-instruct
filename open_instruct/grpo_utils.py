@@ -67,7 +67,7 @@ class ExperimentConfig:
     """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
-    loss_denominator: str = "token"
+    loss_denominator: str | float = "token"
     """Optional constant denominator for masked_mean; can be "token" or a float value.
     when "token", the loss is divided by the total number of tokens in the batch (standard LM training).
     when a float value, the loss is divided by this value (ideally, max tokens in batch, per Dr GRPO).
