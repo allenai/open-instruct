@@ -91,6 +91,7 @@ class WorkerWrap:
         Two modes controlled by OPEN_INSTRUCT_FP32_LM_HEAD env var:
         - "1" (cache mode): Keep bf16 weights, maintain separate fp32 cache
         - "2" (permanent mode): Convert lm_head weight to fp32 in-place
+                               (falls back to cache mode if weights are tied)
         """
         import os
 
@@ -129,13 +130,18 @@ class WorkerWrap:
         if param is not weight:
             return
 
-        if fp32_mode == "2":
+        # Check if weights are tied with embed_tokens (common in LLMs)
+        # If tied, we can't convert in-place as it would affect the embedding layer
+        weights_are_tied = self._check_weights_tied(model, lm_head)
+
+        if fp32_mode == "2" and not weights_are_tied:
             # Permanent mode: convert lm_head weight to fp32 in-place
+            # Only safe when weights are not tied to embed_tokens
             if weight.dtype != torch.float32:
-                # Convert weight data to fp32
                 lm_head.weight.data = weight.float()
         else:
-            # Cache mode: maintain separate fp32 cache
+            # Cache mode (or permanent mode with tied weights):
+            # Maintain separate fp32 cache to avoid affecting embed_tokens
             fp32_weight = getattr(lm_head, "_open_instruct_fp32_weight", None)
             if (
                 isinstance(fp32_weight, torch.Tensor)
@@ -145,3 +151,37 @@ class WorkerWrap:
                 fp32_weight.copy_(weight)
             else:
                 lm_head._open_instruct_fp32_weight = weight.float()
+
+    def _check_weights_tied(self, model, lm_head):
+        """Check if lm_head weights are tied with the input embedding layer."""
+        import torch
+
+        lm_head_weight = getattr(lm_head, "weight", None)
+        if not isinstance(lm_head_weight, torch.Tensor):
+            return False
+
+        # Try common paths for embed_tokens in various model architectures
+        embed_paths = [
+            "model.embed_tokens",  # Qwen, Llama, Mistral
+            "transformer.wte",      # GPT-2 style
+            "embed_tokens",         # Some models
+        ]
+
+        for path in embed_paths:
+            try:
+                parts = path.split(".")
+                module = model
+                for part in parts:
+                    module = getattr(module, part, None)
+                    if module is None:
+                        break
+                if module is not None:
+                    embed_weight = getattr(module, "weight", None)
+                    if isinstance(embed_weight, torch.Tensor):
+                        # Check if they share the same underlying storage
+                        if lm_head_weight.data_ptr() == embed_weight.data_ptr():
+                            return True
+            except Exception:
+                continue
+
+        return False
