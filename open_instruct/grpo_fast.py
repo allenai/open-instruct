@@ -1476,10 +1476,10 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> list[ray.actor.ActorHa
         # or transformation of the args, which we then now pass to the tool.
         _kwarg_dict = asdict(config) | {"call_name": parsed_tool.call_name}
         # max_concurrency is only needed for Ray actor options, not passed to the tool class
-
-        max_concurrency = _kwarg_dict.pop("max_concurrency")
         tool_actors.append(
-            ray.remote(tool_config_class.tool_class).options(max_concurrency=max_concurrency).remote(**_kwarg_dict)
+            ray.remote(tool_config_class.tool_class)
+            .options(max_concurrency=_kwarg_dict.pop("max_concurrency"))
+            .remote(**_kwarg_dict)
         )
 
     return tool_actors
