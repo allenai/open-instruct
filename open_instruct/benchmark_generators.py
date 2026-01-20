@@ -14,6 +14,7 @@ import gc
 import json
 import os
 import pathlib
+import queue
 import threading
 import time
 from concurrent import futures
@@ -42,6 +43,31 @@ elif pathlib.Path("/root").exists():
     DATA_DIR = pathlib.Path("/root") / "finbarrt" / "open_instruct_generators_benchmark"
 else:
     DATA_DIR = pathlib.Path("/tmp") / "open_instruct_generators_benchmark"
+
+INFERENCE_RESULT_TIMEOUT_S = 600
+
+
+def get_inference_result_with_timeout(
+    inference_results_Q: ray_queue.Queue, vllm_engines: list, timeout: float = INFERENCE_RESULT_TIMEOUT_S
+):
+    """Get inference result from queue with timeout and health check.
+
+    If the timeout is reached, performs a health check on vLLM engines
+    to detect silent failures.
+    """
+    try:
+        return inference_results_Q.get(timeout=timeout)
+    except queue.Empty as err:
+        logger.error(f"Timeout ({timeout}s) waiting for inference result. Checking vLLM health...")
+        utils.ray_get_with_progress(
+            [engine.check_background_threads.remote() for engine in vllm_engines],
+            "Health check on background threads after timeout.",
+            timeout=60,
+        )
+        raise RuntimeError(
+            f"Inference result timeout after {timeout}s. vLLM engines appear healthy but no results received. "
+            "This may indicate a deadlock or silent failure in the inference pipeline."
+        ) from err
 
 
 def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx: int):
@@ -412,17 +438,9 @@ def run_benchmark(
 
         # Collect all warmup results (one per prompt) using non-blocking polling
         warmup_batch_size = warmup_end_idx - warmup_start_idx
-        warmup_results = []
-        while len(warmup_results) < warmup_batch_size:
-            try:
-                result = inference_results_Q.get(timeout=1.0)
-                warmup_results.append(result)
-            except Empty:
-                if len(warmup_results) % 10 == 0:
-                    utils.ray_get_with_progress(
-                        [engine.check_background_threads.remote() for engine in vllm_engines],
-                        f"Health check ({len(warmup_results)}/{warmup_batch_size})",
-                    )
+        warmup_results = [
+            get_inference_result_with_timeout(inference_results_Q, vllm_engines) for _ in range(warmup_batch_size)
+        ]
 
         total_warmup_responses = sum(len(result.responses) for result in warmup_results)
         logger.info(
@@ -445,17 +463,11 @@ def run_benchmark(
             if submission_future.done():
                 submission_future.result()
 
-            # Collect all results for this batch (one per prompt) using non-blocking polling
-            num_prompts = streaming_config.num_unique_prompts_rollout
-            batch_results = []
-            batch_deadline = time.time() + 1200
-            while len(batch_results) < num_prompts:
-                try:
-                    result = inference_results_Q.get(timeout=1.0)
-                    batch_results.append(result)
-                except Empty:
-                    if time.time() > batch_deadline:
-                        raise TimeoutError(f"Batch timed out, got {len(batch_results)}/{num_prompts}") from None
+            # Collect all results for this batch (one per prompt)
+            batch_results = [
+                get_inference_result_with_timeout(inference_results_Q, vllm_engines)
+                for _ in range(streaming_config.num_unique_prompts_rollout)
+            ]
 
             # Simulate weight sync between batches
             weight_sync_time = simulate_weight_sync(actor_manager, vllm_engines, args)
