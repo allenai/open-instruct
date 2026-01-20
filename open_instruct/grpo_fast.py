@@ -2280,6 +2280,10 @@ def main(
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: ToolsConfig,
 ):
+    # Set fp32 lm head env var early so it propagates to all Ray/vLLM worker processes
+    if args.fp32_lm_head:
+        os.environ["OPEN_INSTRUCT_FP32_LM_HEAD"] = "1"
+
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
