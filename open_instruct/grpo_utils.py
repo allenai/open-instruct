@@ -9,7 +9,7 @@ from open_instruct.utils import calibrate_checkpoint_state_dir, download_latest_
 @dataclass
 class ExperimentConfig:
     # Experiment
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    exp_name: str | None = None
     """The name of this experiment"""
     seed: int = 1
     """Seed of the experiment"""
