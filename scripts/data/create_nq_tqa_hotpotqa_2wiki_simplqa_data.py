@@ -94,12 +94,8 @@ def convert_nq_to_rlvr_format_with_context(no_prompt: bool):
 
 
 def check_nq_rlvr_dataset():
-    # Load the NQ dataset
     nq_dataset = datasets.load_dataset("hamishivi/nq_rlvr", num_proc=max_num_processes())
-    nq_data = nq_dataset["train"]
-    import pdb
-
-    pdb.set_trace()
+    nq_data = nq_dataset["train"]  # noqa: F841
 
 
 def convert_tqa_to_rlvr_format(no_prompt: bool):

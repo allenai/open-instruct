@@ -149,13 +149,17 @@ docstring-code-format = false
 # SIM = flake8-simplify
 # UP = pyupgrade
 # B = flake8-bugbear
-select = ["F", "E", "W", "I", "SIM", "UP", "B"]
+select = ["F", "E", "W", "I", "SIM", "UP", "B", "PLC0415"]
 ignore = [
     "B905", # zip() without explicit strict= parameter
     "C408", # dict() calls (stylistic)
     "C901", # function complexity
     "E501", # Line too long (handled by line-length setting)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# This class runs in vLLM worker processes; imports are inside methods.
+"open_instruct/vllm_utils_workerwrap.py" = ["PLC0415"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["open_instruct", "mason"]
