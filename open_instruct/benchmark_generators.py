@@ -415,6 +415,8 @@ def run_benchmark(
 
     # Submit warmup batch first
     logger.info("Submitting warmup batch...")
+    logger.info(f"param_prompt_Q type: {type(param_prompt_Q)}, id: {id(param_prompt_Q)}")
+    logger.info(f"param_prompt_Q actor: {param_prompt_Q.actor}")
     warmup_start_idx = 0
     warmup_end_idx = min(streaming_config.num_unique_prompts_rollout, len(dataset))
     warmup_data = dataset[warmup_start_idx:warmup_end_idx]
