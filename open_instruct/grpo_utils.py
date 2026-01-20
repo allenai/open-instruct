@@ -38,7 +38,7 @@ class ExperimentConfig:
     clip_higher: float = 0.2
     truncated_importance_sampling_ratio_cap: float = 0.0
     kl_estimator: Literal[0, 1, 2, 3] = 2
-    loss_denominator: str | float = "token"
+    loss_denominator: str = "token"
     alpha: float = 0.6
     ref_policy_update_freq: int | None = None
     load_ref_policy: bool = True
