@@ -5,7 +5,6 @@ This module provides GRPO (Group Relative Policy Optimization) training using
 OLMo-core's native training infrastructure, following TransformerTrainModule patterns.
 """
 
-import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -20,15 +19,15 @@ from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
 from olmo_core.optim.scheduler import Scheduler
 from olmo_core.train.common import ReduceType
-from olmo_core.train.train_module import TrainModule
+from olmo_core.train.train_module import EvalBatchSpec, TrainModule
 from olmo_core.train.train_module.transformer.common import parallelize_model
 from olmo_core.train.train_module.transformer.config import TransformerDataParallelConfig
 from olmo_core.utils import get_default_device
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types
+from open_instruct import data_types, logger_utils
 
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 
 @dataclass
@@ -384,15 +383,19 @@ class GRPOTrainModule(TrainModule):
 
     @property
     def eval_batch_spec(self):
-        from olmo_core.train.train_module import EvalBatchSpec
-
         return EvalBatchSpec(self.rank_microbatch_size, max_sequence_length=self.max_sequence_length)
 
-    def eval_batch(self, batch: dict[str, Any], labels: Any = None) -> Any:
-        return None
+    def eval_batch(self, batch: dict[str, Any], labels: Any = None) -> torch.Tensor:
+        self.model.eval()
+        with torch.no_grad():
+            return self.model(**batch)
 
-    def num_flops_per_token(self, seq_len: int) -> int | None:
-        return None
+    def num_flops_per_token(self, seq_len: int) -> int:
+        return self.model.num_flops_per_token(seq_len)
 
-    def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int | None:
-        return None
+    def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int:
+        data_BT: data_types.CollatedBatchData = batch["batch"]
+        seq_len = data_BT.query_responses[0].shape[1]
+        flops_per_token = self.num_flops_per_token(seq_len)
+        global_num_tokens = self.trainer.data_loader.global_num_tokens_in_batch(batch)
+        return flops_per_token * global_num_tokens
