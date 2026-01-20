@@ -445,42 +445,20 @@ async def _check_health(port: int) -> None:
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
-    print("[_prefetch_worker] Starting prefetch worker loop", flush=True)
-    print(f"[_prefetch_worker] prompt_queue type: {type(actor.prompt_queue)}", flush=True)
-    print(f"[_prefetch_worker] prompt_queue: {actor.prompt_queue}", flush=True)
-    print(f"[_prefetch_worker] prompt_queue actor: {actor.prompt_queue.actor}", flush=True)
-    try:
-        qsize = actor.prompt_queue.qsize()
-        print(f"[_prefetch_worker] prompt_queue size: {qsize}", flush=True)
-    except Exception as e:
-        print(f"[_prefetch_worker] Error getting queue size: {e}", flush=True)
-
     while True:
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        print("[_prefetch_worker] Waiting for request from prompt_queue...", flush=True)
         try:
-            # Try with a timeout to see if we ever get anything
             request = actor.prompt_queue.get(timeout=30)
-            print(f"[_prefetch_worker] Got request: prompt_id={request.prompt_id}, index={request.index}", flush=True)
             add_request(actor, request)
-            print(f"[_prefetch_worker] Finished processing request: prompt_id={request.prompt_id}", flush=True)
-        except Exception as e:
-            print(f"[_prefetch_worker] Exception during get: {type(e).__name__}: {e}", flush=True)
-            # Check queue size again
-            try:
-                qsize = actor.prompt_queue.qsize()
-                print(f"[_prefetch_worker] After timeout, queue size: {qsize}", flush=True)
-            except Exception as e2:
-                print(f"[_prefetch_worker] Error getting queue size: {e2}", flush=True)
+        except Exception:
+            pass
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
-    print(f"[add_request] Processing request_id={request_id}, n={request.generation_config.n}", flush=True)
-    print("[add_request] Step 1: Creating sampling_params", flush=True)
     # Use manual construction instead of dataclasses.replace() to avoid
     # serialization issues with Ray where the dataclass may not be recognized
     gc = request.generation_config
@@ -493,11 +471,8 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         seed=gc.seed,
         logprobs=gc.logprobs,
     )
-    print("[add_request] Step 2: sampling_params created", flush=True)
 
-    print(f"[add_request] Step 3: Converting prompt to list, len={len(request.prompt)}", flush=True)
     prompt_token_ids = list(request.prompt)
-    print(f"[add_request] Step 4: Prompt converted, len={len(prompt_token_ids)}", flush=True)
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
@@ -509,7 +484,6 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "start_time": time.perf_counter(),
         "active_tools": request.active_tools,
     }
-    print("[add_request] Step 5: Metadata stored", flush=True)
 
     for j in range(request.generation_config.n):
         seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
@@ -524,12 +498,9 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
             logprobs=sampling_params.logprobs,
         )
         sub_request_id = f"{request_id}_{j}"
-        print(f"[add_request] Submitting sub_request_id={sub_request_id}", flush=True)
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request(actor, sub_request_id, sub_sampling_params), actor.loop
         )
-        print(f"[add_request] Submitted sub_request_id={sub_request_id}", flush=True)
-    print(f"[add_request] All {request.generation_config.n} sub-requests submitted for {request_id}", flush=True)
 
 
 FALLBACK_CHAT_TEMPLATE = "{% for message in messages %}{{ message['content'] }}{% endfor %}"
