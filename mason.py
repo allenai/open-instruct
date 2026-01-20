@@ -7,6 +7,7 @@ import secrets
 import select
 import shlex
 import string
+import subprocess
 import sys
 import time
 
@@ -478,7 +479,6 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     "python " + " ".join(shlex.quote(arg) for arg in filtered_command) + " --cache_dataset_only"
                 )
                 console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
-                import subprocess
 
                 # Use Popen to get real-time output while also capturing it
                 process = subprocess.Popen(
