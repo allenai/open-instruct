@@ -15,3 +15,4 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 ### Removed
+- Removed `open_instruct/ppo.py` and related PPO training scripts (https://github.com/allenai/open-instruct/pull/1395).
