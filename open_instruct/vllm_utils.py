@@ -597,8 +597,11 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
 
 
 async def compute_rewards(
-    actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset, is_eval: bool
+    actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset | None, is_eval: bool
 ) -> tuple[list[float], dict]:
+    if actor.reward_fn is None or dataset is None:
+        return [0.0] * len(result.responses), {}
+
     index_map = actor._eval_index_map if is_eval else actor._train_index_map
     example = dataset[index_map[result.index]]
     decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
