@@ -249,6 +249,8 @@ class Args:
     """The wandb's project name"""
     wandb_entity: str | None = None
     """The entity (team) of wandb's project"""
+    log_generator_metrics: bool = False
+    """If toggled, log system metrics from the first vLLM generator process to wandb"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: str | None = None
@@ -1376,18 +1378,33 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
 
     wandb_url = None
     if args.with_tracking:
+        # Use group and -trainer suffix only when generator metrics are enabled
+        run_name = f"{args.run_name}-trainer" if args.log_generator_metrics else args.run_name
+        group = args.run_name if args.log_generator_metrics else None
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
             config=all_configs,
-            name=args.run_name,
+            name=run_name,
+            group=group,
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
         maybe_update_beaker_description(wandb_url=wandb_url)
 
-    return beaker_config, wandb_url
+    # Build wandb config to pass to generator processes (only if flag is set)
+    wandb_config = None
+    if args.with_tracking and args.log_generator_metrics:
+        wandb_config = {
+            "project": args.wandb_project_name,
+            "entity": args.wandb_entity,
+            "name": args.run_name,
+            "group": args.run_name,
+            "tags": [args.exp_name] + get_wandb_tags(),
+        }
+
+    return beaker_config, wandb_url, wandb_config
 
 
 def _validate_and_log_dataset_tools(dataset, configured_tool_names: list[str] | None, dataset_name: str) -> None:
@@ -1552,6 +1569,7 @@ def create_model_and_optimizer(
     eval_dataset,
     reward_config: RewardConfig,
     generation_config,
+    wandb_config,
     data_prep_actor_state: dict | None = None,
     tool_actors: list[ray.actor.ActorHandle] | None = None,
     tools_config: ToolsConfig | None = None,
@@ -1643,6 +1661,7 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        wandb_config=wandb_config,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
@@ -2342,7 +2361,7 @@ def main(
         for handler in logging.getLogger().handlers:
             handler.setLevel(logging.DEBUG)
 
-    beaker_config, wandb_url = setup_experiment_tracking(args, tc, model_config)
+    beaker_config, wandb_url, wandb_config = setup_experiment_tracking(args, tc, model_config)
 
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
@@ -2435,6 +2454,7 @@ def main(
             eval_dataset,
             reward_config,
             generation_configs["train"],
+            wandb_config,
             data_prep_actor_state,
             tool_actors,
             tools_config,

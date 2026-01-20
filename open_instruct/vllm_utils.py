@@ -566,6 +566,8 @@ class LLMRayActor:
         reward_config: RewardConfig | None = None,
         train_dataset=None,
         eval_dataset=None,
+        wandb_config: dict | None = None,
+        engine_id: int = 0,
         **kwargs,
     ):
         assert_threaded_actor(self)
@@ -583,6 +585,7 @@ class LLMRayActor:
         self._init_executor()
         # comes after executor as it requires tokenizer access.
         self._init_tool_parser(tool_parser_type)
+        self._init_wandb(wandb_config, engine_id)
 
     def _init_config(
         self,
@@ -644,6 +647,21 @@ class LLMRayActor:
             tool_actors=self.tool_actors,
             tokenizer=self.llm_engine.tokenizer,
             tool_definitions=_tool_definitions,
+        )
+
+    def _init_wandb(self, wandb_config: dict | None, engine_id: int) -> None:
+        """Initialize wandb for system metrics logging (only for the first generator)."""
+        if wandb_config is None or engine_id != 0:
+            return  # Only first generator logs to wandb
+        import wandb
+
+        wandb.init(
+            project=wandb_config["project"],
+            entity=wandb_config["entity"],
+            name=f"{wandb_config['name']}-generator",
+            group=wandb_config["group"],
+            tags=wandb_config.get("tags", []) + ["generator"],
+            settings=wandb.Settings(start_method="thread"),
         )
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
@@ -1057,6 +1075,7 @@ def create_vllm_engines(
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
+    wandb_config: dict | None = None,
 ) -> list[ray.actor.ActorHandle]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     vllm_engines = []
@@ -1128,6 +1147,8 @@ def create_vllm_engines(
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
+                wandb_config=wandb_config,
+                engine_id=i,
             )
         )
 
