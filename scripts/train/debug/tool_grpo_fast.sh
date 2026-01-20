@@ -73,5 +73,5 @@ uv run python mason.py \
     --vllm_num_engines 1 \
     --max_tool_calls 5 \
     --vllm_enable_prefix_caching \
-    --tools python serper_search \
-    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute"}' '{}'
+    --tools python \
+    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute"}'
