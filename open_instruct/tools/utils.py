@@ -1,11 +1,13 @@
 import asyncio
 import json
+import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 import aiohttp
+import backoff
 
 from open_instruct import logger_utils
 from open_instruct.data_types import ToolCallStats
@@ -221,6 +223,39 @@ class APIResponse:
     timed_out: bool = False
 
 
+class _RetryableHTTPError(Exception):
+    """Exception raised for HTTP errors that should be retried."""
+
+    def __init__(self, status: int, message: str):
+        self.status = status
+        self.message = message
+        super().__init__(f"HTTP {status}: {message}")
+
+
+def _is_retryable_status(status: int) -> bool:
+    """Check if an HTTP status code is retryable (429 or 5xx)."""
+    return status == 429 or status >= 500
+
+
+def _should_giveup(exception: Exception) -> bool:
+    """Determine if we should give up retrying based on the exception type.
+
+    Returns True (give up) for non-retryable errors, False (retry) for retryable ones.
+
+    Retries on:
+    - Timeouts (asyncio.TimeoutError)
+    - Connection errors (aiohttp.ClientConnectionError - includes ClientConnectorError,
+      ServerDisconnectedError, etc.)
+    - Our custom _RetryableHTTPError (for 429/5xx detected before raise_for_status)
+
+    Does NOT retry on:
+    - aiohttp.ClientResponseError (4xx errors from raise_for_status)
+    - Other non-connection ClientError subclasses
+    """
+    # Return False (don't give up, retry) for retryable errors, True (give up) for others
+    return not isinstance(exception, (asyncio.TimeoutError, _RetryableHTTPError, aiohttp.ClientConnectionError))
+
+
 async def make_api_request(
     url: str,
     timeout_seconds: int,
@@ -228,8 +263,19 @@ async def make_api_request(
     json_payload: dict | None = None,
     params: dict | None = None,
     method: str = "POST",
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 60.0,
 ) -> APIResponse:
-    """Make an async HTTP request with standard error handling.
+    """Make an async HTTP request with standard error handling and retries.
+
+    Retries on:
+    - Timeouts
+    - Connection errors
+    - HTTP 429 (Too Many Requests)
+    - HTTP 5xx (Server errors)
+
+    Does NOT retry on HTTP 4xx errors (except 429).
 
     Args:
         url: The API endpoint URL.
@@ -238,6 +284,9 @@ async def make_api_request(
         json_payload: JSON data to send in the request body.
         params: Query parameters.
         method: HTTP method ("GET" or "POST"). Defaults to "POST".
+        max_retries: Maximum number of retry attempts. Defaults to 3.
+        base_delay: Base delay in seconds for exponential backoff. Defaults to 1.0.
+        max_delay: Maximum delay in seconds between retries. Defaults to 60.0.
 
     Returns:
         APIResponse with data on success, or error details on failure.
@@ -246,7 +295,19 @@ async def make_api_request(
         raise ValueError(f"Invalid method: {method}")
     if method == "GET" and json_payload:
         raise ValueError("JSON payload cannot be provided for GET requests")
-    try:
+
+    @backoff.on_exception(
+        backoff.expo,
+        (asyncio.TimeoutError, aiohttp.ClientError, _RetryableHTTPError),
+        max_tries=max_retries + 1,
+        base=base_delay,
+        max_value=max_delay,
+        giveup=_should_giveup,
+        logger=logger,
+        backoff_log_level=logging.DEBUG,
+        giveup_log_level=logging.DEBUG,
+    )
+    async def _do_request() -> dict:
         timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             if method == "GET":
@@ -255,15 +316,26 @@ async def make_api_request(
                 request_context = session.post(url, params=params, json=json_payload, headers=headers)
 
             async with request_context as response:
+                if _is_retryable_status(response.status):
+                    raise _RetryableHTTPError(response.status, response.reason or "")
+
                 response.raise_for_status()
-                data = await response.json()
-                return APIResponse(data=data)
+                return await response.json()
+
+    try:
+        data = await _do_request()
+        return APIResponse(data=data)
     except asyncio.TimeoutError:
         return APIResponse(error=f"Timeout after {timeout_seconds} seconds", timed_out=True)
+    except _RetryableHTTPError as e:
+        return APIResponse(error=f"HTTP error: {e.status} {e.message}")
     except aiohttp.ClientResponseError as e:
         return APIResponse(error=f"HTTP error: {e.status} {e.message}")
     except aiohttp.ClientError as e:
         return APIResponse(error=f"Connection error: {e}")
+
+    # we should never reach this point, so raise an error if we do
+    raise RuntimeError(f"Failed to make API request to {url}")
 
 
 def get_openai_tool_definitions(tool: "Tool") -> dict[str, Any]:
@@ -341,3 +413,7 @@ class BaseToolConfig:
 
     tool_class: ClassVar[type[Tool]]
     """Related tool class for this config."""
+
+    max_concurrency: int = field(default=512, kw_only=True)
+    """Maximum number of concurrent requests the Ray actor can handle.
+    This controls how many parallel calls can be made to this tool across all workers."""

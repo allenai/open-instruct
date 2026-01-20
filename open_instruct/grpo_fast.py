@@ -1525,7 +1525,12 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.A
 
         for cfg, call_name, tool_class in configs_to_create:
             _kwarg_dict = asdict(cfg) | {"call_name": call_name}
-            tool_actors.append(ray.remote(tool_class).options(max_concurrency=512).remote(**_kwarg_dict))
+            # max_concurrency is only needed for Ray actor options, not passed to the tool class
+            tool_actors.append(
+                ray.remote(tool_class)
+                .options(max_concurrency=_kwarg_dict.pop("max_concurrency"))
+                .remote(**_kwarg_dict)
+            )
             tool_call_names.append(call_name)
 
     return tool_actors, tool_call_names
