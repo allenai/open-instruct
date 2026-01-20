@@ -216,6 +216,8 @@ class Args:
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
     fp32_lm_head: bool = False
     """Force FP32 LM head projection in trainer and vLLM generator to reduce logprob mismatch."""
+    fp32_lm_head_permanent: bool = False
+    """If True, convert vLLM lm_head weights to fp32 permanently instead of caching. More memory but simpler."""
 
     # Ray
     single_gpu_mode: bool = False
@@ -2281,8 +2283,9 @@ def main(
     tools_config: ToolsConfig,
 ):
     # Set fp32 lm head env var early so it propagates to all Ray/vLLM worker processes
+    # Mode "1" = cache mode (default), Mode "2" = permanent mode
     if args.fp32_lm_head:
-        os.environ["OPEN_INSTRUCT_FP32_LM_HEAD"] = "1"
+        os.environ["OPEN_INSTRUCT_FP32_LM_HEAD"] = "2" if args.fp32_lm_head_permanent else "1"
 
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)

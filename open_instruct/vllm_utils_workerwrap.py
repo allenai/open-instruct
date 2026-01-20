@@ -86,11 +86,18 @@ class WorkerWrap:
         torch.cuda.synchronize()
 
     def _maybe_update_fp32_lm_head_cache(self, name):
+        """Update the fp32 lm_head cache when weights are synced.
+
+        Two modes controlled by OPEN_INSTRUCT_FP32_LM_HEAD env var:
+        - "1" (cache mode): Keep bf16 weights, maintain separate fp32 cache
+        - "2" (permanent mode): Convert lm_head weight to fp32 in-place
+        """
         import os
 
         import torch
 
-        if os.environ.get("OPEN_INSTRUCT_FP32_LM_HEAD") != "1":
+        fp32_mode = os.environ.get("OPEN_INSTRUCT_FP32_LM_HEAD", "")
+        if fp32_mode not in ("1", "2"):
             return
         if not isinstance(name, str) or not name.endswith(".weight"):
             return
@@ -122,12 +129,19 @@ class WorkerWrap:
         if param is not weight:
             return
 
-        fp32_weight = getattr(lm_head, "_open_instruct_fp32_weight", None)
-        if (
-            isinstance(fp32_weight, torch.Tensor)
-            and fp32_weight.shape == weight.shape
-            and fp32_weight.device == weight.device
-        ):
-            fp32_weight.copy_(weight)
+        if fp32_mode == "2":
+            # Permanent mode: convert lm_head weight to fp32 in-place
+            if weight.dtype != torch.float32:
+                # Convert weight data to fp32
+                lm_head.weight.data = weight.float()
         else:
-            lm_head._open_instruct_fp32_weight = weight.float()
+            # Cache mode: maintain separate fp32 cache
+            fp32_weight = getattr(lm_head, "_open_instruct_fp32_weight", None)
+            if (
+                isinstance(fp32_weight, torch.Tensor)
+                and fp32_weight.shape == weight.shape
+                and fp32_weight.device == weight.device
+            ):
+                fp32_weight.copy_(weight)
+            else:
+                lm_head._open_instruct_fp32_weight = weight.float()

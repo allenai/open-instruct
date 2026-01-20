@@ -100,9 +100,20 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelD
 
 
 def maybe_enable_fp32_lm_head(enabled: bool) -> None:
+    """Enable fp32 lm_head computation in vLLM.
+
+    Reads the mode from OPEN_INSTRUCT_FP32_LM_HEAD env var (set in grpo_fast.py main()):
+    - "1" = cache mode: Keep bf16 weights, maintain separate fp32 cache
+    - "2" = permanent mode: Convert lm_head weights to fp32 in-place
+
+    Args:
+        enabled: Whether to enable fp32 lm_head at all.
+    """
     if not enabled:
         return
-    os.environ["OPEN_INSTRUCT_FP32_LM_HEAD"] = "1"
+    # Read mode from env var (already set by main() before ray.init)
+    fp32_mode = os.environ.get("OPEN_INSTRUCT_FP32_LM_HEAD", "1")
+    permanent = fp32_mode == "2"
     try:
         from vllm.model_executor.layers.logits_processor import LogitsProcessor
     except Exception:
@@ -118,6 +129,7 @@ def maybe_enable_fp32_lm_head(enabled: bool) -> None:
         return
 
     def _get_logits_fp32(self, hidden_states, lm_head, embedding_bias):
+        # Always cast hidden_states to fp32 for consistent precision
         if isinstance(hidden_states, torch.Tensor) and hidden_states.dtype != torch.float32:
             hidden_states = hidden_states.float()
         if (
@@ -127,10 +139,13 @@ def maybe_enable_fp32_lm_head(enabled: bool) -> None:
         ):
             embedding_bias = embedding_bias.float()
 
+        # Check for cached fp32 weight (cache mode) or permanent fp32 weight
         fp32_weight = getattr(lm_head, "_open_instruct_fp32_weight", None)
+        lm_head_weight = getattr(lm_head, "weight", None)
+
+        # Use cached fp32 weight if available (cache mode)
         if (
-            isinstance(hidden_states, torch.Tensor)
-            and isinstance(fp32_weight, torch.Tensor)
+            isinstance(fp32_weight, torch.Tensor)
             and fp32_weight.dtype == torch.float32
             and fp32_weight.device == hidden_states.device
         ):
@@ -140,12 +155,26 @@ def maybe_enable_fp32_lm_head(enabled: bool) -> None:
                 logits = logits[..., : self.org_vocab_size]
             return logits
 
+        # Use lm_head weight directly if it's already fp32 (permanent mode)
+        if (
+            isinstance(lm_head_weight, torch.Tensor)
+            and lm_head_weight.dtype == torch.float32
+            and lm_head_weight.device == hidden_states.device
+        ):
+            logits = torch.nn.functional.linear(hidden_states, lm_head_weight, embedding_bias)
+            logits = self._gather_logits(logits)
+            if logits is not None:
+                logits = logits[..., : self.org_vocab_size]
+            return logits
+
+        # Fallback to original implementation with fp32 hidden_states
         return orig_get_logits(self, hidden_states, lm_head, embedding_bias)
 
     LogitsProcessor._get_logits = _get_logits_fp32
     LogitsProcessor._open_instruct_fp32_lm_head = True
     LogitsProcessor._open_instruct_fp32_lm_head_orig_get_logits = orig_get_logits
-    logger.info("Enabled vLLM fp32 LM head patch.")
+    mode_str = "permanent" if permanent else "cache"
+    logger.info(f"Enabled vLLM fp32 LM head patch (mode: {mode_str}).")
 
 
 @dataclasses.dataclass
