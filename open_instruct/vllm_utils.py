@@ -445,22 +445,30 @@ async def _check_health(port: int) -> None:
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
-    logger.info("[_prefetch_worker] Starting prefetch worker loop")
+    print("[_prefetch_worker] Starting prefetch worker loop", flush=True)
     while True:
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        logger.info("[_prefetch_worker] Waiting for request from prompt_queue...")
+        print("[_prefetch_worker] Waiting for request from prompt_queue...", flush=True)
         request = actor.prompt_queue.get()
-        logger.info(f"[_prefetch_worker] Got request: prompt_id={request.prompt_id}, index={request.index}")
+        print(f"[_prefetch_worker] Got request: prompt_id={request.prompt_id}, index={request.index}", flush=True)
         add_request(actor, request)
+        print(f"[_prefetch_worker] Finished processing request: prompt_id={request.prompt_id}", flush=True)
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
+
     request_id = make_request_id(request)
-    logger.info(f"[add_request] Processing request_id={request_id}, n={request.generation_config.n}")
+    print(f"[add_request] Processing request_id={request_id}, n={request.generation_config.n}", flush=True)
+    print("[add_request] Step 1: Creating sampling_params", flush=True)
     sampling_params = dataclasses.replace(request.generation_config, n=1)
+    print("[add_request] Step 2: sampling_params created", flush=True)
+
+    print(f"[add_request] Step 3: Converting prompt to list, len={len(request.prompt)}", flush=True)
+    prompt_token_ids = list(request.prompt)
+    print(f"[add_request] Step 4: Prompt converted, len={len(prompt_token_ids)}", flush=True)
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
@@ -468,20 +476,22 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "prompt_id": request.prompt_id,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
-        "prompt_token_ids": list(request.prompt),
+        "prompt_token_ids": prompt_token_ids,
         "start_time": time.perf_counter(),
         "active_tools": request.active_tools,
     }
+    print("[add_request] Step 5: Metadata stored", flush=True)
 
     for j in range(request.generation_config.n):
         seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
         sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
         sub_request_id = f"{request_id}_{j}"
-        logger.info(f"[add_request] Submitting sub_request_id={sub_request_id} to async loop")
+        print(f"[add_request] Submitting sub_request_id={sub_request_id}", flush=True)
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request(actor, sub_request_id, sub_sampling_params), actor.loop
         )
-    logger.info(f"[add_request] All {request.generation_config.n} sub-requests submitted for {request_id}")
+        print(f"[add_request] Submitted sub_request_id={sub_request_id}", flush=True)
+    print(f"[add_request] All {request.generation_config.n} sub-requests submitted for {request_id}", flush=True)
 
 
 FALLBACK_CHAT_TEMPLATE = "{% for message in messages %}{{ message['content'] }}{% endfor %}"
