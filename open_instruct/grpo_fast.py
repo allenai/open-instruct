@@ -218,6 +218,10 @@ class Args:
     """Force FP32 LM head projection in trainer and vLLM generator to reduce logprob mismatch."""
     fp32_lm_head_permanent: bool = False
     """If True, convert vLLM lm_head weights to fp32 permanently instead of caching. More memory but simpler."""
+    save_logprob_samples: bool = False
+    """Save raw vLLM vs trainer logprob samples for alignment analysis (reproduces ScaleRL Figure 3)."""
+    save_logprob_samples_max: int = 50000
+    """Maximum number of logprob samples to save."""
 
     # Ray
     single_gpu_mode: bool = False
@@ -612,7 +616,53 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.dataloader = iter(self._streaming_dataloader)
 
+        # Initialize logprob sample storage for alignment analysis (ScaleRL Figure 3)
+        self._logprob_samples = {"vllm": [], "trainer": []}
+        self._logprob_samples_saved = 0
+
         return optimization_steps_done
+
+    def _save_logprob_samples(self, vllm_logprobs: "np.ndarray", trainer_logprobs: "np.ndarray") -> None:
+        """Save logprob samples for alignment analysis."""
+        import json
+
+        if self._logprob_samples_saved >= self.args.save_logprob_samples_max:
+            return
+
+        # Only save from rank 0 to avoid duplicates
+        if self.rank != 0:
+            return
+
+        # Flatten and add to storage
+        vllm_flat = vllm_logprobs.flatten().tolist()
+        trainer_flat = trainer_logprobs.flatten().tolist()
+
+        remaining = self.args.save_logprob_samples_max - self._logprob_samples_saved
+        n_to_add = min(len(vllm_flat), remaining)
+
+        self._logprob_samples["vllm"].extend(vllm_flat[:n_to_add])
+        self._logprob_samples["trainer"].extend(trainer_flat[:n_to_add])
+        self._logprob_samples_saved += n_to_add
+
+        # Save periodically (every 10k samples) or when full
+        if self._logprob_samples_saved % 10000 == 0 or self._logprob_samples_saved >= self.args.save_logprob_samples_max:
+            samples_dir = os.path.join(self.args.output_dir, "logprob_samples")
+            os.makedirs(samples_dir, exist_ok=True)
+            sample_file = os.path.join(samples_dir, f"samples_{self._logprob_samples_saved}.json")
+            with open(sample_file, "w") as f:
+                json.dump(
+                    {
+                        "vllm_logprobs": self._logprob_samples["vllm"],
+                        "trainer_logprobs": self._logprob_samples["trainer"],
+                        "n_samples": self._logprob_samples_saved,
+                        "fp32_lm_head": self.args.fp32_lm_head,
+                        "fp32_lm_head_permanent": self.args.fp32_lm_head_permanent,
+                    },
+                    f,
+                )
+            logger.info(f"Saved {self._logprob_samples_saved} logprob samples to {sample_file}")
+            # Clear after saving to avoid memory growth
+            self._logprob_samples = {"vllm": [], "trainer": []}
 
     def forward(
         self,
@@ -940,6 +990,13 @@ class PolicyTrainerRayProcess(RayProcess):
                             masked_reverse_kl_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
                         )
                         self.local_metrics["debug/vllm_local_reverse_kl"] = float(mean_reverse_kl)
+
+                        # Save raw logprob samples for alignment analysis (ScaleRL Figure 3)
+                        if self.args.save_logprob_samples:
+                            self._save_logprob_samples(
+                                vllm_logprobs_BT[valid_mask_BT].cpu().numpy(),
+                                local_logprobs_BT[valid_mask_BT].cpu().numpy(),
+                            )
 
                     new_logprobs_BT = local_logprobs_BT
 
