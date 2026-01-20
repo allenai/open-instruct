@@ -1329,6 +1329,7 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        vllm_dtype=vllm_config.vllm_dtype,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 

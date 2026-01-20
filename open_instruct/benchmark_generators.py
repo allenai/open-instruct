@@ -268,6 +268,7 @@ def setup_vllm_engines(
             verifier_functions=build_all_verifiers(args, streaming_config),
         ),
         train_dataset=dataset,
+        vllm_dtype=vllm_config.vllm_dtype,
     )
 
     logger.info("vLLM engines ready")
