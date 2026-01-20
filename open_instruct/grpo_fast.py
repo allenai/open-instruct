@@ -104,8 +104,8 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.tools.parsers import create_tool_parser
-from open_instruct.tools.tools import TOOL_REGISTRY
-from open_instruct.tools.utils import ParsedToolConfig, ToolsConfig
+from open_instruct.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
+from open_instruct.tools.utils import BaseToolConfig, ParsedToolConfig, ToolsConfig
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -395,8 +395,8 @@ class PolicyTrainerRayProcess(RayProcess):
         # Monkey patch to load checkpoints with `weights_only=False`
         # otherwise it errors out with:
         # `_pickle.UnpicklingError: Weights only load failed. ` with pytorch 2.6.0
-        from deepspeed.runtime.checkpoint_engine import torch_checkpoint_engine
-        from deepspeed.utils import logger
+        from deepspeed.runtime.checkpoint_engine import torch_checkpoint_engine  # noqa: PLC0415
+        from deepspeed.utils import logger  # noqa: PLC0415
 
         def load(self, path: str, map_location=None):
             logger.info(f"[Torch] Loading checkpoint from {path}...")
@@ -1479,19 +1479,22 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def create_tools(parsed_tools: list[ParsedToolConfig]) -> list[ray.actor.ActorHandle]:
+def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.ActorHandle], list[str]]:
     """Create tool actors based on tool configuration using the TOOL_REGISTRY.
 
     Args:
         parsed_tools: List of ParsedTool instances containing name, call_name, and config.
 
     Returns:
-        A list of Ray actor handles for the requested tools.
+        A tuple of (tool_actors, tool_call_names) where:
+        - tool_actors: List of Ray actor handles for the requested tools.
+        - tool_call_names: List of call names for each tool (may differ from input for MCP tools, which decide their own call names).
 
     Raises:
         ValueError: If an unknown tool is requested, configs are invalid, or required fields are missing.
     """
     tool_actors = []
+    tool_call_names = []
 
     for parsed_tool in parsed_tools:
         if parsed_tool.name not in TOOL_REGISTRY:
@@ -1505,12 +1508,32 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> list[ray.actor.ActorHa
         except Exception as e:
             raise ValueError(f"Invalid config for tool '{parsed_tool.name}': {e}") from e
 
-        # The config is a dataclass, and may have performed additional validation
-        # or transformation of the args, which we then now pass to the tool.
-        _kwarg_dict = asdict(config) | {"call_name": parsed_tool.call_name}
-        tool_actors.append(ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**_kwarg_dict))
+        # Collect (config, call_name, tool_class) tuples to process
+        # special logic for MCP tools: we ask the mcp server what tools it has, and then create actors for each.
+        configs_to_create: list[tuple[BaseToolConfig, str, type]] = []
 
-    return tool_actors
+        if isinstance(config, GenericMCPToolConfig) and config.tool_name is None:
+            logger.info(f"Auto-discovering tools from MCP server for '{parsed_tool.name}'...")
+            expanded_configs = asyncio.run(config.expand_tools())
+            for expanded_config in expanded_configs:
+                configs_to_create.append((expanded_config, expanded_config.tool_name, tool_config_class.tool_class))
+            logger.info(
+                f"Discovered {len(expanded_configs)} tools from MCP server: {[c.tool_name for c in expanded_configs]}"
+            )
+        else:
+            configs_to_create.append((config, parsed_tool.call_name, tool_config_class.tool_class))
+
+        for cfg, call_name, tool_class in configs_to_create:
+            _kwarg_dict = asdict(cfg) | {"call_name": call_name}
+            # max_concurrency is only needed for Ray actor options, not passed to the tool class
+            tool_actors.append(
+                ray.remote(tool_class)
+                .options(max_concurrency=_kwarg_dict.pop("max_concurrency"))
+                .remote(**_kwarg_dict)
+            )
+            tool_call_names.append(call_name)
+
+    return tool_actors, tool_call_names
 
 
 def create_model_and_optimizer(
@@ -2274,7 +2297,7 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, list[str]]:
+def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, list[str], list[str]]:
     """Initialize tool actors and get tool definitions and stop sequences.
 
     Args:
@@ -2282,9 +2305,11 @@ def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, 
         tokenizer: Tokenizer for the model.
 
     Returns:
-        Tuple of (tool_actors, tool_definitions, stop_sequences).
+        Tuple of (tool_actors, tool_definitions, stop_sequences, tool_call_names).
+        Note: tool_call_names may differ from tools_config.tool_call_names if MCP
+        tools were auto-expanded.
     """
-    tool_actors = create_tools(tools_config._parsed_tools)
+    tool_actors, tool_call_names = create_tools(tools_config._parsed_tools)
     tool_definitions = (
         ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
     )
@@ -2297,7 +2322,7 @@ def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, 
             parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
         ).stop_sequences
 
-    return tool_actors, tool_definitions, stop_sequences
+    return tool_actors, tool_definitions, stop_sequences, tool_call_names
 
 
 def main(
@@ -2322,10 +2347,12 @@ def main(
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
-    tool_actors, tool_definitions, tool_stop_sequences = initialize_tools(tools_config, tokenizer)
+    tool_actors, tool_definitions, tool_stop_sequences, tool_call_names = initialize_tools(tools_config, tokenizer)
     logger.info(
         f"Initialized {len(tool_actors)} tool actors with definitions: {[d['function']['name'] for d in tool_definitions]}"
     )
+    # Update tools_config with expanded tool call names (for MCP auto-expansion)
+    tools_config.tool_call_names = tool_call_names
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)

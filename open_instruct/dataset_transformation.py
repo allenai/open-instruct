@@ -1380,19 +1380,21 @@ def rlvr_tokenize_v2(
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
-    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
-    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
-    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
-    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # if the verifier source is a string, we wrap it in a list (compatibility with multi-verifier datasets)
+    # we also then wrap ground truths in a list to match.
+    if isinstance(verifier_source_val, str):
+        verifier_source_val = [verifier_source_val]
+        ground_truths_val = [ground_truths_val]
+    row[GROUND_TRUTHS_KEY] = ground_truths_val
+    row[VERIFIER_SOURCE_KEY] = verifier_source_val
+
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
-    # some basic transformations:
-    # if ground truths is a string, make it a list
-    if isinstance(row[ground_truths_key], str):
-        row[ground_truths_key] = [row[ground_truths_key]]
-    # if dataset source is a string, make it a list
-    if isinstance(row[verifier_source_key], str):
-        row[verifier_source_key] = [row[verifier_source_key]]
     # drop the messages field as it often causes issues.
     row.pop(sft_messages_key)
     return row
@@ -1437,19 +1439,24 @@ def rlvr_tokenize_v3(
     )
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
-    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
-    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
-    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
-    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # if the verifier source is a string, we wrap it in a list (compatibility with multi-verifier datasets)
+    # we also then wrap ground truths in a list to match.
+    if isinstance(verifier_source_val, str):
+        verifier_source_val = [verifier_source_val]
+        ground_truths_val = [ground_truths_val]
+    row[GROUND_TRUTHS_KEY] = ground_truths_val
+    row[VERIFIER_SOURCE_KEY] = verifier_source_val
+
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
-    # some basic transformations:
-    # if ground truths is a string, make it a list
-    if isinstance(row[ground_truths_key], str):
-        row[ground_truths_key] = [row[ground_truths_key]]
-    # if dataset source is a string, make it a list
-    if isinstance(row[verifier_source_key], str):
-        row[verifier_source_key] = [row[verifier_source_key]]
     return row
 
 

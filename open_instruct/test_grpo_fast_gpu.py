@@ -164,13 +164,11 @@ class TestGeneration(TestGrpoFastBase):
         test_data_path = TEST_DATA_DIR / test_data_filename
 
         tokenizer_name = "Qwen/Qwen3-1.7B"
-        tool_actors = (
-            create_tools(
+        tool_actors = None
+        if use_tools:
+            tool_actors, _ = create_tools(
                 [ParsedToolConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})]
             )
-            if use_tools
-            else None
-        )
         max_tool_calls = 5 if use_tools else None
 
         result = self._setup_engine_and_generate(
