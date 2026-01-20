@@ -186,6 +186,7 @@ include = [
     "open_instruct/dpo_config.py",
     "open_instruct/dpo_utils.py",
     "open_instruct/grpo_callbacks.py",
+    "open_instruct/grpo_olmo_core_actor.py",
     "open_instruct/logger_utils.py",
     "open_instruct/mix_data.py",
     "open_instruct/mix_data_preferences.py",
