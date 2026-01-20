@@ -214,7 +214,7 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
             entity=args.wandb_entity,
             config=json_config,
         )
-    checkpointing_steps = int(args.checkpointing_steps) if args.checkpointing_steps else None
+    checkpointing_steps = int(args.checkpointing_steps) if args.checkpointing_steps else 500
     trainer_callbacks["checkpointer"] = CheckpointerCallback(save_interval=checkpointing_steps, save_async=False)
     return trainer_callbacks
 
