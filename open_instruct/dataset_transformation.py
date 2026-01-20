@@ -1812,14 +1812,14 @@ class LocalDatasetTransformationCache:
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
 
         # Exclude the 'dataset' field from DatasetConfig as it's not JSON serializable
-        def dc_to_dict(dc: DatasetConfig) -> dict:
+        def _dc_to_dict(dc: DatasetConfig) -> dict:
             d = asdict(dc)
             d.pop("dataset", None)
             return d
 
         config_dict = {
             "tokenizer_config": asdict(tc),
-            "dataset_configs": [dc_to_dict(dc) for dc in dcs],
+            "dataset_configs": [_dc_to_dict(dc) for dc in dcs],
             "config_hash": config_hash,
         }
         with open(config_path, "w") as f:
