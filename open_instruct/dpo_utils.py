@@ -228,7 +228,7 @@ class CheckpointConfig:
 
     output_dir: str = "output/"
     """The output directory where the model predictions and checkpoints will be written."""
-    checkpointing_steps: int | str | None = None
+    checkpointing_steps: int | str = 500
     """Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."""
     keep_last_n_checkpoints: int = 3
     """How many checkpoints to keep in the output directory. -1 for all."""
