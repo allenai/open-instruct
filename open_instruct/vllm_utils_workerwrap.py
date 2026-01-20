@@ -1,3 +1,6 @@
+# This class runs in vLLM worker processes; imports are inside methods.
+
+
 class WorkerWrap:
     def init_process_group(
         self,

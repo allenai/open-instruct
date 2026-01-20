@@ -645,7 +645,7 @@ def prepare_deepspeed(model: torch.nn.Module, per_device_train_batch_size: int, 
         `torch.nn.Module`:
             The model initialized and configured with DeepSpeed for training.
     """
-    import deepspeed
+    import deepspeed  # noqa: PLC0415
 
     deepspeed_plugin = AcceleratorState().deepspeed_plugin
     config_kwargs = deepspeed_plugin.deepspeed_config

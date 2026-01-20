@@ -1,28 +1,23 @@
 #!/usr/bin/env python3
+"""Script to remove phrases identifying the model as a certain entity in our datasets.
 
-import argparse
-import re
-
-import pandas as pd
-from datasets import load_dataset
-from huggingface_hub import hf_hub_download, list_repo_files
-
-import open_instruct.utils as open_instruct_utils
-
-"""
-Script to remove phrases identifying the model as a certain entity in our datasets.
 Motivated by: realizing the SFT mix has lots of "I am DeepSeek" snippets.
 
 Run with:
 python scripts/data/filtering_and_updates/filter_dataset_by_keywords.py --input-dataset allenai/tulu-3-sft-mixture --column messages
 """
 
+import argparse
 import os
+import re
+
+import pandas as pd
+from datasets import Dataset, disable_caching, load_dataset
+from huggingface_hub import hf_hub_download, list_repo_files
+
+import open_instruct.utils as open_instruct_utils
 
 os.environ["HF_DATASETS_DISABLE_CACHING"] = "1"
-
-from datasets import disable_caching
-
 disable_caching()
 
 
@@ -163,8 +158,6 @@ def load_dataset_from_parquet(dataset_name):
     combined_df = pd.concat(dfs, ignore_index=True)
 
     # Convert to HF Dataset
-    from datasets import Dataset
-
     return Dataset.from_pandas(combined_df)
 
 
