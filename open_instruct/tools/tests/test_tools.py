@@ -1,17 +1,19 @@
-"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, and Crawl4AIBrowseTool from tools.py)."""
+"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, Crawl4AIBrowseTool, and GenericMCPTool from tools.py)."""
 
 import asyncio
 import dataclasses
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import aiohttp
 from parameterized import parameterized
 
 from open_instruct import data_types
+from open_instruct.tools.generic_mcp import GenericMCPTool, GenericMCPToolConfig
 from open_instruct.tools.tools import (
+    TOOL_REGISTRY,
     Crawl4AIBrowseTool,
     Crawl4AIBrowseToolConfig,
     JinaBrowseTool,
@@ -22,7 +24,6 @@ from open_instruct.tools.tools import (
     S2SearchToolConfig,
     SerperSearchTool,
     SerperSearchToolConfig,
-    _truncate,
 )
 from open_instruct.tools.utils import (
     APIResponse,
@@ -32,6 +33,7 @@ from open_instruct.tools.utils import (
     ToolStatistics,
     get_openai_tool_definitions,
     make_api_request,
+    truncate,
 )
 
 
@@ -252,7 +254,7 @@ class TestPythonCodeToolConfig(unittest.TestCase):
 
 
 class TestTruncateHelper(unittest.TestCase):
-    """Tests for _truncate helper function."""
+    """Tests for truncate helper function."""
 
     @parameterized.expand(
         [
@@ -263,8 +265,8 @@ class TestTruncateHelper(unittest.TestCase):
         ]
     )
     def test_truncate(self, name, text, max_length, expected_result, should_truncate):
-        """Test _truncate with various inputs."""
-        result = _truncate(text, max_length=max_length)
+        """Test truncate with various inputs."""
+        result = truncate(text, max_length=max_length)
 
         if should_truncate:
             self.assertTrue(result.startswith(text[:max_length]))
@@ -1493,6 +1495,96 @@ class TestMakeApiRequestRetry(unittest.TestCase):
 
         self.assertTrue(result.timed_out)
         self.assertIn("Timeout", result.error)
+
+
+class TestGenericMCPToolExecution(unittest.TestCase):
+    """Tests for GenericMCPTool execution."""
+
+    @patch("open_instruct.tools.generic_mcp._call_mcp_tool")
+    def test_execute_success(self, mock_call):
+        """Test successful tool execution."""
+        mock_result = MagicMock()
+        mock_result.content = [MagicMock(type="text", text="result text")]
+        mock_result.structuredContent = None
+        mock_call.return_value = mock_result
+
+        tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool")
+        result = asyncio.run(tool.execute(query="test"))
+
+        self.assertTrue(result.called)
+        self.assertEqual(result.output, "result text")
+        self.assertEqual(result.error, "")
+
+    @patch("open_instruct.tools.generic_mcp._call_mcp_tool")
+    def test_execute_timeout(self, mock_call):
+        """Test tool execution timeout."""
+        mock_call.side_effect = asyncio.TimeoutError()
+
+        tool = GenericMCPTool(
+            call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool", timeout=1
+        )
+        result = asyncio.run(tool.execute(query="test"))
+
+        self.assertTrue(result.called)
+        self.assertTrue(result.timeout)
+        self.assertIn("Timeout", result.error)
+
+
+class TestGenericMCPToolConfig(unittest.TestCase):
+    """Tests for GenericMCPToolConfig."""
+
+    def test_config_default_values(self):
+        """Test config has correct default values."""
+        config = GenericMCPToolConfig()
+        self.assertEqual(config.server_url, "")
+        self.assertEqual(config.transport, "http")
+        self.assertEqual(config.command, "")
+        self.assertEqual(config.args, [])
+        self.assertEqual(config.env, {})
+        self.assertEqual(config.timeout, 60)
+        self.assertEqual(config.max_retries, 3)
+        self.assertEqual(config.retry_backoff, 0.5)
+        self.assertIsNone(config.tool_name)
+
+    def test_config_custom_values(self):
+        """Test config accepts custom values."""
+        config = GenericMCPToolConfig(
+            server_url="http://localhost:9000/mcp", transport="sse", timeout=120, max_retries=5, tool_name="my_tool"
+        )
+        self.assertEqual(config.server_url, "http://localhost:9000/mcp")
+        self.assertEqual(config.transport, "sse")
+        self.assertEqual(config.timeout, 120)
+        self.assertEqual(config.max_retries, 5)
+        self.assertEqual(config.tool_name, "my_tool")
+
+    def test_config_stdio_values(self):
+        """Test config with stdio transport values."""
+        config = GenericMCPToolConfig(transport="stdio", command="python", args=["server.py"], env={"DEBUG": "1"})
+        self.assertEqual(config.transport, "stdio")
+        self.assertEqual(config.command, "python")
+        self.assertEqual(config.args, ["server.py"])
+        self.assertEqual(config.env, {"DEBUG": "1"})
+
+    def test_tool_class_attribute(self):
+        """Test tool_class is set to GenericMCPTool."""
+
+        self.assertEqual(GenericMCPToolConfig.tool_class, GenericMCPTool)
+
+    def test_expand_tools_returns_self_when_tool_name_set(self):
+        """Test expand_tools returns [self] when tool_name is specified."""
+        config = GenericMCPToolConfig(server_url="http://localhost:8000/mcp", tool_name="my_tool")
+        expanded = asyncio.run(config.expand_tools())
+        self.assertEqual(len(expanded), 1)
+        self.assertEqual(expanded[0].tool_name, "my_tool")
+
+
+class TestGenericMCPToolInRegistry(unittest.TestCase):
+    """Tests for GenericMCPTool in TOOL_REGISTRY."""
+
+    def test_generic_mcp_in_registry(self):
+        """Test generic_mcp is in TOOL_REGISTRY."""
+        self.assertIn("generic_mcp", TOOL_REGISTRY)
+        self.assertEqual(TOOL_REGISTRY["generic_mcp"], GenericMCPToolConfig)
 
 
 if __name__ == "__main__":

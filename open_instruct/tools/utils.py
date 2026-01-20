@@ -107,6 +107,24 @@ class ToolOutput:
     runtime: float
 
 
+def truncate(text: str, max_length: int = 500) -> str:
+    """Truncate text for logging, adding ellipsis if needed."""
+    if len(text) <= max_length:
+        return text
+    return text[:max_length] + f"... [{len(text) - max_length} more chars]"
+
+
+def log_tool_call(tool_name: str, input_text: str, output: ToolOutput) -> None:
+    """Log a tool call at DEBUG level with truncated input/output."""
+    logger.debug(
+        f"Tool '{tool_name}' called:\n"
+        f"  Input: {truncate(input_text)}\n"
+        f"  Output: {truncate(output.output)}\n"
+        f"  Error: {output.error or 'None'}\n"
+        f"  Runtime: {output.runtime:.3f}s, Timeout: {output.timeout}"
+    )
+
+
 class ToolStatistics:
     """Manages aggregated tool call statistics across rollouts.
 
