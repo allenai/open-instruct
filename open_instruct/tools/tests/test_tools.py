@@ -29,6 +29,7 @@ from open_instruct.tools.utils import (
     ToolsConfig,
     ToolStatistics,
     get_openai_tool_definitions,
+    make_api_request,
 )
 
 
@@ -1398,8 +1399,6 @@ class TestMakeApiRequestRetry(unittest.TestCase):
         Returns:
             Tuple of (result, call_count).
         """
-        from open_instruct.tools.utils import make_api_request
-
         call_count = {"count": 0}
 
         async def mock_request(*args, **kwargs):
