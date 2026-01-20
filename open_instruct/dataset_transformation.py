@@ -47,7 +47,7 @@ import multiprocessing
 import os
 from dataclasses import asdict, dataclass, field
 from functools import cached_property
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -96,8 +96,8 @@ def get_file_hash(
 
 
 def get_files_hash_if_exists(
-    model_name_or_path: str, revision: str, filenames: List[str], repo_type: str = "model"
-) -> List[str]:
+    model_name_or_path: str, revision: str, filenames: list[str], repo_type: str = "model"
+) -> list[str]:
     return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
 
 
@@ -141,7 +141,6 @@ def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrai
 # ----------------------------------------------------------------------------
 # Tokenization
 # Chat templates
-# flake8: noqa
 # note we added `{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}`
 # because we want the template to not output eos_token if `add_generation_prompt=True`
 CHAT_TEMPLATES = {
@@ -518,13 +517,13 @@ CHAT_TEMPLATES = {
     ),
     "olmo_thinker_code_rlzero": (
         "Solve the following code problem step by step. "
-        f"The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem."
+        "The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem."
         "\n\n"
         "{% for message in messages %}"
         "{{ '\n\n' if not loop.first else '' }}"
         "{{ message['content'] + '\n' }}"
         "{% if loop.last and add_generation_prompt %}"
-        f"\nRemember to put your solution inside the ```\npython\nCODE\n``` tags"
+        "\nRemember to put your solution inside the ```\npython\nCODE\n``` tags"
         "{% endif %}"
         "{% endfor %}"
     ),
@@ -622,7 +621,6 @@ CHAT_TEMPLATES = {
         "{% endfor %}"
     ),
 }
-# flake8: noqa
 
 
 def get_tokenizer_simple_v1(tc: "TokenizerConfig"):
@@ -645,7 +643,7 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     # only add if the pad token is not present already.
-    if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
+    if isinstance(tokenizer, (LlamaTokenizer, LlamaTokenizerFast)):
         num_added_tokens = tokenizer.add_special_tokens(
             {"bos_token": "<s>", "eos_token": "</s>", "unk_token": "<unk>", "pad_token": "<pad>"}
         )
@@ -681,7 +679,7 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
                 tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
             ).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
+            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -707,7 +705,7 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     # only add if the pad token is not present already, or if the current one is set to eos_token_id.
     if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
-        if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
+        if isinstance(tokenizer, (LlamaTokenizer, LlamaTokenizerFast)):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens in [0, 1], (
                 "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
@@ -745,7 +743,7 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
                 tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
             ).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
+            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
     elif tc.chat_template_name in CHAT_TEMPLATES:
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
@@ -786,7 +784,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     # only add if the pad token is not present already, or if the current one is set to eos_token_id.
     if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
-        if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
+        if isinstance(tokenizer, (LlamaTokenizer, LlamaTokenizerFast)):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens in [0, 1], (
                 "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
@@ -828,7 +826,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
                 tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
             ).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
+            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -858,20 +856,20 @@ RAW_PROMPT_KEY = "prompt"
 
 @dataclass
 class TokenizerConfig:
-    tokenizer_name_or_path: Optional[str] = None
-    tokenizer_revision: Optional[str] = None
+    tokenizer_name_or_path: str | None = None
+    tokenizer_revision: str | None = None
     trust_remote_code: bool = False
     use_fast: bool = True
-    chat_template_name: Optional[str] = None  # default to using the tokenizer chat template
+    chat_template_name: str | None = None  # default to using the tokenizer chat template
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
     # for tracking purposes
-    tokenizer_files_hash: Optional[List[str]] = None
+    tokenizer_files_hash: list[str] | None = None
 
     # backward compatibility to make sure script runs
     use_slow_tokenizer: bool = False  # completely ignored
-    tokenizer_name: Optional[str] = None
+    tokenizer_name: str | None = None
     ground_truths_key: str = GROUND_TRUTHS_KEY
     """columns name for the ground truth"""
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
@@ -954,12 +952,9 @@ TOKENIZED_PREFERENCE_DATASET_KEYS = [
 
 # TODO: allow passing in sft_message key, so we can train on "chosen" of pref dataset.
 def sft_tokenize_v1(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
+    row: dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
 ):
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
-        prompt = row[sft_messages_key][:-1]
+    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
@@ -971,13 +966,10 @@ def sft_tokenize_v1(
 
 
 def sft_tokenize_mask_out_prompt_v1(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
+    row: dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
 ):
     """mask out the prompt tokens by manipulating labels"""
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
-        prompt = row[sft_messages_key][:-1]
+    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
@@ -989,10 +981,10 @@ def sft_tokenize_mask_out_prompt_v1(
 
 
 def sft_filter_v1(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
-    max_prompt_token_length: Optional[int] = None,
-    max_token_length: Optional[int] = None,
+    max_prompt_token_length: int | None = None,
+    max_token_length: int | None = None,
     need_contain_labels: bool = True,
 ):
     max_prompt_token_length_ok = True
@@ -1007,7 +999,7 @@ def sft_filter_v1(
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
-def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
     if len(messages) == 0:
@@ -1077,7 +1069,7 @@ def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrained
     return row
 
 
-def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
     if len(messages) == 0:
@@ -1095,7 +1087,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreT
     input_ids = input_ids_result
     labels = input_ids.clone()
     # mask all turns but the last for avoiding loss
-    for message_idx, message in enumerate(messages):
+    for message_idx, _message in enumerate(messages):
         if message_idx < len(messages) - 1:
             # we calculate the start index of this non-assistant message
             if message_idx == 0:
@@ -1147,11 +1139,11 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreT
     return row
 
 
-def sft_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
+def sft_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     return any(x != -100 for x in row[LABELS_KEY])
 
 
-def preference_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
+def preference_tokenize_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     # Extract prompt (all messages except the last one)
     prompt = row["chosen"][:-1]
 
@@ -1171,15 +1163,14 @@ def preference_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
 
 
 def preference_filter_v1(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
-    max_prompt_token_length: Optional[int] = None,
-    max_token_length: Optional[int] = None,
+    max_prompt_token_length: int | None = None,
+    max_token_length: int | None = None,
 ):
     # Check prompt length if specified
-    if max_prompt_token_length is not None:
-        if len(row[INPUT_IDS_PROMPT_KEY]) > max_prompt_token_length:
-            return False
+    if max_prompt_token_length is not None and len(row[INPUT_IDS_PROMPT_KEY]) > max_prompt_token_length:
+        return False
 
     # Check total sequence lengths if specified
     if max_token_length is not None:
@@ -1192,7 +1183,7 @@ def preference_filter_v1(
 
 
 def preference_tulu_tokenize_and_truncate_v1(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     max_seq_length: int,
     chosen_key: str = DEFAULT_CHOSEN_KEY,
@@ -1228,7 +1219,7 @@ def preference_tulu_tokenize_and_truncate_v1(
 
 
 def preference_tulu_tokenize_and_truncate_v1_2(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     max_seq_length: int,
     chosen_key: str = DEFAULT_CHOSEN_KEY,
@@ -1263,21 +1254,18 @@ def preference_tulu_tokenize_and_truncate_v1_2(
     }
 
 
-def preference_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
+def preference_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     return any(x != -100 for x in row[CHOSEN_LABELS_KEY]) and any(x != -100 for x in row[REJECTED_LABELS_KEY])
 
 
 def rlvr_tokenize_v1(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
 ):
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
-        prompt = row[sft_messages_key][:-1]
+    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
@@ -1291,16 +1279,13 @@ def rlvr_tokenize_v1(
 
 
 def rlvr_tokenize_v2(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
 ):
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
-        prompt = row[sft_messages_key][:-1]
+    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     # weird issue with qwen: sometimes the padding token ends up in the input ids?
@@ -1331,12 +1316,12 @@ def rlvr_tokenize_v2(
 
 
 def rlvr_tokenize_v3(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
-    system_prompt_override: Optional[str] = None,
+    system_prompt_override: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
 ):
     prompt = row.pop(sft_messages_key)
@@ -1350,7 +1335,7 @@ def rlvr_tokenize_v3(
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
-    chat_template_kwargs: Dict[str, Any] = {"add_generation_prompt": True}
+    chat_template_kwargs: dict[str, Any] = {"add_generation_prompt": True}
     if tool_definitions:
         chat_template_kwargs["tools"] = tool_definitions
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
@@ -1373,11 +1358,11 @@ def rlvr_tokenize_v3(
 
 
 def rlvr_filter_v1(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     need_contain_labels: bool = True,
-    max_prompt_token_length: Optional[int] = None,
-    max_token_length: Optional[int] = None,
+    max_prompt_token_length: int | None = None,
+    max_token_length: int | None = None,
 ):
     max_prompt_token_length_ok = True
     if max_prompt_token_length is not None:
@@ -1392,7 +1377,7 @@ def rlvr_filter_v1(
 
 
 def rlvr_max_length_filter_v2(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: Optional[int] = None
+    row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: int | None = None
 ):
     if max_prompt_token_length is None:
         return True
@@ -1419,7 +1404,7 @@ class SimplePreferenceCollator:
         """Simple collator for preference dataset (always pad from the RIGHT)"""
         self.pad_token_id = pad_token_id
 
-    def __call__(self, batch: List[Dict[str, List[int]]]):
+    def __call__(self, batch: list[dict[str, list[int]]]):
         """the input will have input_ids_chosen, input_ids_rejected"""
         # Find max length in the batch
         max_length_chosen = -1
@@ -1461,16 +1446,16 @@ class DatasetConfig:
     dataset_name: str
     dataset_split: str
     dataset_revision: str
-    dataset_range: Optional[int] = None
-    transform_fn: List[str] = field(default_factory=list)
-    transform_fn_args: List[Dict[str, Any]] = field(default_factory=list)
-    target_columns: Optional[List[str]] = None
+    dataset_range: int | None = None
+    transform_fn: list[str] = field(default_factory=list)
+    transform_fn_args: list[dict[str, Any]] = field(default_factory=list)
+    target_columns: list[str] | None = None
     dataset_config_seed: int = 42
 
     # for tracking purposes
-    dataset_commit_hash: Optional[str] = None
-    frac_or_num_samples: Optional[Union[int, float]] = None
-    original_dataset_size: Optional[int] = None
+    dataset_commit_hash: str | None = None
+    frac_or_num_samples: int | float | None = None
+    original_dataset_size: int | None = None
     is_upsampled: bool = False
     dataset: Dataset = field(init=False)
 
@@ -1592,7 +1577,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     return dataset
 
 
-def compute_config_hash(dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
+def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     """Compute a deterministic hash of both configs for caching."""
     dc_dicts = [{k: v for k, v in asdict(dc).items() if v is not None} for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
@@ -1602,12 +1587,12 @@ def compute_config_hash(dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
 
 
 class DatasetTransformationCache:
-    def __init__(self, config_hash: str, hf_entity: Optional[str] = None):
+    def __init__(self, config_hash: str, hf_entity: str | None = None):
         self.config_hash = config_hash
         self.hf_entity = hf_entity or hf_whoami()["name"]
 
     def load_or_transform_dataset(
-        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+        self, dcs: list[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
     ) -> Dataset:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
@@ -1633,7 +1618,7 @@ class DatasetTransformationCache:
                     loaded_dataset = loaded_dataset.add_column("index", range(len(loaded_dataset)))
                 return loaded_dataset
 
-        print(f"Cache not found, transforming datasets...")
+        print("Cache not found, transforming datasets...")
 
         # Transform each dataset
         transformed_datasets = []
@@ -1703,7 +1688,7 @@ class LocalDatasetTransformationCache:
         """Get the path to the cached dataset."""
         return os.path.join(self.dataset_local_cache_dir, self.config_hash)
 
-    def save_config(self, config_hash: str, dcs: List[DatasetConfig], tc: TokenizerConfig):
+    def save_config(self, config_hash: str, dcs: list[DatasetConfig], tc: TokenizerConfig):
         """Save the configuration to a JSON file."""
         config_path = os.path.join(self.get_cache_path(), "config.json")
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
@@ -1717,8 +1702,8 @@ class LocalDatasetTransformationCache:
             json.dump(config_dict, f, indent=2)
 
     def load_or_transform_dataset(
-        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
-    ) -> Tuple[Dataset, Dict[str, Any]]:
+        self, dcs: list[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+    ) -> tuple[Dataset, dict[str, Any]]:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
 
@@ -1731,14 +1716,14 @@ class LocalDatasetTransformationCache:
             # Load statistics from cache if available
             stats_path = os.path.join(cache_path, "dataset_statistics.json")
             if os.path.exists(stats_path):
-                with open(stats_path, "r") as f:
+                with open(stats_path) as f:
                     statistics = json.load(f)
                 return dataset, statistics
             else:
                 # Return empty statistics if not cached
                 return dataset, {"per_dataset_stats": [], "dataset_order": []}
 
-        print(f"Cache not found or invalid, transforming datasets...")
+        print("Cache not found or invalid, transforming datasets...")
 
         # Transform each dataset and collect statistics
         transformed_datasets = []
@@ -1814,13 +1799,13 @@ class LocalDatasetTransformationCache:
 
 
 def load_dataset_configs(
-    dataset_mixer_list: List[str],
-    dataset_mixer_list_splits: List[str],
-    dataset_transform_fn: List[str],
-    transform_fn_args: List[Dict[str, Any]],
-    target_columns: Optional[List[str]] = None,
+    dataset_mixer_list: list[str],
+    dataset_mixer_list_splits: list[str],
+    dataset_transform_fn: list[str],
+    transform_fn_args: list[dict[str, Any]],
+    target_columns: list[str] | None = None,
     dataset_config_seed: int = 42,
-) -> List[DatasetConfig]:
+) -> list[DatasetConfig]:
     dcs = []
     if len(dataset_mixer_list_splits) == 1:
         print("by default, we will use the same split for all datasets")
@@ -1834,10 +1819,7 @@ def load_dataset_configs(
     for i in range(0, len(dataset_mixer_list), 2):
         dataset_name = dataset_mixer_list[i]
         frac_or_num_samples = dataset_mixer_list[i + 1]
-        if "." in frac_or_num_samples:
-            frac_or_num_samples = float(frac_or_num_samples)
-        else:
-            frac_or_num_samples = int(frac_or_num_samples)
+        frac_or_num_samples = float(frac_or_num_samples) if "." in frac_or_num_samples else int(frac_or_num_samples)
         # Uses dataset_mixer_list_splits[i] where i increments by 2 (0, 2, 4...). This works because
         # all current usage provides a single split that gets replicated to len(dataset_mixer_list).
         # If different splits per dataset are needed, use dataset_mixer_list_splits[i // 2] instead.
@@ -1871,21 +1853,21 @@ def load_dataset_configs(
 
 
 def get_cached_dataset_tulu_with_statistics(
-    dataset_mixer_list: List[str],
-    dataset_mixer_list_splits: List[str],
+    dataset_mixer_list: list[str],
+    dataset_mixer_list_splits: list[str],
     tc: TokenizerConfig,
-    dataset_transform_fn: List[str],
-    transform_fn_args: List[Dict[str, Any]],
-    target_columns: Optional[List[str]] = None,
+    dataset_transform_fn: list[str],
+    transform_fn_args: list[dict[str, Any]],
+    target_columns: list[str] | None = None,
     dataset_cache_mode: Literal["hf", "local"] = "local",
-    dataset_config_hash: Optional[str] = None,
-    hf_entity: Optional[str] = None,
+    dataset_config_hash: str | None = None,
+    hf_entity: str | None = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
-    system_prompt_override: Optional[str] = None,
-) -> Tuple[Dataset, Dict[str, Any]]:
+    system_prompt_override: str | None = None,
+) -> tuple[Dataset, dict[str, Any]]:
     if dataset_config_hash is None:
         dcs = load_dataset_configs(
             dataset_mixer_list,
@@ -1914,19 +1896,19 @@ def get_cached_dataset_tulu_with_statistics(
 
 
 def get_cached_dataset_tulu(
-    dataset_mixer_list: List[str],
-    dataset_mixer_list_splits: List[str],
+    dataset_mixer_list: list[str],
+    dataset_mixer_list_splits: list[str],
     tc: TokenizerConfig,
-    dataset_transform_fn: List[str],
-    transform_fn_args: List[Dict[str, Any]],
-    target_columns: Optional[List[str]] = None,
+    dataset_transform_fn: list[str],
+    transform_fn_args: list[dict[str, Any]],
+    target_columns: list[str] | None = None,
     dataset_cache_mode: Literal["hf", "local"] = "local",
-    dataset_config_hash: Optional[str] = None,
-    hf_entity: Optional[str] = None,
+    dataset_config_hash: str | None = None,
+    hf_entity: str | None = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
-    system_prompt_override: Optional[str] = None,
+    system_prompt_override: str | None = None,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=dataset_mixer_list,
