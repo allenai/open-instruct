@@ -81,9 +81,11 @@ class Batch:
     decoded_responses: list[str] | None
     indices: list[int] | None
     scores: list[float] | None
+    active_tools: list[list[str] | None] | None = None
 
     def __getitem__(self, key: slice | int | list[int]) -> "Batch":
         """Enable indexing and slicing: batch[5], batch[start:end], or batch[[1,3,5]]."""
+        active_tools = self.active_tools[key] if self.active_tools is not None else None
         if isinstance(key, slice):
             # Handle slice object: batch[start:end]
             return Batch(
@@ -94,6 +96,7 @@ class Batch:
                 decoded_responses=self.decoded_responses[key] if self.decoded_responses is not None else None,
                 indices=self.indices[key] if self.indices is not None else None,
                 scores=self.scores[key] if self.scores is not None else None,
+                active_tools=active_tools,
             )
         elif isinstance(key, int):
             # Handle single index: batch[5]
@@ -105,6 +108,7 @@ class Batch:
                 decoded_responses=[self.decoded_responses[key]] if self.decoded_responses is not None else None,
                 indices=[self.indices[key]] if self.indices is not None else None,
                 scores=[self.scores[key]] if self.scores is not None else None,
+                active_tools=active_tools,
             )
         else:
             # Handle list of indices: batch[[1,3,5]]
@@ -118,6 +122,7 @@ class Batch:
                 else None,
                 indices=[self.indices[i] for i in key] if self.indices is not None else None,
                 scores=[self.scores[i] for i in key] if self.scores is not None else None,
+                active_tools=active_tools,
             )
 
 

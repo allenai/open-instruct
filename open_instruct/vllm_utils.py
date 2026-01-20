@@ -462,6 +462,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "original_sampling_params": request.generation_config,
         "prompt_token_ids": list(request.prompt),
         "start_time": time.perf_counter(),
+        "active_tools": request.active_tools,
     }
 
     for j in range(request.generation_config.n):
@@ -872,10 +873,15 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     excess_tool_calls: dict[str, int] = {}
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
-    original_prompt = actor.request_metadata[base_request_id]["prompt_token_ids"]
+    request_metadata = actor.request_metadata[base_request_id]
+    original_prompt = request_metadata["prompt_token_ids"]
+    active_tools = request_metadata["active_tools"]
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
+
+    configured_tools = set(actor.tool_actor_map.keys())
+    allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
 
     while True:
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
@@ -905,14 +911,15 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         response_masks.extend([1] * len(model_tokens))
 
         # check if we have tools to check for
-        if not actor.tool_actors or actor.tool_parser is None:
+        # allowed_tools is empty if active_tools=[] for this sample (no tools active)
+        if not actor.tool_actors or actor.tool_parser is None or not allowed_tools:
             break
 
         tool_calls = actor.tool_parser.get_tool_calls(output.text)
-        # sometimes the model will make a tool call that *looks* valid,
+        # Sometimes the model will make a tool call that *looks* valid,
         # but actually that tool doesn't exist for it! So we filter these out.
-        # in future, we could instead add an error message to the model output to indicate that the tool call is invalid.
-        tool_calls = [tc for tc in tool_calls if tc.name in actor.tool_actor_map]
+        # In future, we could instead add an error message to the model output to indicate that the tool call is invalid.
+        tool_calls = [tc for tc in tool_calls if tc.name in allowed_tools]
         if not tool_calls:
             break
 
