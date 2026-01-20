@@ -1144,8 +1144,6 @@ class PolicyTrainerRayProcess(RayProcess):
             return
 
         model_to_save = self.model
-        if chat_template_name is not None and "olmo" in chat_template_name:
-            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         if self.rank == 0:
             output_path.mkdir(parents=True, exist_ok=True)
@@ -1153,6 +1151,10 @@ class PolicyTrainerRayProcess(RayProcess):
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
             model_to_save = model_to_save.module
+
+        # Set generation config after unwrapping to ensure it's on the actual model being saved
+        if chat_template_name is not None and "olmo" in chat_template_name:
+            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         # gather parameters
         output_state_dict = {}

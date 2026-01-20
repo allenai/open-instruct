@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Fixed JSON serialization error in `LocalDatasetTransformationCache.save_config` when caching datasets locally (https://github.com/allenai/open-instruct/pull/1402).
 - Improved error handling for tool calls with missing/invalid arguments - now returns a clear error message instead of crashing.
+- Fixed `GenerationConfig` validation error when saving OLMo models - config is now set after unwrapping the model.
 
 ### Removed
 - Removed `open_instruct/ppo.py` and related PPO training scripts (https://github.com/allenai/open-instruct/pull/1395).
