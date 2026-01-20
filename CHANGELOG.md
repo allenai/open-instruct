@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Moved `concatenated_forward` and `packing` config fields from DPOConfig to ModelConfig
 - Removed duplicate config fields from ExperimentConfig that were already defined in parent classes
+- Replaced HfArgumentParser with simple-parsing for DPO argument parsing
 
 ### Fixed
 

@@ -55,7 +55,6 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
-    ArgumentParserPlus,
     ModelDims,
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
@@ -756,6 +755,10 @@ def print_gpu_stats(init_gpu_memory: int | None):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((dpo_utils.ExperimentConfig, TokenizerConfig))
-    args, tc = parser.parse_args_into_dataclasses()
-    main(args, tc)
+    import simple_parsing
+
+    parser = simple_parsing.ArgumentParser()
+    parser.add_arguments(dpo_utils.ExperimentConfig, dest="args")
+    parser.add_arguments(TokenizerConfig, dest="tc")
+    namespace = parser.parse_args()
+    main(namespace.args, namespace.tc)
