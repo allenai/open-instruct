@@ -1795,6 +1795,13 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
         return final_dataset
 
 
+def _dc_to_dict(dc: DatasetConfig) -> dict:
+    """Convert DatasetConfig to dict, excluding the 'dataset' field which is not JSON serializable."""
+    d = asdict(dc)
+    d.pop("dataset", None)
+    return d
+
+
 class LocalDatasetTransformationCache:
     def __init__(self, config_hash: str, dataset_local_cache_dir: str):
         """Initialize the local cache with a directory path."""
@@ -1810,12 +1817,6 @@ class LocalDatasetTransformationCache:
         """Save the configuration to a JSON file."""
         config_path = os.path.join(self.get_cache_path(), "config.json")
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
-
-        # Exclude the 'dataset' field from DatasetConfig as it's not JSON serializable
-        def _dc_to_dict(dc: DatasetConfig) -> dict:
-            d = asdict(dc)
-            d.pop("dataset", None)
-            return d
 
         config_dict = {
             "tokenizer_config": asdict(tc),
