@@ -9,16 +9,12 @@ import contextlib
 import os
 import pathlib
 import shutil
-import time
 from functools import partial
-from typing import Any
 
 import peft
 import torch
 import torch.distributed as dist
-import torch.nn as nn
 import transformers
-from huggingface_hub import HfApi
 from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
@@ -26,18 +22,17 @@ from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, g
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.transformer import TransformerConfig
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
-from olmo_core.optim.scheduler import Scheduler
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import CheckpointerCallback
-from olmo_core.train.common import ReduceType
-from olmo_core.train.train_module import EvalBatchSpec, TrainModule
 from olmo_core.train.train_module.transformer import (
     TransformerDataParallelConfig,
     TransformerDataParallelWrappingStrategy,
 )
 
-from open_instruct import data_loader, dataset_transformation, dpo_utils, logger_utils, model_utils, utils
+from open_instruct import data_loader as data_loader_lib
+from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, utils
 from open_instruct.beaker_callback import BeakerCallbackV2
+from open_instruct.olmo_core_train_modules import DPOTrainModule
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
@@ -83,146 +78,19 @@ def get_transformer_config(model_name_or_path: str, vocab_size: int) -> Transfor
             f"Available models: {available_models}. "
             f"Available config names: {', '.join(available_configs)}"
         )
-    config_fn = getattr(TransformerConfig, config_name)
-    return config_fn(vocab_size=vocab_size)
+    return getattr(TransformerConfig, config_name)(vocab_size=vocab_size)
 
 
-class DPOTrainModule(TrainModule):
-    """Training module for DPO with OLMo-core's Trainer.
+def _load_dataset_distributed(
+    args: dpo_utils.ExperimentConfig,
+    tc: dataset_transformation.TokenizerConfig,
+    transform_fn_args: list[dict],
+    is_main_process: bool,
+):
+    """Load dataset with distributed coordination."""
 
-    Uses OLMo-core's scheduler.set_lr() pattern for learning rate scheduling.
-    """
-
-    def __init__(
-        self,
-        model: nn.Module,
-        optim: torch.optim.Optimizer,
-        args: dpo_utils.ExperimentConfig,
-        reference_cache: model_utils.TensorCache,
-        scheduler: Scheduler,
-        device: torch.device | None = None,
-        max_grad_norm: float | None = None,
-    ) -> None:
-        super().__init__()
-        self.model = model
-        self.optim = optim
-        self.args = args
-        self.reference_cache = reference_cache
-        self.scheduler = scheduler
-        self.device = device
-        self.max_grad_norm = max_grad_norm
-
-        if args.packing:
-            self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
-        elif args.concatenated_forward:
-            self._forward_fn = dpo_utils.concatenated_forward_olmo
-        else:
-            self._forward_fn = dpo_utils.separate_forward_olmo
-
-    def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
-        state_dict: dict[str, Any] = {"model": self.model.state_dict()}
-        if optim is not False:
-            state_dict["optim"] = self.optim.state_dict()
-        return state_dict
-
-    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        self.model.load_state_dict(state_dict["model"])
-        if "optim" in state_dict:
-            self.optim.load_state_dict(state_dict["optim"])
-
-    def zero_grads(self) -> None:
-        self.optim.zero_grad()
-
-    def optim_step(self) -> None:
-        if self.max_grad_norm is not None:
-            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-            self.trainer.record_metric("total grad norm", grad_norm, reduce_type=None, namespace="optim")
-        for group_idx, group in enumerate(self.optim.param_groups):
-            new_lr = self.scheduler.set_lr(group, self.trainer)
-            self.trainer.record_metric(f"LR (group {group_idx})", new_lr, namespace="optim")
-        self.optim.step()
-
-    def num_flops_per_token(self, seq_len: int) -> int:
-        return self.model.num_flops_per_token(seq_len)
-
-    def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int:
-        seq_len = batch["input_ids"].shape[1]
-        flops_per_token = self.num_flops_per_token(seq_len)
-        global_num_tokens = self.trainer.data_loader.global_num_tokens_in_batch(batch)
-        return flops_per_token * global_num_tokens
-
-    @property
-    def eval_batch_spec(self) -> EvalBatchSpec:
-        return EvalBatchSpec(rank_batch_size=1)
-
-    def eval_batch(self, batch: dict[str, Any]) -> torch.Tensor:
-        self.model.eval()
-        with torch.no_grad():
-            return self.model(**batch)
-
-    def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
-        self.model.train()
-
-        policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
-            self.model,
-            batch,
-            average_log_prob=self.args.loss_type.is_average_loss,
-            output_router_logits=self.args.load_balancing_loss,
-        )
-
-        losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss_olmo(
-            self.args,
-            batch,
-            policy_chosen_logps,
-            policy_rejected_logps,
-            self.reference_cache if self.args.loss_type.needs_reference_model else None,
-        )
-
-        loss = losses.mean()
-
-        if self.args.load_balancing_loss and aux_loss is not None:
-            loss = loss + self.args.load_balancing_weight * aux_loss
-
-        if not dry_run:
-            self.record_metric("train/loss", loss.detach(), ReduceType.mean)
-            self.record_metric("train/logps_chosen", policy_chosen_logps.mean().detach(), ReduceType.mean)
-            self.record_metric("train/logps_rejected", policy_rejected_logps.mean().detach(), ReduceType.mean)
-
-            if self.args.loss_type.computes_reward_metrics:
-                accuracy = (chosen_rewards > rejected_rewards).float().mean()
-                margin = (chosen_rewards - rejected_rewards).mean()
-                self.record_metric("train/rewards_chosen", chosen_rewards.mean().detach(), ReduceType.mean)
-                self.record_metric("train/rewards_rejected", rejected_rewards.mean().detach(), ReduceType.mean)
-                self.record_metric("train/rewards_accuracy", accuracy.detach(), ReduceType.mean)
-                self.record_metric("train/rewards_margin", margin.detach(), ReduceType.mean)
-
-            if self.args.load_balancing_loss and aux_loss is not None:
-                self.record_metric("train/aux_loss", aux_loss.detach(), ReduceType.mean)
-
-        loss.backward()
-
-
-def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerConfig) -> None:
-    """Main entry point for DPO training with OLMo-core."""
-    if args.model_name_or_path is None:
-        raise ValueError("--model_name_or_path is required. Specify a HuggingFace model name or path.")
-
-    tc.tokenizer_name_or_path = (
-        args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
-    )
-    tokenizer = tc.tokenizer
-
-    args.local_cache_dir = os.path.abspath(args.local_cache_dir)
-    if utils.is_beaker_job():
-        args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
-
-    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
-    ref_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
-    reference_cache_path = pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt"
-    logger.info(f"Reference logprobs cache path: {reference_cache_path}")
-
-    if args.cache_dataset_only:
-        dataset = dataset_transformation.get_cached_dataset_tulu(
+    def _load():
+        return dataset_transformation.get_cached_dataset_tulu(
             dataset_mixer_list=args.mixer_list,
             dataset_mixer_list_splits=args.mixer_list_splits,
             tc=tc,
@@ -235,89 +103,18 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             dataset_local_cache_dir=args.local_cache_dir,
             dataset_skip_cache=args.skip_cache,
         )
-        logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
-        return
-
-    train.prepare_training_environment(seed=args.seed)
-
-    dp_rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
-    is_main_process = dp_rank == 0
 
     if is_main_process:
-        dataset = dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=args.mixer_list,
-            dataset_mixer_list_splits=args.mixer_list_splits,
-            tc=tc,
-            dataset_transform_fn=args.transform_fn,
-            transform_fn_args=transform_fn_args,
-            target_columns=args.target_columns,
-            dataset_cache_mode=args.cache_mode,
-            dataset_config_hash=args.config_hash,
-            hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.local_cache_dir,
-            dataset_skip_cache=args.skip_cache,
-        )
-
+        dataset = _load()
     if distributed_utils.is_distributed():
         dist.barrier()
-
     if not is_main_process:
-        dataset = dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=args.mixer_list,
-            dataset_mixer_list_splits=args.mixer_list_splits,
-            tc=tc,
-            dataset_transform_fn=args.transform_fn,
-            transform_fn_args=transform_fn_args,
-            target_columns=args.target_columns,
-            dataset_cache_mode=args.cache_mode,
-            dataset_config_hash=args.config_hash,
-            hf_entity=args.hf_entity,
-            dataset_local_cache_dir=args.local_cache_dir,
-            dataset_skip_cache=args.skip_cache,
-        )
+        dataset = _load()
+    return dataset
 
-    dataset = dataset.shuffle(seed=args.seed)
-    dataset.set_format(type="pt")
 
-    dp_world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
-
-    logger_utils.setup_logger(rank=dp_rank)
-
-    if args.add_seed_and_date_to_exp_name:
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    args.output_dir = os.path.join(args.output_dir, args.exp_name)
-
-    if distributed_utils.is_distributed():
-        path_list = [args.output_dir]
-        dist.broadcast_object_list(path_list, src=0)
-        args.output_dir = path_list[0]
-
-    beaker_config = None
-    if utils.is_beaker_job() and is_main_process:
-        beaker_config = utils.maybe_get_beaker_config()
-
-    if args.push_to_hub and is_main_process:
-        if args.hf_repo_id is None:
-            args.hf_repo_id = "open_instruct_dev"
-        if args.hf_entity is None:
-            args.hf_entity = utils.maybe_use_ai2_hf_entity()
-        if args.hf_entity is None:
-            args.hf_entity = HfApi().whoami()["name"]
-        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:
-            args.hf_repo_revision = args.exp_name
-        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-
-    if args.wandb_entity is None:
-        args.wandb_entity = utils.maybe_use_ai2_wandb_entity()
-
-    if is_main_process:
-        os.makedirs(args.output_dir, exist_ok=True)
-    if distributed_utils.is_distributed():
-        dist.barrier()
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
+    """Load and configure OLMo-core model."""
     hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
     vocab_size = hf_config.vocab_size
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
@@ -334,58 +131,16 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         logger.info("Enabling activation checkpointing...")
         model.apply_activation_checkpointing(TransformerActivationCheckpointingMode.full)
 
-    if args.packing:
-        collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
-    else:
-        collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
+    return model
 
-    global_batch_size = args.per_device_train_batch_size * dp_world_size
-    data_loader_instance = data_loader.HFDataLoader(
-        dataset=dataset,
-        batch_size=global_batch_size,
-        seed=args.seed,
-        dp_rank=dp_rank,
-        dp_world_size=dp_world_size,
-        work_dir=args.output_dir,
-        collator=collator,
-        device=device,
-    )
 
-    forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
-    if args.packing:
-        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
-    average_log_prob = args.loss_type.is_average_loss
-
-    logger.info("Caching reference logprobs (before HSDP)...")
-
-    def make_disable_adapter_context() -> contextlib.AbstractContextManager:
-        if args.use_lora:
-            assert isinstance(model, peft.PeftModel)
-            return model.disable_adapter()
-        return contextlib.nullcontext()
-
-    def all_reduce_max(tensor: torch.Tensor) -> None:
-        dist.all_reduce(tensor, op=dist.ReduceOp.MAX)
-
-    reference_cache = dpo_utils.build_reference_logprobs_cache_olmo(
-        model=model,
-        dataloader=data_loader_instance,
-        average_log_prob=average_log_prob,
-        forward_fn=forward_fn,
-        full_dataset_size=len(dataset),
-        use_lora=args.use_lora,
-        device=device,
-        cache_path=reference_cache_path,
-        disable_adapter_context=make_disable_adapter_context,
-        is_distributed=distributed_utils.is_distributed,
-        all_reduce_fn=all_reduce_max,
-        is_main_process=distributed_utils.get_rank() == 0,
-    )
-    logger.info("Reference logprobs cached.")
-    data_loader_instance.reshuffle(epoch=0)
-
+def _apply_hsdp(model, device: torch.device):
+    """Apply HSDP to model."""
     dp_config = TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
+        # When None, OLMo-core automatically determines optimal values based on
+        # world size. For HSDP, it computes num_replicas and shard_degree to
+        # maximize efficiency across the available device mesh.
         num_replicas=None,
         shard_degree=None,
         param_dtype=DType.bfloat16,
@@ -401,7 +156,11 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         reduce_dtype=torch.float32,
         wrapping_strategy=dp_config.wrapping_strategy,
     )
+    return model
 
+
+def _setup_optimizer_and_scheduler(args: dpo_utils.ExperimentConfig, model, num_training_steps: int):
+    """Return (optimizer, scheduler)."""
     no_decay = ["bias", "layer_norm.weight"]
     optimizer_grouped_parameters = [
         {
@@ -422,7 +181,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     else:
         optim = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
 
-    num_training_steps = len(data_loader_instance) * args.num_epochs
     warmup_steps = int(num_training_steps * args.warmup_ratio)
     if args.lr_scheduler_type == "cosine":
         scheduler = CosWithWarmup(warmup_steps=warmup_steps)
@@ -431,17 +189,11 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     else:
         scheduler = ConstantWithWarmup(warmup_steps=warmup_steps)
 
-    max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
-    train_module = DPOTrainModule(
-        model=model,
-        optim=optim,
-        args=args,
-        reference_cache=reference_cache,
-        scheduler=scheduler,
-        device=device,
-        max_grad_norm=max_grad_norm,
-    )
+    return optim, scheduler
 
+
+def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
+    """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
     device_name = utils.get_device_name(torch.cuda.get_device_name(0))
@@ -465,19 +217,11 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         )
     checkpointing_steps = int(args.checkpointing_steps) if args.checkpointing_steps else None
     trainer_callbacks["checkpointer"] = CheckpointerCallback(save_interval=checkpointing_steps, save_async=False)
+    return trainer_callbacks
 
-    trainer = train.TrainerConfig(
-        save_folder=args.output_dir,
-        max_duration=train.Duration.epochs(args.num_epochs),
-        metrics_collect_interval=args.logging_steps,
-        callbacks=trainer_callbacks,
-        save_overwrite=True,
-    ).build(train_module, data_loader_instance)
 
-    logger.info("Starting training...")
-    trainer.fit()
-    logger.info("Training complete.")
-
+def _handle_post_training(args: dpo_utils.ExperimentConfig, trainer_callbacks, beaker_config, is_main_process: bool):
+    """Save to beaker, launch evals, push to hub."""
     distributed_utils.barrier()
     output_path = pathlib.Path(args.output_dir).resolve()
     beaker_output_path = pathlib.Path("/output").resolve()
@@ -517,6 +261,144 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     if args.push_to_hub and is_main_process:
         model_utils.push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+
+
+def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerConfig) -> None:
+    """Main entry point for DPO training with OLMo-core."""
+    if args.model_name_or_path is None:
+        raise ValueError("--model_name_or_path is required. Specify a HuggingFace model name or path.")
+
+    tc.tokenizer_name_or_path = (
+        args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    )
+    tokenizer = tc.tokenizer
+
+    args.local_cache_dir = os.path.abspath(args.local_cache_dir)
+    if utils.is_beaker_job():
+        args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+
+    transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+    ref_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
+    reference_cache_path = pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt"
+    logger.info(f"Reference logprobs cache path: {reference_cache_path}")
+
+    if args.cache_dataset_only:
+        dataset_transformation.get_cached_dataset_tulu(
+            dataset_mixer_list=args.mixer_list,
+            dataset_mixer_list_splits=args.mixer_list_splits,
+            tc=tc,
+            dataset_transform_fn=args.transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=args.target_columns,
+            dataset_cache_mode=args.cache_mode,
+            dataset_config_hash=args.config_hash,
+            hf_entity=args.hf_entity,
+            dataset_local_cache_dir=args.local_cache_dir,
+            dataset_skip_cache=args.skip_cache,
+        )
+        logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
+        return
+
+    train.prepare_training_environment(seed=args.seed)
+
+    dp_rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
+    is_main_process = dp_rank == 0
+
+    dataset = _load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
+    dataset = dataset.shuffle(seed=args.seed)
+    dataset.set_format(type="pt")  # Must be after shuffle (shuffle resets format)
+
+    dp_world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
+
+    logger_utils.setup_logger(rank=dp_rank)
+
+    beaker_config = utils.setup_experiment_paths(args, is_main_process)
+
+    if is_main_process:
+        os.makedirs(args.output_dir, exist_ok=True)
+    if distributed_utils.is_distributed():
+        dist.barrier()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model = _setup_model(args, device)
+
+    if args.packing:
+        collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
+    else:
+        collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
+
+    global_batch_size = args.per_device_train_batch_size * dp_world_size
+    data_loader = data_loader_lib.HFDataLoader(
+        dataset=dataset,
+        batch_size=global_batch_size,
+        seed=args.seed,
+        dp_rank=dp_rank,
+        dp_world_size=dp_world_size,
+        work_dir=args.output_dir,
+        collator=collator,
+        device=device,
+    )
+
+    forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
+    if args.packing:
+        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
+    average_log_prob = args.loss_type.is_average_loss
+
+    logger.info("Caching reference logprobs (before HSDP)...")
+
+    def make_disable_adapter_context() -> contextlib.AbstractContextManager:
+        if args.use_lora:
+            assert isinstance(model, peft.PeftModel)
+            return model.disable_adapter()
+        return contextlib.nullcontext()
+
+    reference_cache = dpo_utils.build_reference_logprobs_cache(
+        model=model,
+        dataloader=data_loader,
+        average_log_prob=average_log_prob,
+        forward_fn=forward_fn,
+        full_dataset_size=len(dataset),
+        device=device,
+        cache_path=reference_cache_path,
+        is_main_process=is_main_process,
+        use_lora=args.use_lora,
+        disable_adapter_context=make_disable_adapter_context if args.use_lora else None,
+    )
+    logger.info("Reference logprobs cached.")
+    data_loader.reshuffle(epoch=0)
+
+    model = _apply_hsdp(model, device)
+
+    num_training_steps = len(data_loader) * args.num_epochs
+    optim, scheduler = _setup_optimizer_and_scheduler(args, model, num_training_steps)
+
+    max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
+    train_module = DPOTrainModule(
+        model=model,
+        optim=optim,
+        args=args,
+        reference_cache=reference_cache,
+        scheduler=scheduler,
+        device=device,
+        max_grad_norm=max_grad_norm,
+    )
+
+    trainer_callbacks = _setup_callbacks(args, model)
+
+    trainer = train.TrainerConfig(
+        save_folder=args.output_dir,
+        max_duration=train.Duration.epochs(args.num_epochs),
+        metrics_collect_interval=args.logging_steps,
+        callbacks=trainer_callbacks,
+        save_overwrite=True,
+    ).build(train_module, data_loader)
+
+    logger.info("Starting training...")
+    trainer.fit()
+    logger.info("Training complete.")
+
+    _handle_post_training(args, trainer_callbacks, beaker_config, is_main_process)
 
     train.teardown_training_environment()
 

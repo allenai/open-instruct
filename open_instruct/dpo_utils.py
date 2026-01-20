@@ -32,7 +32,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from accelerate import Accelerator
 from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
@@ -473,41 +472,55 @@ def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) ->
 def build_reference_logprobs_cache(
     model: torch.nn.Module,
     dataloader: torch.utils.data.DataLoader,
-    accelerator: Accelerator,
     average_log_prob: bool,
     forward_fn: Callable,
     full_dataset_size: int,
-    reference_cache_hash: str,
+    device: torch.device,
+    cache_path: pathlib.Path,
+    is_main_process: bool,
     use_lora: bool = False,
+    disable_adapter_context: Callable[[], contextlib.AbstractContextManager] | None = None,
 ) -> model_utils.TensorCache:
-    """Build a TensorCache with reference logprobs by computing logprobs once for all samples."""
-    cache_path = pathlib.Path(REFERENCE_LOGPROBS_CACHE_PATH) / f"{reference_cache_hash}.pt"
-    if not cache_path.exists():
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        test_file = cache_path.parent / f".write_test_{reference_cache_hash}"
-        try:
-            test_file.touch()
-            test_file.unlink()
-        except (OSError, PermissionError) as e:
-            raise RuntimeError(
-                f"Cannot write to cache directory {cache_path.parent}: {e}. "
-                f"Set REFERENCE_LOGPROBS_CACHE_PATH to a writable location."
-            ) from e
+    """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
+
+    Args:
+        model: The model to compute logprobs with.
+        dataloader: DataLoader providing batches with 'index' key.
+        average_log_prob: Whether to average log probs over sequence length.
+        forward_fn: Forward function to compute logprobs.
+        full_dataset_size: Total number of samples in the dataset.
+        device: Device to place tensors on.
+        cache_path: Path to save/load cache from.
+        is_main_process: Whether this is the main process.
+        use_lora: Whether LoRA is enabled (requires disable_adapter_context).
+        disable_adapter_context: Callable returning context manager to disable LoRA adapter.
+
+    Returns:
+        TensorCache containing 'chosen_logps' and 'rejected_logps' tensors.
+    """
     if cache_path.exists():
         logger.info(f"Loading reference logprobs cache from {cache_path}")
-        return model_utils.TensorCache.from_disk(cache_path, device=accelerator.device)
+        return model_utils.TensorCache.from_disk(cache_path, device=device)
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    test_file = cache_path.parent / f".write_test_{cache_path.stem}"
+    try:
+        test_file.touch()
+        test_file.unlink()
+    except (OSError, PermissionError) as e:
+        raise RuntimeError(
+            f"Cannot write to cache directory {cache_path.parent}: {e}. "
+            f"Set REFERENCE_LOGPROBS_CACHE_PATH to a writable location."
+        ) from e
 
     model.eval()
-    device = accelerator.device
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
     rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
 
     with torch.no_grad():
-        for batch in tqdm(
-            dataloader, disable=not accelerator.is_local_main_process, desc="Caching reference logprobs"
-        ):
-            if use_lora:
-                with accelerator.unwrap_model(model).disable_adapter():
+        for batch in tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs"):
+            if use_lora and disable_adapter_context is not None:
+                with disable_adapter_context():
                     chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
             else:
                 chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
@@ -531,107 +544,11 @@ def build_reference_logprobs_cache(
     model.train()
     cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
 
-    if accelerator.is_main_process:
+    if is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
 
     if dist.is_initialized():
-        dist.barrier()
-
-    return cache
-
-
-def build_reference_logprobs_cache_olmo(
-    model: torch.nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    average_log_prob: bool,
-    forward_fn: Callable,
-    full_dataset_size: int,
-    use_lora: bool = False,
-    device: torch.device | None = None,
-    cache_path: pathlib.Path | None = None,
-    disable_adapter_context: Callable[[], contextlib.AbstractContextManager] | None = None,
-    is_distributed: Callable[[], bool] | None = None,
-    all_reduce_fn: Callable[[torch.Tensor], None] | None = None,
-    is_main_process: bool = True,
-) -> model_utils.TensorCache:
-    """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
-
-    Generic version that works with OLMo-core (or any framework) by accepting callables
-    instead of framework-specific objects.
-
-    Args:
-        model: The model to compute logprobs with.
-        dataloader: DataLoader providing batches with 'index' key.
-        average_log_prob: Whether to average log probs over sequence length.
-        forward_fn: Forward function to compute logprobs.
-        full_dataset_size: Total number of samples in the dataset.
-        use_lora: Whether LoRA is enabled (requires disable_adapter_context).
-        device: Device to place tensors on.
-        cache_path: Path to save/load cache from.
-        disable_adapter_context: Callable returning context manager to disable LoRA adapter.
-        is_distributed: Callable returning whether distributed training is active.
-        all_reduce_fn: Callable to perform all-reduce on tensors.
-        is_main_process: Whether this is the main process.
-
-    Returns:
-        TensorCache containing 'chosen_logps' and 'rejected_logps' tensors.
-    """
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    if cache_path is not None and cache_path.exists():
-        logger.info(f"Loading reference logprobs cache from {cache_path}")
-        return model_utils.TensorCache.from_disk(cache_path, device=device)
-
-    if cache_path is not None:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        test_file = cache_path.parent / f".write_test_{cache_path.stem}"
-        try:
-            test_file.touch()
-            test_file.unlink()
-        except (OSError, PermissionError) as e:
-            raise RuntimeError(
-                f"Cannot write to cache directory {cache_path.parent}: {e}. "
-                f"Set REFERENCE_LOGPROBS_CACHE_PATH to a writable location."
-            ) from e
-
-    model.eval()
-    chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
-    rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
-
-    with torch.no_grad():
-        for batch in tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs"):
-            if use_lora and disable_adapter_context is not None:
-                with disable_adapter_context():
-                    chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
-            else:
-                chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
-
-            chosen_tensor[batch["index"]] = chosen_logps
-            rejected_tensor[batch["index"]] = rejected_logps
-
-    if is_distributed is not None and is_distributed() and all_reduce_fn is not None:
-        all_reduce_fn(chosen_tensor)
-        all_reduce_fn(rejected_tensor)
-
-    missing_chosen = torch.where(chosen_tensor == float("-inf"))[0]
-    missing_rejected = torch.where(rejected_tensor == float("-inf"))[0]
-    if len(missing_chosen) > 0 or len(missing_rejected) > 0:
-        missing_indices = torch.unique(torch.cat([missing_chosen, missing_rejected]))
-        raise RuntimeError(
-            f"Missing {len(missing_indices)} indices during reference logprobs caching. "
-            f"First 10: {missing_indices[:10].tolist()}"
-        )
-
-    model.train()
-    cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
-
-    if is_main_process and cache_path is not None:
-        logger.info(f"Saving reference logprobs cache to {cache_path}")
-        cache.to_disk(cache_path)
-
-    if is_distributed is not None and is_distributed():
         dist.barrier()
 
     return cache
