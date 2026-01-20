@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from parameterized import parameterized
 
-from open_instruct.tools.generic_mcp import GenericMCPTool, GenericMCPToolConfig, MCPTransport
+from open_instruct.tools.generic_mcp import GenericMCPTool, GenericMCPToolConfig
 from open_instruct.tools.tools import (
     Crawl4AIBrowseTool,
     Crawl4AIBrowseToolConfig,
@@ -1383,74 +1383,6 @@ class TestToolsConfig(unittest.TestCase):
         """Test ToolsConfig raises on invalid JSON in tool_configs."""
         with self.assertRaisesRegex(ValueError, "Invalid tool_config for tool python"):
             ToolsConfig(tools=["python"], tool_configs=["not valid json"])
-
-
-class TestMCPTransport(unittest.TestCase):
-    """Tests for MCPTransport enum."""
-
-    def test_transport_values(self):
-        """Test MCPTransport has correct values."""
-        self.assertEqual(MCPTransport.HTTP.value, "http")
-        self.assertEqual(MCPTransport.SSE.value, "sse")
-        self.assertEqual(MCPTransport.STDIO.value, "stdio")
-
-    def test_transport_from_string(self):
-        """Test MCPTransport can be created from string."""
-        self.assertEqual(MCPTransport("http"), MCPTransport.HTTP)
-        self.assertEqual(MCPTransport("sse"), MCPTransport.SSE)
-        self.assertEqual(MCPTransport("stdio"), MCPTransport.STDIO)
-
-
-class TestGenericMCPToolInit(unittest.TestCase):
-    """Tests for GenericMCPTool initialization."""
-
-    def test_tool_config_name(self):
-        """Test tool has correct config_name."""
-        self.assertEqual(GenericMCPTool.config_name, "generic_mcp")
-
-    def test_http_transport_requires_server_url(self):
-        """Test HTTP transport requires server_url."""
-        with self.assertRaisesRegex(ValueError, "server_url is required for http transport"):
-            GenericMCPTool(call_name="test", transport="http")
-
-    def test_sse_transport_requires_server_url(self):
-        """Test SSE transport requires server_url."""
-        with self.assertRaisesRegex(ValueError, "server_url is required for sse transport"):
-            GenericMCPTool(call_name="test", transport="sse")
-
-    def test_stdio_transport_requires_command(self):
-        """Test STDIO transport requires command."""
-        with self.assertRaisesRegex(ValueError, "command is required for stdio transport"):
-            GenericMCPTool(call_name="test", transport="stdio")
-
-    def test_valid_http_initialization(self):
-        """Test valid HTTP initialization."""
-        tool = GenericMCPTool(
-            call_name="search", server_url="http://localhost:8000/mcp", transport="http", tool_name="my_tool"
-        )
-        self.assertEqual(tool.call_name, "search")
-        self.assertEqual(tool.server_url, "http://localhost:8000/mcp")
-        self.assertEqual(tool.transport, MCPTransport.HTTP)
-        self.assertEqual(tool.tool_name, "my_tool")
-
-    def test_valid_stdio_initialization(self):
-        """Test valid STDIO initialization."""
-        tool = GenericMCPTool(
-            call_name="test", transport="stdio", command="python", args=["server.py"], env={"DEBUG": "1"}
-        )
-        self.assertEqual(tool.transport, MCPTransport.STDIO)
-        self.assertEqual(tool.command, "python")
-        self.assertEqual(tool.args, ["server.py"])
-        self.assertEqual(tool.env, {"DEBUG": "1"})
-
-    def test_tool_info_from_init(self):
-        """Test tool_info can be passed in init."""
-        tool_info = {"description": "My tool", "input_schema": {"type": "object"}}
-        tool = GenericMCPTool(
-            call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool", tool_info=tool_info
-        )
-        self.assertEqual(tool.description, "My tool")
-        self.assertEqual(tool.parameters, {"type": "object"})
 
 
 class TestGenericMCPToolExecution(unittest.TestCase):

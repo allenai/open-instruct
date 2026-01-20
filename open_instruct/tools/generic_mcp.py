@@ -7,13 +7,13 @@ This module provides classes for connecting to any MCP server and exposing its t
 import asyncio
 import time
 from dataclasses import dataclass, field, replace
-from enum import Enum
-from typing import Any, ClassVar
+from typing import Any, ClassVar, strEnum
 
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.types import MCPResult
 
 from open_instruct import logger_utils
 from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, log_tool_call
@@ -21,9 +21,15 @@ from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, log_tool
 logger = logger_utils.setup_logger(__name__)
 
 
-def _get_mcp_client(
-    transport: "MCPTransport", server_url: str | None, command: str | None, args: list[str], env: dict[str, str]
-):
+class MCPTransport(strEnum):
+    """Transport types for MCP connections."""
+
+    HTTP = "http"
+    SSE = "sse"
+    STDIO = "stdio"
+
+
+def _get_mcp_client(transport: MCPTransport, server_url: str, command: str, args: list[str], env: dict[str, str]):
     """Get the appropriate MCP client context manager based on transport type."""
     if transport == MCPTransport.HTTP:
         return streamablehttp_client(server_url)
@@ -34,7 +40,7 @@ def _get_mcp_client(
     raise ValueError(f"Unknown transport type: {transport}")
 
 
-async def _call_mcp_tool(client_context, tool_name: str, arguments: dict[str, Any]):
+async def _call_mcp_tool(client_context, tool_name: str, arguments: dict[str, Any]) -> MCPResult:
     """Call a tool on an MCP server, returning the raw result."""
     async with client_context as (read_stream, write_stream, *_):  # noqa: SIM117
         async with ClientSession(read_stream, write_stream) as session:
@@ -42,7 +48,7 @@ async def _call_mcp_tool(client_context, tool_name: str, arguments: dict[str, An
             return await session.call_tool(tool_name, arguments)
 
 
-def _extract_mcp_result(result) -> str:
+def _extract_mcp_result(result: MCPResult) -> str:
     """Extract text from an MCP tool result."""
     # TODO: handle other content types (image, audio, resource, resource_link)
     if not hasattr(result, "content"):
@@ -53,14 +59,6 @@ def _extract_mcp_result(result) -> str:
             raise ValueError(f"Unsupported MCP content type: {c.type}")
         parts.append(c.text)
     return "\n".join(parts)
-
-
-class MCPTransport(str, Enum):
-    """Transport types for MCP connections."""
-
-    HTTP = "http"
-    SSE = "sse"
-    STDIO = "stdio"
 
 
 class GenericMCPTool(Tool):
@@ -75,9 +73,9 @@ class GenericMCPTool(Tool):
     def __init__(
         self,
         call_name: str,
-        server_url: str | None = None,
+        server_url: str = "",
         transport: str = "http",
-        command: str | None = None,
+        command: str = "",
         args: list[str] | None = None,
         env: dict[str, str] | None = None,
         timeout: int = 60,
@@ -115,6 +113,8 @@ class GenericMCPTool(Tool):
 
     async def execute(self, **kwargs: Any) -> ToolOutput:
         """Call the MCP tool with retry logic."""
+        if self.tool_name is None:
+            raise ValueError("tool_name must be set before execute")
         start_time = time.time()
         last_error: str | None = None
         retryable_exceptions = (ConnectionError, TimeoutError, OSError)
@@ -184,9 +184,9 @@ class GenericMCPToolConfig(BaseToolConfig):
 
     tool_class: ClassVar[type[Tool]] = GenericMCPTool
 
-    server_url: str | None = None
+    server_url: str = ""
     transport: str = "http"
-    command: str | None = None
+    command: str = ""
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     timeout: int = 60
