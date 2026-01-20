@@ -38,6 +38,9 @@ The main things we are looking for are:
     * Sometimes we also launch on places that don't have a shared cache (e.g., GCP), so we would
     download individual datasets 32 times, and wait for concatenation and tokenization (actually
     twice because the `with accelerator.main_process_first()` function assumes a shared cache)
+
+
+## TODO: We should just simplify the tokenization setups. We have multiple "rlvr_tokenize", etc. This came from a previous version of version handling that prioritised backwards compatibility, but I think in practice we should just directly edit these functions + invalidate caches.
 """
 
 import copy
@@ -66,8 +69,10 @@ from transformers import (
 )
 from transformers.utils.hub import extract_commit_hash
 
-from open_instruct import launch_utils
+from open_instruct import launch_utils, logger_utils
 from open_instruct.utils import hf_whoami, max_num_processes
+
+logger = logger_utils.setup_logger(__name__)
 
 
 # ----------------------------------------------------------------------------
@@ -97,6 +102,12 @@ def get_files_hash_if_exists(
     model_name_or_path: str, revision: str, filenames: List[str], repo_type: str = "model"
 ) -> List[str]:
     return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
+
+
+def _preserve_column(column_name: str, dataset, target_columns: list) -> list:
+    if column_name in dataset.column_names and column_name not in target_columns:
+        target_columns = target_columns + [column_name]
+    return target_columns
 
 
 # Performance tuning. Some rough numbers:
@@ -918,6 +929,57 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
     return dataset
 
 
+TOOLS_COLUMN_KEY = "tools"
+
+# Cache version: increment this when transformation logic changes significantly
+# to invalidate old caches. v2: Added per-sample tool filtering in rlvr_tokenize_v3.
+DATASET_CACHE_VERSION = "v2"
+
+
+def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
+    """Validate that configured tools match tools in dataset's 'tools' column.
+
+    The tools column is a list of tool call names (strings) that are active for each sample.
+    This function validates that all tools in the dataset are configured (no unknown tools).
+    Extraneous configured tools (not in dataset) are allowed but logged as a warning.
+
+    Args:
+        dataset: The dataset to validate.
+        configured_tool_names: List of tool names configured in the launch job
+            (e.g., ["python", "search"]).
+        dataset_name: Name of the dataset for error messages.
+
+    Raises:
+        ValueError: If dataset contains tools that are not configured.
+    """
+    if TOOLS_COLUMN_KEY not in dataset.column_names:
+        return
+
+    dataset_tool_names: set[str] = set()
+    for tools in dataset[TOOLS_COLUMN_KEY]:
+        if tools is not None:
+            dataset_tool_names.update(t for t in tools if t)
+
+    unconfigured_tools = dataset_tool_names - set(configured_tool_names)
+    if unconfigured_tools:
+        raise ValueError(
+            f"Dataset '{dataset_name}' contains tools {sorted(unconfigured_tools)} that are not configured. "
+            f"Configured tools: {configured_tool_names}. "
+            f"All tools in the dataset must be configured for execution."
+        )
+
+    # extraneous tools might happen e.g. if you subsample a dataset,
+    # and end up with no samples with some set of tools present in the entire dataset.
+    # or you might just accidentally include tools you don't need.
+    extraneous_tools = set(configured_tool_names) - dataset_tool_names
+    if extraneous_tools:
+        logger.warning(
+            f"Configured tools {sorted(extraneous_tools)} are not found in {dataset_name}'s "
+            f"'{TOOLS_COLUMN_KEY}' column. Tools found in dataset: {sorted(dataset_tool_names)}. "
+            f"These tools will be available but never used by this dataset."
+        )
+
+
 # Preference dataset
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `CHOSEN_ATTENTION_MASK_KEY` and `REJECTED_ATTENTION_MASK_KEY`
@@ -1263,12 +1325,33 @@ def rlvr_tokenize_v1(
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
+    system_prompt_override: Optional[str] = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
+    pass_tools_to_chat_template: bool = True,
 ):
     if len(row[sft_messages_key]) == 1:
         prompt = row[sft_messages_key]
     else:
         prompt = row[sft_messages_key][:-1]
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+
+    # Override the system prompt if provided
+    if system_prompt_override:
+        if prompt[0]["role"] == "system":
+            prompt = prompt[1:]
+        prompt = [{"role": "system", "content": system_prompt_override}] + prompt
+
+    chat_template_kwargs = {"add_generation_prompt": True}
+    if pass_tools_to_chat_template and tool_definitions:
+        sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+        if sample_active_tools is not None:
+            active_tool_names = set(sample_active_tools)
+            filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
+            if filtered_tools:
+                chat_template_kwargs["tools"] = filtered_tools
+        else:
+            chat_template_kwargs["tools"] = tool_definitions
+
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
@@ -1328,6 +1411,7 @@ def rlvr_tokenize_v3(
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
     system_prompt_override: Optional[str] = None,
     tool_definitions: list[dict[str, Any]] | None = None,
+    pass_tools_to_chat_template: bool = True,
 ):
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
@@ -1341,8 +1425,16 @@ def rlvr_tokenize_v3(
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     chat_template_kwargs = {"add_generation_prompt": True}
-    if tool_definitions:
-        chat_template_kwargs["tools"] = tool_definitions
+    if pass_tools_to_chat_template and tool_definitions:
+        sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+        if sample_active_tools is not None:
+            active_tool_names = set(sample_active_tools)
+            filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
+            if filtered_tools:
+                chat_template_kwargs["tools"] = filtered_tools
+        else:
+            chat_template_kwargs["tools"] = tool_definitions
+
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, **chat_template_kwargs)
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
@@ -1551,11 +1643,17 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         fn_kwargs = {"tokenizer": tokenizer}
         fn_kwargs.update(fn_args)
 
+        # Compute a custom fingerprint that includes DATASET_CACHE_VERSION to invalidate
+        # HuggingFace's internal .map() cache when transformation logic changes significantly
+        new_fingerprint = hashlib.sha256(
+            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}".encode()
+        ).hexdigest()[:16]
+
         # perform the transformation
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         # Always preserve dataset_source if it exists
-        if DATASET_ORIGIN_KEY in dataset.column_names and DATASET_ORIGIN_KEY not in target_columns:
-            target_columns = target_columns + [DATASET_ORIGIN_KEY]
+        target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
+        target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
 
         if fn_type == "map":
             dataset = dataset.map(
@@ -1563,12 +1661,14 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
                 fn_kwargs=fn_kwargs,
                 remove_columns=[col for col in dataset.column_names if col not in target_columns],
                 num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+                new_fingerprint=new_fingerprint,
             )
         elif fn_type == "filter":
             dataset = dataset.filter(
                 fn,
                 fn_kwargs=fn_kwargs,
                 num_proc=get_num_proc(len(dataset), num_proc, FILTER_EXAMPLE_PER_SECOND_PER_CPU),
+                new_fingerprint=new_fingerprint,
             )
         # NOTE: elif we can implement packing here to create a packed SFT dataset. Low priority for now.
         else:
@@ -1580,10 +1680,14 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
 
 def compute_config_hash(dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
-    """Compute a deterministic hash of both configs for caching."""
+    """Compute a deterministic hash of both configs for caching.
+
+    The hash includes DATASET_CACHE_VERSION to invalidate old caches when
+    transformation logic changes significantly.
+    """
     dc_dicts = [{k: v for k, v in asdict(dc).items() if v is not None} for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
-    combined_dict = {"dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
+    combined_dict = {"cache_version": DATASET_CACHE_VERSION, "dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
     config_str = json.dumps(combined_dict, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:10]
 

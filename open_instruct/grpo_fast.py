@@ -83,8 +83,10 @@ from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
     INPUT_IDS_PROMPT_KEY,
+    TOOLS_COLUMN_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
+    validate_dataset_tools,
     visualize_token,
 )
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
@@ -1388,14 +1390,37 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
     return beaker_config, wandb_url
 
 
+def _validate_and_log_dataset_tools(dataset, configured_tool_names: list[str] | None, dataset_name: str) -> None:
+    """Validate and log per-sample tool configuration for a dataset."""
+    if dataset and TOOLS_COLUMN_KEY in dataset.column_names and configured_tool_names:
+        logger.info(
+            f"{dataset_name} has '{TOOLS_COLUMN_KEY}' column - validating configured tools against dataset tools"
+        )
+        validate_dataset_tools(dataset, configured_tool_names, dataset_name)
+        logger.info(f"{dataset_name} has '{TOOLS_COLUMN_KEY}' column - per-sample tool activation enabled")
+
+
 def setup_datasets(
     args: Args,
     tc: TokenizerConfig,
     tokenizer: PreTrainedTokenizer,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     tool_definitions: list[dict[str, Any]],
+    pass_tools_to_chat_template: bool,
+    configured_tool_call_names: list[str] | None = None,
 ):
-    """Set up training and evaluation datasets."""
+    """Set up training and evaluation datasets.
+
+    Args:
+        args: Training arguments.
+        tc: Tokenizer configuration.
+        tokenizer: The tokenizer.
+        streaming_config: Data loading configuration.
+        tool_definitions: Global tool definitions in OpenAI format.
+        pass_tools_to_chat_template: Whether to pass tools to chat template.
+        configured_tool_call_names: List of tool call names configured in the launch job.
+            Used to validate against per-sample tools in datasets.
+    """
     system_prompt_override = None
     if streaming_config.system_prompt_override_file is not None:
         logger.info(f"Loading system prompt override from {streaming_config.system_prompt_override_file}")
@@ -1404,7 +1429,11 @@ def setup_datasets(
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
     transform_fn_args = [
-        {"system_prompt_override": system_prompt_override, "tool_definitions": tool_definitions},
+        {
+            "system_prompt_override": system_prompt_override,
+            "tool_definitions": tool_definitions,
+            "pass_tools_to_chat_template": pass_tools_to_chat_template,
+        },
         {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
@@ -1420,6 +1449,8 @@ def setup_datasets(
         dataset_skip_cache=streaming_config.dataset_skip_cache,
         system_prompt_override=system_prompt_override,
     )
+
+    _validate_and_log_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
     train_dataset = train_dataset.shuffle(seed=args.seed)
 
     if len(streaming_config.dataset_mixer_eval_list) > 0:
@@ -1436,6 +1467,8 @@ def setup_datasets(
             dataset_skip_cache=streaming_config.dataset_skip_cache,
             system_prompt_override=system_prompt_override,
         )
+
+        _validate_and_log_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
         if streaming_config.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
     else:
@@ -1935,6 +1968,8 @@ def maybe_evaluate(
         table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
         table["scores"] = eval_batch.scores
         table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
+        if eval_batch.active_tools is not None:
+            table["active_tools"] = [str(tools) if tools is not None else "all" for tools in eval_batch.active_tools]
         df = pd.DataFrame(table)
 
         if args.with_tracking:
@@ -2301,7 +2336,13 @@ def main(
         streaming_config.stop_strings.extend(tool_stop_sequences)
 
     train_dataset, eval_dataset = setup_datasets(
-        args, tc, tokenizer, streaming_config, tool_definitions if tools_config.pass_tools_to_chat_template else []
+        args,
+        tc,
+        tokenizer,
+        streaming_config,
+        tool_definitions,
+        pass_tools_to_chat_template=tools_config.pass_tools_to_chat_template,
+        configured_tool_call_names=tools_config.tool_call_names if tools_config.enabled else None,
     )
 
     if len(train_dataset) < (

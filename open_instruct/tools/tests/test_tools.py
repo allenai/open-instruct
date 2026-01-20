@@ -1521,9 +1521,7 @@ class TestMakeApiRequestRetry(unittest.TestCase):
     )
     def test_max_retries_respected(self, name, max_retries, expected_count):
         """Test that the number of retries respects max_retries."""
-        result, count = _run_with_mock_responses(
-            [(500, None, "Internal Server Error")] * 10, max_retries=max_retries
-        )
+        result, count = _run_with_mock_responses([(500, None, "Internal Server Error")] * 10, max_retries=max_retries)
 
         self.assertEqual(count, expected_count)
         self.assertIn("500", result.error)
