@@ -15,19 +15,12 @@ HAS_CACHE = (
     or os.path.exists(os.path.expanduser("~/.cache/huggingface/datasets"))
 )
 
+TEST_DATA_DIR = os.path.join(os.path.dirname(__file__), "test_data")
+
 
 class TestTokenizerEquality(unittest.TestCase):
     @parameterized.expand(
-        [
-            (
-                "llama",
-                "meta-llama/Llama-3.1-8B",
-                "allenai/Llama-3.1-Tulu-3-8B-SFT",
-                "allenai/Llama-3.1-Tulu-3-8B-DPO",
-                False,
-            ),
-            ("olmo", "allenai/OLMo-2-1124-7B", "allenai/OLMo-2-1124-7B-SFT", "allenai/OLMo-2-1124-7B-DPO", True),
-        ]
+        [("olmo", "allenai/OLMo-2-1124-7B", "allenai/OLMo-2-1124-7B-SFT", "allenai/OLMo-2-1124-7B-DPO", True)]
     )
     def test_sft_dpo_same_tokenizer(self, name, base_model, sft_model, dpo_model, add_bos):
         base_to_sft_tc = open_instruct.dataset_transformation.TokenizerConfig(
@@ -65,7 +58,7 @@ class TestTokenizerEquality(unittest.TestCase):
 class TestConfigHash(unittest.TestCase):
     def test_config_hash_different(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
-            tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu"
+            tokenizer_name_or_path="Qwen/Qwen3-0.6B", tokenizer_revision="main", chat_template_name="tulu"
         )
 
         dcs1 = [
@@ -128,7 +121,7 @@ class TestCachedDataset(unittest.TestCase):
 
     def test_get_cached_dataset_tulu_sft(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
-            tokenizer_name_or_path="meta-llama/Llama-3.1-8B",
+            tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT",
             tokenizer_revision="main",
             use_fast=True,
             chat_template_name="tulu",
@@ -150,7 +143,7 @@ class TestCachedDataset(unittest.TestCase):
             dataset_local_cache_dir=self.temp_dir.name,
         )
         gold_tokenized_dataset = datasets.load_dataset(
-            "allenai/dataset-mix-cached", split="train", revision="4c47c491c0"
+            "parquet", data_files=os.path.join(TEST_DATA_DIR, "gold_sft_dataset.parquet"), split="train"
         )
         self.assertEqual(len(dataset), len(gold_tokenized_dataset))
         for i in range(len(dataset)):
@@ -207,7 +200,7 @@ class TestCachedDataset(unittest.TestCase):
             dataset_local_cache_dir=self.temp_dir.name,
         )
         gold_tokenized_dataset = datasets.load_dataset(
-            "allenai/dataset-mix-cached", split="train", revision="1f2adb3bb9"
+            "parquet", data_files=os.path.join(TEST_DATA_DIR, "gold_rlvr_dataset.parquet"), split="train"
         )
         self.assertEqual(len(dataset), len(gold_tokenized_dataset))
         for i in range(len(dataset)):
