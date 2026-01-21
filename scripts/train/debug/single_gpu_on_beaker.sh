@@ -36,6 +36,7 @@ uv run python mason.py \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path allenai/open_instruct_dev \
     --model_revision dpo_olmo_core_debug_test \
+    --add_bos \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
