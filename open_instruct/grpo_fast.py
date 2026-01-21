@@ -645,7 +645,10 @@ class PolicyTrainerRayProcess(RayProcess):
         self._logprob_samples_saved += n_to_add
 
         # Save periodically (every 10k samples) or when full
-        if self._logprob_samples_saved % 10000 == 0 or self._logprob_samples_saved >= self.args.save_logprob_samples_max:
+        if (
+            self._logprob_samples_saved % 10000 == 0
+            or self._logprob_samples_saved >= self.args.save_logprob_samples_max
+        ):
             samples_dir = os.path.join(self.args.output_dir, "logprob_samples")
             os.makedirs(samples_dir, exist_ok=True)
             sample_file = os.path.join(samples_dir, f"samples_{self._logprob_samples_saved}.json")

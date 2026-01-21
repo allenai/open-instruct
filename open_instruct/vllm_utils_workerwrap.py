@@ -58,7 +58,7 @@ class WorkerWrap:
             torch.distributed.broadcast(weight, 0, group=self._model_update_group)
 
         self.model_runner.model.load_weights(weights=[(name, weight)])
-        self._maybe_update_fp32_lm_head_cache(name)
+        self._sync_fp32_lm_head(name)
 
         del weight
         # TODO: should we empty cache if all weights have updated?
@@ -82,12 +82,13 @@ class WorkerWrap:
         list_args[6] = device_id
         weight = func(*list_args)
         self.model_runner.model.load_weights(weights=[(name, weight)])
-        self._maybe_update_fp32_lm_head_cache(name)
+        self._sync_fp32_lm_head(name)
         torch.cuda.synchronize()
 
-    def _maybe_update_fp32_lm_head_cache(self, name):
-        """Update the fp32 lm_head cache when weights are synced.
+    def _sync_fp32_lm_head(self, name):
+        """Sync fp32 lm_head weights after weight broadcast from trainer.
 
+        Called after weight updates to keep the fp32 LM head in sync.
         Two modes controlled by OPEN_INSTRUCT_FP32_LM_HEAD env var:
         - "1" (cache mode): Keep bf16 weights, maintain separate fp32 cache
         - "2" (permanent mode): Convert lm_head weight to fp32 in-place
@@ -163,8 +164,8 @@ class WorkerWrap:
         # Try common paths for embed_tokens in various model architectures
         embed_paths = [
             "model.embed_tokens",  # Qwen, Llama, Mistral
-            "transformer.wte",      # GPT-2 style
-            "embed_tokens",         # Some models
+            "transformer.wte",  # GPT-2 style
+            "embed_tokens",  # Some models
         ]
 
         for path in embed_paths:
@@ -177,10 +178,9 @@ class WorkerWrap:
                         break
                 if module is not None:
                     embed_weight = getattr(module, "weight", None)
-                    if isinstance(embed_weight, torch.Tensor):
-                        # Check if they share the same underlying storage
-                        if lm_head_weight.data_ptr() == embed_weight.data_ptr():
-                            return True
+                    # Check if they share the same underlying storage
+                    if isinstance(embed_weight, torch.Tensor) and lm_head_weight.data_ptr() == embed_weight.data_ptr():
+                        return True
             except Exception:
                 continue
 

@@ -99,15 +99,18 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelD
     )
 
 
-def maybe_enable_fp32_lm_head(enabled: bool) -> None:
-    """Enable fp32 lm_head computation in vLLM.
+def patch_vllm_for_fp32_logits(enabled: bool) -> None:
+    """Patch vLLM's LogitsProcessor to compute logits in FP32 for numerical precision.
 
-    Reads the mode from OPEN_INSTRUCT_FP32_LM_HEAD env var (set in grpo_fast.py main()):
+    This reduces logprob mismatch between vLLM inference and trainer forward pass,
+    which is important for GRPO/RL training stability (see ScaleRL paper Figure 3).
+
+    Modes controlled by OPEN_INSTRUCT_FP32_LM_HEAD env var:
     - "1" = cache mode: Keep bf16 weights, maintain separate fp32 cache
     - "2" = permanent mode: Convert lm_head weights to fp32 in-place
 
     Args:
-        enabled: Whether to enable fp32 lm_head at all.
+        enabled: Whether to enable fp32 logits computation.
     """
     if not enabled:
         return
@@ -654,7 +657,7 @@ class LLMRayActor:
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
-        maybe_enable_fp32_lm_head(self.fp32_lm_head)
+        patch_vllm_for_fp32_logits(self.fp32_lm_head)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
