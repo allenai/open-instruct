@@ -27,3 +27,8 @@ if [ "$status" != "0" ]; then
     echo "GPU tests failed with exit code $status"
     exit 1
 fi
+
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    echo "exp_id=$exp_id" >> "$GITHUB_OUTPUT"
+    echo "exp_url=$exp_url" >> "$GITHUB_OUTPUT"
+fi
