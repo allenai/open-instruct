@@ -663,8 +663,9 @@ class LLMRayActor:
         # The parent's wandb.init() sets variables like WANDB_RUN_ID, WANDB_SERVICE,
         # and _WANDB_* that would cause us to either connect to a non-existent socket
         # or take over the parent's run instead of creating our own.
+        wandb_vars_to_clear = ["WANDB_RUN_ID", "WANDB_SERVICE"]
         for key in list(os.environ.keys()):
-            if key.startswith("WANDB") or key.startswith("_WANDB"):
+            if key in wandb_vars_to_clear or key.startswith("_WANDB"):
                 del os.environ[key]
 
         import wandb
