@@ -522,6 +522,9 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
     results_queue.put(result)
 
+    # Log token statistics to wandb (only logs if wandb is enabled for this actor)
+    actor.log_token_stats(result.token_statistics)
+
 
 async def compute_rewards(
     actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset, is_eval: bool
@@ -651,14 +654,17 @@ class LLMRayActor:
 
     def _init_wandb(self, wandb_config: dict | None, engine_id: int) -> None:
         """Initialize wandb for system metrics logging (only for the first generator)."""
+        self._wandb_enabled = False
+        self._wandb_step = 0
         if wandb_config is None or engine_id != 0:
             return  # Only first generator logs to wandb
 
-        # Clear inherited wandb service variables so we start fresh
-        # These are set by the parent's wandb.init() and would cause us to try
-        # to connect to a socket that doesn't exist in this process
+        # Clear inherited wandb environment variables so we start a fresh run.
+        # The parent's wandb.init() sets variables like WANDB_RUN_ID, WANDB_SERVICE,
+        # and _WANDB_* that would cause us to either connect to a non-existent socket
+        # or take over the parent's run instead of creating our own.
         for key in list(os.environ.keys()):
-            if key.startswith("_WANDB") or key == "WANDB_SERVICE":
+            if key.startswith("WANDB") or key.startswith("_WANDB"):
                 del os.environ[key]
 
         import wandb
@@ -671,6 +677,34 @@ class LLMRayActor:
             tags=wandb_config.get("tags", []) + ["generator"],
             settings=wandb.Settings(start_method="thread"),
         )
+        self._wandb_enabled = True
+
+    def log_token_stats(self, token_statistics: "TokenStatistics") -> None:
+        """Log token statistics to wandb if enabled."""
+        if not self._wandb_enabled:
+            return
+
+        import wandb
+
+        generation_time = token_statistics.generation_time
+        if generation_time > 0:
+            prefill_tps = token_statistics.num_prompt_tokens / generation_time
+            decode_tps = token_statistics.num_response_tokens / generation_time
+        else:
+            prefill_tps = 0
+            decode_tps = 0
+
+        wandb.log(
+            {
+                "generator/prefill_tokens_per_sec": prefill_tps,
+                "generator/decode_tokens_per_sec": decode_tps,
+                "generator/num_prompt_tokens": token_statistics.num_prompt_tokens,
+                "generator/num_response_tokens": token_statistics.num_response_tokens,
+                "generator/generation_time": generation_time,
+            },
+            step=self._wandb_step,
+        )
+        self._wandb_step += 1
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
