@@ -10,7 +10,7 @@ image_name="open-instruct-gpu-tests-${short_sha}"
 beaker image create open-instruct-gpu-tests:latest -n "$image_name" -w "ai2/$beaker_user" --description "Git commit: $GIT_SHA"
 
 uv sync --frozen
-output=$(bash scripts/train/debug/run_gpu_pytest.sh "$beaker_user/$image_name" 2>&1)
+output=$(bash scripts/test/run_gpu_pytest.sh "$beaker_user/$image_name" 2>&1)
 echo "$output"
 
 exp_url=$(echo "$output" | grep -oP 'https://beaker.org/ex/[^\s]+' | head -1)

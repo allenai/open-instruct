@@ -1,4 +1,5 @@
 import gc
+import hashlib
 import os
 import shutil
 import tempfile
@@ -15,7 +16,8 @@ HAS_CACHE = (
     or os.path.exists(os.path.expanduser("~/.cache/huggingface/datasets"))
 )
 
-TEST_DATA_DIR = os.path.join(os.path.dirname(__file__), "test_data")
+GOLD_SFT = {"count": 9390, "hash": "87a737b6e1124a84335fc81f8e82b51372d20edadd03e40fc5d60e06683c0ac0"}
+GOLD_RLVR = {"count": 298, "hash": "2999bbb6d7b3f54d6fbffbeeb8bfa31c0efe2b1685def883e6e52914db9f1496"}
 
 
 class TestTokenizerEquality(unittest.TestCase):
@@ -142,12 +144,11 @@ class TestCachedDataset(unittest.TestCase):
             dataset_skip_cache=True,
             dataset_local_cache_dir=self.temp_dir.name,
         )
-        gold_tokenized_dataset = datasets.load_dataset(
-            "parquet", data_files=os.path.join(TEST_DATA_DIR, "gold_sft_dataset.parquet"), split="train"
-        )
-        self.assertEqual(len(dataset), len(gold_tokenized_dataset))
-        for i in range(len(dataset)):
-            self.assertEqual(dataset[i]["input_ids"], gold_tokenized_dataset[i]["input_ids"])
+        self.assertEqual(len(dataset), GOLD_SFT["count"])
+        dataset_hash = hashlib.sha256()
+        for row in dataset:
+            dataset_hash.update(str(row["input_ids"]).encode())
+        self.assertEqual(dataset_hash.hexdigest(), GOLD_SFT["hash"])
 
     def test_get_cached_dataset_tulu_preference(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
@@ -199,15 +200,11 @@ class TestCachedDataset(unittest.TestCase):
             dataset_skip_cache=True,
             dataset_local_cache_dir=self.temp_dir.name,
         )
-        gold_tokenized_dataset = datasets.load_dataset(
-            "parquet", data_files=os.path.join(TEST_DATA_DIR, "gold_rlvr_dataset.parquet"), split="train"
-        )
-        self.assertEqual(len(dataset), len(gold_tokenized_dataset))
-        for i in range(len(dataset)):
-            self.assertEqual(
-                dataset[i][open_instruct.dataset_transformation.INPUT_IDS_PROMPT_KEY],
-                gold_tokenized_dataset[i][open_instruct.dataset_transformation.INPUT_IDS_PROMPT_KEY],
-            )
+        self.assertEqual(len(dataset), GOLD_RLVR["count"])
+        dataset_hash = hashlib.sha256()
+        for row in dataset:
+            dataset_hash.update(str(row[open_instruct.dataset_transformation.INPUT_IDS_PROMPT_KEY]).encode())
+        self.assertEqual(dataset_hash.hexdigest(), GOLD_RLVR["hash"])
 
 
 if __name__ == "__main__":
