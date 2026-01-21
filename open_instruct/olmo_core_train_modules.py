@@ -95,7 +95,7 @@ class DPOTrainModule(TrainModule):
             output_router_logits=self.args.load_balancing_loss,
         )
 
-        losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss_olmo(
+        losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
             self.args,
             batch,
             policy_chosen_logps,

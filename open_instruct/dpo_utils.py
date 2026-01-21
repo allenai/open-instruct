@@ -557,27 +557,6 @@ def build_reference_logprobs_cache(
     return cache
 
 
-def compute_loss_olmo(
-    args: ExperimentConfig,
-    batch: dict[str, torch.Tensor],
-    policy_chosen_logps: torch.Tensor,
-    policy_rejected_logps: torch.Tensor,
-    reference_cache: model_utils.TensorCache | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Wrapper for compute_loss using ExperimentConfig fields.
-
-    This function extracts the DPO-related fields from ExperimentConfig
-    and calls the underlying compute_loss function.
-    """
-    dpo_config = DPOConfig(
-        beta=args.beta,
-        loss_type=args.loss_type,
-        gamma_beta_ratio=args.gamma_beta_ratio,
-        label_smoothing=args.label_smoothing,
-    )
-    return compute_loss(dpo_config, batch, policy_chosen_logps, policy_rejected_logps, reference_cache)
-
-
 def dpo_loss(
     policy_chosen_logps: torch.Tensor,
     policy_rejected_logps: torch.Tensor,
