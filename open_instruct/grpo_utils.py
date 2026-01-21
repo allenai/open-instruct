@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
-from open_instruct import utils
 from open_instruct.utils import calibrate_checkpoint_state_dir, download_latest_checkpoint_from_gs, get_beaker_whoami
 
 
@@ -181,7 +180,12 @@ class ExperimentConfig:
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
-        self.loss_denominator = utils.get_denominator(self.loss_denominator)  # type: ignore[assignment]
+        if self.loss_denominator != "token":
+            val = float(self.loss_denominator)
+            if val <= 0:
+                raise ValueError(
+                    f"loss_denominator must be greater than 0 if not 'token', got: {self.loss_denominator}"
+                )
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
