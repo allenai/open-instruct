@@ -1,15 +1,19 @@
-"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, and Crawl4AIBrowseTool from tools.py)."""
+"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, Crawl4AIBrowseTool, and GenericMCPTool from tools.py)."""
 
 import asyncio
 import dataclasses
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import aiohttp
 from parameterized import parameterized
 
+from open_instruct import data_types
+from open_instruct.tools.generic_mcp import GenericMCPTool, GenericMCPToolConfig
 from open_instruct.tools.tools import (
+    TOOL_REGISTRY,
     Crawl4AIBrowseTool,
     Crawl4AIBrowseToolConfig,
     JinaBrowseTool,
@@ -20,14 +24,16 @@ from open_instruct.tools.tools import (
     S2SearchToolConfig,
     SerperSearchTool,
     SerperSearchToolConfig,
-    _truncate,
 )
 from open_instruct.tools.utils import (
+    APIResponse,
     ParsedToolConfig,
     ToolOutput,
     ToolsConfig,
     ToolStatistics,
     get_openai_tool_definitions,
+    make_api_request,
+    truncate,
 )
 
 
@@ -116,7 +122,6 @@ class TestPythonCodeToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_successful_execution(self, mock_api_request):
         """Test successful code execution."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data={"output": "Hello, World!\n", "error": None})
@@ -135,7 +140,6 @@ class TestPythonCodeToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_execution_with_error_response(self, mock_api_request):
         """Test code execution that returns an error from the API."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data={"output": "", "error": "NameError: name 'undefined_var' is not defined"})
@@ -152,7 +156,6 @@ class TestPythonCodeToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_timeout_handling(self, mock_api_request):
         """Test timeout is handled correctly."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(error="Timeout after 3 seconds", timed_out=True)
@@ -168,7 +171,6 @@ class TestPythonCodeToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_api_connection_error(self, mock_api_request):
         """Test handling of API connection errors."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(error="Connection error: Connection refused")
@@ -185,7 +187,6 @@ class TestPythonCodeToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_execution_with_output_and_error(self, mock_api_request):
         """Test execution that produces both output and an error."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data={"output": "Partial output\n", "error": "Some warning or error"})
@@ -202,8 +203,6 @@ class TestPythonCodeToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_custom_timeout(self, mock_api_request):
         """Test that custom timeout is passed to API."""
-        from open_instruct.tools.utils import APIResponse
-
         tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute", timeout=10)
 
         async def mock_response(*args, **kwargs):
@@ -255,7 +254,7 @@ class TestPythonCodeToolConfig(unittest.TestCase):
 
 
 class TestTruncateHelper(unittest.TestCase):
-    """Tests for _truncate helper function."""
+    """Tests for truncate helper function."""
 
     @parameterized.expand(
         [
@@ -266,8 +265,8 @@ class TestTruncateHelper(unittest.TestCase):
         ]
     )
     def test_truncate(self, name, text, max_length, expected_result, should_truncate):
-        """Test _truncate with various inputs."""
-        result = _truncate(text, max_length=max_length)
+        """Test truncate with various inputs."""
+        result = truncate(text, max_length=max_length)
 
         if should_truncate:
             self.assertTrue(result.startswith(text[:max_length]))
@@ -368,7 +367,6 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_successful_fetch(self, name, api_data, expected_in_output, mock_api_request):
         """Test successful webpage fetch with various response types."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data=api_data)
@@ -387,7 +385,6 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_jina_api_error_response(self, mock_api_request):
         """Test handling of Jina API error response (code != 200)."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data={"code": 400, "message": "Invalid URL format"})
@@ -416,7 +413,6 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_error_handling(self, name, api_response, expected_timeout, expected_error_contains, mock_api_request):
         """Test error handling for various API error types."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(**api_response)
@@ -433,7 +429,6 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_uses_get_method(self, mock_api_request):
         """Test that JinaBrowseTool uses GET method."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data={"code": 200, "data": {"content": "OK"}})
@@ -538,7 +533,6 @@ class TestS2SearchToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_successful_search(self, mock_api_request):
         """Test successful search with results."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(
@@ -564,7 +558,6 @@ class TestS2SearchToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_no_results_returns_error(self, mock_api_request):
         """Test query with no results returns an error."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data={"data": []})
@@ -593,7 +586,6 @@ class TestS2SearchToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_error_handling(self, name, api_response, expected_timeout, expected_error_contains, mock_api_request):
         """Test error handling for various API error types."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(**api_response)
@@ -610,7 +602,6 @@ class TestS2SearchToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_uses_get_method(self, mock_api_request):
         """Test that S2SearchTool uses GET method."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data={"data": []})
@@ -748,7 +739,6 @@ class TestSerperSearchToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_successful_search(self, name, api_data, expected_in_output, mock_api_request):
         """Test successful search with various response types."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data=api_data)
@@ -779,7 +769,6 @@ class TestSerperSearchToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_error_handling(self, name, api_response, expected_timeout, expected_error_contains, mock_api_request):
         """Test error handling for various API error types."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(**api_response)
@@ -796,7 +785,6 @@ class TestSerperSearchToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_no_results_returns_error(self, mock_api_request):
         """Test query with no results returns an error."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data={"organic": []})
@@ -813,7 +801,6 @@ class TestSerperSearchToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_results_without_snippets_filtered_out(self, mock_api_request):
         """Test that results without snippets are filtered out."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(
@@ -1028,7 +1015,6 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_successful_fetch(self, name, api_data, expected_in_output, mock_api_request):
         """Test successful webpage fetch with various response types."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data=api_data)
@@ -1047,7 +1033,6 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_crawl4ai_api_error_response(self, mock_api_request):
         """Test handling of Crawl4AI API error response (success=False)."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data={"results": [{"success": False, "error_message": "Failed to fetch URL"}]})
@@ -1081,7 +1066,6 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_error_handling(self, name, api_response, expected_timeout, expected_error_contains, mock_api_request):
         """Test error handling for various API error types."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(**api_response)
@@ -1098,7 +1082,6 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_uses_post_method_and_correct_endpoint(self, mock_api_request):
         """Test that Crawl4AIBrowseTool uses POST method and correct endpoint."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data={"results": [{"success": True, "markdown": "OK", "metadata": {}}]})
@@ -1114,7 +1097,6 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_payload_contains_url(self, mock_api_request):
         """Test that the request payload contains the URL in a list."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data={"results": [{"success": True, "markdown": "OK", "metadata": {}}]})
@@ -1130,7 +1112,6 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_api_key_in_headers(self, mock_api_request):
         """Test that API key is included in headers."""
-        from open_instruct.tools.utils import APIResponse
 
         async def mock_response(*args, **kwargs):
             return APIResponse(data={"results": [{"success": True, "markdown": "OK", "metadata": {}}]})
@@ -1146,8 +1127,6 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_content_truncation(self, mock_api_request):
         """Test that content is truncated when exceeding max_content_length."""
-        from open_instruct.tools.utils import APIResponse
-
         tool = Crawl4AIBrowseTool(call_name="browse", max_content_length=50)
 
         long_content = "A" * 100
@@ -1166,8 +1145,6 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_no_truncation_when_under_limit(self, mock_api_request):
         """Test that content is not truncated when under max_content_length."""
-        from open_instruct.tools.utils import APIResponse
-
         tool = Crawl4AIBrowseTool(call_name="browse", max_content_length=100)
 
         short_content = "A" * 50
@@ -1185,8 +1162,6 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
     @patch("open_instruct.tools.tools.make_api_request")
     def test_no_truncation_when_limit_is_none(self, mock_api_request):
         """Test that content is not truncated when max_content_length is None."""
-        from open_instruct.tools.utils import APIResponse
-
         tool = Crawl4AIBrowseTool(call_name="browse", max_content_length=None)
 
         long_content = "A" * 10000
@@ -1235,11 +1210,9 @@ class TestToolStatistics(unittest.TestCase):
 
     def test_add_rollout_without_excess_calls(self):
         """Test add_rollout works without excess_tool_calls."""
-        from open_instruct.data_types import ToolCallStats
-
         stats = ToolStatistics()
-        stats.add_rollout([ToolCallStats(tool_name="python", success=True, runtime=0.5)])
-        stats.add_rollout([ToolCallStats(tool_name="python", success=False, runtime=0.3)])
+        stats.add_rollout([data_types.ToolCallStats(tool_name="python", success=True, runtime=0.5)])
+        stats.add_rollout([data_types.ToolCallStats(tool_name="python", success=False, runtime=0.3)])
 
         self.assertEqual(stats.num_rollouts, 2)
         self.assertIn("python", stats.tool_names)
@@ -1249,11 +1222,9 @@ class TestToolStatistics(unittest.TestCase):
 
     def test_add_rollout_with_excess_calls(self):
         """Test add_rollout correctly tracks excess_tool_calls."""
-        from open_instruct.data_types import ToolCallStats
-
         stats = ToolStatistics()
         stats.add_rollout(
-            [ToolCallStats(tool_name="python", success=True, runtime=0.5)],
+            [data_types.ToolCallStats(tool_name="python", success=True, runtime=0.5)],
             excess_tool_calls={"python": 2, "search": 1},
         )
 
@@ -1265,16 +1236,14 @@ class TestToolStatistics(unittest.TestCase):
 
     def test_compute_metrics_includes_excess_calls(self):
         """Test compute_metrics includes avg_excess_calls_per_rollout."""
-        from open_instruct.data_types import ToolCallStats
-
         stats = ToolStatistics()
         # Rollout 1: 1 successful call, 2 excess python calls
         stats.add_rollout(
-            [ToolCallStats(tool_name="python", success=True, runtime=0.5)], excess_tool_calls={"python": 2}
+            [data_types.ToolCallStats(tool_name="python", success=True, runtime=0.5)], excess_tool_calls={"python": 2}
         )
         # Rollout 2: 1 failed call, 1 excess python call
         stats.add_rollout(
-            [ToolCallStats(tool_name="python", success=False, runtime=0.3)], excess_tool_calls={"python": 1}
+            [data_types.ToolCallStats(tool_name="python", success=False, runtime=0.3)], excess_tool_calls={"python": 1}
         )
 
         metrics = stats.compute_metrics()
@@ -1285,18 +1254,16 @@ class TestToolStatistics(unittest.TestCase):
 
     def test_compute_metrics_multiple_tools_with_excess(self):
         """Test compute_metrics with multiple tools having excess calls."""
-        from open_instruct.data_types import ToolCallStats
-
         stats = ToolStatistics()
         stats.add_rollout(
             [
-                ToolCallStats(tool_name="python", success=True, runtime=0.5),
-                ToolCallStats(tool_name="search", success=True, runtime=0.2),
+                data_types.ToolCallStats(tool_name="python", success=True, runtime=0.5),
+                data_types.ToolCallStats(tool_name="search", success=True, runtime=0.2),
             ],
             excess_tool_calls={"python": 3, "search": 1},
         )
         stats.add_rollout(
-            [ToolCallStats(tool_name="python", success=True, runtime=0.4)], excess_tool_calls={"python": 1}
+            [data_types.ToolCallStats(tool_name="python", success=True, runtime=0.4)], excess_tool_calls={"python": 1}
         )
 
         metrics = stats.compute_metrics()
@@ -1310,11 +1277,9 @@ class TestToolStatistics(unittest.TestCase):
 
     def test_compute_metrics_no_excess_calls(self):
         """Test compute_metrics when no excess calls occurred."""
-        from open_instruct.data_types import ToolCallStats
-
         stats = ToolStatistics()
-        stats.add_rollout([ToolCallStats(tool_name="python", success=True, runtime=0.5)])
-        stats.add_rollout([ToolCallStats(tool_name="python", success=True, runtime=0.3)])
+        stats.add_rollout([data_types.ToolCallStats(tool_name="python", success=True, runtime=0.5)])
+        stats.add_rollout([data_types.ToolCallStats(tool_name="python", success=True, runtime=0.3)])
 
         metrics = stats.compute_metrics()
 
@@ -1382,6 +1347,244 @@ class TestToolsConfig(unittest.TestCase):
         """Test ToolsConfig raises on invalid JSON in tool_configs."""
         with self.assertRaisesRegex(ValueError, "Invalid tool_config for tool python"):
             ToolsConfig(tools=["python"], tool_configs=["not valid json"])
+
+
+def _run_with_mock_responses(responses: list, **request_kwargs):
+    """Run make_api_request with mocked responses.
+
+    Args:
+        responses: List of (status, json_data, reason) tuples or Exception instances.
+        **request_kwargs: Additional kwargs for make_api_request.
+
+    Returns:
+        Tuple of (result, call_count).
+    """
+    call_count = {"count": 0}
+
+    async def mock_request(*args, **kwargs):
+        idx = min(call_count["count"], len(responses) - 1)
+        call_count["count"] += 1
+        response_spec = responses[idx]
+
+        if isinstance(response_spec, Exception):
+            raise response_spec
+
+        status, json_data, reason = response_spec
+        mock_response = unittest.mock.MagicMock()
+        mock_response.status = status
+        mock_response.reason = reason
+        mock_response.headers = {}
+        mock_response.json = unittest.mock.AsyncMock(return_value=json_data)
+
+        if status >= 400:
+            mock_response.raise_for_status.side_effect = aiohttp.ClientResponseError(
+                request_info=unittest.mock.MagicMock(), history=(), status=status, message=reason
+            )
+        return mock_response
+
+    # Create a mock that properly handles nested async context managers
+    async def run_test():
+        with patch("open_instruct.tools.utils.aiohttp.ClientSession") as mock_session_class:
+            # Mock the ClientSession context manager
+            mock_session = unittest.mock.MagicMock()
+
+            # Create response context manager mock
+            response_cm = unittest.mock.MagicMock()
+            response_cm.__aenter__ = mock_request
+            response_cm.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+
+            mock_session.post.return_value = response_cm
+            mock_session.get.return_value = response_cm
+
+            # Mock ClientSession as context manager
+            session_cm = unittest.mock.MagicMock()
+            session_cm.__aenter__ = unittest.mock.AsyncMock(return_value=mock_session)
+            session_cm.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+            mock_session_class.return_value = session_cm
+
+            result = await make_api_request(
+                "http://test.com",
+                timeout_seconds=10,
+                base_delay=0.001,  # Use very short delay for tests
+                max_delay=0.01,
+                **request_kwargs,
+            )
+            return result
+
+    result = asyncio.run(run_test())
+    return result, call_count["count"]
+
+
+class TestMakeApiRequestRetry(unittest.TestCase):
+    """Tests for make_api_request retry behavior."""
+
+    def test_successful_request_no_retry(self):
+        """Test that successful requests don't retry."""
+        result, count = _run_with_mock_responses([(200, {"result": "ok"}, "OK")], max_retries=3)
+
+        self.assertEqual(result.data, {"result": "ok"})
+        self.assertEqual(result.error, "")
+        self.assertEqual(count, 1)
+
+    @parameterized.expand(
+        [
+            ("429_rate_limit", [(429, None, "Too Many Requests"), (200, {"result": "ok"}, "OK")], 2),
+            ("500_server_error", [(500, None, "Internal Server Error"), (200, {"result": "ok"}, "OK")], 2),
+            ("503_unavailable", [(503, None, "Service Unavailable"), (200, {"result": "ok"}, "OK")], 2),
+            ("multiple_5xx", [(500, None, "Error"), (503, None, "Error"), (200, {"result": "ok"}, "OK")], 3),
+        ]
+    )
+    def test_retryable_status_codes(self, name, responses, expected_count):
+        """Test that retryable status codes (429, 5xx) trigger retries and eventually succeed."""
+        result, count = _run_with_mock_responses(responses, max_retries=3)
+
+        self.assertEqual(result.data, {"result": "ok"})
+        self.assertEqual(count, expected_count)
+
+    @parameterized.expand(
+        [
+            ("400_bad_request", 400, "Bad Request"),
+            ("401_unauthorized", 401, "Unauthorized"),
+            ("403_forbidden", 403, "Forbidden"),
+            ("404_not_found", 404, "Not Found"),
+            ("422_unprocessable", 422, "Unprocessable Entity"),
+        ]
+    )
+    def test_non_retryable_4xx_errors(self, name, status, reason):
+        """Test that non-429 4xx errors do not trigger retries."""
+        result, count = _run_with_mock_responses([(status, None, reason)], max_retries=3)
+
+        self.assertIn(str(status), result.error)
+        self.assertEqual(count, 1)
+
+    @parameterized.expand(
+        [
+            ("timeout", [asyncio.TimeoutError(), asyncio.TimeoutError(), (200, {"result": "ok"}, "OK")], 3),
+            ("connection_refused", "connection_error", 2),  # Special case handled below
+        ]
+    )
+    def test_retryable_exceptions(self, name, responses, expected_count):
+        """Test that retryable exceptions trigger retries."""
+        if responses == "connection_error":
+            responses = [
+                aiohttp.ClientConnectorError(unittest.mock.MagicMock(), OSError("Connection refused")),
+                (200, {"result": "ok"}, "OK"),
+            ]
+        result, count = _run_with_mock_responses(responses, max_retries=3)
+
+        self.assertEqual(result.data, {"result": "ok"})
+        self.assertEqual(count, expected_count)
+
+    @parameterized.expand(
+        [
+            ("max_retries_2", 2, 3),  # 1 initial + 2 retries = 3 attempts
+            ("max_retries_0", 0, 1),  # No retries, just 1 attempt
+            ("max_retries_1", 1, 2),  # 1 initial + 1 retry = 2 attempts
+        ]
+    )
+    def test_max_retries_respected(self, name, max_retries, expected_count):
+        """Test that the number of retries respects max_retries."""
+        result, count = _run_with_mock_responses([(500, None, "Internal Server Error")] * 10, max_retries=max_retries)
+
+        self.assertEqual(count, expected_count)
+        self.assertIn("500", result.error)
+
+    def test_timeout_error_returns_timed_out_flag(self):
+        """Test that timeout errors set timed_out=True in response."""
+        result, count = _run_with_mock_responses([asyncio.TimeoutError()] * 5, max_retries=2)
+
+        self.assertTrue(result.timed_out)
+        self.assertIn("Timeout", result.error)
+
+
+class TestGenericMCPToolExecution(unittest.TestCase):
+    """Tests for GenericMCPTool execution."""
+
+    @patch("open_instruct.tools.generic_mcp._call_mcp_tool")
+    def test_execute_success(self, mock_call):
+        """Test successful tool execution."""
+        mock_result = MagicMock()
+        mock_result.content = [MagicMock(type="text", text="result text")]
+        mock_result.structuredContent = None
+        mock_call.return_value = mock_result
+
+        tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool")
+        result = asyncio.run(tool.execute(query="test"))
+
+        self.assertTrue(result.called)
+        self.assertEqual(result.output, "result text")
+        self.assertEqual(result.error, "")
+
+    @patch("open_instruct.tools.generic_mcp._call_mcp_tool")
+    def test_execute_timeout(self, mock_call):
+        """Test tool execution timeout."""
+        mock_call.side_effect = asyncio.TimeoutError()
+
+        tool = GenericMCPTool(
+            call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool", timeout=1
+        )
+        result = asyncio.run(tool.execute(query="test"))
+
+        self.assertTrue(result.called)
+        self.assertTrue(result.timeout)
+        self.assertIn("Timeout", result.error)
+
+
+class TestGenericMCPToolConfig(unittest.TestCase):
+    """Tests for GenericMCPToolConfig."""
+
+    def test_config_default_values(self):
+        """Test config has correct default values."""
+        config = GenericMCPToolConfig()
+        self.assertEqual(config.server_url, "")
+        self.assertEqual(config.transport, "http")
+        self.assertEqual(config.command, "")
+        self.assertEqual(config.args, [])
+        self.assertEqual(config.env, {})
+        self.assertEqual(config.timeout, 60)
+        self.assertEqual(config.max_retries, 3)
+        self.assertEqual(config.retry_backoff, 0.5)
+        self.assertIsNone(config.tool_name)
+
+    def test_config_custom_values(self):
+        """Test config accepts custom values."""
+        config = GenericMCPToolConfig(
+            server_url="http://localhost:9000/mcp", transport="sse", timeout=120, max_retries=5, tool_name="my_tool"
+        )
+        self.assertEqual(config.server_url, "http://localhost:9000/mcp")
+        self.assertEqual(config.transport, "sse")
+        self.assertEqual(config.timeout, 120)
+        self.assertEqual(config.max_retries, 5)
+        self.assertEqual(config.tool_name, "my_tool")
+
+    def test_config_stdio_values(self):
+        """Test config with stdio transport values."""
+        config = GenericMCPToolConfig(transport="stdio", command="python", args=["server.py"], env={"DEBUG": "1"})
+        self.assertEqual(config.transport, "stdio")
+        self.assertEqual(config.command, "python")
+        self.assertEqual(config.args, ["server.py"])
+        self.assertEqual(config.env, {"DEBUG": "1"})
+
+    def test_tool_class_attribute(self):
+        """Test tool_class is set to GenericMCPTool."""
+
+        self.assertEqual(GenericMCPToolConfig.tool_class, GenericMCPTool)
+
+    def test_expand_tools_returns_self_when_tool_name_set(self):
+        """Test expand_tools returns [self] when tool_name is specified."""
+        config = GenericMCPToolConfig(server_url="http://localhost:8000/mcp", tool_name="my_tool")
+        expanded = asyncio.run(config.expand_tools())
+        self.assertEqual(len(expanded), 1)
+        self.assertEqual(expanded[0].tool_name, "my_tool")
+
+
+class TestGenericMCPToolInRegistry(unittest.TestCase):
+    """Tests for GenericMCPTool in TOOL_REGISTRY."""
+
+    def test_generic_mcp_in_registry(self):
+        """Test generic_mcp is in TOOL_REGISTRY."""
+        self.assertIn("generic_mcp", TOOL_REGISTRY)
+        self.assertEqual(TOOL_REGISTRY["generic_mcp"], GenericMCPToolConfig)
 
 
 if __name__ == "__main__":

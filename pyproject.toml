@@ -36,6 +36,7 @@ dependencies = [
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
+    "mcp>=1.9.0",
 ]
 
 [build-system]
@@ -148,13 +149,17 @@ docstring-code-format = false
 # SIM = flake8-simplify
 # UP = pyupgrade
 # B = flake8-bugbear
-select = ["F", "E", "W", "I", "SIM", "UP", "B"]
+select = ["F", "E", "W", "I", "SIM", "UP", "B", "PLC0415"]
 ignore = [
     "B905", # zip() without explicit strict= parameter
     "C408", # dict() calls (stylistic)
     "C901", # function complexity
     "E501", # Line too long (handled by line-length setting)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# This class runs in vLLM worker processes; imports are inside methods.
+"open_instruct/vllm_utils_workerwrap.py" = ["PLC0415"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["open_instruct", "mason"]
@@ -176,17 +181,19 @@ include = [
     "open_instruct/code_utils/api.py",
     "open_instruct/context_window_checker.py",
     "open_instruct/dataset_processor.py",
+    "open_instruct/dataset_transformation.py",
     "open_instruct/data_loader.py",
     "open_instruct/data_types.py",
     "open_instruct/dpo_config.py",
     "open_instruct/dpo_utils.py",
+    "open_instruct/grpo_utils.py",
     "open_instruct/logger_utils.py",
     "open_instruct/mix_data.py",
     "open_instruct/mix_data_preferences.py",
     "open_instruct/padding_free_collator.py",
     "open_instruct/rejection_sampling/prompt_templates.py",
-    "open_instruct/tools/massive_ds.py",
-    "open_instruct/tools/tools.py",
     "open_instruct/rl_utils.py",
+    "open_instruct/tools/tools.py",
+    "open_instruct/tools/generic_mcp.py",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]

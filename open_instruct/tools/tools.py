@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from open_instruct import logger_utils
-from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, make_api_request
+from open_instruct.tools.generic_mcp import GenericMCPToolConfig
+from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, log_tool_call, make_api_request
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -33,24 +34,6 @@ try:
 except ImportError:
     DR_AGENT_MCP_AVAILABLE = False
     DR_AGENT_MCP_TOOLS: dict[str, type] = {}
-
-
-def _truncate(text: str, max_length: int = 500) -> str:
-    """Truncate text for logging, adding ellipsis if needed."""
-    if len(text) <= max_length:
-        return text
-    return text[:max_length] + f"... [{len(text) - max_length} more chars]"
-
-
-def _log_tool_call(tool_name: str, input_text: str, output: ToolOutput) -> None:
-    """Log a tool call at DEBUG level with truncated input/output."""
-    logger.debug(
-        f"Tool '{tool_name}' called:\n"
-        f"  Input: {_truncate(input_text)}\n"
-        f"  Output: {_truncate(output.output)}\n"
-        f"  Error: {output.error or 'None'}\n"
-        f"  Runtime: {output.runtime:.3f}s, Timeout: {output.timeout}"
-    )
 
 
 class PythonCodeTool(Tool):
@@ -81,7 +64,7 @@ class PythonCodeTool(Tool):
                 timeout=False,
                 runtime=0,
             )
-            _log_tool_call(self.call_name, code or "", result)
+            log_tool_call(self.call_name, code or "", result)
             return result
 
         start_time = time.time()
@@ -105,7 +88,7 @@ class PythonCodeTool(Tool):
                 output=full_output, called=True, error=error, timeout=False, runtime=time.time() - start_time
             )
 
-        _log_tool_call(self.call_name, code, result)
+        log_tool_call(self.call_name, code, result)
         return result
 
 
@@ -151,7 +134,7 @@ class JinaBrowseTool(Tool):
             result = ToolOutput(
                 output="", error="Empty URL. Please provide a URL to fetch.", called=True, timeout=False, runtime=0
             )
-            _log_tool_call(self.call_name, url or "", result)
+            log_tool_call(self.call_name, url or "", result)
             return result
 
         start_time = time.time()
@@ -174,7 +157,7 @@ class JinaBrowseTool(Tool):
                 timeout=api_response.timed_out,
                 runtime=time.time() - start_time,
             )
-            _log_tool_call(self.call_name, url, result)
+            log_tool_call(self.call_name, url, result)
             return result
 
         # Extract content from Jina response
@@ -194,7 +177,7 @@ class JinaBrowseTool(Tool):
 
         output = error if error else content
         result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
-        _log_tool_call(self.call_name, url, result)
+        log_tool_call(self.call_name, url, result)
         return result
 
 
@@ -237,7 +220,7 @@ class S2SearchTool(Tool):
             result = ToolOutput(
                 output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
             )
-            _log_tool_call(self.call_name, query or "", result)
+            log_tool_call(self.call_name, query or "", result)
             return result
 
         start_time = time.time()
@@ -257,7 +240,7 @@ class S2SearchTool(Tool):
                 timeout=api_response.timed_out,
                 runtime=time.time() - start_time,
             )
-            _log_tool_call(self.call_name, query, result)
+            log_tool_call(self.call_name, query, result)
             return result
 
         # Extract snippets from response
@@ -268,7 +251,7 @@ class S2SearchTool(Tool):
         output = "\n".join(snippets).strip() if snippets else error
 
         result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
-        _log_tool_call(self.call_name, query, result)
+        log_tool_call(self.call_name, query, result)
         return result
 
 
@@ -312,7 +295,7 @@ class SerperSearchTool(Tool):
             result = ToolOutput(
                 output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
             )
-            _log_tool_call(self.call_name, query or "", result)
+            log_tool_call(self.call_name, query or "", result)
             return result
 
         start_time = time.time()
@@ -331,7 +314,7 @@ class SerperSearchTool(Tool):
                 timeout=api_response.timed_out,
                 runtime=time.time() - start_time,
             )
-            _log_tool_call(self.call_name, query, result)
+            log_tool_call(self.call_name, query, result)
             return result
 
         # Process the response data
@@ -358,7 +341,7 @@ class SerperSearchTool(Tool):
         output = "\n\n".join(snippets).strip() if snippets else error
 
         result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
-        _log_tool_call(self.call_name, query, result)
+        log_tool_call(self.call_name, query, result)
         return result
 
 
@@ -464,7 +447,7 @@ class Crawl4AIBrowseTool(Tool):
             result = ToolOutput(
                 output="", error="Empty URL. Please provide a URL to fetch.", called=True, timeout=False, runtime=0
             )
-            _log_tool_call(self.call_name, url or "", result)
+            log_tool_call(self.call_name, url or "", result)
             return result
 
         start_time = time.time()
@@ -504,13 +487,13 @@ class Crawl4AIBrowseTool(Tool):
                 timeout=api_response.timed_out,
                 runtime=time.time() - start_time,
             )
-            _log_tool_call(self.call_name, url, result)
+            log_tool_call(self.call_name, url, result)
             return result
 
         content, error = _parse_crawl4ai_response(api_response.data, self.include_html, self.max_content_length)
         output = error if error else content
         result = ToolOutput(output=output, called=True, error=error, timeout=False, runtime=time.time() - start_time)
-        _log_tool_call(self.call_name, url, result)
+        log_tool_call(self.call_name, url, result)
         return result
 
 
@@ -609,7 +592,7 @@ class DrAgentMCPTool(Tool):
                 timeout=any_timeout,
                 runtime=time.time() - start_time,
             )
-        _log_tool_call(self.call_name, text, result)
+        log_tool_call(self.call_name, text, result)
         return result
 
 
@@ -655,4 +638,5 @@ TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     SerperSearchToolConfig.tool_class.config_name: SerperSearchToolConfig,
     Crawl4AIBrowseToolConfig.tool_class.config_name: Crawl4AIBrowseToolConfig,
     DrAgentMCPToolConfig.tool_class.config_name: DrAgentMCPToolConfig,
+    GenericMCPToolConfig.tool_class.config_name: GenericMCPToolConfig,
 }

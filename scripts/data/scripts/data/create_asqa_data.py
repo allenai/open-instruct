@@ -1,4 +1,4 @@
-from datasets import Dataset, load_dataset
+from datasets import Dataset, DatasetDict, load_dataset
 
 import open_instruct.utils as open_instruct_utils
 
@@ -64,9 +64,6 @@ def save_to_hf_repo(train_data, val_data, repo_id):
 
     # Create a dataset dictionary with splits
     dataset_dict = {"train": train_dataset, "test": val_dataset}
-
-    # Push to Hub
-    from datasets import DatasetDict
 
     dataset_dict = DatasetDict(dataset_dict)
     dataset_dict.push_to_hub(repo_id)

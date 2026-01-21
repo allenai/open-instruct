@@ -41,7 +41,7 @@ with contextlib.suppress(Exception):
     from deepspeed.utils import groups
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import data_types, utils
+from open_instruct import data_types, grpo_utils, utils
 from open_instruct.data_loader import DataPreparationActor, accumulate_inference_batches, add_prompt_to_generator
 
 # isort: on
@@ -54,9 +54,9 @@ import shutil
 import socket
 import threading
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from queue import Empty, Full, Queue
-from typing import Any, Literal
+from typing import Any
 
 import backoff
 import datasets
@@ -83,8 +83,10 @@ from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
     INPUT_IDS_PROMPT_KEY,
+    TOOLS_COLUMN_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
+    validate_dataset_tools,
     visualize_token,
 )
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
@@ -103,8 +105,8 @@ from open_instruct.model_utils import (
 )
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.tools.parsers import create_tool_parser
-from open_instruct.tools.tools import TOOL_REGISTRY
-from open_instruct.tools.utils import ParsedToolConfig, ToolsConfig
+from open_instruct.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
+from open_instruct.tools.utils import BaseToolConfig, ParsedToolConfig, ToolsConfig
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -112,10 +114,7 @@ from open_instruct.utils import (
     RayProcess,
     UlyssesSPSplitter,
     _z3_params_to_fetch,
-    calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
-    download_latest_checkpoint_from_gs,
-    get_beaker_whoami,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
     get_train_ds_config,
@@ -135,223 +134,6 @@ logger = logger_utils.setup_logger(__name__)
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 
 
-@dataclass
-class Args:
-    # Experiment
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
-    """The name of this experiment"""
-    seed: int = 1
-    """Seed of the experiment"""
-    run_name: str | None = None
-    """RUNTIME VALUE: A unique name of this run"""
-
-    # Optimizer
-    learning_rate: float = 2e-5
-    """The initial learning rate for AdamW optimizer."""
-    lr_scheduler_type: Literal[
-        "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
-    ] = "linear"
-    """Which scheduler to use"""
-    warm_up_steps: int = 0
-    """Number of warm up steps for the scheduler"""
-    warmup_ratio: float = 0.0
-    """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
-    weight_decay: float = 0.0
-    """Weight decay for AdamW if we apply some."""
-    set_weight_decay_on_bias_and_norm: bool = True
-    """Whether to set weight decay on bias and norm layers"""
-    fused_optimizer: bool = False
-    """Whether to use fused optimizer"""
-
-    # Batch sizes
-    per_device_train_batch_size: int = 1
-    """The forward batch size per device (local_micro_batch_size)"""
-    total_episodes: int = 100000
-    """The total number of episodes in the dataset"""
-    world_size: int | None = None
-    """RUNTIME VALUE: The number of processes (GPUs) to use for training ONLY"""
-    num_training_steps: int | None = None
-    """RUNTIME VALUE: The number of training_steps to train"""
-    local_eval_every: int = 100
-    """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
-    save_freq: int = 200
-    """How many train steps to save the model"""
-    backend_timeout: int = 120
-    """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
-
-    # Algorithm
-    num_epochs: int = 1
-    """the number of epochs to train"""
-    num_mini_batches: int = 1
-    """Number of minibatches to split a batch into"""
-    beta: float = 0.05
-    """the beta value of the RLHF objective (KL coefficient)"""
-    clip_lower: float = 0.2
-    """the lower clip range"""
-    clip_higher: float = 0.2
-    """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
-    truncated_importance_sampling_ratio_cap: float = 0.0
-    """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
-    kl_estimator: Literal[0, 1, 2, 3] = 2
-    """the KL estimator to use"""
-    loss_denominator: str = "token"
-    """Optional constant denominator for masked_mean; can be "token" or a float value.
-    when "token", the loss is divided by the total number of tokens in the batch (standard LM training).
-    when a float value, the loss is divided by this value (ideally, max tokens in batch, per Dr GRPO).
-    """
-    alpha: float = 0.6
-    """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
-    reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
-    used. E.g., [TD3](https://arxiv.org/abs/1802.09477) uses https://github.com/vwxyzjn/cleanrl/blob/dcc289fc6f0bda492fa7360a155262cf826b12a5/cleanrl/td3_continuous_action.py#L269
-    """
-    ref_policy_update_freq: int | None = None
-    """How many training steps to take before updating the reference policy."""
-    load_ref_policy: bool = True
-    """Whether to load and use a reference policy for KL penalty calculation."""
-    loss_fn: Literal["dapo", "cispo"] = "dapo"
-    """Whether to use DAPO or CISPO loss function."""
-    record_entropy: bool = False
-    """whether to record the entropy of the policy during training. Uses extra memory."""
-    use_vllm_logprobs: bool = False
-    """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
-    fp32_lm_head: bool = False
-    """Force FP32 LM head projection in trainer and vLLM generator to reduce logprob mismatch."""
-    fp32_lm_head_permanent: bool = False
-    """If True, convert vLLM lm_head weights to fp32 permanently instead of caching. More memory but simpler."""
-    save_logprob_samples: bool = False
-    """Save raw vLLM vs trainer logprob samples for alignment analysis (reproduces ScaleRL Figure 3)."""
-    save_logprob_samples_max: int = 50000
-    """Maximum number of logprob samples to save."""
-
-    # Ray
-    single_gpu_mode: bool = False
-    """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
-    num_learners_per_node: list[int] = field(default_factory=lambda: [1])
-    """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
-    on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
-    sequence_parallel_size: int = 1
-    """sequence parallel size - how many GPUs we will parallelize sequences across during training.
-    Useful for super-long context lengths."""
-    deepspeed_stage: int = 0
-    """the deepspeed stage"""
-    deepspeed_zpg: int = 8
-    """the deepspeed zpg value. Higher values are more memory efficient but slower. Set to 1 to disable zpg, which uses less memory but is significantly slower. Ideally is set to the number of GPUs per node (usually 8, default)."""
-    deepspeed_offload_param: bool = False
-    """whether to offload parameters to CPU (reduces GPU memory usage)"""
-    deepspeed_offload_optimizer: bool = False
-    """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
-    gather_whole_model: bool = True
-    """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
-    enable_queue_dashboard: bool = True
-    """whether to enable the ActorManager queue monitoring dashboard"""
-    queue_dashboard_port: int | None = None
-    """optional port for the dashboard server (if None, finds a free port automatically)"""
-
-    # Experiment tracking
-    verbose: bool = False
-    """If toggled, debug output will be shown"""
-    with_tracking: bool = False
-    """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open_instruct_internal"
-    """The wandb's project name"""
-    wandb_entity: str | None = None
-    """The entity (team) of wandb's project"""
-    push_to_hub: bool = True
-    """Whether to upload the saved model to huggingface"""
-    hf_entity: str | None = None
-    """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: str | None = None
-    """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: str | None = None
-    """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: str | None = None
-    """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: str = "output"
-    """Where to save the model"""
-    save_traces: bool = False
-    """Whether to save learning data traces"""
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
-    keep_last_n_checkpoints: int = 3
-    """How many checkpoints to keep in the output directory. -1 for all."""
-    checkpoint_state_freq: int = -1
-    """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
-    checkpoint_state_dir: str | None = None
-    """Where to save the model checkpoint (if applicable)"""
-    gs_checkpoint_state_dir: str | None = None
-    """The actual `checkpoint_state_dir` to use (handling the case where gs_bucket_path is provided)"""
-
-    # Ai2 specific settings
-    try_launch_beaker_eval_jobs_on_weka: bool = False
-    """Whether to launch beaker evaluation jobs after training on weka"""
-    try_auto_save_to_beaker: bool = True
-    """Whether to try to save the model to Beaker dataset `/output` after training"""
-    gs_bucket_path: str | None = None
-    """The path to the gs bucket to save the model to"""
-    oe_eval_tasks: list[str] | None = None
-    """The beaker evaluation tasks to launch"""
-    oe_eval_max_length: int = 4096
-    """the max generation length for evaluation for oe-eval"""
-    oe_eval_beaker_image: str | None = None
-    """the docker image for evaluation for oe-eval"""
-    oe_eval_gpu_multiplier: int | None = None
-    """multiply the gpus used for each oe-eval task"""
-    eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
-    """the priority of auto-launched evaluation jobs"""
-    eval_workspace: str = "ai2/tulu-3-results"
-    """the workspace to launch evaluation jobs on"""
-    send_slack_alerts: bool = False
-    """Whether to send Slack alerts on training failures"""
-
-    # Evaluation behavior
-    eval_on_step_0: bool = False
-    """Whether to run local evaluation at training step 0. Defaults to False."""
-
-    def __post_init__(self):
-        if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
-            raise ValueError(
-                "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
-                "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
-            )
-        self.loss_denominator = utils.get_denominator(self.loss_denominator)
-        if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
-            raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
-        if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
-            raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
-
-        if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):
-            raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
-        if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
-            raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
-        if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:
-            raise ValueError("`sequence_parallel_size` > 1 requires `deepspeed_stage` to be 3!")
-
-        if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
-            if self.checkpoint_state_dir is None:
-                raise ValueError("`checkpoint_state_dir` must be provided when using `gs_bucket_path`!")
-            checkpoint_dir_name = self.checkpoint_state_dir.rstrip("/")
-            beaker_users = get_beaker_whoami()
-            if beaker_users is not None:
-                self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{beaker_users}/{checkpoint_dir_name}"
-            else:
-                self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{checkpoint_dir_name}"
-            # On GCP, all checkpointing must happen on filestore.
-            # TODO(finbarrtimbers): Change this so we can checkpoint to GCS.
-            # TODO(finbarrtimbers): Move this logic to mason.py once we refactor config.
-            if not checkpoint_dir_name.startswith("/filestore"):
-                self.checkpoint_state_dir = f"/filestore{self.checkpoint_state_dir}"
-
-        if self.checkpoint_state_dir is not None:
-            if self.gs_checkpoint_state_dir is not None:
-                download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
-            calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if not self.load_ref_policy and self.beta != 0.0:
-            raise ValueError(
-                "When load_ref_policy=False, beta must be 0.0. "
-                f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
-            )
-
-
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
     for i in range(len(tensors_list)):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
@@ -366,7 +148,7 @@ class PolicyTrainerRayProcess(RayProcess):
         local_rank: int,
         master_addr: str | None,
         master_port: int | None,
-        args: Args,
+        args: grpo_utils.ExperimentConfig,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
@@ -392,7 +174,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def from_pretrained(
         self,
-        args: Args,
+        args: grpo_utils.ExperimentConfig,
         model_config: ModelConfig,
         beaker_config: BeakerRuntimeConfig,
         wandb_url: str,
@@ -402,8 +184,8 @@ class PolicyTrainerRayProcess(RayProcess):
         # Monkey patch to load checkpoints with `weights_only=False`
         # otherwise it errors out with:
         # `_pickle.UnpicklingError: Weights only load failed. ` with pytorch 2.6.0
-        from deepspeed.runtime.checkpoint_engine import torch_checkpoint_engine
-        from deepspeed.utils import logger
+        from deepspeed.runtime.checkpoint_engine import torch_checkpoint_engine  # noqa: PLC0415
+        from deepspeed.utils import logger  # noqa: PLC0415
 
         def load(self, path: str, map_location=None):
             logger.info(f"[Torch] Loading checkpoint from {path}...")
@@ -577,7 +359,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 mpu=self.mpu,
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
-                fp32_lm_head=args.fp32_lm_head,
             )
         self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
 
@@ -616,56 +397,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.dataloader = iter(self._streaming_dataloader)
 
-        # Initialize logprob sample storage for alignment analysis (ScaleRL Figure 3)
-        self._logprob_samples = {"vllm": [], "trainer": []}
-        self._logprob_samples_saved = 0
-
         return optimization_steps_done
-
-    def _save_logprob_samples(self, vllm_logprobs: "np.ndarray", trainer_logprobs: "np.ndarray") -> None:
-        """Save logprob samples for alignment analysis."""
-        import json
-
-        if self._logprob_samples_saved >= self.args.save_logprob_samples_max:
-            return
-
-        # Only save from rank 0 to avoid duplicates
-        if self.rank != 0:
-            return
-
-        # Flatten and add to storage
-        vllm_flat = vllm_logprobs.flatten().tolist()
-        trainer_flat = trainer_logprobs.flatten().tolist()
-
-        remaining = self.args.save_logprob_samples_max - self._logprob_samples_saved
-        n_to_add = min(len(vllm_flat), remaining)
-
-        self._logprob_samples["vllm"].extend(vllm_flat[:n_to_add])
-        self._logprob_samples["trainer"].extend(trainer_flat[:n_to_add])
-        self._logprob_samples_saved += n_to_add
-
-        # Save periodically (every 10k samples) or when full
-        if (
-            self._logprob_samples_saved % 10000 == 0
-            or self._logprob_samples_saved >= self.args.save_logprob_samples_max
-        ):
-            samples_dir = os.path.join(self.args.output_dir, "logprob_samples")
-            os.makedirs(samples_dir, exist_ok=True)
-            sample_file = os.path.join(samples_dir, f"samples_{self._logprob_samples_saved}.json")
-            with open(sample_file, "w") as f:
-                json.dump(
-                    {
-                        "vllm_logprobs": self._logprob_samples["vllm"],
-                        "trainer_logprobs": self._logprob_samples["trainer"],
-                        "n_samples": self._logprob_samples_saved,
-                        "fp32_lm_head": self.args.fp32_lm_head,
-                        "fp32_lm_head_permanent": self.args.fp32_lm_head_permanent,
-                    },
-                    f,
-                )
-            logger.info(f"Saved {self._logprob_samples_saved} logprob samples to {sample_file}")
-            # Clear after saving to avoid memory growth
-            self._logprob_samples = {"vllm": [], "trainer": []}
 
     def forward(
         self,
@@ -951,7 +683,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
                 else:
                     accumulation_token_counts = {
-                        int(group_idx * accumulation_steps): self.args.loss_denominator
+                        int(group_idx * accumulation_steps): float(self.args.loss_denominator)
                         for group_idx in range((len(data_BT.query_responses) // accumulation_steps) + 1)
                     }
 
@@ -993,14 +725,6 @@ class PolicyTrainerRayProcess(RayProcess):
                             masked_reverse_kl_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
                         )
                         self.local_metrics["debug/vllm_local_reverse_kl"] = float(mean_reverse_kl)
-
-                        # Save raw logprob samples for alignment analysis (ScaleRL Figure 3)
-                        # Only save on first epoch and first mini-batch when weights match vLLM
-                        if self.args.save_logprob_samples and epoch_idx == 0 and i == 0:
-                            self._save_logprob_samples(
-                                vllm_logprobs_BT[valid_mask_BT].float().cpu().numpy(),
-                                local_logprobs_BT[valid_mask_BT].float().cpu().numpy(),
-                            )
 
                     new_logprobs_BT = local_logprobs_BT
 
@@ -1211,8 +935,6 @@ class PolicyTrainerRayProcess(RayProcess):
             return
 
         model_to_save = self.model
-        if chat_template_name is not None and "olmo" in chat_template_name:
-            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         if self.rank == 0:
             output_path.mkdir(parents=True, exist_ok=True)
@@ -1220,6 +942,15 @@ class PolicyTrainerRayProcess(RayProcess):
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
             model_to_save = model_to_save.module
+
+        # Set generation config after unwrapping to ensure it's on the actual model being saved
+        # Check both chat_template_name and model name for OLMo 3 detection
+        model_name = getattr(model_to_save.config, "_name_or_path", "") or ""
+        is_olmo3 = (
+            chat_template_name is not None and "olmo" in chat_template_name.lower()
+        ) or "olmo-3" in model_name.lower()
+        if is_olmo3:
+            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         # gather parameters
         output_state_dict = {}
@@ -1292,7 +1023,7 @@ class ModelGroup:
         ray_process_cls: RayProcess,
         num_gpus_per_node: list[int],
         single_gpu_mode: bool,
-        args: Args,
+        args: grpo_utils.ExperimentConfig,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         vllm_config: data_loader_lib.VLLMConfig,
         data_prep_actor_name: str,
@@ -1397,8 +1128,10 @@ def validate_configs(
 
 
 def setup_runtime_variables(
-    args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig, tools_config: ToolsConfig
-) -> Args:
+    args: grpo_utils.ExperimentConfig,
+    streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    tools_config: ToolsConfig,
+) -> grpo_utils.ExperimentConfig:
     """Set up runtime variables for the experiment."""
     if tools_config.enabled and (args.use_vllm_logprobs or args.truncated_importance_sampling_ratio_cap > 0.0):
         assert streaming_config.mask_tool_use, (
@@ -1432,7 +1165,7 @@ def setup_runtime_variables(
     return args
 
 
-def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerConfig, model_config: ModelConfig):
     """Setup experiment tracking and seeds."""
     all_configs = {}
     beaker_config = None
@@ -1457,14 +1190,37 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
     return beaker_config, wandb_url
 
 
+def _validate_and_log_dataset_tools(dataset, configured_tool_names: list[str] | None, dataset_name: str) -> None:
+    """Validate and log per-sample tool configuration for a dataset."""
+    if dataset and TOOLS_COLUMN_KEY in dataset.column_names and configured_tool_names:
+        logger.info(
+            f"{dataset_name} has '{TOOLS_COLUMN_KEY}' column - validating configured tools against dataset tools"
+        )
+        validate_dataset_tools(dataset, configured_tool_names, dataset_name)
+        logger.info(f"{dataset_name} has '{TOOLS_COLUMN_KEY}' column - per-sample tool activation enabled")
+
+
 def setup_datasets(
-    args: Args,
+    args: grpo_utils.ExperimentConfig,
     tc: TokenizerConfig,
     tokenizer: PreTrainedTokenizer,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     tool_definitions: list[dict[str, Any]],
+    pass_tools_to_chat_template: bool,
+    configured_tool_call_names: list[str] | None = None,
 ):
-    """Set up training and evaluation datasets."""
+    """Set up training and evaluation datasets.
+
+    Args:
+        args: Training arguments.
+        tc: Tokenizer configuration.
+        tokenizer: The tokenizer.
+        streaming_config: Data loading configuration.
+        tool_definitions: Global tool definitions in OpenAI format.
+        pass_tools_to_chat_template: Whether to pass tools to chat template.
+        configured_tool_call_names: List of tool call names configured in the launch job.
+            Used to validate against per-sample tools in datasets.
+    """
     system_prompt_override = None
     if streaming_config.system_prompt_override_file is not None:
         logger.info(f"Loading system prompt override from {streaming_config.system_prompt_override_file}")
@@ -1473,7 +1229,11 @@ def setup_datasets(
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
     transform_fn_args = [
-        {"system_prompt_override": system_prompt_override, "tool_definitions": tool_definitions},
+        {
+            "system_prompt_override": system_prompt_override,
+            "tool_definitions": tool_definitions,
+            "pass_tools_to_chat_template": pass_tools_to_chat_template,
+        },
         {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
@@ -1489,6 +1249,8 @@ def setup_datasets(
         dataset_skip_cache=streaming_config.dataset_skip_cache,
         system_prompt_override=system_prompt_override,
     )
+
+    _validate_and_log_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
     train_dataset = train_dataset.shuffle(seed=args.seed)
 
     if len(streaming_config.dataset_mixer_eval_list) > 0:
@@ -1505,6 +1267,8 @@ def setup_datasets(
             dataset_skip_cache=streaming_config.dataset_skip_cache,
             system_prompt_override=system_prompt_override,
         )
+
+        _validate_and_log_dataset_tools(eval_dataset, configured_tool_call_names, "eval_dataset")
         if streaming_config.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
     else:
@@ -1515,19 +1279,22 @@ def setup_datasets(
     return train_dataset, eval_dataset
 
 
-def create_tools(parsed_tools: list[ParsedToolConfig]) -> list[ray.actor.ActorHandle]:
+def create_tools(parsed_tools: list[ParsedToolConfig]) -> tuple[list[ray.actor.ActorHandle], list[str]]:
     """Create tool actors based on tool configuration using the TOOL_REGISTRY.
 
     Args:
         parsed_tools: List of ParsedTool instances containing name, call_name, and config.
 
     Returns:
-        A list of Ray actor handles for the requested tools.
+        A tuple of (tool_actors, tool_call_names) where:
+        - tool_actors: List of Ray actor handles for the requested tools.
+        - tool_call_names: List of call names for each tool (may differ from input for MCP tools, which decide their own call names).
 
     Raises:
         ValueError: If an unknown tool is requested, configs are invalid, or required fields are missing.
     """
     tool_actors = []
+    tool_call_names = []
 
     for parsed_tool in parsed_tools:
         if parsed_tool.name not in TOOL_REGISTRY:
@@ -1541,16 +1308,36 @@ def create_tools(parsed_tools: list[ParsedToolConfig]) -> list[ray.actor.ActorHa
         except Exception as e:
             raise ValueError(f"Invalid config for tool '{parsed_tool.name}': {e}") from e
 
-        # The config is a dataclass, and may have performed additional validation
-        # or transformation of the args, which we then now pass to the tool.
-        _kwarg_dict = asdict(config) | {"call_name": parsed_tool.call_name}
-        tool_actors.append(ray.remote(tool_config_class.tool_class).options(max_concurrency=512).remote(**_kwarg_dict))
+        # Collect (config, call_name, tool_class) tuples to process
+        # special logic for MCP tools: we ask the mcp server what tools it has, and then create actors for each.
+        configs_to_create: list[tuple[BaseToolConfig, str, type]] = []
 
-    return tool_actors
+        if isinstance(config, GenericMCPToolConfig) and config.tool_name is None:
+            logger.info(f"Auto-discovering tools from MCP server for '{parsed_tool.name}'...")
+            expanded_configs = asyncio.run(config.expand_tools())
+            for expanded_config in expanded_configs:
+                configs_to_create.append((expanded_config, expanded_config.tool_name, tool_config_class.tool_class))
+            logger.info(
+                f"Discovered {len(expanded_configs)} tools from MCP server: {[c.tool_name for c in expanded_configs]}"
+            )
+        else:
+            configs_to_create.append((config, parsed_tool.call_name, tool_config_class.tool_class))
+
+        for cfg, call_name, tool_class in configs_to_create:
+            _kwarg_dict = asdict(cfg) | {"call_name": call_name}
+            # max_concurrency is only needed for Ray actor options, not passed to the tool class
+            tool_actors.append(
+                ray.remote(tool_class)
+                .options(max_concurrency=_kwarg_dict.pop("max_concurrency"))
+                .remote(**_kwarg_dict)
+            )
+            tool_call_names.append(call_name)
+
+    return tool_actors, tool_call_names
 
 
 def create_model_and_optimizer(
-    args: Args,
+    args: grpo_utils.ExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     beaker_config: BeakerRuntimeConfig,
@@ -1702,7 +1489,9 @@ def create_model_and_optimizer(
     return (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor)
 
 
-def create_generation_configs(args: Args, streaming_config: data_loader_lib.StreamingDataLoaderConfig):
+def create_generation_configs(
+    args: grpo_utils.ExperimentConfig, streaming_config: data_loader_lib.StreamingDataLoaderConfig
+):
     """Create generation configs for training and evaluation."""
     generation_config = vllm_utils.SamplingConfig(
         temperature=streaming_config.temperature,
@@ -1718,7 +1507,7 @@ def create_generation_configs(args: Args, streaming_config: data_loader_lib.Stre
 
 
 def weight_sync_thread(
-    args: Args,
+    args: grpo_utils.ExperimentConfig,
     stop_event: threading.Event,
     weight_sync_trigger_event: threading.Event,
     policy_group: ModelGroup,
@@ -1779,7 +1568,7 @@ def weight_sync_thread(
 
 
 def one_training_step(
-    args: Args,
+    args: grpo_utils.ExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
@@ -1905,7 +1694,7 @@ def one_training_step(
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
 def maybe_save_checkpoint(
-    args: Args,
+    args: grpo_utils.ExperimentConfig,
     training_step: int,
     policy_group: ModelGroup,
     chat_template_name: str,
@@ -1937,7 +1726,7 @@ def maybe_save_checkpoint(
 
 
 def maybe_evaluate(
-    args: Args,
+    args: grpo_utils.ExperimentConfig,
     training_step: int,
     evaluation_inference_results_Q: ray_queue.Queue,
     tokenizer,
@@ -2000,6 +1789,8 @@ def maybe_evaluate(
         table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
         table["scores"] = eval_batch.scores
         table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
+        if eval_batch.active_tools is not None:
+            table["active_tools"] = [str(tools) if tools is not None else "all" for tools in eval_batch.active_tools]
         df = pd.DataFrame(table)
 
         if args.with_tracking:
@@ -2013,7 +1804,7 @@ def maybe_evaluate(
 
 
 def save_final_model(
-    args: Args,
+    args: grpo_utils.ExperimentConfig,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
     training_step: int,
@@ -2309,7 +2100,7 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
-def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, list[str]]:
+def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, list[str], list[str]]:
     """Initialize tool actors and get tool definitions and stop sequences.
 
     Args:
@@ -2317,9 +2108,11 @@ def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, 
         tokenizer: Tokenizer for the model.
 
     Returns:
-        Tuple of (tool_actors, tool_definitions, stop_sequences).
+        Tuple of (tool_actors, tool_definitions, stop_sequences, tool_call_names).
+        Note: tool_call_names may differ from tools_config.tool_call_names if MCP
+        tools were auto-expanded.
     """
-    tool_actors = create_tools(tools_config._parsed_tools)
+    tool_actors, tool_call_names = create_tools(tools_config._parsed_tools)
     tool_definitions = (
         ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
     )
@@ -2332,11 +2125,11 @@ def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, 
             parser_type=tools_config.tool_parser_type, tool_actors=tool_actors, tokenizer=tokenizer
         ).stop_sequences
 
-    return tool_actors, tool_definitions, stop_sequences
+    return tool_actors, tool_definitions, stop_sequences, tool_call_names
 
 
 def main(
-    args: Args,
+    args: grpo_utils.ExperimentConfig,
     tc: TokenizerConfig,
     model_config: ModelConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -2362,16 +2155,24 @@ def main(
     # We have to initialize ray earlier for constructing Tools (they are implemented as ray actors).
     ray.init(dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"], "env_vars": dict(os.environ)})
 
-    tool_actors, tool_definitions, tool_stop_sequences = initialize_tools(tools_config, tokenizer)
+    tool_actors, tool_definitions, tool_stop_sequences, tool_call_names = initialize_tools(tools_config, tokenizer)
     logger.info(
         f"Initialized {len(tool_actors)} tool actors with definitions: {[d['function']['name'] for d in tool_definitions]}"
     )
+    # Update tools_config with expanded tool call names (for MCP auto-expansion)
+    tools_config.tool_call_names = tool_call_names
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
 
     train_dataset, eval_dataset = setup_datasets(
-        args, tc, tokenizer, streaming_config, tool_definitions if tools_config.pass_tools_to_chat_template else []
+        args,
+        tc,
+        tokenizer,
+        streaming_config,
+        tool_definitions,
+        pass_tools_to_chat_template=tools_config.pass_tools_to_chat_template,
+        configured_tool_call_names=tools_config.tool_call_names if tools_config.enabled else None,
     )
 
     if len(train_dataset) < (
@@ -2517,7 +2318,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParserPlus(
         (
-            Args,
+            grpo_utils.ExperimentConfig,
             TokenizerConfig,
             ModelConfig,
             data_loader_lib.StreamingDataLoaderConfig,
@@ -2528,7 +2329,7 @@ if __name__ == "__main__":
     args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
         parser.parse_args_into_dataclasses()
     )
-    assert isinstance(args, Args)
+    assert isinstance(args, grpo_utils.ExperimentConfig)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)

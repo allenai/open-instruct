@@ -19,7 +19,7 @@ import os
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+    from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum, OffloadStateTypeEnum
     import deepspeed.comm as dist
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
@@ -59,6 +59,7 @@ import ray
 import requests
 import torch
 import torch.nn.functional as F
+import wandb
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -1301,8 +1302,6 @@ def retry_on_exception(max_attempts=4, delay=1, backoff=2):
 @functools.lru_cache(maxsize=1)
 def maybe_use_ai2_wandb_entity() -> str | None:
     """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
-    import wandb
-
     wandb.login()
     api = wandb.Api()
     current_user = api.viewer
@@ -1526,7 +1525,7 @@ class RayProcess:
         if _SET_AFFINITY:
             return
 
-        from ctypes.util import find_library
+        from ctypes.util import find_library  # noqa: PLC0415
 
         class bitmask_t(Structure):
             _fields_ = [("size", c_ulong), ("maskp", POINTER(c_ulong))]
@@ -1556,8 +1555,6 @@ class RayProcess:
         self._set_numa_affinity(torch.distributed.get_rank() % torch.cuda.device_count())
 
         if model.zero_optimization_stage() == 3:
-            from deepspeed.runtime.zero.offload_config import OffloadStateTypeEnum
-
             model.optimizer.offload_states(
                 include=[
                     OffloadStateTypeEnum.optim_states,
@@ -2422,8 +2419,6 @@ def check_calculation(
     if percentage <= 100:
         return
 
-    import json
-
     full_device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
 
     avg_prompt_length = sum(prompt_lengths) / len(prompt_lengths)
@@ -2585,16 +2580,3 @@ class UlyssesSPSplitter:
             kwargs[field.name] = sharded
 
         return data_types.CollatedBatchData(**kwargs)
-
-
-def get_denominator(loss_denominator: str | float) -> float | str:
-    """
-    Validates and converts the loss_denominator argument.
-    """
-    if loss_denominator == "token":
-        return "token"
-
-    val = float(loss_denominator)
-    if val <= 0:
-        raise ValueError(f"loss_denominator must be greater than 0 if not 'token', got: {loss_denominator}")
-    return val
