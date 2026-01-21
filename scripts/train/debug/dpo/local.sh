@@ -1,5 +1,5 @@
 #!/bin/bash
-torchrun --nproc_per_node=1 open_instruct/dpo.py \
+uv run torchrun --nproc_per_node=1 open_instruct/dpo.py \
     --model_name_or_path allenai/OLMo-2-0425-1B \
     --tokenizer_name allenai/OLMo-2-0425-1B \
     --use_flash_attn false \
