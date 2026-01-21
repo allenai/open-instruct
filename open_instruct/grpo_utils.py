@@ -180,10 +180,8 @@ class ExperimentConfig:
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
-if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
-            raise ValueError(
-                f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
-            )
+        if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
+            raise ValueError(f"loss_denominator must be greater than 0 if not 'token', got: {self.loss_denominator}")
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
