@@ -1,16 +1,19 @@
-"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, and Crawl4AIBrowseTool from tools.py)."""
+"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, Crawl4AIBrowseTool, and GenericMCPTool from tools.py)."""
 
 import asyncio
 import dataclasses
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import aiohttp
 from parameterized import parameterized
 
 from open_instruct import data_types
+from open_instruct.tools.generic_mcp import GenericMCPTool, GenericMCPToolConfig
 from open_instruct.tools.tools import (
+    TOOL_REGISTRY,
     Crawl4AIBrowseTool,
     Crawl4AIBrowseToolConfig,
     JinaBrowseTool,
@@ -21,7 +24,6 @@ from open_instruct.tools.tools import (
     S2SearchToolConfig,
     SerperSearchTool,
     SerperSearchToolConfig,
-    _truncate,
 )
 from open_instruct.tools.utils import (
     APIResponse,
@@ -30,6 +32,8 @@ from open_instruct.tools.utils import (
     ToolsConfig,
     ToolStatistics,
     get_openai_tool_definitions,
+    make_api_request,
+    truncate,
 )
 
 
@@ -250,7 +254,7 @@ class TestPythonCodeToolConfig(unittest.TestCase):
 
 
 class TestTruncateHelper(unittest.TestCase):
-    """Tests for _truncate helper function."""
+    """Tests for truncate helper function."""
 
     @parameterized.expand(
         [
@@ -261,8 +265,8 @@ class TestTruncateHelper(unittest.TestCase):
         ]
     )
     def test_truncate(self, name, text, max_length, expected_result, should_truncate):
-        """Test _truncate with various inputs."""
-        result = _truncate(text, max_length=max_length)
+        """Test truncate with various inputs."""
+        result = truncate(text, max_length=max_length)
 
         if should_truncate:
             self.assertTrue(result.startswith(text[:max_length]))
@@ -1343,6 +1347,244 @@ class TestToolsConfig(unittest.TestCase):
         """Test ToolsConfig raises on invalid JSON in tool_configs."""
         with self.assertRaisesRegex(ValueError, "Invalid tool_config for tool python"):
             ToolsConfig(tools=["python"], tool_configs=["not valid json"])
+
+
+def _run_with_mock_responses(responses: list, **request_kwargs):
+    """Run make_api_request with mocked responses.
+
+    Args:
+        responses: List of (status, json_data, reason) tuples or Exception instances.
+        **request_kwargs: Additional kwargs for make_api_request.
+
+    Returns:
+        Tuple of (result, call_count).
+    """
+    call_count = {"count": 0}
+
+    async def mock_request(*args, **kwargs):
+        idx = min(call_count["count"], len(responses) - 1)
+        call_count["count"] += 1
+        response_spec = responses[idx]
+
+        if isinstance(response_spec, Exception):
+            raise response_spec
+
+        status, json_data, reason = response_spec
+        mock_response = unittest.mock.MagicMock()
+        mock_response.status = status
+        mock_response.reason = reason
+        mock_response.headers = {}
+        mock_response.json = unittest.mock.AsyncMock(return_value=json_data)
+
+        if status >= 400:
+            mock_response.raise_for_status.side_effect = aiohttp.ClientResponseError(
+                request_info=unittest.mock.MagicMock(), history=(), status=status, message=reason
+            )
+        return mock_response
+
+    # Create a mock that properly handles nested async context managers
+    async def run_test():
+        with patch("open_instruct.tools.utils.aiohttp.ClientSession") as mock_session_class:
+            # Mock the ClientSession context manager
+            mock_session = unittest.mock.MagicMock()
+
+            # Create response context manager mock
+            response_cm = unittest.mock.MagicMock()
+            response_cm.__aenter__ = mock_request
+            response_cm.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+
+            mock_session.post.return_value = response_cm
+            mock_session.get.return_value = response_cm
+
+            # Mock ClientSession as context manager
+            session_cm = unittest.mock.MagicMock()
+            session_cm.__aenter__ = unittest.mock.AsyncMock(return_value=mock_session)
+            session_cm.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+            mock_session_class.return_value = session_cm
+
+            result = await make_api_request(
+                "http://test.com",
+                timeout_seconds=10,
+                base_delay=0.001,  # Use very short delay for tests
+                max_delay=0.01,
+                **request_kwargs,
+            )
+            return result
+
+    result = asyncio.run(run_test())
+    return result, call_count["count"]
+
+
+class TestMakeApiRequestRetry(unittest.TestCase):
+    """Tests for make_api_request retry behavior."""
+
+    def test_successful_request_no_retry(self):
+        """Test that successful requests don't retry."""
+        result, count = _run_with_mock_responses([(200, {"result": "ok"}, "OK")], max_retries=3)
+
+        self.assertEqual(result.data, {"result": "ok"})
+        self.assertEqual(result.error, "")
+        self.assertEqual(count, 1)
+
+    @parameterized.expand(
+        [
+            ("429_rate_limit", [(429, None, "Too Many Requests"), (200, {"result": "ok"}, "OK")], 2),
+            ("500_server_error", [(500, None, "Internal Server Error"), (200, {"result": "ok"}, "OK")], 2),
+            ("503_unavailable", [(503, None, "Service Unavailable"), (200, {"result": "ok"}, "OK")], 2),
+            ("multiple_5xx", [(500, None, "Error"), (503, None, "Error"), (200, {"result": "ok"}, "OK")], 3),
+        ]
+    )
+    def test_retryable_status_codes(self, name, responses, expected_count):
+        """Test that retryable status codes (429, 5xx) trigger retries and eventually succeed."""
+        result, count = _run_with_mock_responses(responses, max_retries=3)
+
+        self.assertEqual(result.data, {"result": "ok"})
+        self.assertEqual(count, expected_count)
+
+    @parameterized.expand(
+        [
+            ("400_bad_request", 400, "Bad Request"),
+            ("401_unauthorized", 401, "Unauthorized"),
+            ("403_forbidden", 403, "Forbidden"),
+            ("404_not_found", 404, "Not Found"),
+            ("422_unprocessable", 422, "Unprocessable Entity"),
+        ]
+    )
+    def test_non_retryable_4xx_errors(self, name, status, reason):
+        """Test that non-429 4xx errors do not trigger retries."""
+        result, count = _run_with_mock_responses([(status, None, reason)], max_retries=3)
+
+        self.assertIn(str(status), result.error)
+        self.assertEqual(count, 1)
+
+    @parameterized.expand(
+        [
+            ("timeout", [asyncio.TimeoutError(), asyncio.TimeoutError(), (200, {"result": "ok"}, "OK")], 3),
+            ("connection_refused", "connection_error", 2),  # Special case handled below
+        ]
+    )
+    def test_retryable_exceptions(self, name, responses, expected_count):
+        """Test that retryable exceptions trigger retries."""
+        if responses == "connection_error":
+            responses = [
+                aiohttp.ClientConnectorError(unittest.mock.MagicMock(), OSError("Connection refused")),
+                (200, {"result": "ok"}, "OK"),
+            ]
+        result, count = _run_with_mock_responses(responses, max_retries=3)
+
+        self.assertEqual(result.data, {"result": "ok"})
+        self.assertEqual(count, expected_count)
+
+    @parameterized.expand(
+        [
+            ("max_retries_2", 2, 3),  # 1 initial + 2 retries = 3 attempts
+            ("max_retries_0", 0, 1),  # No retries, just 1 attempt
+            ("max_retries_1", 1, 2),  # 1 initial + 1 retry = 2 attempts
+        ]
+    )
+    def test_max_retries_respected(self, name, max_retries, expected_count):
+        """Test that the number of retries respects max_retries."""
+        result, count = _run_with_mock_responses([(500, None, "Internal Server Error")] * 10, max_retries=max_retries)
+
+        self.assertEqual(count, expected_count)
+        self.assertIn("500", result.error)
+
+    def test_timeout_error_returns_timed_out_flag(self):
+        """Test that timeout errors set timed_out=True in response."""
+        result, count = _run_with_mock_responses([asyncio.TimeoutError()] * 5, max_retries=2)
+
+        self.assertTrue(result.timed_out)
+        self.assertIn("Timeout", result.error)
+
+
+class TestGenericMCPToolExecution(unittest.TestCase):
+    """Tests for GenericMCPTool execution."""
+
+    @patch("open_instruct.tools.generic_mcp._call_mcp_tool")
+    def test_execute_success(self, mock_call):
+        """Test successful tool execution."""
+        mock_result = MagicMock()
+        mock_result.content = [MagicMock(type="text", text="result text")]
+        mock_result.structuredContent = None
+        mock_call.return_value = mock_result
+
+        tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool")
+        result = asyncio.run(tool.execute(query="test"))
+
+        self.assertTrue(result.called)
+        self.assertEqual(result.output, "result text")
+        self.assertEqual(result.error, "")
+
+    @patch("open_instruct.tools.generic_mcp._call_mcp_tool")
+    def test_execute_timeout(self, mock_call):
+        """Test tool execution timeout."""
+        mock_call.side_effect = asyncio.TimeoutError()
+
+        tool = GenericMCPTool(
+            call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool", timeout=1
+        )
+        result = asyncio.run(tool.execute(query="test"))
+
+        self.assertTrue(result.called)
+        self.assertTrue(result.timeout)
+        self.assertIn("Timeout", result.error)
+
+
+class TestGenericMCPToolConfig(unittest.TestCase):
+    """Tests for GenericMCPToolConfig."""
+
+    def test_config_default_values(self):
+        """Test config has correct default values."""
+        config = GenericMCPToolConfig()
+        self.assertEqual(config.server_url, "")
+        self.assertEqual(config.transport, "http")
+        self.assertEqual(config.command, "")
+        self.assertEqual(config.args, [])
+        self.assertEqual(config.env, {})
+        self.assertEqual(config.timeout, 60)
+        self.assertEqual(config.max_retries, 3)
+        self.assertEqual(config.retry_backoff, 0.5)
+        self.assertIsNone(config.tool_name)
+
+    def test_config_custom_values(self):
+        """Test config accepts custom values."""
+        config = GenericMCPToolConfig(
+            server_url="http://localhost:9000/mcp", transport="sse", timeout=120, max_retries=5, tool_name="my_tool"
+        )
+        self.assertEqual(config.server_url, "http://localhost:9000/mcp")
+        self.assertEqual(config.transport, "sse")
+        self.assertEqual(config.timeout, 120)
+        self.assertEqual(config.max_retries, 5)
+        self.assertEqual(config.tool_name, "my_tool")
+
+    def test_config_stdio_values(self):
+        """Test config with stdio transport values."""
+        config = GenericMCPToolConfig(transport="stdio", command="python", args=["server.py"], env={"DEBUG": "1"})
+        self.assertEqual(config.transport, "stdio")
+        self.assertEqual(config.command, "python")
+        self.assertEqual(config.args, ["server.py"])
+        self.assertEqual(config.env, {"DEBUG": "1"})
+
+    def test_tool_class_attribute(self):
+        """Test tool_class is set to GenericMCPTool."""
+
+        self.assertEqual(GenericMCPToolConfig.tool_class, GenericMCPTool)
+
+    def test_expand_tools_returns_self_when_tool_name_set(self):
+        """Test expand_tools returns [self] when tool_name is specified."""
+        config = GenericMCPToolConfig(server_url="http://localhost:8000/mcp", tool_name="my_tool")
+        expanded = asyncio.run(config.expand_tools())
+        self.assertEqual(len(expanded), 1)
+        self.assertEqual(expanded[0].tool_name, "my_tool")
+
+
+class TestGenericMCPToolInRegistry(unittest.TestCase):
+    """Tests for GenericMCPTool in TOOL_REGISTRY."""
+
+    def test_generic_mcp_in_registry(self):
+        """Test generic_mcp is in TOOL_REGISTRY."""
+        self.assertIn("generic_mcp", TOOL_REGISTRY)
+        self.assertEqual(TOOL_REGISTRY["generic_mcp"], GenericMCPToolConfig)
 
 
 if __name__ == "__main__":

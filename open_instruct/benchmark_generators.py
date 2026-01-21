@@ -27,7 +27,7 @@ import torch.utils.flop_counter
 import vllm
 from ray.util import queue as ray_queue
 
-from open_instruct import data_loader, dataset_transformation, grpo_fast, logger_utils, model_utils, utils, vllm_utils
+from open_instruct import data_loader, dataset_transformation, grpo_utils, logger_utils, model_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import PromptRequest
 
@@ -211,7 +211,7 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
 
 
 def setup_dataset(
-    args: grpo_fast.Args,
+    args: grpo_utils.ExperimentConfig,
     streaming_config: data_loader.StreamingDataLoaderConfig,
     tokenizer_config: dataset_transformation.TokenizerConfig,
 ) -> datasets.Dataset:
@@ -244,7 +244,7 @@ def setup_dataset(
 
 
 def setup_vllm_engines(
-    args: grpo_fast.Args,
+    args: grpo_utils.ExperimentConfig,
     streaming_config: data_loader.StreamingDataLoaderConfig,
     vllm_config: data_loader.VLLMConfig,
     tokenizer_config: dataset_transformation.TokenizerConfig,
@@ -292,7 +292,7 @@ def setup_vllm_engines(
 
 
 def simulate_weight_sync(
-    actor_manager: ray.actor.ActorHandle, vllm_engines: list[ray.actor.ActorHandle], args: grpo_fast.Args
+    actor_manager: ray.actor.ActorHandle, vllm_engines: list[ray.actor.ActorHandle], args: grpo_utils.ExperimentConfig
 ) -> float:
     """Simulate weight sync by pausing all actors.
 
@@ -363,7 +363,7 @@ def run_benchmark(
     param_prompt_Q: ray_queue.Queue,
     inference_results_Q: ray_queue.Queue,
     actor_manager: ray.actor.ActorHandle,
-    args: grpo_fast.Args,
+    args: grpo_utils.ExperimentConfig,
     streaming_config: data_loader.StreamingDataLoaderConfig,
     vllm_config: data_loader.VLLMConfig,
     model_config: model_utils.ModelConfig,
@@ -670,7 +670,7 @@ def main() -> None:
     # Parse arguments using ArgumentParserPlus
     parser = utils.ArgumentParserPlus(
         (
-            grpo_fast.Args,
+            grpo_utils.ExperimentConfig,
             dataset_transformation.TokenizerConfig,
             model_utils.ModelConfig,
             data_loader.StreamingDataLoaderConfig,
@@ -680,7 +680,7 @@ def main() -> None:
 
     args, tokenizer_config, model_config, streaming_config, vllm_config = cast(
         tuple[
-            grpo_fast.Args,
+            grpo_utils.ExperimentConfig,
             dataset_transformation.TokenizerConfig,
             model_utils.ModelConfig,
             data_loader.StreamingDataLoaderConfig,

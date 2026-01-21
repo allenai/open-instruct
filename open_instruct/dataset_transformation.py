@@ -1380,19 +1380,21 @@ def rlvr_tokenize_v2(
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
-    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
-    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
-    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
-    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # if the verifier source is a string, we wrap it in a list (compatibility with multi-verifier datasets)
+    # we also then wrap ground truths in a list to match.
+    if isinstance(verifier_source_val, str):
+        verifier_source_val = [verifier_source_val]
+        ground_truths_val = [ground_truths_val]
+    row[GROUND_TRUTHS_KEY] = ground_truths_val
+    row[VERIFIER_SOURCE_KEY] = verifier_source_val
+
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
-    # some basic transformations:
-    # if ground truths is a string, make it a list
-    if isinstance(row[ground_truths_key], str):
-        row[ground_truths_key] = [row[ground_truths_key]]
-    # if dataset source is a string, make it a list
-    if isinstance(row[verifier_source_key], str):
-        row[verifier_source_key] = [row[verifier_source_key]]
     # drop the messages field as it often causes issues.
     row.pop(sft_messages_key)
     return row
@@ -1437,19 +1439,24 @@ def rlvr_tokenize_v3(
     )
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
-    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
-    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
-    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
-    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # if the verifier source is a string, we wrap it in a list (compatibility with multi-verifier datasets)
+    # we also then wrap ground truths in a list to match.
+    if isinstance(verifier_source_val, str):
+        verifier_source_val = [verifier_source_val]
+        ground_truths_val = [ground_truths_val]
+    row[GROUND_TRUTHS_KEY] = ground_truths_val
+    row[VERIFIER_SOURCE_KEY] = verifier_source_val
+
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
-    # some basic transformations:
-    # if ground truths is a string, make it a list
-    if isinstance(row[ground_truths_key], str):
-        row[ground_truths_key] = [row[ground_truths_key]]
-    # if dataset source is a string, make it a list
-    if isinstance(row[verifier_source_key], str):
-        row[verifier_source_key] = [row[verifier_source_key]]
     return row
 
 
@@ -1681,16 +1688,31 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     return dataset
 
 
+def _get_serializable_dataset_config_dict(dc: DatasetConfig, exclude_none: bool = False) -> dict:
+    """Convert DatasetConfig to a JSON-serializable dict.
+
+    Args:
+        dc: The DatasetConfig to convert.
+        exclude_none: If True, exclude keys with None values (useful for hashing).
+
+    Returns:
+        A dictionary representation of the DatasetConfig, excluding the non-serializable
+        'dataset' field.
+    """
+    d = asdict(dc)
+    d.pop("dataset", None)
+    if exclude_none:
+        d = {k: v for k, v in d.items() if v is not None}
+    return d
+
+
 def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     """Compute a deterministic hash of both configs for caching.
 
     The hash includes DATASET_CACHE_VERSION to invalidate old caches when
     transformation logic changes significantly.
     """
-    non_serializable_keys = {"dataset"}
-    dc_dicts = [
-        {k: v for k, v in asdict(dc).items() if v is not None and k not in non_serializable_keys} for dc in dcs
-    ]
+    dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
     combined_dict = {"cache_version": DATASET_CACHE_VERSION, "dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
     config_str = json.dumps(combined_dict, sort_keys=True)
@@ -1804,9 +1826,10 @@ class LocalDatasetTransformationCache:
         config_path = os.path.join(self.get_cache_path(), "config.json")
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
 
+        # Filter out `dataset` field because HuggingFace Dataset objects are not JSON serializable
         config_dict = {
             "tokenizer_config": asdict(tc),
-            "dataset_configs": [asdict(dc) for dc in dcs],
+            "dataset_configs": [_get_serializable_dataset_config_dict(dc) for dc in dcs],
             "config_hash": config_hash,
         }
         with open(config_path, "w") as f:
