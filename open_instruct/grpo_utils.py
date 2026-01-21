@@ -66,7 +66,7 @@ class ExperimentConfig:
     """The maximum cap for truncated importance sampling ratio (0 means disabled)"""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
-    loss_denominator: str | float = "token"
+    loss_denominator: str = "token"
     """Optional constant denominator for masked_mean; can be "token" or a float value.
     when "token", the loss is divided by the total number of tokens in the batch (standard LM training).
     when a float value, the loss is divided by this value (ideally, max tokens in batch, per Dr GRPO).
@@ -181,7 +181,7 @@ class ExperimentConfig:
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
-        self.loss_denominator = utils.get_denominator(self.loss_denominator)
+        self.loss_denominator = utils.get_denominator(self.loss_denominator)  # type: ignore[assignment]
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
