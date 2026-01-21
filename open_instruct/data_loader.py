@@ -16,7 +16,6 @@ import datetime
 import json
 import logging
 import os
-import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -77,17 +76,10 @@ class RolloutRecord:
     tool_info: dict | None = None
 
 
-def get_git_commit() -> str:
-    try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL).strip()
-    except Exception:
-        return "unknown"
-
-
 def save_rollout_metadata(save_path: str, run_name: str, model_name: str | None) -> None:
     metadata = RolloutMetadata(
         run_name=run_name,
-        git_commit=get_git_commit(),
+        git_commit=utils.get_git_commit(),
         model_name=model_name or "unknown",
         timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
     )
