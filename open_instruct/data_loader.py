@@ -515,6 +515,9 @@ class StreamingDataLoaderConfig:
         if self.apply_r1_style_format_reward and self.additive_format_reward:
             self.max_possible_score += self.r1_style_format_reward
 
+        if self.save_traces and not self.rollouts_save_path:
+            raise ValueError("`rollouts_save_path` must be provided when `save_traces` is True.")
+
     def build_dataloader(
         self,
         data_prep_actor_name: str,
