@@ -34,13 +34,13 @@ uv run python mason.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 32 \
     --dataset_mixer_eval_list_splits train \
-    --max_prompt_token_length 512 \
-    --response_length 512 \
-    --pack_length 1024 \
+    --max_prompt_token_length 2048 \
+    --response_length 8192 \
+    --pack_length 16384 \
     --inflight_updates True \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 32 \
-    --num_samples_per_prompt_rollout 4 \
+    --num_samples_per_prompt_rollout 8 \
     --model_name_or_path allenai/Olmo-3-7B-Instruct-SFT \
     --apply_verifiable_reward true \
     --temperature 1.0 \
@@ -48,7 +48,7 @@ uv run python mason.py \
     --sft_messages_key messages \
     --exp_name olmo3_7b_tool_use_test \
     --learning_rate 5e-7 \
-    --total_episodes $((5 * 32 * 4)) \
+    --total_episodes $((5 * 32 * 8)) \
     --deepspeed_stage 3 \
     --sequence_parallel_size 2 \
     --with_tracking \
@@ -56,7 +56,7 @@ uv run python mason.py \
     --num_learners_per_node 8 \
     --vllm_num_engines 8 \
     --vllm_tensor_parallel_size 1 \
-    --beta 0.01 \
+    --beta 0.0 \
     --seed 1 \
     --local_eval_every 10 \
     --gradient_checkpointing \
