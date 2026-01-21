@@ -28,6 +28,7 @@ if [ "$status" != "0" ]; then
     exit 1
 fi
 
+# Output experiment info for GitHub Actions to update PR body with GPU_TESTS override
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "exp_id=$exp_id" >> "$GITHUB_OUTPUT"
     echo "exp_url=$exp_url" >> "$GITHUB_OUTPUT"
