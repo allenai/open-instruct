@@ -133,77 +133,6 @@ logger = logger_utils.setup_logger(__name__)
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 
 
-def verify_model_checkpoint(output_dir: str) -> bool:
-    """Verify that a model checkpoint is valid.
-
-    Returns True if:
-    - .checkpoint_complete marker exists
-    - config.json exists
-    - Model weights file exists and is > 1KB (safetensors or pytorch_model.bin)
-    """
-    output_path = pathlib.Path(output_dir)
-    marker_path = output_path / CHECKPOINT_COMPLETE_MARKER
-    config_path = output_path / "config.json"
-    safetensors_path = output_path / "model.safetensors"
-    pytorch_path = output_path / "pytorch_model.bin"
-
-    if not marker_path.exists():
-        return False
-    if not config_path.exists():
-        return False
-
-    weights_valid = False
-    if (
-        safetensors_path.exists()
-        and safetensors_path.stat().st_size > 1024
-        or pytorch_path.exists()
-        and pytorch_path.stat().st_size > 1024
-    ):
-        weights_valid = True
-
-    return weights_valid
-
-
-def verify_deepspeed_state_checkpoint(checkpoint_dir: str, expected_step: int) -> bool:
-    """Verify that a DeepSpeed state checkpoint is valid.
-
-    Returns True if:
-    - global_step{N} directory exists and is non-empty
-    """
-    checkpoint_path = pathlib.Path(checkpoint_dir)
-    step_dir = checkpoint_path / f"global_step{expected_step}"
-    if not step_dir.exists() or not step_dir.is_dir():
-        return False
-    return any(step_dir.iterdir())
-
-
-def verify_traces(rollouts_save_path: str, run_name: str) -> bool:
-    """Verify that traces are saved correctly.
-
-    Returns True if:
-    - Metadata file {run_name}_metadata.jsonl exists
-    - At least one rollout file {run_name}_rollouts_*.jsonl exists
-    """
-    rollouts_path = pathlib.Path(rollouts_save_path)
-    if not rollouts_path.exists():
-        return False
-
-    metadata_file = rollouts_path / f"{run_name}_metadata.jsonl"
-    if not metadata_file.exists():
-        return False
-
-    rollout_files = list(rollouts_path.glob(f"{run_name}_rollouts_*.jsonl"))
-    return len(rollout_files) > 0
-
-
-def log_verification(name: str, success: bool, with_tracking: bool, step: int) -> None:
-    """Log verification result to console and optionally to wandb."""
-    status = "✓" if success else "✗"
-    logger.info(f"Verification {name}: {status}")
-    if with_tracking:
-        wandb.log({f"verification/{name}": success}, step=step)
-
-
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
     for i in range(len(tensors_list)):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
@@ -1787,8 +1716,6 @@ def maybe_save_checkpoint(
                     policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
                         step_dir, leaderboard_name, wandb_url, training_step
                     )
-            checkpoint_valid = verify_model_checkpoint(step_dir)
-            log_verification("model_checkpoint", checkpoint_valid, args.with_tracking, training_step)
         save_time = timer.duration
 
     return save_time
@@ -1896,11 +1823,6 @@ def save_final_model(
                 policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
                     args.output_dir, leaderboard_name, wandb_url, training_step
                 )
-        final_model_valid = verify_model_checkpoint(args.output_dir)
-        log_verification("final_model", final_model_valid, args.with_tracking, training_step)
-        if args.save_traces:
-            traces_valid = verify_traces(args.output_dir, args.run_name)
-            log_verification("traces", traces_valid, args.with_tracking, training_step)
 
 
 def make_tokenizer(tc: TokenizerConfig, model_config: ModelConfig):
@@ -2145,8 +2067,6 @@ def run_training(
                     desc=f"Saving checkpoint state at step {training_step}",
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
-                ds_checkpoint_valid = verify_deepspeed_state_checkpoint(args.checkpoint_state_dir, training_step)
-                log_verification("deepspeed_state_checkpoint", ds_checkpoint_valid, args.with_tracking, training_step)
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
         weight_sync_trigger_event.set()
