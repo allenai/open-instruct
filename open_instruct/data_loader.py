@@ -12,8 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
+import json
 import logging
 import os
+import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -46,6 +49,94 @@ from open_instruct.tools.utils import ToolStatistics
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
+
+_rollout_executor = ThreadPoolExecutor(max_workers=2)
+ROLLOUT_SHARD_SIZE = 10000
+
+
+def get_git_commit() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL).strip()
+    except Exception:
+        return "unknown"
+
+
+def save_rollout_metadata(save_path: str, run_name: str, model_name: str | None) -> None:
+    metadata = {
+        "run_name": run_name,
+        "git_commit": get_git_commit(),
+        "model_name": model_name or "unknown",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    metadata_path = os.path.join(save_path, f"{run_name}_metadata.jsonl")
+    os.makedirs(save_path, exist_ok=True)
+    with open(metadata_path, "w") as f:
+        f.write(json.dumps(metadata) + "\n")
+    logger.info(f"Saved rollout metadata to {metadata_path}")
+
+
+def save_rollouts_to_disk(
+    save_path: str,
+    run_name: str,
+    step: int,
+    batch: Batch,
+    result: data_types.GenerationResult,
+    advantages: np.ndarray,
+    num_samples_per_prompt: int,
+    shard_idx: int,
+) -> None:
+    shard_filename = f"{run_name}_rollouts_{shard_idx:06d}.jsonl"
+    filepath = os.path.join(save_path, shard_filename)
+    os.makedirs(save_path, exist_ok=True)
+
+    records = []
+    for i in range(len(batch.queries)):
+        prompt_idx = i // num_samples_per_prompt
+        tool_info = None
+        if result.request_info and result.request_info.num_calls:
+            tool_info = {
+                "num_calls": result.request_info.num_calls[i] if i < len(result.request_info.num_calls) else 0,
+                "timeout": result.request_info.timeouts[i] if i < len(result.request_info.timeouts) else 0,
+                "tool_called": result.request_info.tool_calleds[i]
+                if i < len(result.request_info.tool_calleds)
+                else False,
+                "runtime": result.request_info.tool_runtimes[i] if i < len(result.request_info.tool_runtimes) else 0.0,
+            }
+        record = {
+            "step": step,
+            "sample_idx": i,
+            "prompt_idx": prompt_idx,
+            "prompt_tokens": batch.queries[i],
+            "response_tokens": result.responses[i],
+            "reward": float(batch.scores[i]) if batch.scores else 0.0,
+            "advantage": float(advantages[i]),
+            "finish_reason": result.finish_reasons[i],
+            "dataset": batch.datasets[i],
+            "ground_truth": batch.ground_truths[i] if batch.ground_truths else None,
+            "tool_info": tool_info,
+        }
+        records.append(record)
+
+    with open(filepath, "a") as f:
+        for record in records:
+            f.write(json.dumps(record) + "\n")
+    logger.info(f"Saved {len(records)} rollouts to {filepath}")
+
+
+def save_rollouts_async(
+    save_path: str,
+    run_name: str,
+    step: int,
+    batch: Batch,
+    result: data_types.GenerationResult,
+    advantages: np.ndarray,
+    num_samples_per_prompt: int,
+    total_samples_written: int,
+) -> None:
+    shard_idx = total_samples_written // ROLLOUT_SHARD_SIZE
+    _rollout_executor.submit(
+        save_rollouts_to_disk, save_path, run_name, step, batch, result, advantages, num_samples_per_prompt, shard_idx
+    )
 
 
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
@@ -352,6 +443,12 @@ class StreamingDataLoaderConfig:
     # Non stop penalty
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
+
+    # Rollout saving
+    save_traces: bool = False
+    rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
+    run_name: str | None = None
+    model_name: str | None = None
 
     # Computed at post_init
     max_possible_score: float = 1.0
@@ -926,6 +1023,8 @@ class DataPreparationActor:
         self.lock = threading.Lock()
         self.shutdown_requested = False
         self.training_step = 0
+        self.total_samples_written = 0
+        self.metadata_saved = False
 
         if initial_state is not None:
             self.training_step = initial_state["training_step"]
@@ -937,6 +1036,13 @@ class DataPreparationActor:
 
     def _data_preparation_loop(self):
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
+
+        if self.config.save_traces and self.config.rollouts_save_path and not self.metadata_saved:
+            save_rollout_metadata(
+                self.config.rollouts_save_path, self.config.run_name or "unknown_run", self.config.model_name
+            )
+            self.metadata_saved = True
+
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
         for _ in range(num_initial_prompts):
@@ -1013,6 +1119,19 @@ class DataPreparationActor:
                 advantages = scores - mean_grouped_rewards
             else:
                 raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
+
+            if self.config.save_traces and self.config.rollouts_save_path:
+                save_rollouts_async(
+                    self.config.rollouts_save_path,
+                    self.config.run_name or "unknown_run",
+                    step,
+                    batch,
+                    result,
+                    advantages,
+                    self.config.num_samples_per_prompt_rollout,
+                    self.total_samples_written,
+                )
+                self.total_samples_written += len(batch.queries)
 
             if self.config.mask_truncated_completions:
                 stop_idxes = torch.tensor(

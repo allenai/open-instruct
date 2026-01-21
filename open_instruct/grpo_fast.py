@@ -2134,6 +2134,12 @@ def main(
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
+
+    streaming_config.save_traces = args.save_traces
+    streaming_config.rollouts_save_path = args.rollouts_save_path
+    streaming_config.run_name = args.run_name
+    streaming_config.model_name = model_config.model_name_or_path
+
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
 
     if args.verbose:
