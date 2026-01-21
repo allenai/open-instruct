@@ -5,7 +5,6 @@ import shutil
 import tempfile
 import unittest
 
-import datasets
 from parameterized import parameterized
 
 import open_instruct.dataset_transformation
@@ -17,6 +16,7 @@ HAS_CACHE = (
 )
 
 GOLD_SFT = {"count": 9390, "hash": "87a737b6e1124a84335fc81f8e82b51372d20edadd03e40fc5d60e06683c0ac0"}
+GOLD_PREFERENCE = {"count": 2678, "hash": "14eec936b320768c0985866fd9d8033d0d960f20df431cc6c686b96b29d5413a"}
 GOLD_RLVR = {"count": 298, "hash": "2999bbb6d7b3f54d6fbffbeeb8bfa31c0efe2b1685def883e6e52914db9f1496"}
 
 
@@ -172,12 +172,11 @@ class TestCachedDataset(unittest.TestCase):
             dataset_skip_cache=True,
             dataset_local_cache_dir=self.temp_dir.name,
         )
-        gold_tokenized_dataset = datasets.load_dataset(
-            "allenai/dataset-mix-cached", split="train", revision="7c4f2bb6cf"
-        )
-        self.assertEqual(len(dataset), len(gold_tokenized_dataset))
-        for i in range(len(dataset)):
-            self.assertEqual(dataset[i]["chosen_input_ids"], gold_tokenized_dataset[i]["chosen_input_ids"])
+        self.assertEqual(len(dataset), GOLD_PREFERENCE["count"])
+        dataset_hash = hashlib.sha256()
+        for row in dataset:
+            dataset_hash.update(str(row["chosen_input_ids"]).encode())
+        self.assertEqual(dataset_hash.hexdigest(), GOLD_PREFERENCE["hash"])
 
     def test_get_cached_dataset_tulu_rlvr(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
