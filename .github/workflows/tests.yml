@@ -26,8 +26,6 @@ jobs:
       - name: Set up Python
         run: uv sync --frozen
       - name: Run unit tests
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: uv run --frozen pytest
 
   gpu-tests:
@@ -42,27 +40,122 @@ jobs:
         shell: bash -euo pipefail {0}
     steps:
 
+      - name: Detect fork PR and parse GPU_TESTS override
+        id: check
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Default: run GPU tests
+          echo "RUN_GPU_TESTS=true" >> $GITHUB_ENV
+          echo "SKIP_REASON=" >> $GITHUB_ENV
+          echo "GPU_TESTS_EXP_ID=" >> $GITHUB_ENV
+
+          # For merge_group events, always run GPU tests
+          if [ "${{ github.event_name }}" = "merge_group" ]; then
+            echo "Merge queue: running GPU tests"
+            exit 0
+          fi
+
+          # Check if this is a fork PR
+          HEAD_REPO="${{ github.event.pull_request.head.repo.full_name }}"
+          BASE_REPO="${{ github.repository }}"
+
+          if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            echo "RUN_GPU_TESTS=false" >> $GITHUB_ENV
+            echo "SKIP_REASON=fork" >> $GITHUB_ENV
+            echo ""
+            echo "=========================================="
+            echo "Skipping GPU tests for fork PR"
+            echo "=========================================="
+            echo ""
+            echo "This PR is from a fork ($HEAD_REPO), and secrets are not available."
+            echo "GPU tests will run automatically when this PR enters the merge queue."
+            echo ""
+            exit 0
+          fi
+
+          # Internal PR: check for GPU_TESTS override
+          if echo "$PR_BODY" | grep -qE 'GPU_TESTS=\[[^\]]+\]\([^)]+\)'; then
+            EXP_ID=$(echo "$PR_BODY" | grep -oP 'GPU_TESTS=\[\K[^\]]+')
+            echo "GPU_TESTS_EXP_ID=$EXP_ID" >> $GITHUB_ENV
+            echo "RUN_GPU_TESTS=false" >> $GITHUB_ENV
+            echo "SKIP_REASON=override" >> $GITHUB_ENV
+            echo ""
+            echo "=========================================="
+            echo "Found GPU_TESTS override: $EXP_ID"
+            echo "=========================================="
+            echo ""
+          fi
+
+      - name: Verify GPU_TESTS override experiment
+        if: env.SKIP_REASON == 'override'
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+        run: |
+          # Setup beaker CLI
+          echo "$BEAKER_TOKEN" | beaker account login --token-stdin
+
+          EXP_ID="${{ env.GPU_TESTS_EXP_ID }}"
+          echo "Verifying experiment: $EXP_ID"
+
+          # Check experiment exists and get details
+          exp_json=$(beaker experiment get "$EXP_ID" --format json)
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Failed to get experiment $EXP_ID"
+            exit 1
+          fi
+
+          # Verify description contains "GPU tests"
+          description=$(echo "$exp_json" | jq -r '.[0].description // ""')
+          if ! echo "$description" | grep -qi "GPU tests"; then
+            echo "ERROR: Experiment description must contain 'GPU tests'"
+            echo "Found description: $description"
+            exit 1
+          fi
+
+          # Verify exit code is 0
+          exit_code=$(echo "$exp_json" | jq -r '.[0].jobs[0].status.exitCode // "null"')
+          if [ "$exit_code" != "0" ]; then
+            echo "ERROR: Experiment exit code must be 0, got: $exit_code"
+            exit 1
+          fi
+
+          echo ""
+          echo "=========================================="
+          echo "GPU_TESTS override verified successfully!"
+          echo "Experiment: $EXP_ID"
+          echo "Description: $description"
+          echo "Exit code: $exit_code"
+          echo "=========================================="
+          echo ""
+
       - name: Checkout code
+        if: env.RUN_GPU_TESTS == 'true'
         uses: actions/checkout@v4
 
       - name: Install uv
+        if: env.RUN_GPU_TESTS == 'true'
         uses: astral-sh/setup-uv@v5
         with:
           version: "0.8.6"
 
       - name: Set up Python
+        if: env.RUN_GPU_TESTS == 'true'
         run: uv sync --frozen
 
       - name: Setup Beaker
+        if: env.RUN_GPU_TESTS == 'true'
         uses: allenai/setup-beaker@v2
         with:
           token: ${{ secrets.BEAKER_TOKEN }}
           workspace: ai2/open-instruct-dev
 
       - name: Set up Docker Buildx
+        if: env.RUN_GPU_TESTS == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Container Registry
+        if: env.RUN_GPU_TESTS == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -70,6 +163,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Docker image
+        if: env.RUN_GPU_TESTS == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -83,6 +177,7 @@ jobs:
           cache-to: type=inline
 
       - name: Upload image to Beaker and run tests
+        if: env.RUN_GPU_TESTS == 'true'
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: |
