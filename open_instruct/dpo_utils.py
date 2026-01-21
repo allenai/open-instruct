@@ -502,16 +502,19 @@ def build_reference_logprobs_cache(
         logger.info(f"Loading reference logprobs cache from {cache_path}")
         return model_utils.TensorCache.from_disk(cache_path, device=device)
 
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    test_file = cache_path.parent / f".write_test_{cache_path.stem}"
-    try:
-        test_file.touch()
-        test_file.unlink()
-    except (OSError, PermissionError) as e:
-        raise RuntimeError(
-            f"Cannot write to cache directory {cache_path.parent}: {e}. "
-            f"Set REFERENCE_LOGPROBS_CACHE_PATH to a writable location."
-        ) from e
+    if is_main_process:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        test_file = cache_path.parent / f".write_test_{cache_path.stem}"
+        try:
+            test_file.touch()
+            test_file.unlink()
+        except (OSError, PermissionError) as e:
+            raise RuntimeError(
+                f"Cannot write to cache directory {cache_path.parent}: {e}. "
+                f"Set REFERENCE_LOGPROBS_CACHE_PATH to a writable location."
+            ) from e
+    if dist.is_initialized():
+        dist.barrier()
 
     model.eval()
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
