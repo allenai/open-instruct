@@ -7,4 +7,6 @@ Wait for the first to finish before running the second. Monitor the results and 
 
 If they pass, then update the PR with links to them in this format:
 
-Ran single GPU DPO script ([Beaker](link)) and multi-node DPO ([Beaker](link)) scripts.
+Runs:
+1. Single GPU DPO: [Beaker](link)
+2. Multi-node DPO: [Beaker](link)
