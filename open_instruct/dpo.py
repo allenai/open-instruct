@@ -209,7 +209,8 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
 
 def _handle_post_training(args: dpo_utils.ExperimentConfig, trainer_callbacks, beaker_config, is_main_process: bool):
     """Save to beaker, launch evals, push to hub."""
-    distributed_utils.barrier()
+    if distributed_utils.is_distributed():
+        dist.barrier()
     output_path = pathlib.Path(args.output_dir).resolve()
     beaker_output_path = pathlib.Path("/output").resolve()
     if (
@@ -220,8 +221,6 @@ def _handle_post_training(args: dpo_utils.ExperimentConfig, trainer_callbacks, b
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and output_path != beaker_output_path
     ):
-        if distributed_utils.is_distributed():
-            dist.barrier()
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
     if utils.is_beaker_job() and is_main_process and args.try_launch_beaker_eval_jobs:
