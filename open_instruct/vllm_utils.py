@@ -653,6 +653,14 @@ class LLMRayActor:
         """Initialize wandb for system metrics logging (only for the first generator)."""
         if wandb_config is None or engine_id != 0:
             return  # Only first generator logs to wandb
+
+        # Clear inherited wandb service variables so we start fresh
+        # These are set by the parent's wandb.init() and would cause us to try
+        # to connect to a socket that doesn't exist in this process
+        for key in list(os.environ.keys()):
+            if key.startswith("_WANDB") or key == "WANDB_SERVICE":
+                del os.environ[key]
+
         import wandb
 
         wandb.init(
