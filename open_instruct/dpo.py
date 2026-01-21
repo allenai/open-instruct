@@ -11,6 +11,7 @@ import pathlib
 import shutil
 from functools import partial
 
+import bitsandbytes.optim
 import peft
 import torch
 import torch.distributed as dist
@@ -21,6 +22,7 @@ from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.transformer import TransformerConfig
+from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import CheckpointerCallback
@@ -126,8 +128,6 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     model = model.to(device=device, dtype=torch.bfloat16)
 
     if args.gradient_checkpointing:
-        from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
-
         logger.info("Enabling activation checkpointing...")
         model.apply_activation_checkpointing(TransformerActivationCheckpointingMode.full)
 
@@ -170,9 +170,7 @@ def _setup_optimizer_and_scheduler(args: dpo_utils.ExperimentConfig, model, num_
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
     ]
     if args.dpo_use_paged_optimizer:
-        from bitsandbytes.optim import AdamW
-
-        optim = AdamW(
+        optim = bitsandbytes.optim.AdamW(
             optimizer_grouped_parameters,
             lr=args.learning_rate,
             optim_bits=8 if args.use_8bit_optimizer else 32,
