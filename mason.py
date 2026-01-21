@@ -293,11 +293,15 @@ def get_env_vars(
         "AZURE_API_BASE",
         "ANTHROPIC_API_KEY",
     ]
+    beaker_secrets_lower = {s.lower(): s for s in beaker_secrets}
     for useful_secret in useful_secrets:
-        if f"{whoami}_{useful_secret}" in beaker_secrets:
-            env_vars.append(beaker.BeakerEnvVar(name=useful_secret, secret=f"{whoami}_{useful_secret}"))
-        elif useful_secret in beaker_secrets:
-            env_vars.append(beaker.BeakerEnvVar(name=useful_secret, secret=useful_secret))
+        user_secret_key = f"{whoami}_{useful_secret}".lower()
+        if user_secret_key in beaker_secrets_lower:
+            env_vars.append(beaker.BeakerEnvVar(name=useful_secret, secret=beaker_secrets_lower[user_secret_key]))
+        elif useful_secret.lower() in beaker_secrets_lower:
+            env_vars.append(
+                beaker.BeakerEnvVar(name=useful_secret, secret=beaker_secrets_lower[useful_secret.lower()])
+            )
 
     # use the user's PATH; including the conda / python PATH
     if not pure_docker_mode:
