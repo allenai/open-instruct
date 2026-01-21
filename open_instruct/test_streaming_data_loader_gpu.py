@@ -3,7 +3,7 @@
 These tests require CUDA and Ray, and will be skipped if not available.
 
 To run:
-    ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
+    ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
 """
 
 import json
