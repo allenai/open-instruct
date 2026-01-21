@@ -52,11 +52,17 @@ LEARNING_RATE=1e-6
 BETA=0.0
 
 FP32_LM_HEAD="${FP32_LM_HEAD:-0}"
+FP32_PERMANENT="${FP32_PERMANENT:-0}"
 FP32_FLAG=""
 EXP_SUFFIX="no_fp32"
 if [ "$FP32_LM_HEAD" = "1" ]; then
-    FP32_FLAG="--fp32_lm_head"
-    EXP_SUFFIX="fp32"
+    if [ "$FP32_PERMANENT" = "1" ]; then
+        FP32_FLAG="--fp32_lm_head true --fp32_lm_head_permanent true"
+        EXP_SUFFIX="fp32_permanent"
+    else
+        FP32_FLAG="--fp32_lm_head true"
+        EXP_SUFFIX="fp32_cache"
+    fi
 fi
 WANDB_ENTITY="${WANDB_ENTITY:-}"
 WANDB_ENTITY_FLAG=""
@@ -109,6 +115,8 @@ uv run --active python open_instruct/grpo_fast.py \
     --beta $BETA \
     --load_ref_policy false \
     $FP32_FLAG \
+    --save_logprob_samples true \
+    --save_logprob_samples_max 50000 \
     --seed 42 \
     --local_eval_every 10 \
     --save_freq 100 \
