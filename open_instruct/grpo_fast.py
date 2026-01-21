@@ -475,7 +475,7 @@ class PolicyTrainerRayProcess(RayProcess):
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         if args.fp32_lm_head:
-            enable_fp32_lm_head(self.policy)
+            enable_fp32_lm_head(self.policy, permanent=args.fp32_lm_head_permanent)
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:

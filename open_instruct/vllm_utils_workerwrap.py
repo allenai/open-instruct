@@ -44,12 +44,22 @@ class WorkerWrap:
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
+        import os
+
         import torch
 
-        assert str(dtype) == str(self.model_config.dtype), (
-            f"mismatch dtype: src {dtype}, dst {str(self.model_config.dtype)}"
-        )
-        weight = torch.empty(shape, dtype=self.model_config.dtype, device="cuda")
+        # Allow fp32 dtype for lm_head when fp32 mode is enabled (permanent mode)
+        fp32_mode = os.environ.get("OPEN_INSTRUCT_FP32_LM_HEAD", "")
+        is_lm_head = name.startswith("lm_head.")
+        expected_dtype = "torch.float32" if (is_lm_head and fp32_mode == "2") else str(self.model_config.dtype)
+
+        # Also allow model dtype for lm_head (backward compatibility with cache mode)
+        if str(dtype) != expected_dtype and not (is_lm_head and str(dtype) == str(self.model_config.dtype)):
+            raise AssertionError(f"mismatch dtype: src {dtype}, expected {expected_dtype}")
+
+        # Use the actual dtype from trainer for the receive buffer
+        recv_dtype = torch.float32 if dtype == "torch.float32" else self.model_config.dtype
+        weight = torch.empty(shape, dtype=recv_dtype, device="cuda")
         if self._model_update_with_ray:
             import ray.util.collective as collective
 
@@ -66,13 +76,21 @@ class WorkerWrap:
         #     torch.cuda.empty_cache()
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles=None, empty_cache=False):
+        import os
+
         import torch
 
         from open_instruct.vllm_utils import get_physical_gpu_id
 
-        assert str(dtype) == str(self.model_config.dtype), (
-            f"mismatch dtype: src {dtype}, dst {str(self.model_config.dtype)}"
-        )
+        # Allow fp32 dtype for lm_head when fp32 mode is enabled (permanent mode)
+        fp32_mode = os.environ.get("OPEN_INSTRUCT_FP32_LM_HEAD", "")
+        is_lm_head = name.startswith("lm_head.")
+        expected_dtype = "torch.float32" if (is_lm_head and fp32_mode == "2") else str(self.model_config.dtype)
+
+        # Also allow model dtype for lm_head (backward compatibility with cache mode)
+        if str(dtype) != expected_dtype and not (is_lm_head and str(dtype) == str(self.model_config.dtype)):
+            raise AssertionError(f"mismatch dtype: src {dtype}, expected {expected_dtype}")
+
         handle = ipc_handles[get_physical_gpu_id()]
         device_id = self.device.index
         func, args = handle

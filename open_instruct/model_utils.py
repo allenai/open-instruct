@@ -46,8 +46,18 @@ from open_instruct.utils import retry_on_exception
 logger = logger_utils.setup_logger(__name__)
 
 
-def enable_fp32_lm_head(model: torch.nn.Module) -> bool:
-    """Force LM head projection to run in fp32 without re-allocating weights."""
+def enable_fp32_lm_head(model: torch.nn.Module, permanent: bool = False) -> bool:
+    """Force LM head projection to run in fp32.
+
+    Args:
+        model: The model to modify.
+        permanent: If True, convert lm_head weights to fp32 in-place (more efficient,
+                   syncs fp32 weights to vLLM directly). If False, patch the forward
+                   pass to compute in fp32 while keeping bf16 weights.
+
+    Returns:
+        True if successful, False otherwise.
+    """
     target = model.module if hasattr(model, "module") else model
     get_output_embeddings = getattr(target, "get_output_embeddings", None)
     if get_output_embeddings is None:
@@ -62,6 +72,21 @@ def enable_fp32_lm_head(model: torch.nn.Module) -> bool:
     if getattr(lm_head, "_open_instruct_fp32_lm_head", False):
         return True
 
+    if permanent:
+        # Convert weights to fp32 in-place (more efficient for weight sync)
+        # Handle tied weights by untying first
+        _untie_lm_head_if_needed(target)
+        lm_head = target.get_output_embeddings()  # Re-fetch after potential untying
+        if hasattr(lm_head, "weight") and lm_head.weight is not None:
+            lm_head.weight.data = lm_head.weight.data.float()
+            lm_head._open_instruct_fp32_lm_head = True
+            logger.info("Converted LM head weights to fp32 (permanent mode).")
+            return True
+        else:
+            logger.warning("Cannot convert lm_head to fp32: no weight attribute.")
+            return False
+
+    # Non-permanent mode: patch forward pass to compute in fp32
     orig_forward = lm_head.forward
 
     def fp32_forward(self, hidden_states, *args, **kwargs):
@@ -81,7 +106,56 @@ def enable_fp32_lm_head(model: torch.nn.Module) -> bool:
     lm_head.forward = types.MethodType(fp32_forward, lm_head)
     lm_head._open_instruct_fp32_lm_head = True
     lm_head._open_instruct_fp32_lm_head_orig_forward = orig_forward
-    logger.info("Enabled fp32 LM head projection.")
+    logger.info("Enabled fp32 LM head projection (forward patch mode).")
+    return True
+
+
+def _untie_lm_head_if_needed(model: torch.nn.Module) -> bool:
+    """Untie lm_head weights from embed_tokens if they share storage.
+
+    This is needed before converting lm_head to fp32 to avoid affecting embeddings.
+
+    Returns:
+        True if weights were untied, False if they weren't tied.
+    """
+    lm_head = getattr(model, "lm_head", None)
+    if lm_head is None:
+        return False
+
+    lm_head_weight = getattr(lm_head, "weight", None)
+    if not isinstance(lm_head_weight, torch.Tensor):
+        return False
+
+    # Find embed_tokens - try common paths
+    embed_tokens = None
+    for path in ["model.embed_tokens", "transformer.wte", "embed_tokens"]:
+        try:
+            parts = path.split(".")
+            module = model
+            for part in parts:
+                module = getattr(module, part, None)
+                if module is None:
+                    break
+            if module is not None and hasattr(module, "weight"):
+                embed_tokens = module
+                break
+        except Exception:
+            continue
+
+    if embed_tokens is None:
+        return False
+
+    embed_weight = getattr(embed_tokens, "weight", None)
+    if not isinstance(embed_weight, torch.Tensor):
+        return False
+
+    # Check if they share storage
+    if lm_head_weight.data_ptr() != embed_weight.data_ptr():
+        return False  # Not tied
+
+    # Untie by creating a copy for lm_head
+    logger.info("Untying lm_head weights from embed_tokens for fp32 conversion.")
+    lm_head.weight = torch.nn.Parameter(lm_head_weight.clone())
     return True
 
 
