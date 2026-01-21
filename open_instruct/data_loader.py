@@ -54,6 +54,29 @@ _rollout_executor = ThreadPoolExecutor(max_workers=2)
 ROLLOUT_SHARD_SIZE = 10000
 
 
+@dataclass
+class RolloutMetadata:
+    run_name: str
+    git_commit: str
+    model_name: str
+    timestamp: str
+
+
+@dataclass
+class RolloutRecord:
+    step: int
+    sample_idx: int
+    prompt_idx: int
+    prompt_tokens: list[int]
+    response_tokens: list[int]
+    reward: float
+    advantage: float
+    finish_reason: str
+    dataset: str
+    ground_truth: list[str] | None = None
+    tool_info: dict | None = None
+
+
 def get_git_commit() -> str:
     try:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL).strip()
@@ -62,16 +85,16 @@ def get_git_commit() -> str:
 
 
 def save_rollout_metadata(save_path: str, run_name: str, model_name: str | None) -> None:
-    metadata = {
-        "run_name": run_name,
-        "git_commit": get_git_commit(),
-        "model_name": model_name or "unknown",
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    }
+    metadata = RolloutMetadata(
+        run_name=run_name,
+        git_commit=get_git_commit(),
+        model_name=model_name or "unknown",
+        timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    )
     metadata_path = os.path.join(save_path, f"{run_name}_metadata.jsonl")
     os.makedirs(save_path, exist_ok=True)
     with open(metadata_path, "w") as f:
-        f.write(json.dumps(metadata) + "\n")
+        f.write(json.dumps(asdict(metadata)) + "\n")
     logger.info(f"Saved rollout metadata to {metadata_path}")
 
 
@@ -102,20 +125,20 @@ def save_rollouts_to_disk(
                 else False,
                 "runtime": result.request_info.tool_runtimes[i] if i < len(result.request_info.tool_runtimes) else 0.0,
             }
-        record = {
-            "step": step,
-            "sample_idx": i,
-            "prompt_idx": prompt_idx,
-            "prompt_tokens": batch.queries[i],
-            "response_tokens": result.responses[i],
-            "reward": float(batch.scores[i]) if batch.scores else 0.0,
-            "advantage": float(advantages[i]),
-            "finish_reason": result.finish_reasons[i],
-            "dataset": batch.datasets[i],
-            "ground_truth": batch.ground_truths[i] if batch.ground_truths else None,
-            "tool_info": tool_info,
-        }
-        records.append(record)
+        record = RolloutRecord(
+            step=step,
+            sample_idx=i,
+            prompt_idx=prompt_idx,
+            prompt_tokens=batch.queries[i],
+            response_tokens=result.responses[i],
+            reward=float(batch.scores[i]) if batch.scores else 0.0,
+            advantage=float(advantages[i]),
+            finish_reason=result.finish_reasons[i],
+            dataset=batch.datasets[i],
+            ground_truth=batch.ground_truths[i] if batch.ground_truths else None,
+            tool_info=tool_info,
+        )
+        records.append(asdict(record))
 
     with open(filepath, "a") as f:
         for record in records:
