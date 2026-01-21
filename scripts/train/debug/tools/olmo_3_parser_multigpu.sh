@@ -9,8 +9,8 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
-export SERPER_API_KEY=$(beaker secret read hamishivi_SERPER_API_KEY --workspace ai2/open-instruct-dev)
-export JINA_API_KEY=$(beaker secret read hamishivi_JINA_API_KEY --workspace ai2/open-instruct-dev)
+export SERPER_API_KEY=$(beaker secret read ${BEAKER_USER}_SERPER_API_KEY --workspace ai2/open-instruct-dev)
+export JINA_API_KEY=$(beaker secret read ${BEAKER_USER}_JINA_API_KEY --workspace ai2/open-instruct-dev)
 
 uv run python mason.py \
        --cluster ai2/jupiter \
@@ -26,8 +26,8 @@ uv run python mason.py \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --budget ai2/oe-adapt \
-       --secret SERPER_API_KEY=hamishivi_SERPER_API_KEY \
-       --secret JINA_API_KEY=hamishivi_JINA_API_KEY \
+       --secret SERPER_API_KEY=${BEAKER_USER}_SERPER_API_KEY \
+       --secret JINA_API_KEY=${BEAKER_USER}_JINA_API_KEY \
        --gpus 8 \
        -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 1.0 \
