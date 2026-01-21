@@ -8,4 +8,7 @@ Wait for each to finish successfully before starting the next one. Monitor the r
 
 If they pass, then update the PR with links to them in this format:
 
-Ran single GPU GRPO ([Beaker](link)), single GPU GRPO with tools ([Beaker](link)), and multi-node GRPO ([Beaker](link)) scripts.
+Runs:
+1. Single GPU GRPO: [Beaker](link)
+2. Single GPU GRPO with tools: [Beaker](link)
+3. Multi-node GRPO: [Beaker](link)
