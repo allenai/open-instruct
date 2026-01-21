@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - Refactors GRPO config into a grpo_utils.py file in preparation for Olmo-core implementation (https://github.com/allenai/open-instruct/pull/1396_.
 
 ### Changed
+- Updated library versions via `uv lock --upgrade` (https://github.com/allenai/open-instruct/pull/1400).
 
 ### Fixed
 - Fixed JSON serialization error in `LocalDatasetTransformationCache.save_config` when caching datasets locally (https://github.com/allenai/open-instruct/pull/1402).

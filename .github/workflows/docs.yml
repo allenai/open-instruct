@@ -46,7 +46,8 @@ jobs:
             echo "" >> comment.md
 
             # Get list of changed files, excluding verbose files
-            changed_files=$(diff -rq site-pr site-base | grep "^Files" | grep "differ$" | grep -v "search_index.json" | head -5)
+            # diff returns exit code 1 when differences exist; || true prevents pipefail from failing the script
+            changed_files=$(diff -rq site-pr site-base | grep "^Files" | grep "differ$" | grep -v "search_index.json" | head -5 || true)
 
             if [ -n "$changed_files" ]; then
               file_count=0
