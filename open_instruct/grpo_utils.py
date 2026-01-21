@@ -176,6 +176,8 @@ class ExperimentConfig:
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
     def __post_init__(self):
+        if self.exp_name is None:
+            self.exp_name = "grpo_fast"
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
