@@ -23,7 +23,7 @@
 - Launch multi-node non-tool experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh`.
 - Launch DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo.sh`.
 - Launch multi-node DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/medium_dpo.sh`.
-- Launch the GPU tests with `./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_tests.sh`.
+- Launch the GPU tests with `./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_tests.sh`.
 - If you are given a Beaker URL (beaker\.allen\.ai.*) use the Beaker CLI tool to interact with it.
 
 # Coding conventions
