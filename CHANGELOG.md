@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Now, we type check `open_instruct/dataset_transformation.py` (https://github.com/allenai/open-instruct/pull/1390).
 - Added a linter rule that imports go at the top of the file (https://github.com/allenai/open-instruct/pull/1394).
 - Refactors GRPO config into a grpo_utils.py file in preparation for Olmo-core implementation (https://github.com/allenai/open-instruct/pull/1396_.
+- Now, we save the generated rollouts to disk during RL when the --save_traces flag is passed (https://github.com/allenai/open-instruct/pull/1406).
 
 ### Changed
 
