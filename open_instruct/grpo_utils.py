@@ -1,7 +1,82 @@
+import pathlib
 from dataclasses import dataclass, field
 from typing import Literal
 
+import wandb
+
+from open_instruct import logger_utils
 from open_instruct.utils import calibrate_checkpoint_state_dir, download_latest_checkpoint_from_gs, get_beaker_whoami
+
+logger = logger_utils.setup_logger(__name__)
+
+CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
+
+
+def verify_model_checkpoint(output_dir: str) -> bool:
+    """Verify that a model checkpoint is valid.
+
+    Returns True if:
+    - .checkpoint_complete marker exists
+    - config.json exists
+    - Model weights file exists and is > 1KB (safetensors or pytorch_model.bin)
+    """
+    output_path = pathlib.Path(output_dir)
+    marker_path = output_path / CHECKPOINT_COMPLETE_MARKER
+    config_path = output_path / "config.json"
+    safetensors_path = output_path / "model.safetensors"
+    pytorch_path = output_path / "pytorch_model.bin"
+
+    if not marker_path.exists():
+        return False
+    if not config_path.exists():
+        return False
+
+    weights_valid = False
+    if (
+        safetensors_path.exists()
+        and safetensors_path.stat().st_size > 1024
+        or pytorch_path.exists()
+        and pytorch_path.stat().st_size > 1024
+    ):
+        weights_valid = True
+
+    return weights_valid
+
+
+def verify_deepspeed_state_checkpoint(checkpoint_dir: str, expected_step: int) -> bool:
+    """Verify that a DeepSpeed state checkpoint is valid.
+
+    Returns True if:
+    - global_step{N} directory exists and is non-empty
+    """
+    checkpoint_path = pathlib.Path(checkpoint_dir)
+    step_dir = checkpoint_path / f"global_step{expected_step}"
+    if not step_dir.exists() or not step_dir.is_dir():
+        return False
+    return any(step_dir.iterdir())
+
+
+def verify_traces(rollouts_save_path: str, run_name: str) -> bool:
+    """Verify that traces are saved correctly.
+
+    Returns True if:
+    - Metadata file {run_name}_metadata.jsonl exists
+    - At least one rollout file {run_name}_rollouts_*.jsonl exists
+    """
+    rollouts_path = pathlib.Path(rollouts_save_path)
+    metadata_file = rollouts_path / f"{run_name}_metadata.jsonl"
+    if not metadata_file.exists():
+        return False
+
+    return any(rollouts_path.glob(f"{run_name}_rollouts_*.jsonl"))
+
+
+def log_verification(name: str, success: bool, with_tracking: bool, step: int) -> None:
+    """Log verification result to console and optionally to wandb."""
+    status = "✓" if success else "✗"
+    logger.info(f"Verification {name}: {status}")
+    if with_tracking:
+        wandb.log({f"verification/{name}": success}, step=step)
 
 
 @dataclass
