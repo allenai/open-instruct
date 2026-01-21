@@ -8,7 +8,7 @@ from open_instruct.utils import calibrate_checkpoint_state_dir, download_latest_
 @dataclass
 class ExperimentConfig:
     # Experiment
-    exp_name: str | None = None
+    exp_name: str = "grpo"
     """The name of this experiment"""
     seed: int = 1
     """Seed of the experiment"""
@@ -176,8 +176,6 @@ class ExperimentConfig:
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
     def __post_init__(self):
-        if self.exp_name is None:
-            self.exp_name = "grpo_fast"
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
