@@ -16,7 +16,7 @@ This enables training models to use tools effectively for tasks like mathematica
 
 Note that **right now, we only allow interleaved tool calling** - we do not allow e.g. sub agent calls, or agents that change their history midway through generation. If you require this, let someone know!
 
-In the future, I (hamish) hope to add more sophisticated environment setups. Let me know if you have particular RL envs you care about!
+In the future, we hope to add more sophisticated environment setups. Please open an issue if you have particular RL environments you would like to see supported!
 
 ## Quick Start
 
