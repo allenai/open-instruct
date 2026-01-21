@@ -1250,7 +1250,7 @@ def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerCo
             config=all_configs,
             name=args.run_name,
             save_code=True,
-            tags=[args.exp_name] + get_wandb_tags(),
+            tags=([args.exp_name] if args.exp_name else []) + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
         maybe_update_beaker_description(wandb_url=wandb_url)
