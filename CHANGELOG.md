@@ -17,6 +17,9 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Fixed JSON serialization error in `LocalDatasetTransformationCache.save_config` when caching datasets locally (https://github.com/allenai/open-instruct/pull/1402).
 - Now, we can support PRs from external contributors while still maintaining security for internal tokens (https://github.com/allenai/open-instruct/pull/1408).
+- Improved error handling for tool calls with missing/invalid arguments - now returns a clear error message instead of crashing (https://github.com/allenai/open-instruct/pull/1404).
+- Fixed `GenerationConfig` validation error when saving OLMo-3 models - config is now set after unwrapping the model, and OLMo-3 is detected from both `chat_template_name` and model name (https://github.com/allenai/open-instruct/pull/1404).
 
 ### Removed
 - Removed `open_instruct/ppo.py` and related PPO training scripts (https://github.com/allenai/open-instruct/pull/1395).
+- Removed `scripts/train/debug/tool_grpo_fast.sh`; use `scripts/train/debug/tools/olmo_3_parser_multigpu.sh` for tool use experiments (https://github.com/allenai/open-instruct/pull/1404).
