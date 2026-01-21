@@ -18,7 +18,7 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
-from olmo_core.nn.hf.checkpoint import load_hf_model
+from olmo_core.nn.hf.checkpoint import load_hf_model, save_hf_model
 from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
@@ -207,10 +207,19 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
     return trainer_callbacks
 
 
-def _handle_post_training(args: dpo_utils.ExperimentConfig, trainer_callbacks, beaker_config, is_main_process: bool):
-    """Save to beaker, launch evals, push to hub."""
+def _handle_post_training(
+    args: dpo_utils.ExperimentConfig, model, tokenizer, trainer_callbacks, beaker_config, is_main_process: bool
+):
+    """Save HF model, copy to beaker, launch evals, push to hub."""
+    hf_model_path = os.path.join(args.output_dir, "hf_model")
+    if is_main_process:
+        logger.info(f"Saving HuggingFace model to {hf_model_path}")
+        save_hf_model(save_dir=hf_model_path, model_state_dict=model.state_dict(), model=model, save_overwrite=True)
+        tokenizer.save_pretrained(hf_model_path)
+
     if distributed_utils.is_distributed():
         dist.barrier()
+
     output_path = pathlib.Path(args.output_dir).resolve()
     beaker_output_path = pathlib.Path("/output").resolve()
     if (
@@ -221,7 +230,7 @@ def _handle_post_training(args: dpo_utils.ExperimentConfig, trainer_callbacks, b
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and output_path != beaker_output_path
     ):
-        shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
+        shutil.copytree(hf_model_path, "/output", dirs_exist_ok=True)
 
     if utils.is_beaker_job() and is_main_process and args.try_launch_beaker_eval_jobs:
         wandb_url = None
@@ -230,7 +239,7 @@ def _handle_post_training(args: dpo_utils.ExperimentConfig, trainer_callbacks, b
             if wandb_tracker is not None and hasattr(wandb_tracker, "run") and wandb_tracker.run is not None:
                 wandb_url = wandb_tracker.run.get_url()
         if args.hf_repo_revision is not None:
-            eval_path = args.output_dir
+            eval_path = hf_model_path
             if beaker_config is not None and beaker_config.beaker_dataset_ids:
                 eval_path = beaker_config.beaker_dataset_ids[-1]
             utils.launch_ai2_evals_on_weka(
@@ -246,7 +255,7 @@ def _handle_post_training(args: dpo_utils.ExperimentConfig, trainer_callbacks, b
             )
 
     if args.push_to_hub and is_main_process:
-        model_utils.push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+        model_utils.push_folder_to_hub(hf_model_path, args.hf_repo_id, args.hf_repo_revision)
 
 
 def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerConfig) -> None:
@@ -384,7 +393,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     trainer.fit()
     logger.info("Training complete.")
 
-    _handle_post_training(args, trainer_callbacks, beaker_config, is_main_process)
+    _handle_post_training(args, model, tokenizer, trainer_callbacks, beaker_config, is_main_process)
 
     train.teardown_training_environment()
 
