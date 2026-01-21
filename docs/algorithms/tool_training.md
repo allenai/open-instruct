@@ -81,7 +81,7 @@ Parsers handle parsing out tool calls, separate from tools. Note that if a tool 
 
 | Parser Type | Format | Best For |
 |-------------|--------|----------|
-| `legacy` | `<tool_name>content</tool_name>` | Custom prompts, Search-R1 style|
+| `legacy` | `<tool_name>content</tool_name>` | Custom prompts, Search-R1 style |
 | `vllm_olmo3` | Pythonic function calls | OLMo-3 models |
 | `vllm_hermes` | Hermes-style JSON | Qwen2.5/3, Hermes models |
 | `vllm_llama3_json` | Llama 3 JSON format | Llama 3.x models |
