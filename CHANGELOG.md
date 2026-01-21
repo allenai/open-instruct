@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Now, we save the generated rollouts to disk during RL when the --save_traces flag is passed (https://github.com/allenai/open-instruct/pull/1406).
 
 ### Changed
+- Updated library versions via `uv lock --upgrade` (https://github.com/allenai/open-instruct/pull/1400).
 
 ### Fixed
 - Fixed JSON serialization error in `LocalDatasetTransformationCache.save_config` when caching datasets locally (https://github.com/allenai/open-instruct/pull/1402).

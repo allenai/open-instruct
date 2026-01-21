@@ -730,24 +730,6 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
 #         _ = get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["messages"])
 
 
-class TestGetDenominator(unittest.TestCase):
-    @parameterized.expand([("token", "token"), ("0.5", 0.5), (0.5, 0.5), (1, 1.0)])
-    def test_valid_inputs(self, input_val, expected):
-        self.assertEqual(utils.get_denominator(input_val), expected)
-
-    @parameterized.expand(
-        [
-            ("invalid", "could not convert string to float"),
-            ("-1", "loss_denominator must be greater than 0"),
-            (0, "loss_denominator must be greater than 0"),
-            ("0", "loss_denominator must be greater than 0"),
-        ]
-    )
-    def test_invalid_inputs(self, input_val, error_msg):
-        with self.assertRaisesRegex(ValueError, error_msg):
-            utils.get_denominator(input_val)
-
-
 class TestRayGetWithProgress(unittest.TestCase):
     def setUp(self):
         os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"

@@ -346,7 +346,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         num_examples = min(self._per_rank_batch_size, len(self.dataset))
         examples = [self.dataset[i] for i in range(num_examples)]
-        return to_device(self._collator(examples), self._device)  # type: ignore[return-value]
+        return to_device(self._collator(examples), self._device)
 
     def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int:
         """Return the total number of tokens in the batch across all ranks.

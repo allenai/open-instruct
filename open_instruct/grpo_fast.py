@@ -680,7 +680,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
                 else:
                     accumulation_token_counts = {
-                        int(group_idx * accumulation_steps): self.args.loss_denominator
+                        int(group_idx * accumulation_steps): float(self.args.loss_denominator)
                         for group_idx in range((len(data_BT.query_responses) // accumulation_steps) + 1)
                     }
 
