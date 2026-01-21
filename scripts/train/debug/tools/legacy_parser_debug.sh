@@ -1,17 +1,20 @@
 #!/bin/bash
 # Local debug script for testing GRPO with tool use
-# Note: Currently only 'code' tool is supported with new tools system
-# Search tool implementation is pending (see create_tools() in grpo_fast.py)
+# Uses hamishivi/tulu_3_rewritten_tools_test which has a 'tools' column
+# for per-sample active tool configuration (search, code, browse)
+
+# Load API keys from beaker secrets
 export SERPER_API_KEY=$(beaker secret read hamishivi_SERPER_API_KEY --workspace ai2/dr-tulu-ablations)
+export JINA_API_KEY=$(beaker secret read hamishivi_JINA_API_KEY --workspace ai2/dr-tulu-ablations)
 
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 64 \
+    --dataset_mixer_list hamishivi/tulu_3_rewritten_tools_test 64 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_100k 4 \
+    --dataset_mixer_eval_list hamishivi/tulu_3_rewritten_tools_test 4 \
     --dataset_mixer_eval_list_splits train \
-    --max_prompt_token_length 2048 \
-    --response_length 2048 \
-    --pack_length 4096 \
+    --max_prompt_token_length 512 \
+    --response_length 512 \
+    --pack_length 1024 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
     --num_samples_per_prompt_rollout 4 \
@@ -19,6 +22,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
+    --chat_template_name r1_simple_chat_postpend_think_tool_vllm \
     --learning_rate 3e-7 \
     --total_episodes 200 \
     --deepspeed_stage 2 \
@@ -34,10 +38,10 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
-    --tools python serper_search \
+    --tools python serper_search jina_browse \
     --verbose true \
-    --tool_call_names code search \
-    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "timeout": 3}' '{}' \
-    --tool_parser_type vllm_hermes \
+    --tool_call_names code search browse \
+    --tool_configs '{"api_endpoint": "https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", "timeout": 3}' '{}' '{}' \
+    --tool_parser_type legacy \
     --max_tool_calls 5 \
     --push_to_hub false

@@ -4,7 +4,7 @@ These tests require CUDA and will be skipped if not available.
 
 To run:
 
-    ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
+    ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
 
 Updating expected test data:
 
@@ -18,7 +18,7 @@ will fail. To update the expected data:
        git add -A && git commit -m "Remove outdated expected data for regeneration"
 
 3. Run the GPU tests on Beaker:
-       ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
+       ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
 
 4. The test will generate new expected data and fail with "Re-run test to verify."
    Get the result dataset ID from the experiment:
@@ -30,7 +30,7 @@ will fail. To update the expected data:
 
 6. Commit the new expected file and re-run tests to verify:
        git add -A && git commit -m "Update expected test data"
-       ./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_pytest.sh
+       ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
 """
 
 import json
@@ -164,13 +164,11 @@ class TestGeneration(TestGrpoFastBase):
         test_data_path = TEST_DATA_DIR / test_data_filename
 
         tokenizer_name = "Qwen/Qwen3-1.7B"
-        tool_actors = (
-            create_tools(
+        tool_actors = None
+        if use_tools:
+            tool_actors, _ = create_tools(
                 [ParsedToolConfig(name="python", call_name="code", config={"api_endpoint": self.tool_api_endpoint})]
             )
-            if use_tools
-            else None
-        )
         max_tool_calls = 5 if use_tools else None
 
         result = self._setup_engine_and_generate(

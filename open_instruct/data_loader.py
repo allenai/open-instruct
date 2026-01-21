@@ -37,6 +37,7 @@ from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
+    TOOLS_COLUMN_KEY,
     VERIFIER_SOURCE_KEY,
 )
 from open_instruct.model_utils import Batch
@@ -239,7 +240,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         num_examples = min(self._per_rank_batch_size, len(self.dataset))
         examples = [self.dataset[i] for i in range(num_examples)]
-        return to_device(self._collator(examples), self._device)  # type: ignore[return-value]
+        return to_device(self._collator(examples), self._device)
 
     def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int:
         """Return the total number of tokens in the batch across all ranks.
@@ -517,6 +518,7 @@ def add_prompt_to_generator(
             index=index,
             prompt_id=f"{epoch_number}_{index}",
             is_eval=is_eval,
+            active_tools=example.get(TOOLS_COLUMN_KEY),
         )
     )
 
@@ -558,6 +560,7 @@ def accumulate_inference_batches(
     all_raw_queries = []
     all_decoded_responses = []
     all_reward_metrics = []
+    all_active_tools = []
     all_scores = []
     all_percent_solved = []
     total_filtered_prompts = 0
@@ -598,6 +601,7 @@ def accumulate_inference_batches(
         ground_truth = example[GROUND_TRUTHS_KEY]
         dataset_name = example[VERIFIER_SOURCE_KEY]
         raw_query = example[RAW_PROMPT_KEY]
+        sample_active_tools = example.get(TOOLS_COLUMN_KEY)
 
         if replenish_prompts:
             assert iter_dataloader is not None
@@ -611,12 +615,13 @@ def accumulate_inference_batches(
                 result.masks[i].append(1)
                 result.logprobs[i].append(float("nan"))
 
-        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+        decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
 
         k_queries = repeat_each([query], generation_config.n)
         k_ground_truths = repeat_each([ground_truth], generation_config.n)
         k_datasets = repeat_each([dataset_name], generation_config.n)
         k_raw_queries = repeat_each([raw_query], generation_config.n)
+        k_active_tools = repeat_each([sample_active_tools], generation_config.n)
 
         percent_solved = np.mean(result.reward_scores).item() / max_possible_score
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
@@ -652,6 +657,7 @@ def accumulate_inference_batches(
         all_ground_truths.extend(k_ground_truths)
         all_datasets.extend(k_datasets)
         all_raw_queries.extend(k_raw_queries)
+        all_active_tools.extend(k_active_tools)
         all_decoded_responses.extend(decoded_responses)
         all_scores.extend(result.reward_scores)
         all_reward_metrics.append(result.reward_metrics)
@@ -749,6 +755,7 @@ def accumulate_inference_batches(
         decoded_responses=all_decoded_responses,
         indices=None,
         scores=all_scores,
+        active_tools=all_active_tools if all_active_tools else None,
     )
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)

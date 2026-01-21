@@ -17,17 +17,12 @@ When updating a GitHub PR body:
 
 2. Get the current PR body to review existing content:
    ```bash
-   gh pr view <pr-number> --json body --jq -r '.body'
+   gh pr view <pr-number> --json body -q '.body'
    ```
 
-3. Update the PR body using `gh pr edit`:
+3. Update the PR body using the REST API:
    ```bash
-   gh pr edit <pr-number> --body "$(cat <<'EOF'
-   New PR body content here.
-
-   Use markdown formatting as needed.
-   EOF
-   )"
+   gh api -X PATCH /repos/{owner}/{repo}/pulls/<pr-number> -f body="New PR body content here."
    ```
 
 ## Examples
@@ -39,33 +34,29 @@ gh pr list --head "$(git branch --show-current)" --json number,url --jq '.[0]'
 
 View current PR body:
 ```bash
-gh pr view 1372 --json body --jq -r '.body'
+gh pr view 1372 --json body -q '.body'
 ```
 
 Update PR body with new content:
 ```bash
-gh pr edit 1372 --body "$(cat <<'EOF'
-## Summary
+gh api -X PATCH /repos/allenai/open-instruct/pulls/1372 -f body="## Summary
 - Updated vllm to 0.13.0
 - Fixed tool_grpo_fast.sh script
 
 ## Test Plan
 - [x] Single GPU GRPO
 - [x] Tool GRPO
-- [x] Multi-node GRPO
-EOF
-)"
+- [x] Multi-node GRPO"
 ```
 
 Add to existing body (read first, then append):
 ```bash
-# Read the current PR body, ensuring to get the raw string
-CURRENT_BODY=$(gh pr view 1372 --json body --jq -r '.body')
+# Read the current PR body
+CURRENT_BODY=$(gh pr view 1372 --json body -q '.body')
 
-# Append new content safely using a double-quoted string
-gh pr edit 1372 --body "${CURRENT_BODY}
+# Append new content
+gh api -X PATCH /repos/allenai/open-instruct/pulls/1372 -f body="${CURRENT_BODY}
 
 ## Additional Notes
-New content appended here.
-"
+New content appended here."
 ```
