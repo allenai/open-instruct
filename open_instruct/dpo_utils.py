@@ -870,7 +870,7 @@ def concatenated_forward(
         all_logps = _get_batch_logps(
             logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
         )
-        bs = batch["chosen_input_ids"].shape[0]  # type: ignore[union-attr]
+        bs = batch["chosen_input_ids"].shape[0]
     else:
         all_logps = pf_get_batch_logps(
             logits,
@@ -987,7 +987,7 @@ def concatenated_forward_olmo(
         all_logps = _get_batch_logps(
             logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
         )
-        bs = batch["chosen_input_ids"].shape[0]  # type: ignore[union-attr]
+        bs = batch["chosen_input_ids"].shape[0]
     else:
         all_logps = pf_get_batch_logps(
             logits,

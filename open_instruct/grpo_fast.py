@@ -680,7 +680,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
                 else:
                     accumulation_token_counts = {
-                        int(group_idx * accumulation_steps): self.args.loss_denominator
+                        int(group_idx * accumulation_steps): float(self.args.loss_denominator)
                         for group_idx in range((len(data_BT.query_responses) // accumulation_steps) + 1)
                     }
 
@@ -932,8 +932,6 @@ class PolicyTrainerRayProcess(RayProcess):
             return
 
         model_to_save = self.model
-        if chat_template_name is not None and "olmo" in chat_template_name:
-            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         if self.rank == 0:
             output_path.mkdir(parents=True, exist_ok=True)
@@ -941,6 +939,15 @@ class PolicyTrainerRayProcess(RayProcess):
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
             model_to_save = model_to_save.module
+
+        # Set generation config after unwrapping to ensure it's on the actual model being saved
+        # Check both chat_template_name and model name for OLMo 3 detection
+        model_name = getattr(model_to_save.config, "_name_or_path", "") or ""
+        is_olmo3 = (
+            chat_template_name is not None and "olmo" in chat_template_name.lower()
+        ) or "olmo-3" in model_name.lower()
+        if is_olmo3:
+            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         # gather parameters
         output_state_dict = {}
