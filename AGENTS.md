@@ -15,14 +15,15 @@
   - `scripts/train/debug/single_gpu_on_beaker.sh`: single GPU, no tools (~8 minutes).
   - `scripts/train/debug/tool_grpo_fast.sh`: single GPU, with tools (~15 minutes).
   - `scripts/train/debug/large_test_script.sh`: two 8x GPU nodes, no tools (~32 minutes).
-- For DPO, we have two test scripts:
-  - `scripts/train/debug/dpo.sh`: single GPU.
-  - `scripts/train/debug/large_dpo.sh`: four 8x GPU nodes.
+- For DPO, we have three test scripts:
+  - `scripts/train/debug/dpo/local.sh`: local single GPU (no Beaker).
+  - `scripts/train/debug/dpo/single_gpu.sh`: single GPU on Beaker.
+  - `scripts/train/debug/dpo/multi_node.sh`: two 8x GPU nodes on Beaker.
 - To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
 - Launch tool use experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/tool_grpo_fast.sh`.
 - Launch multi-node non-tool experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh`.
-- Launch DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo.sh`.
-- Launch multi-node DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/medium_dpo.sh`.
+- Launch DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/single_gpu.sh`.
+- Launch multi-node DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/multi_node.sh`.
 - Launch the GPU tests with `./scripts/train/build_image_and_launch.sh scripts/train/debug/run_gpu_tests.sh`.
 - If you are given a Beaker URL (beaker\.allen\.ai.*) use the Beaker CLI tool to interact with it.
 

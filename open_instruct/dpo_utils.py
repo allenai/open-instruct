@@ -148,6 +148,12 @@ class TrainingConfig:
     """Use paged optimizer from bitsandbytes."""
     fused_optimizer: bool = True
     """Whether to use fused AdamW or not."""
+    tensor_parallel_degree: int = 1
+    """Tensor parallelism degree. Default 1 (disabled)."""
+    context_parallel_degree: int = 1
+    """Context parallelism degree. Default 1 (disabled)."""
+    pipeline_parallel_degree: int = 1
+    """Pipeline parallelism degree. Default 1 (disabled)."""
 
 
 @dataclass

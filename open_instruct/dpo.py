@@ -5,14 +5,12 @@ This module provides DPO (Direct Preference Optimization) training using
 OLMo-core's native training infrastructure.
 """
 
-import contextlib
 import os
 import pathlib
 import shutil
 from functools import partial
 
 import bitsandbytes.optim
-import peft
 import torch
 import torch.distributed as dist
 import transformers
@@ -21,7 +19,6 @@ from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
 from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.nn.transformer import TransformerConfig
 from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
@@ -32,55 +29,12 @@ from olmo_core.train.train_module.transformer import (
 )
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, utils
+from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.beaker_callback import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import DPOTrainModule
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
-
-
-OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
-    "allenai/OLMo-2-0425-1B": "olmo2_1B",
-    "allenai/OLMo-2-1124-7B": "olmo2_7B",
-    "allenai/OLMo-2-1124-13B": "olmo2_13B",
-    "allenai/OLMo-2-0325-32B": "olmo2_32B",
-    "allenai/Olmo-3-1025-7B": "olmo3_7B",
-    "allenai/OLMoE-1B-7B-0924": "olmoe_1B_7B",
-    "Qwen/Qwen3-0.6B": "qwen3_0_6B",
-    "Qwen/Qwen3-1.7B": "qwen3_1_7B",
-    "Qwen/Qwen3-4B": "qwen3_4B",
-    "Qwen/Qwen3-8B": "qwen3_8B",
-    "Qwen/Qwen3-14B": "qwen3_14B",
-    "Qwen/Qwen3-32B": "qwen3_32B",
-}
-
-
-def get_transformer_config(model_name_or_path: str, vocab_size: int) -> TransformerConfig:
-    """Get the appropriate TransformerConfig for a given model name.
-
-    Args:
-        model_name_or_path: HuggingFace model name or path.
-        vocab_size: Vocabulary size for the model.
-
-    Returns:
-        TransformerConfig for the specified model.
-
-    Raises:
-        ValueError: If model not in OLMO_MODEL_CONFIG_MAP.
-    """
-    config_name = OLMO_MODEL_CONFIG_MAP.get(model_name_or_path)
-    if config_name is None:
-        available_models = ", ".join(OLMO_MODEL_CONFIG_MAP.keys())
-        available_configs = [
-            name for name in dir(TransformerConfig) if name.startswith("olmo") and not name.startswith("_")
-        ]
-        raise ValueError(
-            f"Model '{model_name_or_path}' not found in OLMO_MODEL_CONFIG_MAP. "
-            f"Available models: {available_models}. "
-            f"Available config names: {', '.join(available_configs)}"
-        )
-    return getattr(TransformerConfig, config_name)(vocab_size=vocab_size)
 
 
 def _load_dataset_distributed(
@@ -120,7 +74,7 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
     vocab_size = hf_config.vocab_size
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
-    model_config = get_transformer_config(args.model_name_or_path, vocab_size)
+    model_config = olmo_core_utils.get_transformer_config(args.model_name_or_path, vocab_size)
     model = model_config.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
@@ -134,21 +88,57 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     return model
 
 
-def _apply_hsdp(model, device: torch.device):
-    """Apply HSDP to model."""
+def _apply_parallelism(
+    model,
+    device: torch.device,
+    tensor_parallel_degree: int = 1,
+    context_parallel_degree: int = 1,
+    pipeline_parallel_degree: int = 1,
+):
+    """Apply parallelism strategies to model (HSDP, TP, CP, PP).
+
+    Args:
+        model: The model to apply parallelism to.
+        device: The device to use.
+        tensor_parallel_degree: Tensor parallelism degree (default 1, disabled).
+        context_parallel_degree: Context parallelism degree (default 1, disabled).
+        pipeline_parallel_degree: Pipeline parallelism degree (default 1, disabled).
+
+    Returns:
+        The model with parallelism applied.
+    """
+    if tensor_parallel_degree > 1 and context_parallel_degree > 1:
+        raise ValueError("Cannot use both tensor parallelism and context parallelism simultaneously.")
+
     dp_config = TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
-        # When None, OLMo-core automatically determines optimal values based on
-        # world size. For HSDP, it computes num_replicas and shard_degree to
-        # maximize efficiency across the available device mesh.
         num_replicas=None,
         shard_degree=None,
         param_dtype=DType.bfloat16,
         reduce_dtype=DType.float32,
         wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
     )
-    world_mesh = build_world_mesh(dp=dp_config, device_type=device.type)
+
+    tp_config = tensor_parallel_degree if tensor_parallel_degree > 1 else None
+    cp_config = context_parallel_degree if context_parallel_degree > 1 else None
+    pp_config = pipeline_parallel_degree if pipeline_parallel_degree > 1 else None
+
+    world_mesh = build_world_mesh(dp=dp_config, tp=tp_config, cp=cp_config, pp=pp_config, device_type=device.type)
     dp_mesh = get_dp_model_mesh(world_mesh)
+
+    if tensor_parallel_degree > 1:
+        logger.info(f"Applying tensor parallelism with degree={tensor_parallel_degree}")
+        tp_mesh = world_mesh["tp"]
+        model.apply_tp(tp_mesh)
+
+    if context_parallel_degree > 1:
+        logger.info(f"Applying context parallelism with degree={context_parallel_degree}")
+
+    if pipeline_parallel_degree > 1:
+        logger.info(f"Applying pipeline parallelism with degree={pipeline_parallel_degree}")
+        pp_mesh = world_mesh["pp"]
+        model.apply_pp(pp_mesh)
+
     logger.info(f"Applying HSDP with dp_mesh: {dp_mesh}")
     model.apply_fsdp(
         dp_mesh=dp_mesh,
@@ -265,6 +255,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.model_name_or_path is None:
         raise ValueError("--model_name_or_path is required. Specify a HuggingFace model name or path.")
 
+    if args.use_lora:
+        raise ValueError("LoRA is not supported with OLMo-core DPO training. Use dpo_tune_cache.py instead.")
+
     tc.tokenizer_name_or_path = (
         args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
     )
@@ -305,7 +298,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     dataset = dataset.shuffle(seed=args.seed)
     dataset.set_format(type="pt")  # Must be after shuffle (shuffle resets format)
 
-    dp_world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
+    world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
+    parallelism_factor = args.tensor_parallel_degree * args.context_parallel_degree * args.pipeline_parallel_degree
+    dp_world_size = world_size // parallelism_factor
 
     logger_utils.setup_logger(rank=dp_rank)
 
@@ -319,6 +314,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = _setup_model(args, device)
+    model = _apply_parallelism(
+        model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
+    )
 
     if args.packing:
         collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
@@ -342,13 +340,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
     average_log_prob = args.loss_type.is_average_loss
 
-    logger.info("Caching reference logprobs (before HSDP)...")
-
-    def make_disable_adapter_context() -> contextlib.AbstractContextManager:
-        if args.use_lora:
-            assert isinstance(model, peft.PeftModel)
-            return model.disable_adapter()
-        return contextlib.nullcontext()
+    logger.info("Caching reference logprobs...")
 
     reference_cache = dpo_utils.build_reference_logprobs_cache(
         model=model,
@@ -359,13 +351,11 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         device=device,
         cache_path=reference_cache_path,
         is_main_process=is_main_process,
-        use_lora=args.use_lora,
-        disable_adapter_context=make_disable_adapter_context if args.use_lora else None,
+        use_lora=False,
+        disable_adapter_context=None,
     )
     logger.info("Reference logprobs cached.")
     data_loader.reshuffle(epoch=0)
-
-    model = _apply_hsdp(model, device)
 
     num_training_steps = len(data_loader) * args.num_epochs
     optim, scheduler = _setup_optimizer_and_scheduler(args, model, num_training_steps)
