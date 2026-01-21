@@ -118,11 +118,11 @@ uv run --active python open_instruct/grpo_fast.py \
     --save_logprob_samples true \
     --save_logprob_samples_max 50000 \
     --seed 42 \
-    --local_eval_every 10 \
+    --local_eval_every 99999 \
     --save_freq 100 \
     --single_gpu_mode \
     --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.5 \
+    --vllm_gpu_memory_utilization 0.4 \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --attn_implementation sdpa \
