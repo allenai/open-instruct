@@ -33,6 +33,7 @@ from typing import Any
 import aiohttp
 import backoff
 import datasets
+import deepspeed
 import openai
 import ray
 import torch
@@ -1142,3 +1143,50 @@ def create_vllm_engines(
     )
 
     return vllm_engines
+
+
+def broadcast_weights_to_vllm(
+    model: torch.nn.Module,
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: torch.distributed.ProcessGroup,
+    deepspeed_stage: int,
+    gather_whole_model: bool = True,
+) -> list[ray.ObjectRef]:
+    """Broadcast DeepSpeed model weights to vLLM engines.
+
+    Must be called only on rank 0.
+
+    Args:
+        model: The unwrapped model (model.module from DeepSpeed engine)
+        vllm_engines: List of vLLM engine actor handles
+        model_update_group: Process group for distributed broadcast
+        deepspeed_stage: DeepSpeed ZeRO stage (3 requires GatheredParameters)
+        gather_whole_model: If True, gather all params at once (more memory, faster).
+            If False, gather each param individually (less memory, slower).
+
+    Returns:
+        List of Ray ObjectRefs for the weight update calls
+    """
+    params = list(model.named_parameters())
+    num_params = len(params)
+    all_refs: list[ray.ObjectRef] = []
+
+    def send_to_vllm(name: str, param: torch.nn.Parameter, is_last: bool) -> None:
+        shape = param.ds_shape if deepspeed_stage == 3 else param.shape
+        refs = [
+            engine.update_weight.remote(name, dtype=str(param.dtype), shape=shape, empty_cache=is_last)
+            for engine in vllm_engines
+        ]
+        all_refs.extend(refs)
+        torch.distributed.broadcast(param.data, 0, group=model_update_group)
+
+    if gather_whole_model:
+        with deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage == 3):
+            for i, (name, param) in enumerate(params):
+                send_to_vllm(name, param, i == num_params - 1)
+    else:
+        for i, (name, param) in enumerate(params):
+            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage == 3):
+                send_to_vllm(name, param, i == num_params - 1)
+
+    return all_refs
