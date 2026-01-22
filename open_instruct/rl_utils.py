@@ -1,12 +1,10 @@
-# flake8: noqa
 import contextlib
 import time
-from dataclasses import dataclass
-from typing import Generic, List, Optional, TypeVar
+from dataclasses import dataclass, field
+from typing import Generic, TypeVar
 
 import numpy as np
 import torch
-from rich.pretty import pprint
 
 from open_instruct import logger_utils
 
@@ -20,7 +18,9 @@ class Timer(contextlib.ContextDecorator):
 
     description: str
     noop: bool = False
-    start_time: float | None = None
+    start_time: float = field(init=False)
+    end_time: float = field(init=False)
+    duration: float = field(init=False)
 
     def __enter__(self):
         self.start_time = time.perf_counter()
@@ -35,33 +35,33 @@ class Timer(contextlib.ContextDecorator):
 
 @dataclass
 class PackedSequences(Generic[T]):
-    query_responses: np.ndarray
+    query_responses: list[torch.Tensor]
     """packed query and response (batch_size, pack_length)"""
-    attention_masks: np.ndarray
+    attention_masks: list[torch.Tensor]
     """3D attention mask for packed sequences (batch_size, pack_length, pack_length);
     it basically uses a intra-document mask for each query response pair;
     see https://huggingface.co/blog/sirluk/llm-sequence-packing for more details
     """
-    response_masks: np.ndarray
+    response_masks: list[torch.Tensor]
     """bool response mask for packed sequences (batch_size, pack_length)"""
-    original_responses: np.ndarray
+    original_responses: list[list[int]]
     """need the original response for broadcast (batch_size, response_length)"""
-    advantages: Optional[np.ndarray] = None
+    advantages: list[torch.Tensor] | None = None
     """packed advantages (batch_size, pack_length) (to be filled in by the main process)"""
-    num_actions: Optional[np.ndarray] = None
+    num_actions: list[torch.Tensor] | None = None
     """packed number of actions (batch_size, pack_length)"""
-    position_ids: Optional[np.ndarray] = None
+    position_ids: list[torch.Tensor] | None = None
     """packed position ids (batch_size, pack_length)"""
-    packed_seq_lens: Optional[np.ndarray] = None
-    vllm_logprobs: Optional[np.ndarray] = None
-    """packed vLLM logprobs for comparison (batch_size, pack_length)"""
+    packed_seq_lens: list[torch.Tensor] | None = None
     """packed sequence lengths (batch_size, pack_length)"""
-    dones: Optional[np.ndarray] = None
+    vllm_logprobs: list[torch.Tensor] | None = None
+    """packed vLLM logprobs for comparison (batch_size, pack_length)"""
+    dones: list[torch.Tensor] | None = None
     """packed dones (batch_size, pack_length), specifies the sequence boundaries
     E.g., [0, 0, 0, 0, 1, 0, 0, 0, 0, 2] means the first sequence ends at index 4, and the
     second sequence ends at index 9
     """
-    rewards: Optional[np.ndarray] = None
+    rewards: list[torch.Tensor] | None = None
     """packed rewards (batch_size, pack_length)"""
 
 
@@ -78,15 +78,49 @@ def reset_position_ids(attention_mask):
 
 
 def pack_sequences(
-    queries: List[List[int]],
-    responses: List[List[int]],
-    masks: List[List[int]],
+    queries: list[list[int]],
+    responses: list[list[int]],
+    masks: list[list[int]],
     pack_length: int,
     pad_token_id: int,
-    vllm_logprobs: List[List[float]],
+    vllm_logprobs: list[list[float]],
+    min_num_batches: int = 1,
     mask_tool_use: bool = False,
 ) -> PackedSequences:
+    """Pack query-response pairs into sequences for training.
+
+    Args:
+        queries: List of query token sequences
+        responses: List of response token sequences
+        masks: List of tool masks for each response
+        pack_length: Maximum length of each packed sequence
+        pad_token_id: Token ID used for padding
+        vllm_logprobs: Log probabilities from vLLM for each response
+        min_num_batches: Minimum number of packed batches to produce.
+            Used to ensure we have a batch for each rank in distributed training.
+
+    Returns:
+        PackedSequences containing the packed training data.
+    """
     assert not any(pad_token_id in query for query in queries)
+
+    # Calculate total tokens to determine effective pack_length
+    total_tokens = 0
+    for query, response in zip(queries, responses):
+        query_len = len(query)
+        response_len = sum(1 for t in response if t != pad_token_id)
+        total_tokens += query_len + response_len
+
+    # Reduce pack_length if needed to ensure min_num_batches
+    # Note: sequences longer than effective_pack_length will naturally get their own pack(s)
+    # since the packing loop starts a new pack when a sequence doesn't fit
+    if total_tokens > 0 and min_num_batches > 1:
+        target_pack_length = total_tokens // min_num_batches
+        # Don't exceed the original pack_length
+        effective_pack_length = min(target_pack_length, pack_length)
+    else:
+        effective_pack_length = pack_length
+
     # TODO: for some reason vLLM *can* generate the padding token in the responses; investigate
     # assert not any(pad_token_id in response for response in responses)
 
@@ -143,7 +177,8 @@ def pack_sequences(
             f"This can happen if vLLM returns N-1 logprobs for N tokens (missing first token logprob)."
         )
         combined_logprobs = query_logprobs + response_logprobs
-        if len(query_response) + len(cur_data) > pack_length:
+        # only flush if we have data and we exceed the pack length.
+        if len(query_response) + len(cur_data) > effective_pack_length and len(cur_data) > 0:
             query_responses.append(cur_data)
             response_masks.append(cur_response_mask)
             attention_masks.append(cur_attention_mask)
@@ -165,10 +200,7 @@ def pack_sequences(
         cur_packed_seq_lens.append(len(query_response))
 
         query_mask = [0] * len(query)
-        if mask_tool_use:
-            response_mask = [(i + 1) if m else 0 for m in response_tool_mask]
-        else:
-            response_mask = [i + 1] * len(response)
+        response_mask = [i + 1 if m else 0 for m in response_tool_mask] if mask_tool_use else [i + 1] * len(response)
         cur_response_mask.extend(query_mask + response_mask)
         cur_attention_mask.extend([i + 1 - offset for _ in range(len(query_response))])
         cur_dones.extend([0 for _ in range(len(query) + len(response) - 1)] + [i + 1])
@@ -247,7 +279,11 @@ def calculate_advantages_packed(
 def masked_mean(
     values: torch.Tensor, mask: torch.Tensor, axis: int | None = None, denominator: float | None = None
 ) -> torch.Tensor:
-    """Compute mean of tensor with masked values."""
+    """Compute mean of tensor with masked values.
+
+    Returns 0 if mask is empty (no valid elements) to avoid division by zero.
+    This can happen with sequence parallel when a chunk contains only query/padding tokens.
+    """
     extra_dims = values.ndim - mask.ndim
     if axis is None:
         sum_dims = tuple(range(extra_dims, values.ndim))
@@ -257,5 +293,9 @@ def masked_mean(
         sum_dims = axis
     numerator = (values * mask).sum(dim=sum_dims)
     denom = mask.sum(dim=axis) if denominator is None else denominator
-    result = numerator / denom
+    # Handle empty mask case (e.g., SP chunk with no response tokens)
+    if isinstance(denom, torch.Tensor):
+        result = torch.where(denom > 0, numerator / denom, torch.zeros_like(numerator))
+    else:
+        result = numerator / denom if denom > 0 else torch.zeros_like(numerator)
     return result.flatten(extra_dims).mean(-1) if result.ndim > extra_dims else result

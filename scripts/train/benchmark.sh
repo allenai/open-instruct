@@ -1,3 +1,4 @@
+#!/bin/bash
 # ------------------------------------------------------------
 # This script is used to keep track of the commands used to launch
 # the experiments in https://wandb.ai/ai2-llm/open_instruct_public.

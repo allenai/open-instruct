@@ -1,5 +1,6 @@
 import logging
 import unittest
+from unittest import mock
 from unittest.mock import MagicMock
 
 import vllm
@@ -7,6 +8,7 @@ from parameterized import parameterized
 
 from open_instruct import vllm_utils
 from open_instruct.data_types import PromptRequest
+from open_instruct.utils import ModelDims
 
 
 class TestTruncateToolOutputTokens(unittest.TestCase):
@@ -47,8 +49,12 @@ class TestVllmUtils3(unittest.TestCase):
         def create_mock_logprobs(token_ids):
             return [-0.1 * tid for tid in token_ids]
 
+        idx = 43039
+        epoch = 0
+        prompt_id = f"{epoch}_{idx}"
+
         mock_request = PromptRequest(
-            prompt=[1, 2, 3], generation_config=None, is_eval=False, dataset_index=43039, prompt_id="test_prompt_1"
+            prompt=[1, 2, 3], generation_config=None, is_eval=False, index=idx, prompt_id=prompt_id
         )
         request_id = vllm_utils.make_request_id(mock_request)
 
@@ -62,6 +68,8 @@ class TestVllmUtils3(unittest.TestCase):
         mock_output1.tool_output = "result1"
         mock_output1.tool_runtime = 0.5
         mock_output1.tool_called = True
+        mock_output1.tool_call_stats = []
+        mock_output1.excess_tool_calls = {"python": 1}
         mock_output1.finish_reason = "stop"
 
         mock_output2 = MagicMock(spec=vllm.CompletionOutput)
@@ -74,6 +82,8 @@ class TestVllmUtils3(unittest.TestCase):
         mock_output2.tool_output = "result2"
         mock_output2.tool_runtime = 0.3
         mock_output2.tool_called = True
+        mock_output2.tool_call_stats = []
+        mock_output2.excess_tool_calls = {"python": 2, "search": 1}
         mock_output2.finish_reason = "stop"
 
         mock_request_output = MagicMock(spec=vllm.RequestOutput)
@@ -86,20 +96,18 @@ class TestVllmUtils3(unittest.TestCase):
         request_metadata = {
             request_id: {
                 "is_eval": False,
-                "dataset_index": 43039,
-                "prompt_id": "test_prompt_1",
+                "index": idx,
+                "prompt_id": prompt_id,
                 "prompt_token_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                 "start_time": 1000.0,
             }
         }
 
-        tools = {"</tool>": MagicMock()}
-
         result, is_eval = vllm_utils.process_completed_request(
             request_id=request_id,
             outs=[mock_request_output],
             current_time=1001.0,
-            tools=tools,
+            use_tools=True,
             request_metadata=request_metadata,
         )
 
@@ -123,6 +131,7 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_outputs, ["result1", "result2"])
         self.assertEqual(result.request_info.tool_runtimes, [0.5, 0.3])
         self.assertEqual(result.request_info.tool_calleds, [True, True])
+        self.assertEqual(result.request_info.excess_tool_calls, [{"python": 1}, {"python": 2, "search": 1}])
 
     def test_process_outputs_without_tools(self):
         """Test that process_completed_request correctly handles outputs without tool attributes."""
@@ -130,8 +139,12 @@ class TestVllmUtils3(unittest.TestCase):
         def create_mock_logprobs(token_ids):
             return [-0.1 * tid for tid in token_ids]
 
+        idx = 200
+        epoch = 0
+        prompt_id = f"{epoch}_{idx}"
+
         mock_request = PromptRequest(
-            prompt=[1, 2, 3], generation_config=None, is_eval=True, dataset_index=200, prompt_id="test_prompt_2"
+            prompt=[1, 2, 3], generation_config=None, is_eval=True, index=idx, prompt_id=prompt_id
         )
         request_id = vllm_utils.make_request_id(mock_request)
 
@@ -155,8 +168,8 @@ class TestVllmUtils3(unittest.TestCase):
         request_metadata = {
             request_id: {
                 "is_eval": True,
-                "dataset_index": 200,
-                "prompt_id": "test_prompt_2",
+                "index": idx,
+                "prompt_id": prompt_id,
                 "prompt_token_ids": [1, 2, 3, 4, 5],
                 "start_time": 2000.0,
             }
@@ -166,7 +179,7 @@ class TestVllmUtils3(unittest.TestCase):
             request_id=request_id,
             outs=[mock_request_output],
             current_time=2000.5,
-            tools=None,
+            use_tools=False,
             request_metadata=request_metadata,
         )
 
@@ -195,6 +208,46 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_outputs, ["", ""])
         self.assertEqual(result.request_info.tool_runtimes, [0.0, 0.0])
         self.assertEqual(result.request_info.tool_calleds, [False, False])
+        self.assertEqual(result.request_info.excess_tool_calls, [{}, {}])
+
+
+class TestModelDimsFromVllmConfig(unittest.TestCase):
+    def test_model_dims_from_vllm_config(self):
+        expected_dims = ModelDims(
+            num_layers=28,
+            hidden_size=3584,
+            intermediate_size=18944,
+            vocab_size=152064,
+            num_attn_heads=28,
+            head_dim=128,
+            num_kv_heads=4,
+            device_name="h100",
+        )
+
+        mock_hf_text_config = mock.Mock()
+        mock_hf_text_config.intermediate_size = 18944
+        mock_hf_text_config.sliding_window = None
+        mock_hf_text_config.num_attention_heads = 28
+        mock_hf_text_config.num_key_value_heads = 4
+
+        mock_model_config = mock.Mock()
+        mock_model_config.get_hidden_size.return_value = 3584
+        mock_model_config.get_num_layers.return_value = 28
+        mock_model_config.get_vocab_size.return_value = 152064
+        mock_model_config.get_head_size.return_value = 128
+        mock_model_config.hf_text_config = mock_hf_text_config
+
+        mock_vllm_config = mock.Mock()
+        mock_vllm_config.model_config = mock_model_config
+        mock_vllm_config.parallel_config = mock.Mock()
+
+        with (
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+            mock.patch("torch.cuda.is_available", return_value=True),
+        ):
+            vllm_dims = vllm_utils.model_dims_from_vllm_config(mock_vllm_config)
+
+        self.assertEqual(vllm_dims, expected_dims)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,9 @@ import random
 import re
 import secrets
 import select
+import shlex
 import string
+import subprocess
 import sys
 import time
 
@@ -15,7 +17,7 @@ import requests
 from rich.console import Console
 from rich.text import Text
 
-from open_instruct.utils import GCP_CLUSTERS, INTERCONNECT_CLUSTERS, WEKA_CLUSTERS, download_from_gs_bucket
+from open_instruct import launch_utils
 
 console = Console()
 
@@ -26,7 +28,6 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/finetune.py",
     "open_instruct/dpo_tune_cache.py",
     "open_instruct/grpo_fast.py",
-    "open_instruct/ppo.py",
     "open_instruct/reward_modeling.py",
 ]
 
@@ -99,6 +100,7 @@ DEFAULT_ENV_VARS = {
     "VLLM_LOGGING_LEVEL": "WARNING",
     "VLLM_USE_V1": "1",
     "VLLM_ALLOW_INSECURE_SERIALIZATION": "1",
+    "VLLM_ATTENTION_BACKEND": "FLASH_ATTN",
 }
 
 
@@ -301,7 +303,7 @@ def get_env_vars(
         env_vars.extend([beaker.BeakerEnvVar(name="PATH", value=os.getenv("PATH"))])
 
     # if all cluster is in weka, we mount the weka
-    if all(c in WEKA_CLUSTERS for c in cluster):
+    if all(c in launch_utils.WEKA_CLUSTERS for c in cluster):
         env_vars.extend(
             [
                 beaker.BeakerEnvVar(name="HF_HOME", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"),
@@ -324,7 +326,7 @@ def get_env_vars(
             )
     # if all cluster is in gcp we add the following env
 
-    elif all(c in GCP_CLUSTERS for c in cluster):
+    elif all(c in launch_utils.GCP_CLUSTERS for c in cluster):
         env_vars.extend(
             [
                 beaker.BeakerEnvVar(name="HF_HOME", value="/filestore/.cache/huggingface"),
@@ -396,7 +398,7 @@ def get_datasets(beaker_datasets, cluster: list[str]):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
     # if all cluster is in weka, we mount the weka
-    if all(c in WEKA_CLUSTERS for c in cluster):
+    if all(c in launch_utils.WEKA_CLUSTERS for c in cluster):
         res = [
             beaker.BeakerDataMount(
                 source=beaker.BeakerDataSource(weka="oe-adapt-default"), mount_path="/weka/oe-adapt-default"
@@ -405,7 +407,7 @@ def get_datasets(beaker_datasets, cluster: list[str]):
                 source=beaker.BeakerDataSource(weka="oe-training-default"), mount_path="/weka/oe-training-default"
             ),
         ]
-    elif all(c in GCP_CLUSTERS for c in cluster):
+    elif all(c in launch_utils.GCP_CLUSTERS for c in cluster):
         res = [
             beaker.BeakerDataMount(
                 source=beaker.BeakerDataSource(host_path="/mnt/filestore_1"), mount_path="/filestore"
@@ -437,9 +439,6 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
 
     is_open_instruct_training = any(cmd in command for cmd in OPEN_INSTRUCT_COMMANDS)
     if is_open_instruct_training:
-        from open_instruct.dataset_transformation import get_commit_hash
-        from open_instruct.utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
-
         # HACK: Cache dataset logic:
         # Here we basically try to run the tokenization full_command locally before running it on beaker
         # We could in theory submit a cpu only job to beaker to do this, but that requires setting up
@@ -456,7 +455,13 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
 
         dataset_cache_paths = []
         dataset_config_hashes = []
-        if not args.no_auto_dataset_cache:
+        skip_caching = args.no_auto_dataset_cache
+        if sys.platform == "darwin" and not args.no_auto_dataset_cache:
+            console.log(
+                "[yellow]⚠️  On macOS, consider using --no_auto_dataset_cache "
+                "(vllm not available for local caching)[/yellow]"
+            )
+        if not skip_caching:
             for file in OPEN_INSTRUCT_COMMANDS:
                 try:
                     idx = command.index(file)
@@ -467,9 +472,12 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                 filtered_command = maybe_download_tokenizer_from_gs_bucket(
                     filtered_command, args.auto_output_dir_path, whoami
                 )
-                caching_command = "python " + " ".join(filtered_command) + " --cache_dataset_only"
+                # we use shlex.quote to ensure that args with special characters are properly quoted
+                # this is important for tool_configs, which is are json dicts.
+                caching_command = (
+                    "python " + " ".join(shlex.quote(arg) for arg in filtered_command) + " --cache_dataset_only"
+                )
                 console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
-                import subprocess
 
                 # Use Popen to get real-time output while also capturing it
                 process = subprocess.Popen(
@@ -542,7 +550,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
         # Otherwise, we'll set a default path in the user's directory on Weka
-        if any(c in WEKA_CLUSTERS for c in args.cluster):
+        if any(c in launch_utils.WEKA_CLUSTERS for c in args.cluster):
             if len(args.auto_output_dir_path) > 0:
                 need_to_override_output_dir = True
                 for idx, cmd in enumerate(command):
@@ -574,7 +582,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     )
 
         # For GCP clusters, since shared storage is slow, we optimize model loading by:
-        if any(c in GCP_CLUSTERS for c in args.cluster):
+        if any(c in launch_utils.GCP_CLUSTERS for c in args.cluster):
             # 1. First downloading the model from HuggingFace to a local path
             # 2. Uploading it to a Google Storage bucket (if not already there)
             # 3. Then downloading it from the bucket to the compute node
@@ -596,7 +604,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
             if model_name_or_path.startswith("gs://"):
                 gs_saved_path = model_name_or_path
             else:
-                commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
+                commit_hash = launch_utils.get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
                 if os.path.exists(model_name_or_path):
                     path = model_name_or_path
                     assert args.gs_model_name is not None, (
@@ -609,14 +617,14 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         f"Local model is already downloaded, using gs_model_name {model_name_or_path}, with hash of model path {commit_hash}"
                     )
                 else:
-                    download_from_hf(model_name_or_path, model_revision)  # first download the model
-                    path = download_from_hf(model_name_or_path, model_revision)  # then get the path
+                    launch_utils.download_from_hf(model_name_or_path, model_revision)  # first download the model
+                    path = launch_utils.download_from_hf(model_name_or_path, model_revision)  # then get the path
                 gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_models/{model_name_or_path}/{commit_hash}"
-                gs_folder = gs_folder_exists(
+                gs_folder = launch_utils.gs_folder_exists(
                     gs_saved_path
                 )  # race condition exists, but it's fine since we are launching mason sequentially
                 if not gs_folder:
-                    upload_to_gs_bucket(path, gs_saved_path)  # ty: ignore[invalid-argument-type]
+                    launch_utils.upload_to_gs_bucket(path, gs_saved_path)  # ty: ignore[invalid-argument-type]
 
             download_path = gs_saved_path.replace("gs://", "/gs/")
             download_path_without_last_folder = download_path.rsplit("/", 1)[0]
@@ -663,11 +671,11 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     zip(dataset_cache_paths, dataset_config_hashes)
                 ):
                     gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_datasets/{dataset_cache_path}"
-                    gs_folder = gs_folder_exists(
+                    gs_folder = launch_utils.gs_folder_exists(
                         gs_saved_path
                     )  # race condition exists, but it's fine since we are launching mason sequentially
                     if not gs_folder:
-                        upload_to_gs_bucket(dataset_cache_path, gs_saved_path)
+                        launch_utils.upload_to_gs_bucket(dataset_cache_path, gs_saved_path)
                     dataset_cache_path_without_last_folder = dataset_cache_path.rsplit("/", 1)[0]
                     gs_download_command += [
                         "mkdir",
@@ -730,7 +738,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
 
 def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], whoami: str, resumable: bool):
     # Add a check to ensure that the user is using the correct clusters for multi-node jobs
-    if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
+    if args.num_nodes > 1 and not all(c in launch_utils.INTERCONNECT_CLUSTERS for c in args.cluster):
         confirmation = False
         while not confirmation:
             confirmation = input(
@@ -740,11 +748,13 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
                 confirmation = True
             elif confirmation == "n":
                 raise ValueError(
-                    f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {INTERCONNECT_CLUSTERS}"
+                    f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {launch_utils.INTERCONNECT_CLUSTERS}"
                 )
             else:
                 print("Invalid input. Please enter 'y' or 'n'.")
-    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(c in GCP_CLUSTERS for c in args.cluster):
+    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(
+        c in launch_utils.GCP_CLUSTERS for c in args.cluster
+    ):
         raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
 
     if args.hostname is not None:
@@ -805,7 +815,7 @@ def maybe_download_tokenizer_from_gs_bucket(filtered_command: str, auto_output_d
     local_cache_folder = f"{auto_output_dir_path}/{whoami}/tokenizer_{model_name_hash}/"
 
     if not os.path.exists(local_cache_folder):
-        download_from_gs_bucket(
+        launch_utils.download_from_gs_bucket(
             [
                 f"{model_name_or_path}/tokenizer.json",
                 f"{model_name_or_path}/tokenizer_config.json",

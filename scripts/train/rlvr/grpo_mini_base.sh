@@ -1,3 +1,4 @@
+#!/bin/bash
 exp_name="base_grpo_${RANDOM}"
 python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --exp_name $exp_name \

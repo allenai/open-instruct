@@ -19,7 +19,8 @@ import os
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+    from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum, OffloadStateTypeEnum
+    import deepspeed.comm as dist
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
@@ -30,6 +31,7 @@ except Exception:
 # isort: on
 import dataclasses
 import functools
+import importlib
 import json
 import logging
 import math
@@ -56,7 +58,8 @@ import numpy as np
 import ray
 import requests
 import torch
-import vllm.config
+import torch.nn.functional as F
+import wandb
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -64,24 +67,38 @@ from huggingface_hub import HfApi
 from ray.util import state as ray_state
 from rich.pretty import pprint
 from tqdm import tqdm
-from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
+from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentParser
 from transformers.integrations import HfDeepSpeedConfig
 
-from open_instruct import logger_utils
-
-WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
-GCP_CLUSTERS = ["ai2/augusta"]
-INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
+from open_instruct import data_types, logger_utils
+from open_instruct.launch_utils import GCP_CLUSTERS, gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 DISK_USAGE_WARNING_THRESHOLD = 0.85
 CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://", "/filestore")
+INVALID_LOGPROB = 1.0  # Sentinel value for masked/invalid log probabilities
 
 logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+def import_class_from_string(import_path: str) -> type:
+    """Dynamically import a class from a 'module.path:ClassName' string.
+
+    Args:
+        import_path: Import path in format 'module.submodule:ClassName'.
+
+    Returns:
+        The imported class.
+    """
+    if ":" not in import_path:
+        raise ValueError(f"Invalid import path '{import_path}'. Expected format: 'module.path:ClassName'")
+    module_name, class_name = import_path.rsplit(":", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)
 
 
 def warn_if_low_disk_space(
@@ -1114,70 +1131,6 @@ def maybe_update_beaker_description(
         )
 
 
-def live_subprocess_output(cmd: list[str]) -> str:
-    output_lines = []
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    # Display output in real-time and collect it
-    for line in iter(process.stdout.readline, ""):
-        if line.strip():
-            print(line.strip())
-            output_lines.append(line.strip())
-    process.wait()
-    if process.returncode != 0:
-        # Get the actual error message from the process
-        process_error = process.stderr.read() if process.stderr else "No error message available"
-        error_message = f"gsutil command failed with return code {process.returncode}: {process_error}"
-        print(error_message)
-        raise Exception(error_message)
-
-    return "\n".join(output_lines)
-
-
-def download_from_hf(model_name_or_path: str, revision: str) -> None:
-    cmd = ["huggingface-cli", "download", model_name_or_path, "--revision", revision]
-    print(f"Downloading from HF with command: {cmd}")
-    output = live_subprocess_output(cmd)
-    # for some reason, sometimes the output includes the line including some loading message.
-    # so do some minor cleaning.
-    if "\n" in output:
-        output = output.split("\n")[-1].strip()
-    return output
-
-
-def download_from_gs_bucket(src_paths: list[str], dest_path: str) -> None:
-    os.makedirs(dest_path, exist_ok=True)
-    cmd = [
-        "gsutil",
-        "-o",
-        "GSUtil:parallel_thread_count=1",
-        "-o",
-        "GSUtil:sliced_object_download_threshold=150",
-        "-m",
-        "cp",
-        "-r",
-    ]
-    cmd.extend(src_paths)
-    cmd.append(dest_path)
-    print(f"Downloading from GS bucket with command: {cmd}")
-    live_subprocess_output(cmd)
-
-
-def gs_folder_exists(path: str) -> bool:
-    cmd = ["gsutil", "ls", path]
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    # print(f"GS stat command: {cmd}")
-    # print(f"GS stat stdout: {stdout}")
-    # print(f"GS stat stderr: {stderr}")
-    return process.returncode == 0
-
-
-def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
-    cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-r", src_path, dest_path]
-    print(f"Copying model to GS bucket with command: {cmd}")
-    live_subprocess_output(cmd)
-
-
 def sync_gs_bucket(src_path: str, dest_path: str) -> None:
     cmd = [
         "gsutil",
@@ -1349,8 +1302,6 @@ def retry_on_exception(max_attempts=4, delay=1, backoff=2):
 @functools.lru_cache(maxsize=1)
 def maybe_use_ai2_wandb_entity() -> str | None:
     """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
-    import wandb
-
     wandb.login()
     api = wandb.Api()
     current_user = api.viewer
@@ -1406,6 +1357,7 @@ def get_train_ds_config(
     zpg=8,
     grad_accum_dtype=None,
     disable_trace_cache=False,
+    sequence_parallel_size=1,
 ):
     device = "cpu" if offload else "none"
     zero_opt_dict = {
@@ -1436,6 +1388,7 @@ def get_train_ds_config(
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
         "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
+        "sequence_parallel_size": sequence_parallel_size,
     }
 
 
@@ -1572,7 +1525,7 @@ class RayProcess:
         if _SET_AFFINITY:
             return
 
-        from ctypes.util import find_library
+        from ctypes.util import find_library  # noqa: PLC0415
 
         class bitmask_t(Structure):
             _fields_ = [("size", c_ulong), ("maskp", POINTER(c_ulong))]
@@ -1602,8 +1555,6 @@ class RayProcess:
         self._set_numa_affinity(torch.distributed.get_rank() % torch.cuda.device_count())
 
         if model.zero_optimization_stage() == 3:
-            from deepspeed.runtime.zero.offload_config import OffloadStateTypeEnum
-
             model.optimizer.offload_states(
                 include=[
                     OffloadStateTypeEnum.optim_states,
@@ -1795,6 +1746,9 @@ GPU_SPECS = {
     "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
     # Specs from https://www.techpowerup.com/gpu-specs/geforce-rtx-4090-mobile.c3949.
     "4090 laptop": {"flops": 32.98e12, "memory_size": 24e9, "memory_bandwidth": 576e9},
+    # DGX Spark GB10 (Blackwell) - unified LPDDR5X memory with CPU
+    # Specs from https://www.nvidia.com/en-us/products/workstations/dgx-spark/
+    "gb10": {"flops": 104e12, "memory_size": 128e9, "memory_bandwidth": 273e9},  # 273 GB/s LPDDR5X unified
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
@@ -1824,7 +1778,7 @@ class ModelDims:
 
         self.num_params = self.num_params or self._calculate_num_params()
 
-        if self.device_name is None:
+        if self.device_name is None and torch.cuda.is_available():
             self.device_name = get_device_name(torch.cuda.get_device_name(0))
 
         assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
@@ -1852,33 +1806,31 @@ class ModelDims:
         return embedding_params + layer_params + lm_head_params
 
     @classmethod
-    def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
-        """Create ModelDims from a vLLM config object."""
-        model_config = vllm_config.model_config
-        hidden_size = model_config.get_hidden_size()
-
-        # Try to get intermediate_size, default to 4x hidden_size if not present
-        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
-
-        sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
+    def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
+        """Create ModelDims from a HuggingFace model name or path."""
+        config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        hidden_size = config.hidden_size
+        intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)
+        sliding_window = getattr(config, "sliding_window", None)
         num_sliding_window_layers = 0
-
         if sliding_window is not None:
-            layer_types = getattr(model_config.hf_text_config, "layer_types", None)
+            layer_types = getattr(config, "layer_types", None)
             if layer_types is not None:
-                num_sliding_window_layers = sum(1 for lt in layer_types if lt == "sliding_attention")
-
+                num_sliding_window_layers = layer_types.count("sliding_attention")
+            else:
+                num_sliding_window_layers = config.num_hidden_layers
+        head_dim = getattr(config, "head_dim", hidden_size // config.num_attention_heads)
         return cls(
-            num_layers=model_config.get_num_layers(vllm_config.parallel_config),
+            num_layers=config.num_hidden_layers,
             hidden_size=hidden_size,
             intermediate_size=intermediate_size,
-            vocab_size=model_config.get_vocab_size(),
-            num_attn_heads=model_config.hf_text_config.num_attention_heads,
-            num_kv_heads=model_config.hf_text_config.num_key_value_heads,
-            head_dim=model_config.get_head_size(),
+            vocab_size=config.vocab_size,
+            num_attn_heads=config.num_attention_heads,
+            num_kv_heads=getattr(config, "num_key_value_heads", config.num_attention_heads),
+            head_dim=head_dim,
             sliding_window=sliding_window,
             num_sliding_window_layers=num_sliding_window_layers,
-            device_name=get_device_name(torch.cuda.get_device_name(0)),
+            device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
         )
 
     @property
@@ -2415,6 +2367,44 @@ def get_device_name(device_name: str) -> str:
     )
 
 
+def calculate_utilization_metrics(
+    model_dims: ModelDims,
+    prompt_lengths: list[int],
+    response_lengths: list[int],
+    total_generation_time: float,
+    samples_per_prompt: int,
+    num_engines: int,
+    num_gpus_per_engine: int,
+    training_time: float,
+    num_training_gpus: int,
+) -> dict:
+    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+    )
+
+    actor_metrics = model_dims.calculate_actor_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        total_generation_time=total_generation_time,
+        samples_per_prompt=samples_per_prompt,
+        num_engines=num_engines,
+        num_gpus_per_engine=num_gpus_per_engine,
+    )
+
+    learner_metrics = model_dims.calculate_learner_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        training_time=training_time,
+        samples_per_prompt=samples_per_prompt,
+        num_training_gpus=num_training_gpus,
+    )
+
+    utilization_metrics = {f"actor_{k}": v for k, v in actor_metrics.items()}
+    utilization_metrics["learner_mfu"] = learner_metrics["mfu"]
+
+    return utilization_metrics
+
+
 def check_calculation(
     percentage: float,
     metric_name: str,
@@ -2428,8 +2418,6 @@ def check_calculation(
 ) -> None:
     if percentage <= 100:
         return
-
-    import json
 
     full_device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
 
@@ -2543,14 +2531,52 @@ def get_beaker_experiment_url() -> str | None:
         return None
 
 
-def get_denominator(loss_denominator: str | float) -> float | str:
-    """
-    Validates and converts the loss_denominator argument.
-    """
-    if loss_denominator == "token":
-        return "token"
+@dataclass
+class UlyssesSPSplitter:
+    """Splits CollatedBatchData for Ulysses sequence parallelism.
 
-    val = float(loss_denominator)
-    if val <= 0:
-        raise ValueError(f"loss_denominator must be greater than 0 if not 'token', got: {loss_denominator}")
-    return val
+    Adapted from the UlyssesSPDataLoaderAdapter
+    (https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py#L427)
+    Rather than wrapping a dataloader, we just want to split a given batch into the shards across sp group.
+    """
+
+    sp_rank: int
+    sp_group: "torch.distributed.distributed_c10d.ProcessGroup"
+    sp_world_size: int
+    device: torch.device
+    pad_token_id: int
+
+    def split_collated_batch(self, data: data_types.CollatedBatchData) -> data_types.CollatedBatchData:
+        """Get this rank's shard of a CollatedBatchData for sequence parallelism."""
+        # Find max sequence length across all ranks to ensure consistent padding
+        local_max = max(t.shape[-1] for t in data.query_responses)
+        local_seqlen = torch.tensor([local_max], dtype=torch.int64, device=self.device)
+        seqlens = [torch.zeros(1, dtype=torch.int64, device=self.device) for _ in range(self.sp_world_size)]
+        dist.all_gather(seqlens, local_seqlen, group=self.sp_group)
+        max_seqlen = max(x.item() for x in seqlens)
+
+        # Round up to be divisible by sp_world_size
+        max_seqlen = ((max_seqlen + self.sp_world_size - 1) // self.sp_world_size) * self.sp_world_size
+        chunk_len = max_seqlen // self.sp_world_size
+
+        # Compute start and end indices for this rank's chunk
+        start_idx = chunk_len * self.sp_rank
+        end_idx = chunk_len * (self.sp_rank + 1)
+
+        # slice and pad tensors for this sp rank
+        kwargs = {}
+        for field in dataclasses.fields(data):
+            if field.name == "query_responses":
+                pad_value = self.pad_token_id
+            elif field.name == "vllm_logprobs":
+                pad_value = INVALID_LOGPROB
+            else:
+                pad_value = 0
+            sharded = []
+            for t in getattr(data, field.name):
+                # For all tensors in batch, pad tensor to max_seqlen, then slice to get this SP rank's chunk
+                padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
+                sharded.append(padded_sliced)
+            kwargs[field.name] = sharded
+
+        return data_types.CollatedBatchData(**kwargs)
