@@ -118,7 +118,7 @@ def patch_vllm_for_fp32_logits(enabled: bool) -> None:
     fp32_mode = os.environ.get("OPEN_INSTRUCT_FP32_LM_HEAD", "1")
     permanent = fp32_mode == "2"
     try:
-        from vllm.model_executor.layers.logits_processor import LogitsProcessor
+        from vllm.model_executor.layers.logits_processor import LogitsProcessor  # noqa: PLC0415
     except Exception:
         logger.warning("Unable to import vLLM LogitsProcessor for fp32 lm head patch.", exc_info=True)
         return

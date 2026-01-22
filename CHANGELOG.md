@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Added `--fp32_lm_head` option for GRPO training to reduce logprob mismatch between vLLM generator and trainer (addresses ScaleRL precision loss). Supports cache mode (default) and permanent mode (`--fp32_lm_head_permanent`). https://github.com/allenai/open-instruct/pull/1387
 - Added retry logic with exponential backoff to `make_api_request` for tool API calls (retries on timeouts, connection errors, 429, and 5xx). Also added configurable `max_concurrency` parameter to tool configs for controlling Ray actor concurrency per-tool. https://github.com/allenai/open-instruct/pull/1388
 - Added support for generic MCP tools during training, with some limitations (no changing tools, no tool discovery during training). For details: https://github.com/allenai/open-instruct/pull/1384
 - Added the ability to set active tools on a per-sample basis. See the PR for more details: https://github.com/allenai/open-instruct/pull/1382
