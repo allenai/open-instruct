@@ -1,4 +1,6 @@
 #!/bin/bash
+# If this fails with "OSError: Expected to be able to read X bytes", delete the corrupted cache:
+# rm -rf /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/775e5207ce
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
 LR=1e-6
