@@ -45,6 +45,7 @@ def export_to_hf(model, model_config, tokenizer, save_dir: str, original_model_n
     logger.info(f"Exporting model to HuggingFace format at {save_dir}")
 
     state_dict = model.state_dict()
+    state_dict = {k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()}
     unwrapped_model = model_config.build(init_device="cpu")
     unwrapped_model.load_state_dict(state_dict)
 
