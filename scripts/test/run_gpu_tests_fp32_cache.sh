@@ -1,6 +1,5 @@
 #!/bin/bash
-# GPU tests with fp32 LM head CACHE mode
-# This tests --fp32_lm_head without --fp32_lm_head_permanent
+# GPU tests with fp32 LM head CACHE mode (runs inside container)
 set -eo pipefail
 
 source configs/beaker_configs/ray_node_setup.sh
