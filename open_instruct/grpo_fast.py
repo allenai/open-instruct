@@ -1391,6 +1391,8 @@ def create_model_and_optimizer(
         verbose=args.verbose,
         work_dir=args.output_dir,
         tool_names=tools_config.tool_call_names if tools_config else [],
+        run_name=args.run_name,
+        model_name=model_config.model_name_or_path,
         initial_state=data_prep_actor_state,
     )
 
@@ -2137,8 +2139,6 @@ def main(
 
     streaming_config.save_traces = args.save_traces
     streaming_config.rollouts_save_path = args.rollouts_save_path
-    streaming_config.run_name = args.run_name
-    streaming_config.model_name = model_config.model_name_or_path
 
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
 
