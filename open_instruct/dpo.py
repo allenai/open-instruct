@@ -18,7 +18,8 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
-from olmo_core.nn.hf.checkpoint import load_hf_model, save_hf_model
+from olmo_core.nn.hf.checkpoint import load_hf_model
+from olmo_core.nn.hf.convert import convert_state_to_hf
 from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
@@ -214,13 +215,14 @@ def _handle_post_training(
     hf_model_path = os.path.join(args.output_dir, "hf_model")
     if is_main_process:
         logger.info(f"Saving HuggingFace model to {hf_model_path}")
-        save_hf_model(save_dir=hf_model_path, model_state_dict=model.state_dict(), model=model, save_overwrite=True)
-        tokenizer.save_pretrained(hf_model_path)
         original_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
-        logger.info(
-            f"Copying original config from {args.model_name_or_path} (num_hidden_layers={original_config.num_hidden_layers})"
+        logger.info(f"Converting state dict using config with {original_config.num_hidden_layers} layers")
+        hf_state_dict = convert_state_to_hf(original_config, model.state_dict())
+        hf_model = transformers.AutoModelForCausalLM.from_pretrained(
+            args.model_name_or_path, state_dict=hf_state_dict, config=original_config
         )
-        original_config.save_pretrained(hf_model_path)
+        hf_model.save_pretrained(hf_model_path)
+        tokenizer.save_pretrained(hf_model_path)
 
     if distributed_utils.is_distributed():
         dist.barrier()
