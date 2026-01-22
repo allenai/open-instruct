@@ -17,7 +17,7 @@ uv run python mason.py \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --gpus 8 -- torchrun \
-    --nnodes=\$BEAKER_NUM_REPLICAS \
+    --nnodes=2 \
     --node_rank=\$BEAKER_REPLICA_RANK \
     --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
     --master_port=29400 \
