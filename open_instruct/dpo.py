@@ -74,7 +74,8 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
     vocab_size = hf_config.vocab_size
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
-    model_config = olmo_core_utils.get_transformer_config(args.model_name_or_path, vocab_size)
+    config_name_for_lookup = args.config_name if args.config_name else args.model_name_or_path
+    model_config = olmo_core_utils.get_transformer_config(config_name_for_lookup, vocab_size)
     model = model_config.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")

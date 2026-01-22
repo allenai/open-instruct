@@ -27,27 +27,30 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
 }
 
 
-def get_transformer_config(model_name_or_path: str, vocab_size: int) -> TransformerConfig:
-    """Get the appropriate TransformerConfig for a given model name.
+def get_transformer_config(model_name_or_config: str, vocab_size: int) -> TransformerConfig:
+    """Get the appropriate TransformerConfig for a given model name or config name.
 
     Args:
-        model_name_or_path: HuggingFace model name or path.
+        model_name_or_config: HuggingFace model name, path, or direct config name (e.g., 'olmo3_7B').
         vocab_size: Vocabulary size for the model.
 
     Returns:
         TransformerConfig for the specified model.
 
     Raises:
-        ValueError: If model not in OLMO_MODEL_CONFIG_MAP.
+        ValueError: If model/config not found.
     """
-    config_name = OLMO_MODEL_CONFIG_MAP.get(model_name_or_path)
+    config_name = OLMO_MODEL_CONFIG_MAP.get(model_name_or_config)
     if config_name is None:
+        config_name = model_name_or_config
+
+    if not hasattr(TransformerConfig, config_name):
         available_models = ", ".join(OLMO_MODEL_CONFIG_MAP.keys())
         available_configs = [
-            name for name in dir(TransformerConfig) if name.startswith("olmo") and not name.startswith("_")
+            name for name in dir(TransformerConfig) if name.startswith(("olmo", "qwen")) and not name.startswith("_")
         ]
         raise ValueError(
-            f"Model '{model_name_or_path}' not found in OLMO_MODEL_CONFIG_MAP. "
+            f"Model/config '{model_name_or_config}' not found. "
             f"Available models: {available_models}. "
             f"Available config names: {', '.join(available_configs)}"
         )

@@ -26,6 +26,7 @@ uv run python mason.py \
     open_instruct/dpo.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
+    --config_name olmo3_7B \
     --chat_template_name olmo123 \
     --max_seq_length 8192 \
     --per_device_train_batch_size 1 \
