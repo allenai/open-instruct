@@ -1145,6 +1145,24 @@ def create_vllm_engines(
     return vllm_engines
 
 
+def _send_to_vllm(
+    name: str,
+    param: torch.nn.Parameter,
+    is_last: bool,
+    deepspeed_stage: int,
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: torch.distributed.ProcessGroup,
+) -> list[ray.ObjectRef]:
+    """Send a parameter to vLLM engines via broadcast."""
+    shape = param.ds_shape if deepspeed_stage == 3 else param.shape
+    refs = [
+        engine.update_weight.remote(name, dtype=str(param.dtype), shape=shape, empty_cache=is_last)
+        for engine in vllm_engines
+    ]
+    torch.distributed.broadcast(param.data, 0, group=model_update_group)
+    return refs
+
+
 def broadcast_weights_to_vllm(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],
@@ -1171,22 +1189,17 @@ def broadcast_weights_to_vllm(
     num_params = len(params)
     all_refs: list[ray.ObjectRef] = []
 
-    def send_to_vllm(name: str, param: torch.nn.Parameter, is_last: bool) -> None:
-        shape = param.ds_shape if deepspeed_stage == 3 else param.shape
-        refs = [
-            engine.update_weight.remote(name, dtype=str(param.dtype), shape=shape, empty_cache=is_last)
-            for engine in vllm_engines
-        ]
-        all_refs.extend(refs)
-        torch.distributed.broadcast(param.data, 0, group=model_update_group)
-
     if gather_whole_model:
         with deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage == 3):
             for i, (name, param) in enumerate(params):
-                send_to_vllm(name, param, i == num_params - 1)
+                all_refs.extend(
+                    _send_to_vllm(name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group)
+                )
     else:
         for i, (name, param) in enumerate(params):
             with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage == 3):
-                send_to_vllm(name, param, i == num_params - 1)
+                all_refs.extend(
+                    _send_to_vllm(name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group)
+                )
 
     return all_refs
