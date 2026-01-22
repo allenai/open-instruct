@@ -12,7 +12,7 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
-    "allenai/OLMo-2-0425-1B": "olmo2_1B",
+    "allenai/OLMo-2-0425-1B": "olmo2_1B_v2",
     "allenai/OLMo-2-1124-7B": "olmo2_7B",
     "allenai/OLMo-2-1124-13B": "olmo2_13B",
     "allenai/OLMo-2-0325-32B": "olmo2_32B",
