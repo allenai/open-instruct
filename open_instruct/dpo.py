@@ -218,9 +218,8 @@ def _handle_post_training(
         original_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
         logger.info(f"Converting state dict using config with {original_config.num_hidden_layers} layers")
         hf_state_dict = convert_state_to_hf(original_config, model.state_dict())
-        hf_model = transformers.AutoModelForCausalLM.from_pretrained(
-            args.model_name_or_path, state_dict=hf_state_dict, config=original_config
-        )
+        hf_model = transformers.AutoModelForCausalLM.from_config(original_config)
+        hf_model.load_state_dict(hf_state_dict)
         hf_model.save_pretrained(hf_model_path)
         tokenizer.save_pretrained(hf_model_path)
 
