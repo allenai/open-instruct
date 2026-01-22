@@ -37,6 +37,25 @@ from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 logger = logger_utils.setup_logger(__name__)
 
 
+def export_to_hf(model, model_config, tokenizer, save_dir: str, original_model_name_or_path: str):
+    """Export an FSDP-wrapped model to HuggingFace format.
+
+    Handles FSDP unwrapping by building a fresh model from config and loading the state dict.
+    """
+    logger.info(f"Exporting model to HuggingFace format at {save_dir}")
+
+    state_dict = model.state_dict()
+    unwrapped_model = model_config.build(init_device="cpu")
+    unwrapped_model.load_state_dict(state_dict)
+
+    save_hf_model(save_dir=save_dir, model_state_dict=state_dict, model=unwrapped_model, save_overwrite=True)
+    tokenizer.save_pretrained(save_dir)
+
+    original_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
+    logger.info(f"Copying original config (max_position_embeddings={original_config.max_position_embeddings})")
+    original_config.save_pretrained(save_dir)
+
+
 def _load_dataset_distributed(
     args: dpo_utils.ExperimentConfig,
     tc: dataset_transformation.TokenizerConfig,
@@ -86,7 +105,7 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
         logger.info("Enabling activation checkpointing...")
         model.apply_activation_checkpointing(TransformerActivationCheckpointingMode.full)
 
-    return model
+    return model, model_config
 
 
 def _apply_parallelism(
@@ -209,17 +228,18 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
 
 
 def _handle_post_training(
-    args: dpo_utils.ExperimentConfig, model, tokenizer, trainer_callbacks, beaker_config, is_main_process: bool
+    args: dpo_utils.ExperimentConfig,
+    model,
+    model_config,
+    tokenizer,
+    trainer_callbacks,
+    beaker_config,
+    is_main_process: bool,
 ):
     """Save HF model, copy to beaker, launch evals, push to hub."""
     hf_model_path = os.path.join(args.output_dir, "hf_model")
     if is_main_process:
-        logger.info(f"Saving HuggingFace model to {hf_model_path}")
-        save_hf_model(save_dir=hf_model_path, model_state_dict=model.state_dict(), model=model, save_overwrite=True)
-        tokenizer.save_pretrained(hf_model_path)
-        original_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
-        logger.info(f"Copying original config (max_position_embeddings={original_config.max_position_embeddings})")
-        original_config.save_pretrained(hf_model_path)
+        export_to_hf(model, model_config, tokenizer, hf_model_path, args.model_name_or_path)
 
     if distributed_utils.is_distributed():
         dist.barrier()
@@ -325,7 +345,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = _setup_model(args, device)
+    model, model_config = _setup_model(args, device)
     model = _apply_parallelism(
         model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
     )
@@ -397,7 +417,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     trainer.fit()
     logger.info("Training complete.")
 
-    _handle_post_training(args, model, tokenizer, trainer_callbacks, beaker_config, is_main_process)
+    _handle_post_training(args, model, model_config, tokenizer, trainer_callbacks, beaker_config, is_main_process)
 
     train.teardown_training_environment()
 
