@@ -51,12 +51,12 @@ def export_to_hf(
     state_dict = model.state_dict()
     logger.info(f"[rank {rank}] state_dict() complete, got {len(state_dict)} keys")
 
+    logger.info(f"[rank {rank}] Converting DTensors to CPU tensors (collective op)...")
+    state_dict = {k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()}
+    logger.info(f"[rank {rank}] DTensor conversion complete")
+
     if is_main_process:
         logger.info(f"Exporting model to HuggingFace format at {save_dir}")
-        logger.info("Converting DTensors to CPU tensors...")
-        state_dict = {
-            k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()
-        }
         logger.info("Building unwrapped model from config...")
         unwrapped_model = model_config.build(init_device="cpu")
         logger.info("Loading state dict into unwrapped model...")
