@@ -1185,6 +1185,9 @@ def broadcast_weights_to_vllm(
     Returns:
         List of Ray ObjectRefs for the weight update calls
     """
+    if torch.distributed.get_rank() != 0:
+        raise RuntimeError("broadcast_weights_to_vllm must be called only on rank 0")
+
     params = list(model.named_parameters())
     num_params = len(params)
     all_refs: list[ray.ObjectRef] = []
