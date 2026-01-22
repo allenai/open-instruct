@@ -51,9 +51,8 @@ def compute_logprobs(
         List of log probability tensors, one per sample.
     """
     logprobs_BT: list[torch.Tensor] = []
-    ctx = torch.enable_grad() if use_grad else torch.no_grad()
 
-    with ctx:
+    with torch.enable_grad() if use_grad else torch.no_grad():
         for i in range(len(data_BT.query_responses)):
             logprob_BT, _ = forward_fn(
                 model,
