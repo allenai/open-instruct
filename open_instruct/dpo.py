@@ -46,23 +46,33 @@ def export_to_hf(
     All ranks must call this function as state_dict() is a collective operation for FSDP models.
     Only the main process saves to disk.
     """
-    logger.info("Gathering FSDP state dict (collective operation across all ranks)...")
+    rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
+    logger.info(f"[rank {rank}] Entering export_to_hf, calling state_dict()...")
     state_dict = model.state_dict()
+    logger.info(f"[rank {rank}] state_dict() complete, got {len(state_dict)} keys")
 
     if is_main_process:
         logger.info(f"Exporting model to HuggingFace format at {save_dir}")
+        logger.info("Converting DTensors to CPU tensors...")
         state_dict = {
             k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()
         }
+        logger.info("Building unwrapped model from config...")
         unwrapped_model = model_config.build(init_device="cpu")
+        logger.info("Loading state dict into unwrapped model...")
         unwrapped_model.load_state_dict(state_dict)
 
+        logger.info("Calling save_hf_model...")
         save_hf_model(save_dir=save_dir, model_state_dict=state_dict, model=unwrapped_model, save_overwrite=True)
+        logger.info("Saving tokenizer...")
         tokenizer.save_pretrained(save_dir)
 
         original_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
         logger.info(f"Copying original config (max_position_embeddings={original_config.max_position_embeddings})")
         original_config.save_pretrained(save_dir)
+        logger.info("Export complete!")
+
+    logger.info(f"[rank {rank}] Exiting export_to_hf")
 
 
 def _load_dataset_distributed(
