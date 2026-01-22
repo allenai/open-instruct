@@ -50,7 +50,7 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 logger = logging.getLogger(__name__)
 
 _rollout_executor = ThreadPoolExecutor(max_workers=2)
-ROLLOUT_SHARD_SIZE = 10000
+ROLLOUT_SHARD_SIZE: int = 10000
 
 
 @dataclass
