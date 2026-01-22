@@ -37,24 +37,32 @@ from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 logger = logger_utils.setup_logger(__name__)
 
 
-def export_to_hf(model, model_config, tokenizer, save_dir: str, original_model_name_or_path: str):
+def export_to_hf(
+    model, model_config, tokenizer, save_dir: str, original_model_name_or_path: str, is_main_process: bool
+):
     """Export an FSDP-wrapped model to HuggingFace format.
 
     Handles FSDP unwrapping by building a fresh model from config and loading the state dict.
+    All ranks must call this function as state_dict() is a collective operation for FSDP models.
+    Only the main process saves to disk.
     """
-    logger.info(f"Exporting model to HuggingFace format at {save_dir}")
-
+    logger.info("Gathering FSDP state dict (collective operation across all ranks)...")
     state_dict = model.state_dict()
-    state_dict = {k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()}
-    unwrapped_model = model_config.build(init_device="cpu")
-    unwrapped_model.load_state_dict(state_dict)
 
-    save_hf_model(save_dir=save_dir, model_state_dict=state_dict, model=unwrapped_model, save_overwrite=True)
-    tokenizer.save_pretrained(save_dir)
+    if is_main_process:
+        logger.info(f"Exporting model to HuggingFace format at {save_dir}")
+        state_dict = {
+            k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()
+        }
+        unwrapped_model = model_config.build(init_device="cpu")
+        unwrapped_model.load_state_dict(state_dict)
 
-    original_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
-    logger.info(f"Copying original config (max_position_embeddings={original_config.max_position_embeddings})")
-    original_config.save_pretrained(save_dir)
+        save_hf_model(save_dir=save_dir, model_state_dict=state_dict, model=unwrapped_model, save_overwrite=True)
+        tokenizer.save_pretrained(save_dir)
+
+        original_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
+        logger.info(f"Copying original config (max_position_embeddings={original_config.max_position_embeddings})")
+        original_config.save_pretrained(save_dir)
 
 
 def _load_dataset_distributed(
@@ -239,8 +247,7 @@ def _handle_post_training(
 ):
     """Save HF model, copy to beaker, launch evals, push to hub."""
     hf_model_path = os.path.join(args.output_dir, "hf_model")
-    if is_main_process:
-        export_to_hf(model, model_config, tokenizer, hf_model_path, args.model_name_or_path)
+    export_to_hf(model, model_config, tokenizer, hf_model_path, args.model_name_or_path, is_main_process)
 
     if distributed_utils.is_distributed():
         dist.barrier()
