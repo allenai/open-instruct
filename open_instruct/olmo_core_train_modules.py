@@ -354,7 +354,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 if self.grpo_config.loss_denominator == "token" or self.grpo_config.loss_denominator is None:
                     loss = loss.sum() / max(num_tokens, 1)
                 else:
-                    loss = loss.sum() / self.grpo_config.loss_denominator
+                    loss = loss.sum() / float(self.grpo_config.loss_denominator)
 
                 loss = loss / accumulation_steps
                 loss.backward()
