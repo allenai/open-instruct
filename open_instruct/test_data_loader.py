@@ -352,15 +352,13 @@ class TestHFDataLoader(unittest.TestCase):
 class TestStreamingDataLoaderConfig(unittest.TestCase):
     def test_save_traces_requires_rollouts_save_path(self):
         with self.assertRaises(ValueError) as context:
-            open_instruct.data_loader.StreamingDataLoaderConfig(
-                dataset_name="test", save_traces=True, rollouts_save_path=""
-            )
+            open_instruct.data_loader.StreamingDataLoaderConfig(save_traces=True, rollouts_save_path="")
         self.assertIn("rollouts_save_path", str(context.exception))
         self.assertIn("save_traces", str(context.exception))
 
     def test_save_traces_with_valid_path_succeeds(self):
         config = open_instruct.data_loader.StreamingDataLoaderConfig(
-            dataset_name="test", save_traces=True, rollouts_save_path="/tmp/rollouts"
+            save_traces=True, rollouts_save_path="/tmp/rollouts"
         )
         self.assertTrue(config.save_traces)
         self.assertEqual(config.rollouts_save_path, "/tmp/rollouts")
