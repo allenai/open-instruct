@@ -16,7 +16,13 @@ uv run python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
-    --gpus 8 -- torchrun --nproc_per_node=8 open_instruct/dpo.py \
+    --gpus 8 -- torchrun \
+    --nnodes=2 \
+    --node_rank=\$BEAKER_REPLICA_RANK \
+    --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
+    --master_port=29400 \
+    --nproc_per_node=8 \
+    open_instruct/dpo.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
     --chat_template_name olmo \
