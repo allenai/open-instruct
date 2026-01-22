@@ -216,6 +216,9 @@ def _handle_post_training(
         logger.info(f"Saving HuggingFace model to {hf_model_path}")
         save_hf_model(save_dir=hf_model_path, model_state_dict=model.state_dict(), model=model, save_overwrite=True)
         tokenizer.save_pretrained(hf_model_path)
+        original_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path)
+        logger.info(f"Copying original config (max_position_embeddings={original_config.max_position_embeddings})")
+        original_config.save_pretrained(hf_model_path)
 
     if distributed_utils.is_distributed():
         dist.barrier()
