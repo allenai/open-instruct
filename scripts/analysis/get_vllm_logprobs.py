@@ -132,7 +132,6 @@ def get_vllm_logprobs(
     llm = vllm.LLM(
         model=model_name,
         seed=config.seed,
-        enforce_eager=True,
         max_model_len=config.max_model_len,
         dtype=config.dtype,
         gpu_memory_utilization=config.gpu_memory_utilization,
