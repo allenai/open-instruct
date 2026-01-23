@@ -3,11 +3,11 @@
 # Define arrays for model names and paths
 PY="/opt/anaconda3/envs/python310/bin/python"
 MODEL_NAMES=(
-    "SupervisedRT-SoftPriors"
+    "SupervisedRT-Hybrid"
 )
 
 MODEL_PATHS=(
-    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/OLMo2-7b-flex-base-merged-math-code-RT-soft-priors/step3250-hf"
+    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/ce_constrained_RT_lambda0.15/step3000-hf"
 )
 
 # Check that arrays have the same length
