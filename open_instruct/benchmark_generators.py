@@ -96,30 +96,6 @@ def save_config(
     logger.info(f"Saved config to {config_path}")
 
 
-def get_git_commit() -> str:
-    """Get the current git commit hash."""
-    git_dir = pathlib.Path(".git")
-    if not git_dir.exists():
-        return "unknown"
-
-    head_file = git_dir / "HEAD"
-    if not head_file.exists():
-        return "unknown"
-
-    with head_file.open() as f:
-        content = f.read().strip()
-
-    if not content.startswith("ref:"):
-        # Detached HEAD
-        return content[:8]
-
-    # HEAD points to a branch
-    ref_path = git_dir / content[5:]
-
-    with ref_path.open() as ref_f:
-        return ref_f.read().strip()[:8]  # First 8 chars
-
-
 def save_benchmark_results_to_csv(
     results: list[dict[str, Any]],
     total_time: float,
@@ -127,7 +103,7 @@ def save_benchmark_results_to_csv(
     model_config: model_utils.ModelConfig,
 ) -> None:
     """Save benchmark results to CSV file."""
-    git_commit = get_git_commit()
+    git_commit = utils.get_git_commit()
     agg_results = aggregate_results(results)
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
 
