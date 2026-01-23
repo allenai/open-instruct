@@ -248,23 +248,25 @@ def create_diff_histogram(
     x_max = max(diff_bf16.max(), diff_fp32.max()) * 1.05
     bins = np.linspace(0, x_max, 51)  # Shared bins
 
-    # Histogram 1: bf16 vs bf16 diffs
+    # Histogram 1: bf16 vs bf16 diffs (normalized to %)
     ax = axes[0]
-    counts_bf16, _, _ = ax.hist(diff_bf16, bins=bins, color='coral', alpha=0.7, edgecolor='darkred')
+    weights_bf16 = np.ones_like(diff_bf16) * 100 / len(diff_bf16)
+    counts_bf16, _, _ = ax.hist(diff_bf16, bins=bins, weights=weights_bf16, color='coral', alpha=0.7, edgecolor='darkred')
     ax.axvline(diff_bf16.mean(), color='red', linestyle='--', label=f'Mean: {diff_bf16.mean():.4f}')
     ax.set_xlabel(f'|{metric_name} Diff|', fontsize=11)
-    ax.set_ylabel('Count', fontsize=11)
-    ax.set_title('BF16 Baseline\n(vLLM bf16 vs HF bf16)', fontsize=12, fontweight='bold')
+    ax.set_ylabel('% of Tokens', fontsize=11)
+    ax.set_title(f'BF16 Baseline\n(vLLM bf16 vs HF bf16, n={len(diff_bf16)})', fontsize=12, fontweight='bold')
     ax.legend()
     ax.grid(True, alpha=0.3)
 
-    # Histogram 2: fp32 vs fp32 diffs
+    # Histogram 2: fp32 vs fp32 diffs (normalized to %)
     ax = axes[1]
-    counts_fp32, _, _ = ax.hist(diff_fp32, bins=bins, color='mediumseagreen', alpha=0.7, edgecolor='darkgreen')
+    weights_fp32 = np.ones_like(diff_fp32) * 100 / len(diff_fp32)
+    counts_fp32, _, _ = ax.hist(diff_fp32, bins=bins, weights=weights_fp32, color='mediumseagreen', alpha=0.7, edgecolor='darkgreen')
     ax.axvline(diff_fp32.mean(), color='green', linestyle='--', label=f'Mean: {diff_fp32.mean():.4f}')
     ax.set_xlabel(f'|{metric_name} Diff|', fontsize=11)
-    ax.set_ylabel('Count', fontsize=11)
-    ax.set_title('FP32 Fix\n(vLLM fp32 vs HF fp32)', fontsize=12, fontweight='bold')
+    ax.set_ylabel('% of Tokens', fontsize=11)
+    ax.set_title(f'FP32 Fix\n(vLLM fp32 vs HF fp32, n={len(diff_fp32)})', fontsize=12, fontweight='bold')
     ax.legend()
     ax.grid(True, alpha=0.3)
 
