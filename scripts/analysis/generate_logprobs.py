@@ -75,7 +75,6 @@ import vllm
 from vllm.inputs import TokensPrompt
 
 from open_instruct import model_utils
-from open_instruct import rl_utils2
 from open_instruct.vllm_utils import patch_vllm_for_fp32_logits
 
 # Disable vLLM multiprocessing so patches apply in-process
