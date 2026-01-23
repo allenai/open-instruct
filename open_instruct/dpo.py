@@ -406,6 +406,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         disable_adapter_context=None,
     )
     logger.info("Reference logprobs cached.")
+    if args.cache_logprobs_only:
+        logger.info("--cache_logprobs_only set, exiting after cache build.")
+        if dist.is_initialized():
+            dist.barrier()
+            dist.destroy_process_group()
+        return
     data_loader.reshuffle(epoch=0)
 
     num_training_steps = len(data_loader) * args.num_epochs
