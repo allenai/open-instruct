@@ -11,6 +11,9 @@
 #   MODEL_NAME=Qwen/Qwen2.5-7B    # Model to test (default: Qwen/Qwen2.5-0.5B)
 #   MAX_TOKENS=512                # Max tokens to generate (default: 512)
 #   NUM_GPUS=1                    # Number of GPUs for tensor parallelism (default: 1)
+#   CLUSTER=saturn                # Cluster to run on (default: jupiter,saturn,ceres)
+#   PRIORITY=high                 # Job priority (default: high)
+#   TIMEOUT=1h                    # Job timeout (default: 1h)
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
@@ -19,25 +22,34 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-0.5B}"
 MAX_TOKENS="${MAX_TOKENS:-512}"
 NUM_GPUS="${NUM_GPUS:-1}"
+PRIORITY="${PRIORITY:-high}"
+TIMEOUT="${TIMEOUT:-1h}"
+
+# Build cluster args - if CLUSTER is set, use only that; otherwise use defaults
+if [[ -n "${CLUSTER:-}" ]]; then
+    CLUSTER_ARGS="--cluster ai2/$CLUSTER"
+else
+    CLUSTER_ARGS="--cluster ai2/jupiter --cluster ai2/saturn --cluster ai2/ceres"
+fi
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 echo "Model: $MODEL_NAME"
 echo "Max tokens: $MAX_TOKENS"
 echo "GPUs: $NUM_GPUS"
+echo "Cluster: ${CLUSTER:-jupiter,saturn,ceres}"
+echo "Priority: $PRIORITY"
 
 uv run python mason.py \
-    --cluster ai2/jupiter \
-    --cluster ai2/saturn \
-    --cluster ai2/ceres \
+    $CLUSTER_ARGS \
     --image "$BEAKER_IMAGE" \
     --description "FP32 logprobs analysis ($MODEL_NAME)" \
     --pure_docker_mode \
     --workspace ai2/open-instruct-dev \
-    --priority high \
+    --priority "$PRIORITY" \
     --preemptible \
     --num_nodes 1 \
     --max_retries 0 \
-    --timeout 30m \
+    --timeout "$TIMEOUT" \
     --budget ai2/oe-adapt \
     --gpus "$NUM_GPUS" \
     --no_auto_dataset_cache \
