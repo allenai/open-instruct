@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import pathlib
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
@@ -36,7 +37,7 @@ from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, model_utils
+from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
@@ -478,6 +479,7 @@ def build_reference_logprobs_cache(
     device: torch.device,
     cache_path: pathlib.Path,
     is_main_process: bool,
+    model_dims: utils.ModelDims,
     use_lora: bool = False,
     disable_adapter_context: Callable[[], contextlib.AbstractContextManager] | None = None,
 ) -> model_utils.TensorCache:
@@ -520,8 +522,13 @@ def build_reference_logprobs_cache(
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
     rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
 
+    total_tokens = 0
+    total_examples = 0
+
     with torch.no_grad():
-        for batch in tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs"):
+        pbar = tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")
+        for batch in pbar:
+            batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
                     chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
@@ -530,6 +537,21 @@ def build_reference_logprobs_cache(
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
+
+            batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
+            total_tokens += batch_tokens
+            total_examples += len(batch["index"])
+
+            bs = len(batch["index"])
+            chosen_lengths = [batch["chosen_input_ids"].shape[1]] * bs
+            rejected_lengths = [batch["rejected_input_ids"].shape[1]] * bs
+            pbar.set_postfix(
+                {
+                    "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
+                    "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
+                    "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
+                }
+            )
 
     if dist.is_initialized():
         dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)

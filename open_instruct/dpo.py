@@ -371,9 +371,11 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         collator=collator,
         device=device,
     )
+    # 3x batch size: forward-only (no backward), so no activation storage needed.
+    cache_batch_size = args.per_device_train_batch_size * 3 * dp_world_size
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
-        batch_size=global_batch_size,
+        batch_size=cache_batch_size,
         seed=args.seed,
         dp_rank=dp_rank,
         dp_world_size=dp_world_size,
@@ -399,6 +401,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         device=device,
         cache_path=reference_cache_path,
         is_main_process=is_main_process,
+        model_dims=utils.ModelDims.from_hf_config(args.model_name_or_path),
         use_lora=False,
         disable_adapter_context=None,
     )
