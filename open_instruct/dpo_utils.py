@@ -29,6 +29,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -1073,7 +1074,14 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
     def __call__(self, features, return_tensors=None):
         # call the original collator on chosen and rejected separately, then combine
         def filter_batch(match_string, features):
-            return [{k.replace(match_string, ""): v for k, v in f.items() if match_string in k} for f in features]
+            filtered = []
+            for f in features:
+                item = {}
+                for k, v in f.items():
+                    if match_string in k:
+                        item[k.replace(match_string, "")] = torch.as_tensor(v) if isinstance(v, np.ndarray) else v
+                filtered.append(item)
+            return filtered
 
         chosen_features = super().__call__(filter_batch("chosen_", features), return_tensors=return_tensors)
         rejected_features = super().__call__(filter_batch("rejected_", features), return_tensors=return_tensors)
