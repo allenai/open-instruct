@@ -359,6 +359,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 mpu=self.mpu,
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
+                fp32_lm_head=args.fp32_lm_head,
             )
         self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
 
