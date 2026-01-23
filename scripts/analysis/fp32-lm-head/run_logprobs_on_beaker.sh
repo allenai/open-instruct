@@ -11,6 +11,8 @@
 #   MODEL_NAME=Qwen/Qwen2.5-7B    # Model to test (default: Qwen/Qwen2.5-0.5B)
 #   MAX_TOKENS=512                # Max tokens to generate (default: 512)
 #   NUM_GPUS=1                    # Number of GPUs for tensor parallelism (default: 1)
+#   GPU_MEM_UTIL=0.9              # vLLM GPU memory utilization (default: 0.9)
+#   MAX_MODEL_LEN=8192            # Max context length (default: 8192)
 #   CLUSTER=saturn                # Cluster to run on (default: jupiter,saturn,ceres)
 #   PRIORITY=high                 # Job priority (default: high)
 #   TIMEOUT=1h                    # Job timeout (default: 1h)
@@ -22,6 +24,8 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-0.5B}"
 MAX_TOKENS="${MAX_TOKENS:-512}"
 NUM_GPUS="${NUM_GPUS:-1}"
+GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.9}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
 PRIORITY="${PRIORITY:-high}"
 TIMEOUT="${TIMEOUT:-1h}"
 
@@ -35,7 +39,9 @@ fi
 echo "Using Beaker image: $BEAKER_IMAGE"
 echo "Model: $MODEL_NAME"
 echo "Max tokens: $MAX_TOKENS"
+echo "Max model len: $MAX_MODEL_LEN"
 echo "GPUs: $NUM_GPUS"
+echo "GPU mem util: $GPU_MEM_UTIL"
 echo "Cluster: ${CLUSTER:-jupiter,saturn,ceres}"
 echo "Priority: $PRIORITY"
 
@@ -68,6 +74,8 @@ python scripts/analysis/get_vllm_logprobs.py \\
     --mode bf16 \\
     --model $MODEL_NAME \\
     --max-tokens $MAX_TOKENS \\
+    --max-model-len $MAX_MODEL_LEN \\
+    --gpu-memory-utilization $GPU_MEM_UTIL \\
     --tensor-parallel-size $NUM_GPUS \\
     --output \$OUTPUT_DIR/vllm_bf16.json
 
@@ -76,6 +84,8 @@ python scripts/analysis/get_vllm_logprobs.py \\
     --mode fp32 \\
     --model $MODEL_NAME \\
     --max-tokens $MAX_TOKENS \\
+    --max-model-len $MAX_MODEL_LEN \\
+    --gpu-memory-utilization $GPU_MEM_UTIL \\
     --tensor-parallel-size $NUM_GPUS \\
     --output \$OUTPUT_DIR/vllm_fp32.json
 
