@@ -5,15 +5,12 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import Generic, TypeVar
 
 import numpy as np
 import torch
 
-from open_instruct import data_types, logger_utils, utils
-
-if TYPE_CHECKING:
-    from open_instruct.model_utils import Batch
+from open_instruct import data_types, logger_utils, model_utils, utils
 
 T = TypeVar("T")
 logger = logger_utils.setup_logger(__name__)
@@ -43,6 +40,7 @@ class RolloutRecord:
     dataset: str
     ground_truth: list[int] | None = None
     request_info: dict | None = None
+    logprobs: list[float] | None = None
 
 
 def save_rollout_metadata(save_path: str, run_name: str, model_name: str | None) -> None:
@@ -91,7 +89,7 @@ def _save_rollouts(
     save_path: str,
     run_name: str,
     step: int,
-    batch: "Batch",
+    batch: model_utils.Batch,
     result: data_types.GenerationResult,
     advantages: np.ndarray,
     num_samples_per_prompt: int,
@@ -119,6 +117,7 @@ def _save_rollouts(
                     dataset=batch.datasets[i],
                     ground_truth=batch.ground_truths[i],
                     request_info=_get_request_info_for_sample(result.request_info, i),
+                    logprobs=result.logprobs[i] if result.logprobs else None,
                 )
             )
         )
@@ -133,7 +132,7 @@ def save_rollouts_to_disk(
     save_path: str,
     run_name: str,
     step: int,
-    batch: "Batch",
+    batch: model_utils.Batch,
     result: data_types.GenerationResult,
     advantages: np.ndarray,
     num_samples_per_prompt: int,
