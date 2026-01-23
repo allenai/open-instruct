@@ -7,7 +7,7 @@
 # - 4 learner GPUs for training
 #
 # Usage:
-#   ./scripts/train/build_image_and_launch.sh scripts/train/debug/fp32_lm_head_multigpu.sh
+#   ./scripts/train/build_image_and_launch.sh scripts/analysis/fp32-lm-head/fp32_lm_head_multigpu.sh
 #
 # Environment variable overrides:
 #   MODEL_NAME=Qwen/Qwen2.5-14B        # Model to test (default: Qwen/Qwen2.5-7B)
@@ -17,13 +17,13 @@
 #
 # Examples:
 #   # 7B model (default)
-#   ./scripts/train/build_image_and_launch.sh scripts/train/debug/fp32_lm_head_multigpu.sh
+#   ./scripts/train/build_image_and_launch.sh scripts/analysis/fp32-lm-head/fp32_lm_head_multigpu.sh
 #
 #   # MoE model
-#   MODEL_NAME=Qwen/Qwen2.5-MoE-A2.7B ./scripts/train/build_image_and_launch.sh scripts/train/debug/fp32_lm_head_multigpu.sh
+#   MODEL_NAME=Qwen/Qwen2.5-MoE-A2.7B ./scripts/train/build_image_and_launch.sh scripts/analysis/fp32-lm-head/fp32_lm_head_multigpu.sh
 #
 #   # 14B model with 4-way TP (1 engine, 4 learners)
-#   MODEL_NAME=Qwen/Qwen2.5-14B VLLM_TP=4 VLLM_ENGINES=1 ./scripts/train/build_image_and_launch.sh scripts/train/debug/fp32_lm_head_multigpu.sh
+#   MODEL_NAME=Qwen/Qwen2.5-14B VLLM_TP=4 VLLM_ENGINES=1 ./scripts/train/build_image_and_launch.sh scripts/analysis/fp32-lm-head/fp32_lm_head_multigpu.sh
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
