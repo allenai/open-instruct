@@ -209,7 +209,7 @@ def create_scatter_plot(
     metric_suffix = "probs" if use_probs else "logprobs"
     output_path = output_dir / f"comparison_{metric_suffix}_{model_safe}.png"
     output_dir.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
     print(f"Plot saved to {output_path}")
 
     return output_path
@@ -281,7 +281,7 @@ def create_diff_histogram(
     model_safe = config["model"].replace("/", "_")
     metric_suffix = "probs" if use_probs else "logprobs"
     output_path = output_dir / f"histogram_{metric_suffix}_{model_safe}.png"
-    plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
     print(f"Histogram saved to {output_path}")
 
     return output_path

@@ -37,6 +37,7 @@ from vllm.inputs import TokensPrompt
 from open_instruct.vllm_utils import patch_vllm_for_fp32_logits
 
 # Disable vLLM multiprocessing so patches apply in-process
+# Note: fp32 cache setup still fails with TP > 1 due to MultiprocExecutor
 os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 
