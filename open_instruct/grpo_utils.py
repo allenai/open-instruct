@@ -274,13 +274,6 @@ def forward_for_logprobs(
     return_entropy: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Forward pass to compute log probabilities."""
-    device = next(model.parameters()).device
-    query_responses = query_responses.to(device)
-    if attention_mask is not None:
-        attention_mask = attention_mask.to(device)
-    if position_ids is not None:
-        position_ids = position_ids.to(device)
-
     output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
     logits = getattr(output, "logits", output)
     logits = logits / temperature
