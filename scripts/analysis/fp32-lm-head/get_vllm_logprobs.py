@@ -34,11 +34,8 @@ import transformers
 import vllm
 from vllm.inputs import TokensPrompt
 
-from open_instruct.vllm_utils import patch_vllm_for_fp32_logits
-
-# Disable vLLM multiprocessing so patches apply in-process
-# Note: fp32 cache setup still fails with TP > 1 due to MultiprocExecutor
-os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
+# Note: For TP>1, workers are separate processes. We patch LogitsProcessor
+# inside each worker via apply_model (see setup_fp32_in_worker).
 os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 
 
@@ -89,15 +86,93 @@ def setup_precision(config: Config):
         print("TF32 disabled for precise fp32 comparisons")
 
 
-def _set_fp32_lm_head_cache_on_model(model: torch.nn.Module) -> bool:
-    """Runs inside each vLLM worker process (via apply_model)."""
+def _get_logits_fp32_impl(self, hidden_states, lm_head, embedding_bias):
+    """
+    Patched _get_logits that uses fp32 weights if available.
+
+    This function is injected into LogitsProcessor inside each worker process
+    via apply_model, so it works correctly with TP>1.
+    """
+    # Check for cached fp32 weight
+    fp32_weight = getattr(lm_head, "_open_instruct_fp32_weight", None)
+    lm_head_weight = getattr(lm_head, "weight", None)
+
+    # Determine which fp32 weight to use (if any)
+    use_fp32_weight = None
+    if (
+        isinstance(fp32_weight, torch.Tensor)
+        and fp32_weight.dtype == torch.float32
+        and fp32_weight.device == hidden_states.device
+    ):
+        use_fp32_weight = fp32_weight  # Cache mode
+    elif (
+        isinstance(lm_head_weight, torch.Tensor)
+        and lm_head_weight.dtype == torch.float32
+        and lm_head_weight.device == hidden_states.device
+    ):
+        use_fp32_weight = lm_head_weight  # Permanent mode
+
+    # If we have fp32 weight, cast inputs and compute
+    if use_fp32_weight is not None:
+        if isinstance(hidden_states, torch.Tensor) and hidden_states.dtype != torch.float32:
+            hidden_states = hidden_states.float()
+        if (
+            embedding_bias is not None
+            and isinstance(embedding_bias, torch.Tensor)
+            and embedding_bias.dtype != torch.float32
+        ):
+            embedding_bias = embedding_bias.float()
+
+        logits = torch.nn.functional.linear(hidden_states, use_fp32_weight, embedding_bias)
+        logits = self._gather_logits(logits)
+        if logits is not None:
+            logits = logits[..., : self.org_vocab_size]
+        return logits
+
+    # Fallback to original implementation
+    orig = getattr(type(self), "_open_instruct_fp32_lm_head_orig", None)
+    if orig is not None:
+        return orig(self, hidden_states, lm_head, embedding_bias)
+    raise RuntimeError("Original _get_logits not found and no fp32 weight available")
+
+
+def _setup_fp32_in_worker(model: torch.nn.Module) -> str:
+    """
+    Runs inside each vLLM worker process (via apply_model).
+
+    This function does TWO things:
+    1. Patches LogitsProcessor._get_logits to use fp32 weights (if not already patched)
+    2. Sets lm_head._open_instruct_fp32_weight cache on the model
+
+    Both steps are necessary: the patch makes LogitsProcessor LOOK for fp32 weights,
+    and the cache provides the actual fp32 weights to use.
+    """
+    results = []
+
+    # Step 1: Patch LogitsProcessor in this worker process
+    try:
+        from vllm.model_executor.layers.logits_processor import LogitsProcessor
+        if not getattr(LogitsProcessor, "_open_instruct_fp32_lm_head", False):
+            # Save original and install patch
+            LogitsProcessor._open_instruct_fp32_lm_head_orig = LogitsProcessor._get_logits
+            LogitsProcessor._get_logits = _get_logits_fp32_impl
+            LogitsProcessor._open_instruct_fp32_lm_head = True
+            results.append("patched LogitsProcessor")
+        else:
+            results.append("LogitsProcessor already patched")
+    except Exception as e:
+        results.append(f"patch failed: {e}")
+
+    # Step 2: Set fp32 weight cache on model
     lm_head = getattr(model, "lm_head", None)
     if lm_head is None:
-        return False
+        results.append("no lm_head found")
+        return "; ".join(results)
 
     weight = getattr(lm_head, "weight", None)
     if not isinstance(weight, torch.Tensor):
-        return False
+        results.append("lm_head.weight not a tensor")
+        return "; ".join(results)
 
     # Avoid repeated allocations if called more than once
     cached = getattr(lm_head, "_open_instruct_fp32_weight", None)
@@ -107,24 +182,40 @@ def _set_fp32_lm_head_cache_on_model(model: torch.nn.Module) -> bool:
         and cached.device == weight.device
         and cached.shape == weight.shape
     ):
-        return True
+        results.append(f"fp32 cache already exists (shape={weight.shape})")
+        return "; ".join(results)
 
     with torch.no_grad():
         lm_head._open_instruct_fp32_weight = weight.detach().float()
-    return True
+    results.append(f"created fp32 cache (shape={weight.shape}, device={weight.device})")
+
+    return "; ".join(results)
 
 
-def setup_fp32_lm_head_cache(llm: vllm.LLM) -> None:
-    """Set up fp32 LM head weight cache on all vLLM workers (TP-safe)."""
+def setup_fp32_lm_head(llm: vllm.LLM) -> None:
+    """
+    Set up fp32 LM head on all vLLM workers (TP-safe).
+
+    This patches LogitsProcessor AND sets the fp32 weight cache inside each worker,
+    which is necessary for TP>1 where workers are separate processes.
+    """
     try:
         # apply_model executes the function on each worker's local model instance
-        results = llm.apply_model(_set_fp32_lm_head_cache_on_model)
-        if all(results):
-            print(f"  Set up fp32 LM head cache on {len(results)} worker(s)")
+        results = llm.apply_model(_setup_fp32_in_worker)
+        for i, result in enumerate(results):
+            print(f"    Worker {i}: {result}")
+
+        # Verify all workers have the patch
+        all_patched = all("patched" in r or "already patched" in r for r in results)
+        all_cached = all("cache" in r for r in results)
+        if all_patched and all_cached:
+            print(f"  ✓ FP32 LM head enabled on {len(results)} worker(s)")
         else:
-            print(f"  Warning: fp32 lm_head cache not set on all workers: {results}")
+            print(f"  ⚠ FP32 setup incomplete on some workers")
     except Exception as e:
-        print(f"  Warning: Could not set fp32 cache via apply_model: {e}")
+        print(f"  ✗ Could not set up fp32 via apply_model: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def get_vllm_logprobs(
@@ -144,14 +235,7 @@ def get_vllm_logprobs(
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # Set fp32 mode
-    if use_fp32_lm_head:
-        os.environ["OPEN_INSTRUCT_FP32_LM_HEAD"] = "1"
-        patch_vllm_for_fp32_logits(True)
-        print("  [vLLM] FP32 LM head enabled")
-    else:
-        os.environ.pop("OPEN_INSTRUCT_FP32_LM_HEAD", None)
-
+    # Create vLLM engine
     llm = vllm.LLM(
         model=model_name,
         seed=config.seed,
@@ -161,8 +245,10 @@ def get_vllm_logprobs(
         tensor_parallel_size=config.tensor_parallel_size,
     )
 
+    # Set up fp32 LM head AFTER creating LLM (patches LogitsProcessor inside workers)
     if use_fp32_lm_head:
-        setup_fp32_lm_head_cache(llm)
+        print("  [vLLM] Setting up FP32 LM head...")
+        setup_fp32_lm_head(llm)
 
     # Explicit sampling params
     sampling_params = vllm.SamplingParams(
