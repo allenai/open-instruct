@@ -5,9 +5,9 @@
 # allowing each run to use ~85% GPU memory instead of ~40%.
 #
 # Usage:
-#   ./scripts/analysis/run_logprobs_comparison.sh
-#   ./scripts/analysis/run_logprobs_comparison.sh --model Qwen/Qwen2.5-0.5B --max-tokens 100
-#   ./scripts/analysis/run_logprobs_comparison.sh --output-dir ~/dev/logprobs_data/custom/
+#   ./scripts/analysis/fp32-lm-head/run_logprobs_comparison.sh
+#   ./scripts/analysis/fp32-lm-head/run_logprobs_comparison.sh --model Qwen/Qwen2.5-0.5B --max-tokens 100
+#   ./scripts/analysis/fp32-lm-head/run_logprobs_comparison.sh --output-dir ~/dev/logprobs_data/custom/
 
 set -euo pipefail
 
@@ -52,7 +52,7 @@ echo ""
 echo "============================================================"
 echo "Step 1/4: vLLM BF16 generation"
 echo "============================================================"
-uv run python scripts/analysis/get_vllm_logprobs.py \
+uv run python scripts/analysis/fp32-lm-head/get_vllm_logprobs.py \
     --mode bf16 \
     --output "$BF16_OUTPUT" \
     "${SCRIPT_ARGS[@]}"
@@ -62,7 +62,7 @@ echo ""
 echo "============================================================"
 echo "Step 2/4: vLLM FP32 generation"
 echo "============================================================"
-uv run python scripts/analysis/get_vllm_logprobs.py \
+uv run python scripts/analysis/fp32-lm-head/get_vllm_logprobs.py \
     --mode fp32 \
     --output "$FP32_OUTPUT" \
     "${SCRIPT_ARGS[@]}"
@@ -72,7 +72,7 @@ echo ""
 echo "============================================================"
 echo "Step 3/4: HuggingFace scoring"
 echo "============================================================"
-uv run python scripts/analysis/get_hf_logprobs.py \
+uv run python scripts/analysis/fp32-lm-head/get_hf_logprobs.py \
     --bf16-input "$BF16_OUTPUT" \
     --fp32-input "$FP32_OUTPUT" \
     --output "$RESULTS_OUTPUT"
@@ -82,7 +82,7 @@ echo ""
 echo "============================================================"
 echo "Step 4/4: Plotting"
 echo "============================================================"
-uv run python scripts/analysis/plot_logprobs.py \
+uv run python scripts/analysis/fp32-lm-head/plot_logprobs.py \
     --input "$RESULTS_OUTPUT" \
     --output-dir "$OUTPUT_DIR"
 

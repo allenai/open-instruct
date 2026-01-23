@@ -7,13 +7,13 @@ fp32 sequences → fp32 HF).
 
 Usage:
     # Score sequences from vLLM
-    uv run python scripts/analysis/get_hf_logprobs.py \
+    uv run python scripts/analysis/fp32-lm-head/get_hf_logprobs.py \
         --bf16-input ~/dev/logprobs_data/vllm_bf16.json \
         --fp32-input ~/dev/logprobs_data/vllm_fp32.json \
         --output ~/dev/logprobs_data/results.json
 
     # Or use the wrapper script:
-    ./scripts/analysis/run_logprobs_comparison.sh --model hamishivi/qwen3_openthoughts2
+    ./scripts/analysis/fp32-lm-head/run_logprobs_comparison.sh --model hamishivi/qwen3_openthoughts2
 """
 import argparse
 import gc

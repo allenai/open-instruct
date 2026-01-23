@@ -70,7 +70,7 @@ export OUTPUT_DIR=/output
 mkdir -p \$OUTPUT_DIR
 
 echo '=== Step 1/4: vLLM BF16 generation ==='
-python scripts/analysis/get_vllm_logprobs.py \\
+python scripts/analysis/fp32-lm-head/get_vllm_logprobs.py \\
     --mode bf16 \\
     --model $MODEL_NAME \\
     --max-tokens $MAX_TOKENS \\
@@ -80,7 +80,7 @@ python scripts/analysis/get_vllm_logprobs.py \\
     --output \$OUTPUT_DIR/vllm_bf16.json
 
 echo '=== Step 2/4: vLLM FP32 generation ==='
-python scripts/analysis/get_vllm_logprobs.py \\
+python scripts/analysis/fp32-lm-head/get_vllm_logprobs.py \\
     --mode fp32 \\
     --model $MODEL_NAME \\
     --max-tokens $MAX_TOKENS \\
@@ -90,13 +90,13 @@ python scripts/analysis/get_vllm_logprobs.py \\
     --output \$OUTPUT_DIR/vllm_fp32.json
 
 echo '=== Step 3/4: HuggingFace scoring ==='
-python scripts/analysis/get_hf_logprobs.py \\
+python scripts/analysis/fp32-lm-head/get_hf_logprobs.py \\
     --bf16-input \$OUTPUT_DIR/vllm_bf16.json \\
     --fp32-input \$OUTPUT_DIR/vllm_fp32.json \\
     --output \$OUTPUT_DIR/results.json
 
 echo '=== Step 4/4: Plotting ==='
-python scripts/analysis/plot_logprobs.py \\
+python scripts/analysis/fp32-lm-head/plot_logprobs.py \\
     --input \$OUTPUT_DIR/results.json \\
     --output-dir \$OUTPUT_DIR
 

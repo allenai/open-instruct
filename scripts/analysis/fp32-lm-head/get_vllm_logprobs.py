@@ -9,15 +9,15 @@ vLLM memory issues when reloading models in the same process.
 
 Usage:
     # Generate bf16 sequences
-    VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run python scripts/analysis/get_vllm_logprobs.py \
+    VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run python scripts/analysis/fp32-lm-head/get_vllm_logprobs.py \
         --mode bf16 --output ~/dev/logprobs_data/vllm_bf16.json
 
     # Generate fp32 sequences
-    VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run python scripts/analysis/get_vllm_logprobs.py \
+    VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run python scripts/analysis/fp32-lm-head/get_vllm_logprobs.py \
         --mode fp32 --output ~/dev/logprobs_data/vllm_fp32.json
 
     # Or use the wrapper script:
-    ./scripts/analysis/run_logprobs_comparison.sh --model hamishivi/qwen3_openthoughts2
+    ./scripts/analysis/fp32-lm-head/run_logprobs_comparison.sh --model hamishivi/qwen3_openthoughts2
 """
 import argparse
 import gc

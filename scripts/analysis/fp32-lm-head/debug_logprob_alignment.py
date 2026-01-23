@@ -11,7 +11,7 @@ This script:
 4. Compares them to isolate precision issues from weight sync timing issues
 
 Usage:
-    python scripts/analysis/debug_logprob_alignment.py \
+    python scripts/analysis/fp32-lm-head/debug_logprob_alignment.py \
         --model_name_or_path Qwen/Qwen2.5-0.5B \
         --num_sequences 10 \
         --fp32_lm_head  # optional

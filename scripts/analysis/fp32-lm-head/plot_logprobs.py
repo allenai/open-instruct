@@ -19,17 +19,17 @@ Outputs:
 
 Usage:
     # Plot from saved data (probabilities 0-1, default)
-    uv run python scripts/analysis/plot_logprobs.py \
+    uv run python scripts/analysis/fp32-lm-head/plot_logprobs.py \
         --input ~/dev/logprobs_data/logprobs_*.json \
         --output-dir ~/dev/plots/
 
     # Plot logprobs (raw scale, harder to interpret)
-    uv run python scripts/analysis/plot_logprobs.py \
+    uv run python scripts/analysis/fp32-lm-head/plot_logprobs.py \
         --input ~/dev/logprobs_data/logprobs_*.json \
         --output-dir ~/dev/plots/ --use-logprobs
 
     # Show worst offenders for debugging
-    uv run python scripts/analysis/plot_logprobs.py \
+    uv run python scripts/analysis/fp32-lm-head/plot_logprobs.py \
         --input ~/dev/logprobs_data/logprobs_*.json \
         --output-dir ~/dev/plots/ --show-offenders 20
 """
