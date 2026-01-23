@@ -89,20 +89,42 @@ def setup_precision(config: Config):
         print("TF32 disabled for precise fp32 comparisons")
 
 
+def _set_fp32_lm_head_cache_on_model(model: torch.nn.Module) -> bool:
+    """Runs inside each vLLM worker process (via apply_model)."""
+    lm_head = getattr(model, "lm_head", None)
+    if lm_head is None:
+        return False
+
+    weight = getattr(lm_head, "weight", None)
+    if not isinstance(weight, torch.Tensor):
+        return False
+
+    # Avoid repeated allocations if called more than once
+    cached = getattr(lm_head, "_open_instruct_fp32_weight", None)
+    if (
+        isinstance(cached, torch.Tensor)
+        and cached.dtype == torch.float32
+        and cached.device == weight.device
+        and cached.shape == weight.shape
+    ):
+        return True
+
+    with torch.no_grad():
+        lm_head._open_instruct_fp32_weight = weight.detach().float()
+    return True
+
+
 def setup_fp32_lm_head_cache(llm: vllm.LLM) -> None:
-    """Set up fp32 LM head weight cache on vLLM model."""
+    """Set up fp32 LM head weight cache on all vLLM workers (TP-safe)."""
     try:
-        model_runner = llm.llm_engine.model_executor.driver_worker.model_runner
-        model = model_runner.model
-        lm_head = getattr(model, "lm_head", None)
-        if lm_head is not None:
-            weight = getattr(lm_head, "weight", None)
-            if isinstance(weight, torch.Tensor):
-                lm_head._open_instruct_fp32_weight = weight.float()
-                print(f"  Set up fp32 LM head cache: {weight.shape}")
-                return
-    except AttributeError as e:
-        print(f"  Warning: Could not access model for fp32 cache: {e}")
+        # apply_model executes the function on each worker's local model instance
+        results = llm.apply_model(_set_fp32_lm_head_cache_on_model)
+        if all(results):
+            print(f"  Set up fp32 LM head cache on {len(results)} worker(s)")
+        else:
+            print(f"  Warning: fp32 lm_head cache not set on all workers: {results}")
+    except Exception as e:
+        print(f"  Warning: Could not set fp32 cache via apply_model: {e}")
 
 
 def get_vllm_logprobs(
