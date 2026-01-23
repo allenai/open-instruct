@@ -1,7 +1,16 @@
+import enum
 from dataclasses import dataclass, field
 from typing import Literal
 
+import torch
+
+from open_instruct import model_utils
 from open_instruct.utils import calibrate_checkpoint_state_dir, download_latest_checkpoint_from_gs, get_beaker_whoami
+
+
+class GRPOLossType(enum.StrEnum):
+    dapo = "dapo"
+    cispo = "cispo"
 
 
 @dataclass
@@ -79,7 +88,7 @@ class ExperimentConfig:
     """How many training steps to take before updating the reference policy."""
     load_ref_policy: bool = True
     """Whether to load and use a reference policy for KL penalty calculation."""
-    loss_fn: Literal["dapo", "cispo"] = "dapo"
+    loss_fn: GRPOLossType = GRPOLossType.dapo
     """Whether to use DAPO or CISPO loss function."""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
@@ -215,3 +224,36 @@ class ExperimentConfig:
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+
+
+def compute_grpo_loss(
+    new_logprobs: torch.Tensor,
+    ratio: torch.Tensor,
+    advantages: torch.Tensor,
+    ref_logprobs: torch.Tensor | None,
+    config: ExperimentConfig,
+    tis_weights: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    if config.loss_fn == GRPOLossType.dapo:
+        pg_losses = -advantages * ratio
+        pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
+    elif config.loss_fn == GRPOLossType.cispo:
+        pg_losses = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
+        pg_losses2 = pg_losses
+    else:
+        raise ValueError(f"Invalid loss function: {config.loss_fn}")
+
+    if tis_weights is not None:
+        pg_losses = pg_losses * tis_weights
+        pg_losses2 = pg_losses2 * tis_weights
+
+    pg_loss_max = torch.max(pg_losses, pg_losses2)
+
+    if ref_logprobs is not None:
+        ref_logprobs_diff = (new_logprobs - ref_logprobs).clamp(-40.0, 40.0)
+        kl_all = model_utils.estimate_kl(ref_logprobs_diff, ratio)
+        kl = kl_all[config.kl_estimator]
+    else:
+        kl = torch.zeros_like(pg_loss_max)
+
+    return pg_losses, pg_losses2, pg_loss_max, kl
