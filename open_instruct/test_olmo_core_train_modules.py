@@ -2,16 +2,15 @@ import unittest
 from unittest.mock import MagicMock
 
 import torch
-import torch.nn.functional as F
 from parameterized import parameterized
 
-import open_instruct.olmo_core_train_modules as train_modules
 from open_instruct import data_types, grpo_utils
+from open_instruct.utils import INVALID_LOGPROB
 
 
 def _make_mock_model(vocab_size: int = 10, seq_len: int = 5, batch_size: int = 2) -> MagicMock:
     model = MagicMock()
-    model.parameters.return_value = iter([torch.zeros(1)])
+    model.parameters.side_effect = lambda: iter([torch.zeros(1)])
     logits = torch.randn(batch_size, seq_len, vocab_size)
     model.return_value = logits
     return model
@@ -47,67 +46,29 @@ def _make_batch_data(
     )
 
 
-def _forward_for_logprobs(
-    model, query_responses, attention_mask, position_ids, pad_token_id, temperature, return_entropy
-):
-    output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
-    logits = output.logits if hasattr(output, "logits") else output
-    logits = logits / temperature
-    logits = logits[:, :-1]
-    labels = query_responses[:, 1:].clone()
-    labels[labels == pad_token_id] = 0
-    log_probs = F.log_softmax(logits, dim=-1)
-    logprob_BT = torch.gather(log_probs, dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
-
-    entropy = None
-    if return_entropy:
-        with torch.no_grad():
-            probs = F.softmax(logits, dim=-1)
-            entropy = -(probs * log_probs).sum(dim=-1)
-
-    return logprob_BT, entropy
-
-
-def _make_mock_train_module(model, pad_token_id=0, temperature=1.0):
-    grpo_config = MagicMock()
-    grpo_config.temperature = temperature
-    module = MagicMock(spec=train_modules.GRPOTrainModule)
-    module.pad_token_id = pad_token_id
-    module.grpo_config = grpo_config
-    module._forward_for_logprobs = lambda *args, **kwargs: _forward_for_logprobs(
-        args[0], args[1], args[2], args[3], args[4], args[5], args[6] if len(args) > 6 else False
-    )
-    module.compute_logprobs = lambda *args, **kwargs: train_modules.GRPOTrainModule.compute_logprobs(
-        module, *args, **kwargs
-    )
-    return module
-
-
 class TestComputeLogprobs(unittest.TestCase):
     def test_basic(self):
         batch_size, seq_len, vocab_size = 2, 5, 10
         model = _make_mock_model(vocab_size, seq_len, batch_size)
         data_BT = _make_batch_data(batch_size, seq_len, vocab_size, num_samples=2)
-        module = _make_mock_train_module(model)
 
-        result = module.compute_logprobs(model, data_BT, use_grad=False)
+        result = grpo_utils.compute_logprobs(model, data_BT, pad_token_id=0, temperature=1.0, use_grad=False)
 
         self.assertEqual(len(result), 2)
         for logprob in result:
             self.assertEqual(logprob.shape, (batch_size, seq_len - 1))
-            self.assertTrue(torch.all(logprob <= 0))
+            self.assertTrue(torch.all(logprob <= INVALID_LOGPROB))
 
     def test_with_response_mask(self):
         batch_size, seq_len, vocab_size = 2, 5, 10
         model = _make_mock_model(vocab_size, seq_len, batch_size)
         data_BT = _make_batch_data(batch_size, seq_len, vocab_size, num_samples=1)
         data_BT.response_masks[0][:, :] = 0
-        module = _make_mock_train_module(model)
 
-        result = module.compute_logprobs(model, data_BT, use_grad=False)
+        result = grpo_utils.compute_logprobs(model, data_BT, pad_token_id=0, temperature=1.0, use_grad=False)
 
         self.assertEqual(len(result), 1)
-        self.assertTrue(torch.all(result[0] == 0.0))
+        self.assertTrue(torch.all(result[0] == INVALID_LOGPROB))
 
     def test_use_grad(self):
         batch_size, seq_len, vocab_size = 2, 5, 10
@@ -115,9 +76,8 @@ class TestComputeLogprobs(unittest.TestCase):
         logits = torch.randn(batch_size, seq_len, vocab_size, requires_grad=True)
         model.return_value = logits
         data_BT = _make_batch_data(batch_size, seq_len, vocab_size, num_samples=1)
-        module = _make_mock_train_module(model)
 
-        result = module.compute_logprobs(model, data_BT, use_grad=True)
+        result = grpo_utils.compute_logprobs(model, data_BT, pad_token_id=0, temperature=1.0, use_grad=True)
 
         self.assertTrue(result[0].requires_grad)
 
@@ -130,7 +90,7 @@ class TestForwardForLogprobs(unittest.TestCase):
         attention_mask = torch.ones(batch_size, seq_len)
         position_ids = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
-        logprob, entropy = _forward_for_logprobs(
+        logprob, entropy = grpo_utils.forward_for_logprobs(
             model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=1.0, return_entropy=False
         )
 
@@ -145,7 +105,7 @@ class TestForwardForLogprobs(unittest.TestCase):
         attention_mask = torch.ones(batch_size, seq_len)
         position_ids = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
-        logprob, entropy = _forward_for_logprobs(
+        logprob, entropy = grpo_utils.forward_for_logprobs(
             model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=1.0, return_entropy=True
         )
 
@@ -161,10 +121,10 @@ class TestForwardForLogprobs(unittest.TestCase):
         attention_mask = torch.ones(batch_size, seq_len)
         position_ids = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
 
-        logprob_t1, _ = _forward_for_logprobs(
+        logprob_t1, _ = grpo_utils.forward_for_logprobs(
             model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=1.0, return_entropy=False
         )
-        logprob_t2, _ = _forward_for_logprobs(
+        logprob_t2, _ = grpo_utils.forward_for_logprobs(
             model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=2.0, return_entropy=False
         )
 

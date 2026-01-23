@@ -4,8 +4,13 @@ from typing import Literal
 
 import torch
 
-from open_instruct import model_utils
-from open_instruct.utils import calibrate_checkpoint_state_dir, download_latest_checkpoint_from_gs, get_beaker_whoami
+from open_instruct import data_types, model_utils
+from open_instruct.utils import (
+    INVALID_LOGPROB,
+    calibrate_checkpoint_state_dir,
+    download_latest_checkpoint_from_gs,
+    get_beaker_whoami,
+)
 
 
 class GRPOLossType(enum.StrEnum):
@@ -257,3 +262,63 @@ def compute_grpo_loss(
         kl = torch.zeros_like(pg_loss_max)
 
     return pg_losses, pg_losses2, pg_loss_max, kl
+
+
+def forward_for_logprobs(
+    model: torch.nn.Module,
+    query_responses: torch.Tensor,
+    attention_mask: torch.Tensor,
+    position_ids: torch.Tensor,
+    pad_token_id: int,
+    temperature: float,
+    return_entropy: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    device = next(model.parameters()).device
+    query_responses = query_responses.to(device)
+    if attention_mask is not None:
+        attention_mask = attention_mask.to(device)
+    if position_ids is not None:
+        position_ids = position_ids.to(device)
+
+    output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
+    logits = getattr(output, "logits", output)
+    logits = logits / temperature
+    logits = logits[:, :-1]
+    labels = query_responses[:, 1:].clone()
+    labels[labels == pad_token_id] = 0
+    logprob_BT = model_utils.log_softmax_and_gather(logits, labels)
+
+    entropy = None
+    if return_entropy:
+        with torch.no_grad():
+            entropy = model_utils.entropy_from_logits(logits)
+
+    return logprob_BT, entropy
+
+
+def compute_logprobs(
+    model: torch.nn.Module,
+    data_BT: data_types.CollatedBatchData,
+    pad_token_id: int,
+    temperature: float,
+    use_grad: bool = False,
+) -> list[torch.Tensor]:
+    logprobs_BT: list[torch.Tensor] = []
+
+    context = torch.enable_grad() if use_grad else torch.no_grad()
+    with context:
+        for i in range(len(data_BT.query_responses)):
+            logprob_BT, _ = forward_for_logprobs(
+                model,
+                data_BT.query_responses[i],
+                data_BT.attention_masks[i],
+                data_BT.position_ids[i],
+                pad_token_id,
+                temperature,
+                False,
+            )
+            response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
+            logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB)
+            logprobs_BT.append(logprob_BT)
+
+    return logprobs_BT
