@@ -18,6 +18,7 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
+from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model, save_hf_model
 from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
@@ -104,7 +105,8 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     attn_backend = args.attn_backend
     if attn_backend == "auto":
         device_name = torch.cuda.get_device_name(0).lower() if torch.cuda.is_available() else ""
-        attn_backend = "flash_3" if ("h100" in device_name or "h800" in device_name) else "flash_2"
+        is_h100 = "h100" in device_name or "h800" in device_name
+        attn_backend = "flash_3" if (is_h100 and has_flash_attn_3()) else "flash_2"
         logger.info(f"Auto-detected attn_backend={attn_backend} for device: {device_name}")
 
     model_config = olmo_core_utils.get_transformer_config(
