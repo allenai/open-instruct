@@ -443,8 +443,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.args.gather_whole_model:
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
                 for name, param in model.named_parameters():
-                    count += 1  # empty_cache at last param
-                    # Fire all vllm engines for broadcast
+                    count += 1
                     if torch.distributed.get_rank() == 0:
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                         refs = [
@@ -456,7 +455,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         refss.extend(refs)
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-        else:  # broadcast each parameter independently
+        else:
             for name, param in model.named_parameters():
                 count += 1
                 if torch.distributed.get_rank() == 0:
@@ -472,11 +471,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
 
-        # Return futures instead of blocking - let caller handle completion
-        all_refs = []
-        if torch.distributed.get_rank() == 0:
-            all_refs.extend(refss)
-        return all_refs
+        return refss if torch.distributed.get_rank() == 0 else []
 
     def update_ref_policy(self):
         if not self.args.load_ref_policy:
