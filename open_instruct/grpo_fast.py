@@ -747,24 +747,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    if self.args.loss_fn == "dapo":
-                        pg_losses_BT = -data_BT.advantages[i][:, 1:] * ratio_BT
-                        pg_losses2_BT = -data_BT.advantages[i][:, 1:] * torch.clamp(
-                            ratio_BT, 1.0 - self.args.clip_lower, 1.0 + self.args.clip_higher
-                        )
-                    elif self.args.loss_fn == "cispo":
-                        # cispo: directly clip ratio, no lower bound.
-                        # reinforce loss, so multiply by new logprobs
-                        pg_losses_BT = (
-                            -data_BT.advantages[i][:, 1:]
-                            * torch.clamp(ratio_BT.detach(), max=1.0 + self.args.clip_higher)
-                            * new_logprobs_BT
-                        )
-                        pg_losses2_BT = pg_losses_BT
-                    else:
-                        raise ValueError(f"Invalid loss function: {self.args.loss_fn}")
-
-                    # Apply truncated importance sampling if enabled
+                    tis_imp_ratio_BT = None
                     if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
                         old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
                         vllm_logprobs_mask_BT = vllm_logprobs_BT != INVALID_LOGPROB
@@ -781,50 +764,33 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
 
                         valid_mask_BT = response_mask_BT
-
-                        # Initialize importance ratio to 1.0 (no effect) for all positions
                         tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
 
                         if valid_mask_BT.any():
-                            # Calculate logprob difference only for valid positions
                             logprob_diff_is_BT = old_logprob_BT - vllm_logprobs_BT
-                            # Clamp to prevent numerical overflow in exp
                             logprob_diff_is_BT = torch.where(
                                 valid_mask_BT,
                                 logprob_diff_is_BT.clamp(-10.0, 10.0),
                                 torch.zeros_like(logprob_diff_is_BT),
                             )
-                            # Compute importance ratio only for valid positions
                             tis_imp_ratio_BT = torch.where(
                                 valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
                             )
-                            # Apply cap
                             tis_imp_ratio_BT = torch.clamp(
                                 tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
                             )
 
-                        # Apply importance sampling to losses
-                        pg_losses_BT = pg_losses_BT * tis_imp_ratio_BT
-                        pg_losses2_BT = pg_losses2_BT * tis_imp_ratio_BT
+                    pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
+                        new_logprobs=new_logprobs_BT,
+                        ratio=ratio_BT,
+                        advantages=data_BT.advantages[i][:, 1:],
+                        ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
+                        config=self.args,
+                        tis_weights=tis_imp_ratio_BT,
+                    )
 
-                    pg_loss_max_BT = torch.max(pg_losses_BT, pg_losses2_BT)
-
-                    if self.args.load_ref_policy:
-                        ref_logprob_BT = ref_logprobs_BT[i]
-                        # Here we recalculate kl: we want the KL loss to backpropagate through the model
-                        # We also clamp the KL loss to avoid numerical instability
-                        # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
-                        ref_logprobs_diff_BT = (new_logprobs_BT - ref_logprob_BT).clamp(-40.0, 40.0)
-                        kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
-                        # grpo change: directly subtract KL in loss (add)
-                        loss = masked_mean(
-                            pg_loss_max_BT + self.args.beta * kl_4BT[self.args.kl_estimator],
-                            response_mask_BT,
-                            None,
-                            loss_denominator,
-                        )
-                    else:
-                        loss = masked_mean(pg_loss_max_BT, response_mask_BT, None, loss_denominator)
+                    per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
+                    loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
 
                     # we already took world size into account via the tokens
                     # but deepspeed will try to average over ranks, so multiply back
@@ -839,7 +805,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
-                            # NOTE: in packed implementation, kl calculation are averages over response tokens
+                            ref_logprobs_diff_BT = (new_logprobs_BT - ref_logprobs_BT[i]).clamp(-40.0, 40.0)
+                            kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
                             loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
                             loss_stats_B["kl_loss"][i] = loss_stats_B["kl"][self.args.kl_estimator, i] * self.args.beta
                         loss_stats_B["pg_clipfrac"][i] = masked_mean(

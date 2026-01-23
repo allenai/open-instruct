@@ -5,8 +5,6 @@ This module provides GRPO (Group Relative Policy Optimization) training using
 OLMo-core's native training infrastructure, subclassing TransformerTrainModule.
 """
 
-import math
-from collections.abc import Callable
 from typing import Any
 
 import torch
@@ -21,57 +19,9 @@ from olmo_core.train.train_module import TransformerTrainModule
 from olmo_core.train.train_module.transformer.config import TransformerDataParallelConfig
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, grpo_utils, logger_utils, model_utils
+from open_instruct import data_types, grpo_utils, logger_utils
 
 logger = logger_utils.setup_logger(__name__)
-
-
-def compute_logprobs(
-    model: nn.Module,
-    data_BT: data_types.CollatedBatchData,
-    forward_fn: Callable[
-        [nn.Module, torch.Tensor, torch.Tensor, torch.Tensor, int, float, bool],
-        tuple[torch.Tensor, torch.Tensor | None],
-    ],
-    pad_token_id: int,
-    temperature: float,
-    use_grad: bool = False,
-) -> list[torch.Tensor]:
-    """Compute log probabilities for all samples in batch.
-
-    Args:
-        model: The model to use for computing logprobs.
-        data_BT: Collated batch data containing query_responses, attention_masks, etc.
-        forward_fn: Function to compute log probabilities for a single sample.
-        pad_token_id: Padding token ID.
-        temperature: Temperature for logprobs.
-        use_grad: Whether to compute gradients.
-
-    Returns:
-        List of log probability tensors, one per sample.
-    """
-    logprobs_BT: list[torch.Tensor] = []
-
-    with torch.enable_grad() if use_grad else torch.no_grad():
-        for i in range(len(data_BT.query_responses)):
-            logprob_BT, _ = forward_fn(
-                model,
-                data_BT.query_responses[i],
-                data_BT.attention_masks[i],
-                data_BT.position_ids[i],
-                pad_token_id,
-                temperature,
-                False,
-            )
-            response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
-            logprob_BT = torch.where(
-                response_mask_BT[:, 1:].bool(),
-                logprob_BT,
-                torch.tensor(0.0, device=logprob_BT.device, dtype=logprob_BT.dtype),
-            )
-            logprobs_BT.append(logprob_BT)
-
-    return logprobs_BT
 
 
 class GRPOTrainModule(TransformerTrainModule):
@@ -123,7 +73,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
         self.ref_policy = ref_policy
         if ref_policy is not None:
-            self.ref_policy = ref_policy.to(device=self.device).eval()
+            self.ref_policy = ref_policy.to(device=self.device).eval().requires_grad_(False)
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state = super().state_dict(optim=optim)
@@ -146,20 +96,7 @@ class GRPOTrainModule(TransformerTrainModule):
         temperature: float,
         return_entropy: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
-        """Forward pass to compute log probabilities (private helper).
-
-        Args:
-            model: The model to use for forward pass.
-            query_responses: Input token IDs [batch, seq_len].
-            attention_mask: Attention mask [batch, seq_len].
-            position_ids: Position IDs [batch, seq_len].
-            pad_token_id: Padding token ID.
-            temperature: Temperature for logprobs.
-            return_entropy: Whether to return entropy.
-
-        Returns:
-            Tuple of (logprobs [batch, seq_len], entropy or None).
-        """
+        """Forward pass to compute log probabilities."""
         device = next(model.parameters()).device
         query_responses = query_responses.to(device)
         if attention_mask is not None:
@@ -184,6 +121,33 @@ class GRPOTrainModule(TransformerTrainModule):
 
         return logprob_BT, entropy
 
+    def compute_logprobs(
+        self, model: nn.Module, data_BT: data_types.CollatedBatchData, use_grad: bool = False
+    ) -> list[torch.Tensor]:
+        """Compute log probabilities for all samples in batch."""
+        logprobs_BT: list[torch.Tensor] = []
+
+        with torch.enable_grad() if use_grad else torch.no_grad():
+            for i in range(len(data_BT.query_responses)):
+                logprob_BT, _ = self._forward_for_logprobs(
+                    model,
+                    data_BT.query_responses[i],
+                    data_BT.attention_masks[i],
+                    data_BT.position_ids[i],
+                    self.pad_token_id,
+                    self.grpo_config.temperature,
+                    False,
+                )
+                response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
+                logprob_BT = torch.where(
+                    response_mask_BT[:, 1:].bool(),
+                    logprob_BT,
+                    torch.tensor(0.0, device=logprob_BT.device, dtype=logprob_BT.dtype),
+                )
+                logprobs_BT.append(logprob_BT)
+
+        return logprobs_BT
+
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
         """Execute one training step with GRPO loss.
 
@@ -198,29 +162,15 @@ class GRPOTrainModule(TransformerTrainModule):
 
         with torch.no_grad():
             if self.grpo_config.load_ref_policy and self.ref_policy is not None:
-                ref_logprobs_BT = compute_logprobs(
-                    self.ref_policy,
-                    data_BT,
-                    self._forward_for_logprobs,
-                    self.pad_token_id,
-                    self.grpo_config.temperature,
-                    use_grad=False,
-                )
+                ref_logprobs_BT = self.compute_logprobs(self.ref_policy, data_BT, use_grad=False)
             else:
                 ref_logprobs_BT = None
 
         with torch.no_grad():
-            old_logprobs_BT = compute_logprobs(
-                self.model,
-                data_BT,
-                self._forward_for_logprobs,
-                self.pad_token_id,
-                self.grpo_config.temperature,
-                use_grad=False,
-            )
+            old_logprobs_BT = self.compute_logprobs(self.model, data_BT, use_grad=False)
 
         num_samples = len(data_BT.query_responses)
-        accumulation_steps = max(math.ceil(num_samples / self.grpo_config.num_mini_batches - 0.5), 1)
+        accumulation_steps = max(num_samples // self.grpo_config.num_mini_batches, 1)
 
         total_pg_loss = torch.tensor(0.0, device=self.device)
         total_kl = torch.tensor(0.0, device=self.device)
@@ -254,23 +204,14 @@ class GRPOTrainModule(TransformerTrainModule):
                 log_ratio = new_logprobs - old_logprobs
                 ratio = torch.exp(log_ratio)
 
-                if self.grpo_config.loss_fn == "dapo":
-                    clipped_ratio = torch.clamp(
-                        ratio, 1.0 - self.grpo_config.clip_lower, 1.0 + self.grpo_config.clip_higher
-                    )
-                    pg_loss = -advantages.unsqueeze(-1) * torch.min(ratio, clipped_ratio)
-                else:
-                    clipped_ratio = torch.clamp(ratio, max=1.0 + self.grpo_config.clip_higher)
-                    pg_loss = -advantages.unsqueeze(-1) * clipped_ratio * new_logprobs
-
-                if ref_logprobs_BT is not None:
-                    ref_logprobs = ref_logprobs_BT[sample_idx]
-                    kl_all = model_utils.estimate_kl(new_logprobs - ref_logprobs, ratio)
-                    kl = kl_all[self.grpo_config.kl_estimator]
-                    loss = pg_loss + self.grpo_config.beta * kl
-                else:
-                    kl = torch.zeros_like(pg_loss)
-                    loss = pg_loss
+                pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
+                    new_logprobs=new_logprobs,
+                    ratio=ratio,
+                    advantages=advantages[:, 1:],
+                    ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
+                    config=self.grpo_config,
+                )
+                loss = pg_loss + self.grpo_config.beta * kl
 
                 num_tokens = response_mask.sum()
                 if self.grpo_config.loss_denominator == "token" or self.grpo_config.loss_denominator is None:
@@ -283,11 +224,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 total_pg_loss = total_pg_loss + pg_loss.sum().detach()
                 total_kl = total_kl + kl.sum().detach()
-                clip_frac = (
-                    ((ratio < 1.0 - self.grpo_config.clip_lower) | (ratio > 1.0 + self.grpo_config.clip_higher))
-                    .float()
-                    .mean()
-                )
+                clip_frac = (pg_losses2 > pg_losses).float().mean()
                 total_clip_frac = total_clip_frac + clip_frac.detach()
                 if entropy is not None:
                     total_entropy = total_entropy + entropy[response_mask].mean().detach()
