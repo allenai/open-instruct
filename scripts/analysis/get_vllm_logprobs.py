@@ -51,6 +51,7 @@ class Config:
     dtype: str = "bfloat16"
     # Can use high GPU utilization since each mode runs in separate process
     gpu_memory_utilization: float = 0.85
+    tensor_parallel_size: int = 1
     temperature: float = 1.0
     top_p: float = 1.0
     top_k: int = -1
@@ -135,6 +136,7 @@ def get_vllm_logprobs(
         max_model_len=config.max_model_len,
         dtype=config.dtype,
         gpu_memory_utilization=config.gpu_memory_utilization,
+        tensor_parallel_size=config.tensor_parallel_size,
     )
 
     if use_fp32_lm_head:
@@ -239,6 +241,8 @@ def main():
     parser.add_argument("--dtype", type=str, default="bfloat16")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.85,
                         help="vLLM GPU memory fraction (can be high since separate process)")
+    parser.add_argument("--tensor-parallel-size", type=int, default=1,
+                        help="Number of GPUs for tensor parallelism (for larger models)")
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--top-k", type=int, default=-1)
@@ -256,6 +260,7 @@ def main():
         seed=args.seed,
         dtype=args.dtype,
         gpu_memory_utilization=args.gpu_memory_utilization,
+        tensor_parallel_size=args.tensor_parallel_size,
         temperature=args.temperature,
         top_p=args.top_p,
         top_k=args.top_k,
