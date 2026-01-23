@@ -93,11 +93,9 @@ from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, 
 from open_instruct.model_utils import (
     ModelConfig,
     disable_dropout_in_model,
-    entropy_from_logits,
     estimate_kl,
     get_olmo3_generation_config,
     load_ref_policy,
-    log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
     push_folder_to_hub,
@@ -396,39 +394,6 @@ class PolicyTrainerRayProcess(RayProcess):
 
         return optimization_steps_done
 
-    def forward(
-        self,
-        model: PreTrainedModel,
-        query_response: torch.LongTensor,
-        attention_mask: torch.LongTensor,
-        position_ids: torch.LongTensor,
-        pad_token_id: int,
-        temperature: float,
-        return_entropy: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        # Replace pad tokens with 0s so that we don't run into index out of bounds errors
-        padding_mask = query_response != pad_token_id
-        input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
-        # NOTE: the [:-1] and [1:] are because the logits and generated tokens are off by 1 in index
-        output = model(
-            input_ids=input_ids[:, :-1],
-            # @vwxyzjn: without clamp, we get index out of bounds errors; TODO: investigate
-            attention_mask=attention_mask[:, :-1].clamp(0, 1),
-            position_ids=position_ids[:, :-1],
-            return_dict=True,
-        )
-        logits = output.logits
-        logits /= temperature + 1e-7
-        logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
-
-        # For now, entropy is just for monitoring, and we don't pass gradients through it.
-        entropy = None
-        if return_entropy:
-            with torch.no_grad():
-                entropy = entropy_from_logits(logits)
-
-        return logprob, entropy
-
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
         if self.rank == 0:
@@ -524,32 +489,6 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
-    def compute_logprobs(
-        self, model: PreTrainedModel, data_BT: data_types.CollatedBatchData, pad_token_id: int, use_grad: bool = False
-    ) -> list[torch.Tensor]:
-        logprobs_BT: list[torch.Tensor] = []
-
-        context = contextlib.nullcontext() if use_grad else torch.no_grad()
-        with context:
-            for i in range(len(data_BT.query_responses)):
-                logprob_BT, _ = self.forward(
-                    model,
-                    data_BT.query_responses[i],
-                    data_BT.attention_masks[i],
-                    data_BT.position_ids[i],
-                    pad_token_id,
-                    self.streaming_config.temperature,
-                    return_entropy=False,
-                )
-
-                response_mask_BT = data_BT.response_masks[i]
-                logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:], INVALID_LOGPROB)
-                logprobs_BT.append(logprob_BT)
-
-                torch.cuda.empty_cache()
-
-        return logprobs_BT
-
     def calculate_token_counts(
         self, accumulation_steps: int, data_BT: data_types.CollatedBatchData
     ) -> dict[int, float]:
@@ -625,7 +564,10 @@ class PolicyTrainerRayProcess(RayProcess):
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
-                ref_logprobs_BT = self.compute_logprobs(self.ref_policy, data_BT, self.pad_token_id, use_grad=False)
+                ref_logprobs_BT = grpo_utils.compute_logprobs(
+                    self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                )
+                torch.cuda.empty_cache()
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
@@ -635,9 +577,10 @@ class PolicyTrainerRayProcess(RayProcess):
             with Timer("Old logprobs Calculation", noop=self.rank != 0):
                 local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
-                    local_old_logprobs_BT = self.compute_logprobs(
-                        self.model, data_BT, self.pad_token_id, use_grad=False
+                    local_old_logprobs_BT = grpo_utils.compute_logprobs(
+                        self.model, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
                     )
+                    torch.cuda.empty_cache()
 
                 with torch.no_grad():
                     for i in range(len(data_BT.query_responses)):
@@ -689,7 +632,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
-                    local_logprobs_BT, entropy_BT = self.forward(
+                    local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
                         self.model,
                         data_BT.query_responses[i],
                         data_BT.attention_masks[i],
