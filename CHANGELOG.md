@@ -12,7 +12,7 @@ All notable changes to this project will be documented in this file.
 - Added a linter rule that imports go at the top of the file (https://github.com/allenai/open-instruct/pull/1394).
 - Refactors GRPO config into a grpo_utils.py file in preparation for Olmo-core implementation (https://github.com/allenai/open-instruct/pull/1396_.
 - Pulls out weight sync code from GRPO into a more generic function (https://github.com/allenai/open-instruct/pull/1411#pullrequestreview-3694117967)
-- Adds a GRPOTrainModule as part of the Olmo-core migration (https://github.com/allenai/open-instruct/pull/1406/)
+- Adds a GRPOTrainModule as part of the Olmo-core migration (https://github.com/allenai/open-instruct/pull/1412/)
 
 ### Changed
 - Updated library versions via `uv lock --upgrade` (https://github.com/allenai/open-instruct/pull/1400).
