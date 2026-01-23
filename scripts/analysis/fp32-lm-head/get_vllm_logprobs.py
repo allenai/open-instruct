@@ -24,6 +24,7 @@ import gc
 import hashlib
 import json
 import os
+import sys
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -35,7 +36,16 @@ import vllm
 from vllm.inputs import TokensPrompt
 
 # Note: For TP>1, workers are separate processes. We patch LogitsProcessor
-# inside each worker via apply_model (see setup_fp32_in_worker).
+# inside each worker via apply_model (see fp32_worker_patch.py).
+# Add this directory to PYTHONPATH so workers (child processes) can import the patch module.
+_script_dir = str(Path(__file__).parent.resolve())
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
+# Also set PYTHONPATH for child processes (vLLM workers)
+_pythonpath = os.environ.get("PYTHONPATH", "")
+if _script_dir not in _pythonpath:
+    os.environ["PYTHONPATH"] = f"{_script_dir}:{_pythonpath}" if _pythonpath else _script_dir
+
 os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 
 
@@ -86,122 +96,22 @@ def setup_precision(config: Config):
         print("TF32 disabled for precise fp32 comparisons")
 
 
-def _get_logits_fp32_impl(self, hidden_states, lm_head, embedding_bias):
-    """
-    Patched _get_logits that uses fp32 weights if available.
-
-    This function is injected into LogitsProcessor inside each worker process
-    via apply_model, so it works correctly with TP>1.
-    """
-    # Check for cached fp32 weight
-    fp32_weight = getattr(lm_head, "_open_instruct_fp32_weight", None)
-    lm_head_weight = getattr(lm_head, "weight", None)
-
-    # Determine which fp32 weight to use (if any)
-    use_fp32_weight = None
-    if (
-        isinstance(fp32_weight, torch.Tensor)
-        and fp32_weight.dtype == torch.float32
-        and fp32_weight.device == hidden_states.device
-    ):
-        use_fp32_weight = fp32_weight  # Cache mode
-    elif (
-        isinstance(lm_head_weight, torch.Tensor)
-        and lm_head_weight.dtype == torch.float32
-        and lm_head_weight.device == hidden_states.device
-    ):
-        use_fp32_weight = lm_head_weight  # Permanent mode
-
-    # If we have fp32 weight, cast inputs and compute
-    if use_fp32_weight is not None:
-        if isinstance(hidden_states, torch.Tensor) and hidden_states.dtype != torch.float32:
-            hidden_states = hidden_states.float()
-        if (
-            embedding_bias is not None
-            and isinstance(embedding_bias, torch.Tensor)
-            and embedding_bias.dtype != torch.float32
-        ):
-            embedding_bias = embedding_bias.float()
-
-        logits = torch.nn.functional.linear(hidden_states, use_fp32_weight, embedding_bias)
-        logits = self._gather_logits(logits)
-        if logits is not None:
-            logits = logits[..., : self.org_vocab_size]
-        return logits
-
-    # Fallback to original implementation
-    orig = getattr(type(self), "_open_instruct_fp32_lm_head_orig", None)
-    if orig is not None:
-        return orig(self, hidden_states, lm_head, embedding_bias)
-    raise RuntimeError("Original _get_logits not found and no fp32 weight available")
-
-
-def _setup_fp32_in_worker(model: torch.nn.Module) -> str:
-    """
-    Runs inside each vLLM worker process (via apply_model).
-
-    This function does TWO things:
-    1. Patches LogitsProcessor._get_logits to use fp32 weights (if not already patched)
-    2. Sets lm_head._open_instruct_fp32_weight cache on the model
-
-    Both steps are necessary: the patch makes LogitsProcessor LOOK for fp32 weights,
-    and the cache provides the actual fp32 weights to use.
-    """
-    results = []
-
-    # Step 1: Patch LogitsProcessor in this worker process
-    try:
-        from vllm.model_executor.layers.logits_processor import LogitsProcessor
-        if not getattr(LogitsProcessor, "_open_instruct_fp32_lm_head", False):
-            # Save original and install patch
-            LogitsProcessor._open_instruct_fp32_lm_head_orig = LogitsProcessor._get_logits
-            LogitsProcessor._get_logits = _get_logits_fp32_impl
-            LogitsProcessor._open_instruct_fp32_lm_head = True
-            results.append("patched LogitsProcessor")
-        else:
-            results.append("LogitsProcessor already patched")
-    except Exception as e:
-        results.append(f"patch failed: {e}")
-
-    # Step 2: Set fp32 weight cache on model
-    lm_head = getattr(model, "lm_head", None)
-    if lm_head is None:
-        results.append("no lm_head found")
-        return "; ".join(results)
-
-    weight = getattr(lm_head, "weight", None)
-    if not isinstance(weight, torch.Tensor):
-        results.append("lm_head.weight not a tensor")
-        return "; ".join(results)
-
-    # Avoid repeated allocations if called more than once
-    cached = getattr(lm_head, "_open_instruct_fp32_weight", None)
-    if (
-        isinstance(cached, torch.Tensor)
-        and cached.dtype == torch.float32
-        and cached.device == weight.device
-        and cached.shape == weight.shape
-    ):
-        results.append(f"fp32 cache already exists (shape={weight.shape})")
-        return "; ".join(results)
-
-    with torch.no_grad():
-        lm_head._open_instruct_fp32_weight = weight.detach().float()
-    results.append(f"created fp32 cache (shape={weight.shape}, device={weight.device})")
-
-    return "; ".join(results)
-
-
 def setup_fp32_lm_head(llm: vllm.LLM) -> None:
     """
     Set up fp32 LM head on all vLLM workers (TP-safe).
 
     This patches LogitsProcessor AND sets the fp32 weight cache inside each worker,
     which is necessary for TP>1 where workers are separate processes.
+
+    The worker function must be imported from a separate module (not __main__)
+    to be picklable for multiprocessing.
     """
+    # Import from separate module so it's picklable for multiprocessing
+    from fp32_worker_patch import setup_fp32_in_worker
+
     try:
         # apply_model executes the function on each worker's local model instance
-        results = llm.apply_model(_setup_fp32_in_worker)
+        results = llm.apply_model(setup_fp32_in_worker)
         for i, result in enumerate(results):
             print(f"    Worker {i}: {result}")
 
