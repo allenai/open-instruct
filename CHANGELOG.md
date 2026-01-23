@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Updated library versions via `uv lock --upgrade` (https://github.com/allenai/open-instruct/pull/1400).
+- Now, `large_test_script.sh` exercises the `tp > 1` code path (https://github.com/allenai/open-instruct/pull/1413).
 
 ### Fixed
 - Fixed JSON serialization error in `LocalDatasetTransformationCache.save_config` when caching datasets locally (https://github.com/allenai/open-instruct/pull/1402).
