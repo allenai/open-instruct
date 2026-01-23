@@ -153,17 +153,23 @@ def get_vllm_logprobs(
         seed=config.seed,
     )
 
-    all_results = []
     mode_str = "fp32" if use_fp32_lm_head else "bf16"
 
-    for i, prompt in enumerate(prompts):
-        print(f"  [{i+1}/{len(prompts)}] '{prompt[:50]}...'")
+    # Tokenize all prompts upfront
+    print(f"  Tokenizing {len(prompts)} prompts...")
+    queries = [
+        tokenizer(prompt, add_special_tokens=config.add_special_tokens)["input_ids"]
+        for prompt in prompts
+    ]
 
-        # Explicit tokenization control
-        query = tokenizer(prompt, add_special_tokens=config.add_special_tokens)["input_ids"]
+    # Batch generate all at once
+    print(f"  Generating responses for all {len(prompts)} prompts...")
+    token_prompts = [TokensPrompt(prompt_token_ids=q) for q in queries]
+    outputs = llm.generate(token_prompts, sampling_params=sampling_params)
 
-        outputs = llm.generate([TokensPrompt(prompt_token_ids=query)], sampling_params=sampling_params)
-        output = outputs[0]
+    # Process outputs
+    all_results = []
+    for i, (prompt, query, output) in enumerate(zip(prompts, queries, outputs)):
         gen = output.outputs[0]
 
         # Use token_ids alignment instead of dict key order
@@ -188,7 +194,7 @@ def get_vllm_logprobs(
             "logprobs": logprobs,
             "n_tokens": len(response),
         })
-        print(f"    Generated {len(response)} tokens")
+        print(f"  [{i+1}/{len(prompts)}] Generated {len(response)} tokens for '{prompt[:40]}...'")
 
     # Cleanup
     try:
