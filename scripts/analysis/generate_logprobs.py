@@ -91,7 +91,11 @@ class Config:
     max_model_len: int = 8192
     seed: int = 42
     dtype: str = "bfloat16"
-    gpu_memory_utilization: float = 0.4  # Keep low - vLLM cleanup is unreliable between runs
+    # NOTE: Keep utilization low (~0.4) because vLLM V1 doesn't fully release
+    # memory between loads in the same Python process. Higher values (0.8+) cause
+    # OOM on the second vLLM load (bf16 → fp32). To use higher utilization, would
+    # need subprocess-based loading.
+    gpu_memory_utilization: float = 0.4
     attn_implementation: str = "sdpa"
     temperature: float = 1.0
     top_p: float = 1.0
