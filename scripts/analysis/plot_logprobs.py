@@ -244,9 +244,13 @@ def create_diff_histogram(
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
+    # Compute shared axis limits for visual comparison
+    x_max = max(diff_bf16.max(), diff_fp32.max()) * 1.05
+    bins = np.linspace(0, x_max, 51)  # Shared bins
+
     # Histogram 1: bf16 vs bf16 diffs
     ax = axes[0]
-    ax.hist(diff_bf16, bins=50, color='coral', alpha=0.7, edgecolor='darkred')
+    counts_bf16, _, _ = ax.hist(diff_bf16, bins=bins, color='coral', alpha=0.7, edgecolor='darkred')
     ax.axvline(diff_bf16.mean(), color='red', linestyle='--', label=f'Mean: {diff_bf16.mean():.4f}')
     ax.set_xlabel(f'|{metric_name} Diff|', fontsize=11)
     ax.set_ylabel('Count', fontsize=11)
@@ -256,13 +260,19 @@ def create_diff_histogram(
 
     # Histogram 2: fp32 vs fp32 diffs
     ax = axes[1]
-    ax.hist(diff_fp32, bins=50, color='mediumseagreen', alpha=0.7, edgecolor='darkgreen')
+    counts_fp32, _, _ = ax.hist(diff_fp32, bins=bins, color='mediumseagreen', alpha=0.7, edgecolor='darkgreen')
     ax.axvline(diff_fp32.mean(), color='green', linestyle='--', label=f'Mean: {diff_fp32.mean():.4f}')
     ax.set_xlabel(f'|{metric_name} Diff|', fontsize=11)
     ax.set_ylabel('Count', fontsize=11)
     ax.set_title('FP32 Fix\n(vLLM fp32 vs HF fp32)', fontsize=12, fontweight='bold')
     ax.legend()
     ax.grid(True, alpha=0.3)
+
+    # Lock axes to same scale for visual comparison
+    y_max = max(counts_bf16.max(), counts_fp32.max()) * 1.1
+    for ax in axes:
+        ax.set_xlim(0, x_max)
+        ax.set_ylim(0, y_max)
 
     model_name = config["model"].split("/")[-1]
     plt.suptitle(f'{metric_name} Difference Distribution - {model_name}', fontsize=13, y=1.02)
