@@ -764,6 +764,7 @@ def get_wandb_tags() -> list[str]:
     if (git_commit := get_git_commit()) != "unknown":
         tags.append(f"commit: {git_commit}")
         try:
+            # try finding the pull request number on github
             prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
             prs.raise_for_status()
             prs = prs.json()
