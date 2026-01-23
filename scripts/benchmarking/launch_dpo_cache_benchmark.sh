@@ -1,11 +1,11 @@
 #!/bin/bash
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
-MODEL_NAME=allenai/OLMo-2-1124-7B
+MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
 
 uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --description "DPO cache forward-pass benchmark: $MODEL_NAME, 2 nodes, 16k seq" \
+    --description "DPO cache forward-pass benchmark: OLMo3-7B, 2 nodes, 8k seq" \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
@@ -24,8 +24,9 @@ uv run python mason.py \
     --nproc_per_node=8 \
     open_instruct/dpo.py \
     --model_name_or_path "$MODEL_NAME" \
-    --chat_template_name olmo \
-    --max_seq_length 16384 \
+    --config_name olmo3_7B \
+    --chat_template_name olmo123 \
+    --max_seq_length 8192 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
     --learning_rate 1e-6 \
@@ -34,7 +35,16 @@ uv run python mason.py \
     --weight_decay 0.0 \
     --num_epochs 1 \
     --output_dir output/benchmark_dpo_cache/ \
-    --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 1000 \
+    --mixer_list allenai/olmo-3-pref-mix-deltas-complement2-DECON-tpc-kwd-ch-dedup5-lbc100-grafmix-unbal 125000 \
+        allenai/dpo-yolo1-200k-gpt4.1-2w2s-maxdelta_reje-426124-rm-gemma3-kwd-ftd-ch-ftd-topic-ftd-dedup5-lbc100 125000 \
+        allenai/related-query_qwen_pairs_filtered_lbc100 1250 \
+        allenai/paraphrase_qwen_pairs_filtered_lbc100 938 \
+        allenai/repeat_qwen_pairs_filtered_lbc100 312 \
+        allenai/self-talk_qwen_pairs_filtered_lbc100 2500 \
+        allenai/related-query_gpt_pairs_filtered_lbc100 1250 \
+        allenai/paraphrase_gpt_pairs_filtered_lbc100 938 \
+        allenai/repeat_gpt_pairs_filtered_lbc100 312 \
+        allenai/self-talk_gpt_pairs_filtered_lbc100 2500 \
     --seed 123 \
     --use_flash_attn \
     --loss_type dpo_norm \
