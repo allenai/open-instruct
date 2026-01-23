@@ -1067,7 +1067,10 @@ def create_vllm_engines(
 ) -> list[ray.actor.ActorHandle]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     vllm_engines = []
-    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
+    # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
+    # Using "ray" executor causes placement group context loss in vLLM v1's
+    # subprocess-based EngineCore architecture. See: https://github.com/vllm-project/vllm/issues/30016
+    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "mp"
     use_hybrid_engine = pg is not None
     num_gpus = int(tensor_parallel_size == 1)
     if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
@@ -1103,7 +1106,11 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                    env_vars={
+                        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
+                        "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
+                        "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
+                    }
                 ),
             )
             .remote(
