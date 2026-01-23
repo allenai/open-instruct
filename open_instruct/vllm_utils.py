@@ -100,6 +100,90 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelD
     )
 
 
+def patch_vllm_for_fp32_logits(enabled: bool) -> None:
+    """Patch vLLM's LogitsProcessor to compute logits in FP32 for numerical precision.
+
+    This reduces logprob mismatch between vLLM inference and trainer forward pass,
+    which is important for GRPO/RL training stability (see ScaleRL paper Figure 3).
+
+    References:
+        - TRL GRPO cast_lm_head_to_fp32: https://github.com/huggingface/trl/pull/4303
+        - TRL follow-up fix: https://github.com/huggingface/trl/pull/4446
+        - Flash-RL vLLM patch: https://github.com/yaof20/Flash-RL/blob/main/flash_rl/vllm_patch.py#L325
+
+    Modes controlled by OPEN_INSTRUCT_FP32_LM_HEAD env var:
+    - "1" = cache mode: Keep bf16 weights, maintain separate fp32 cache
+    - "2" = permanent mode: Convert lm_head weights to fp32 in-place
+
+    Args:
+        enabled: Whether to enable fp32 logits computation.
+    """
+    if not enabled:
+        return
+    # Read mode from env var (already set by main() before ray.init)
+    fp32_mode = os.environ.get("OPEN_INSTRUCT_FP32_LM_HEAD", "1")
+    permanent = fp32_mode == "2"
+    try:
+        from vllm.model_executor.layers.logits_processor import LogitsProcessor  # noqa: PLC0415
+    except Exception:
+        logger.warning("Unable to import vLLM LogitsProcessor for fp32 lm head patch.", exc_info=True)
+        return
+
+    if getattr(LogitsProcessor, "_open_instruct_fp32_lm_head", False):
+        return
+
+    orig_get_logits = getattr(LogitsProcessor, "_get_logits", None)
+    if orig_get_logits is None:
+        logger.warning("vLLM LogitsProcessor has no _get_logits; fp32 lm head patch skipped.")
+        return
+
+    def _get_logits_fp32(self, hidden_states, lm_head, embedding_bias):
+        # Check for cached fp32 weight (cache mode) or permanent fp32 weight
+        fp32_weight = getattr(lm_head, "_open_instruct_fp32_weight", None)
+        lm_head_weight = getattr(lm_head, "weight", None)
+
+        # Determine which fp32 weight to use (if any)
+        use_fp32_weight = None
+        if (
+            isinstance(fp32_weight, torch.Tensor)
+            and fp32_weight.dtype == torch.float32
+            and fp32_weight.device == hidden_states.device
+        ):
+            use_fp32_weight = fp32_weight  # Cache mode
+        elif (
+            isinstance(lm_head_weight, torch.Tensor)
+            and lm_head_weight.dtype == torch.float32
+            and lm_head_weight.device == hidden_states.device
+        ):
+            use_fp32_weight = lm_head_weight  # Permanent mode
+
+        # If we have fp32 weight, cast inputs and compute
+        if use_fp32_weight is not None:
+            if isinstance(hidden_states, torch.Tensor) and hidden_states.dtype != torch.float32:
+                hidden_states = hidden_states.float()
+            if (
+                embedding_bias is not None
+                and isinstance(embedding_bias, torch.Tensor)
+                and embedding_bias.dtype != torch.float32
+            ):
+                embedding_bias = embedding_bias.float()
+
+            logits = torch.nn.functional.linear(hidden_states, use_fp32_weight, embedding_bias)
+            logits = self._gather_logits(logits)
+            if logits is not None:
+                logits = logits[..., : self.org_vocab_size]
+            return logits
+
+        # Fallback to original implementation (no fp32 weight available yet)
+        return orig_get_logits(self, hidden_states, lm_head, embedding_bias)
+
+    LogitsProcessor._get_logits = _get_logits_fp32
+    LogitsProcessor._open_instruct_fp32_lm_head = True
+    LogitsProcessor._open_instruct_fp32_lm_head_orig_get_logits = orig_get_logits
+    mode_str = "permanent" if permanent else "cache"
+    logger.info(f"Enabled vLLM fp32 LM head patch (mode: {mode_str}).")
+
+
 @dataclasses.dataclass
 class SamplingConfig:
     temperature: float = 0.7
@@ -567,6 +651,7 @@ class LLMRayActor:
         reward_config: RewardConfig | None = None,
         train_dataset=None,
         eval_dataset=None,
+        fp32_lm_head: bool = False,
         **kwargs,
     ):
         assert_threaded_actor(self)
@@ -574,10 +659,12 @@ class LLMRayActor:
             tool_actors, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+        self.fp32_lm_head = fp32_lm_head
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
+        patch_vllm_for_fp32_logits(self.fp32_lm_head)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
@@ -1064,6 +1151,7 @@ def create_vllm_engines(
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
+    fp32_lm_head: bool = False,
 ) -> list[ray.actor.ActorHandle]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     vllm_engines = []
@@ -1135,6 +1223,7 @@ def create_vllm_engines(
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,
+                fp32_lm_head=fp32_lm_head,
             )
         )
 

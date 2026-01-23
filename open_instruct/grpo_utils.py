@@ -85,6 +85,14 @@ class ExperimentConfig:
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
+    fp32_lm_head: bool = False
+    """Force FP32 LM head projection in trainer and vLLM generator to reduce logprob mismatch."""
+    fp32_lm_head_permanent: bool = False
+    """If True, convert vLLM lm_head weights to fp32 permanently instead of caching. More memory but simpler."""
+    save_logprob_samples: bool = False
+    """Save raw vLLM vs trainer logprob samples for alignment analysis (reproduces ScaleRL Figure 3)."""
+    save_logprob_samples_max: int = 50000
+    """Maximum number of logprob samples to save."""
     temperature: float = field(default=1.0, init=False)
     """RUNTIME VALUE: Temperature for sampling, set from streaming_config."""
 

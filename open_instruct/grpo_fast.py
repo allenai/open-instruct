@@ -93,6 +93,7 @@ from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, 
 from open_instruct.model_utils import (
     ModelConfig,
     disable_dropout_in_model,
+    enable_fp32_lm_head,
     entropy_from_logits,
     estimate_kl,
     get_olmo3_generation_config,
@@ -255,6 +256,8 @@ class PolicyTrainerRayProcess(RayProcess):
             use_cache=False,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
+        if args.fp32_lm_head:
+            enable_fp32_lm_head(self.policy, permanent=args.fp32_lm_head_permanent)
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
@@ -356,6 +359,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 mpu=self.mpu,
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
+                fp32_lm_head=args.fp32_lm_head,
             )
         self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
 
@@ -1407,6 +1411,7 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        fp32_lm_head=args.fp32_lm_head,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
@@ -2099,6 +2104,11 @@ def main(
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: ToolsConfig,
 ):
+    # Set fp32 lm head env var early so it propagates to all Ray/vLLM worker processes
+    # Mode "1" = cache mode (default), Mode "2" = permanent mode
+    if args.fp32_lm_head:
+        os.environ["OPEN_INSTRUCT_FP32_LM_HEAD"] = "2" if args.fp32_lm_head_permanent else "1"
+
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)

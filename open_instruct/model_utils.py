@@ -18,6 +18,7 @@ import asyncio
 import itertools
 import pathlib
 import tempfile
+import types
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from typing import Literal, Union
 import deepspeed
 import pandas as pd
 import torch
+import torch.nn.functional as F
 import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
@@ -42,6 +44,127 @@ from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
+
+
+def enable_fp32_lm_head(model: torch.nn.Module, permanent: bool = False) -> bool:
+    """Force LM head projection to run in fp32.
+
+    This reduces logprob mismatch between vLLM (generator) and the trainer during GRPO,
+    improving training signal quality. See ScaleRL paper for motivation.
+
+    References:
+        - TRL GRPO cast_lm_head_to_fp32: https://github.com/huggingface/trl/pull/4303
+        - TRL follow-up fix: https://github.com/huggingface/trl/pull/4446
+        - Flash-RL vLLM patch: https://github.com/yaof20/Flash-RL/blob/main/flash_rl/vllm_patch.py#L325
+
+    Args:
+        model: The model to modify.
+        permanent: If True, convert lm_head weights to fp32 in-place (more efficient,
+                   syncs fp32 weights to vLLM directly). If False, patch the forward
+                   pass to compute in fp32 while keeping bf16 weights.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    target = model.module if hasattr(model, "module") else model
+    get_output_embeddings = getattr(target, "get_output_embeddings", None)
+    if get_output_embeddings is None:
+        logger.warning("Cannot enable fp32 lm head: model has no get_output_embeddings().")
+        return False
+
+    lm_head = target.get_output_embeddings()
+    if lm_head is None:
+        logger.warning("Cannot enable fp32 lm head: model has no output embeddings.")
+        return False
+
+    if getattr(lm_head, "_open_instruct_fp32_lm_head", False):
+        return True
+
+    if permanent:
+        # Convert weights to fp32 in-place (more efficient for weight sync)
+        # Handle tied weights by untying first
+        _untie_lm_head_if_needed(target)
+        lm_head = target.get_output_embeddings()  # Re-fetch after potential untying
+        if hasattr(lm_head, "weight") and lm_head.weight is not None:
+            lm_head.weight.data = lm_head.weight.data.float()
+            lm_head._open_instruct_fp32_lm_head = True
+            logger.info("Converted LM head weights to fp32 (permanent mode).")
+            return True
+        else:
+            logger.warning("Cannot convert lm_head to fp32: no weight attribute.")
+            return False
+
+    # Non-permanent mode: patch forward pass to compute in fp32
+    orig_forward = lm_head.forward
+
+    def fp32_forward(self, hidden_states, *args, **kwargs):
+        if not isinstance(hidden_states, torch.Tensor):
+            return orig_forward(hidden_states, *args, **kwargs)
+        device_type = "cuda" if hidden_states.is_cuda else "cpu"
+        with torch.autocast(device_type=device_type, enabled=False):
+            if hasattr(self, "weight") and self.weight is not None and not args and not kwargs:
+                weight = self.weight.float()
+                bias = self.bias.float() if getattr(self, "bias", None) is not None else None
+                return F.linear(hidden_states.float(), weight, bias)
+            output = orig_forward(hidden_states.float(), *args, **kwargs)
+        if isinstance(output, torch.Tensor) and output.dtype != torch.float32:
+            output = output.float()
+        return output
+
+    lm_head.forward = types.MethodType(fp32_forward, lm_head)
+    lm_head._open_instruct_fp32_lm_head = True
+    lm_head._open_instruct_fp32_lm_head_orig_forward = orig_forward
+    logger.info("Enabled fp32 LM head projection (forward patch mode).")
+    return True
+
+
+def _untie_lm_head_if_needed(model: torch.nn.Module) -> bool:
+    """Untie lm_head weights from embed_tokens if they share storage.
+
+    This is needed before converting lm_head to fp32 to avoid affecting embeddings.
+
+    Returns:
+        True if weights were untied, False if they weren't tied.
+    """
+    lm_head = getattr(model, "lm_head", None)
+    if lm_head is None:
+        return False
+
+    lm_head_weight = getattr(lm_head, "weight", None)
+    if not isinstance(lm_head_weight, torch.Tensor):
+        return False
+
+    # Find embed_tokens - try common paths
+    embed_tokens = None
+    for path in ["model.embed_tokens", "transformer.wte", "embed_tokens"]:
+        try:
+            parts = path.split(".")
+            module = model
+            for part in parts:
+                module = getattr(module, part, None)
+                if module is None:
+                    break
+            if module is not None and hasattr(module, "weight"):
+                embed_tokens = module
+                break
+        except Exception:
+            continue
+
+    if embed_tokens is None:
+        return False
+
+    embed_weight = getattr(embed_tokens, "weight", None)
+    if not isinstance(embed_weight, torch.Tensor):
+        return False
+
+    # Check if they share storage
+    if lm_head_weight.data_ptr() != embed_weight.data_ptr():
+        return False  # Not tied
+
+    # Untie by creating a copy for lm_head
+    logger.info("Untying lm_head weights from embed_tokens for fp32 conversion.")
+    lm_head.weight = torch.nn.Parameter(lm_head_weight.clone())
+    return True
 
 
 @dataclass
@@ -229,6 +352,7 @@ def load_ref_policy(
     mpu: torch.distributed.distributed_c10d.ProcessGroup | None = None,
     ref_policy_update_freq: int | None = None,
     alpha: float = 0.0,
+    fp32_lm_head: bool = False,
 ) -> transformers.PreTrainedModel:
     """Loads a reference policy model for evaluation.
 
@@ -257,6 +381,8 @@ def load_ref_policy(
         use_cache=False,
         **({"device_map": {"": local_rank}} if deepspeed_stage != 3 else {}),
     )
+    if fp32_lm_head:
+        enable_fp32_lm_head(ref_policy)
     disable_dropout_in_model(ref_policy)
     ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
     ref_policy.eval()
