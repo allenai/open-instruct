@@ -49,6 +49,14 @@ logger = logger_utils.setup_logger(__name__)
 def enable_fp32_lm_head(model: torch.nn.Module, permanent: bool = False) -> bool:
     """Force LM head projection to run in fp32.
 
+    This reduces logprob mismatch between vLLM (generator) and the trainer during GRPO,
+    improving training signal quality. See ScaleRL paper for motivation.
+
+    References:
+        - TRL GRPO cast_lm_head_to_fp32: https://github.com/huggingface/trl/pull/4303
+        - TRL follow-up fix: https://github.com/huggingface/trl/pull/4446
+        - Flash-RL vLLM patch: https://github.com/yaof20/Flash-RL/blob/main/flash_rl/vllm_patch.py#L325
+
     Args:
         model: The model to modify.
         permanent: If True, convert lm_head weights to fp32 in-place (more efficient,

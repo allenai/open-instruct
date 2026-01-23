@@ -105,6 +105,11 @@ def patch_vllm_for_fp32_logits(enabled: bool) -> None:
     This reduces logprob mismatch between vLLM inference and trainer forward pass,
     which is important for GRPO/RL training stability (see ScaleRL paper Figure 3).
 
+    References:
+        - TRL GRPO cast_lm_head_to_fp32: https://github.com/huggingface/trl/pull/4303
+        - TRL follow-up fix: https://github.com/huggingface/trl/pull/4446
+        - Flash-RL vLLM patch: https://github.com/yaof20/Flash-RL/blob/main/flash_rl/vllm_patch.py#L325
+
     Modes controlled by OPEN_INSTRUCT_FP32_LM_HEAD env var:
     - "1" = cache mode: Keep bf16 weights, maintain separate fp32 cache
     - "2" = permanent mode: Convert lm_head weights to fp32 in-place
