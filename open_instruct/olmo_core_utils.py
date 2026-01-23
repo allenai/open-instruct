@@ -5,6 +5,7 @@ This module provides common utilities for working with OLMo-core models,
 including model configuration mappings and helper functions.
 """
 
+from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.transformer import TransformerConfig
 
 from open_instruct import logger_utils
@@ -27,12 +28,15 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
 }
 
 
-def get_transformer_config(model_name_or_config: str, vocab_size: int) -> TransformerConfig:
+def get_transformer_config(
+    model_name_or_config: str, vocab_size: int, attn_backend: str | None = None
+) -> TransformerConfig:
     """Get the appropriate TransformerConfig for a given model name or config name.
 
     Args:
         model_name_or_config: HuggingFace model name, path, or direct config name (e.g., 'olmo3_7B').
         vocab_size: Vocabulary size for the model.
+        attn_backend: Attention backend name (e.g., 'flash_2', 'flash_3'). If None, uses default.
 
     Returns:
         TransformerConfig for the specified model.
@@ -54,4 +58,7 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int) -> Transf
             f"Available models: {available_models}. "
             f"Available config names: {', '.join(available_configs)}"
         )
-    return getattr(TransformerConfig, config_name)(vocab_size=vocab_size)
+    kwargs: dict = {"vocab_size": vocab_size}
+    if attn_backend is not None:
+        kwargs["attn_backend"] = AttentionBackendName(attn_backend)
+    return getattr(TransformerConfig, config_name)(**kwargs)

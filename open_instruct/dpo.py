@@ -100,7 +100,16 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     vocab_size = hf_config.vocab_size
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
     config_name_for_lookup = args.config_name if args.config_name else args.model_name_or_path
-    model_config = olmo_core_utils.get_transformer_config(config_name_for_lookup, vocab_size)
+
+    attn_backend = args.attn_backend
+    if attn_backend == "auto":
+        device_name = torch.cuda.get_device_name(0).lower() if torch.cuda.is_available() else ""
+        attn_backend = "flash_3" if ("h100" in device_name or "h800" in device_name) else "flash_2"
+        logger.info(f"Auto-detected attn_backend={attn_backend} for device: {device_name}")
+
+    model_config = olmo_core_utils.get_transformer_config(
+        config_name_for_lookup, vocab_size, attn_backend=attn_backend
+    )
     model = model_config.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
@@ -351,9 +360,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model, model_config = _setup_model(args, device)
-    model = _apply_parallelism(
-        model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
-    )
 
     if args.packing:
         collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
@@ -390,10 +396,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
     average_log_prob = args.loss_type.is_average_loss
 
-    logger.info("Caching reference logprobs...")
-
-    reference_cache = dpo_utils.build_reference_logprobs_cache(
-        model=model,
+    cache_kwargs = dict(
         dataloader=cache_data_loader,
         average_log_prob=average_log_prob,
         forward_fn=forward_fn,
@@ -405,13 +408,33 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         use_lora=False,
         disable_adapter_context=None,
     )
-    logger.info("Reference logprobs cached.")
+
+    model_is_sharded = False
+    logger.info("Caching reference logprobs (trying unsharded first)...")
+    try:
+        reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
+        logger.info("Reference logprobs cached (unsharded).")
+    except torch.cuda.OutOfMemoryError:
+        logger.warning("OOM with unsharded model, falling back to FSDP-sharded.")
+        torch.cuda.empty_cache()
+        model_is_sharded = True
+        model = _apply_parallelism(
+            model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
+        )
+        reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
+        logger.info("Reference logprobs cached (sharded).")
+
     if args.cache_logprobs_only:
         logger.info("--cache_logprobs_only set, exiting after cache build.")
         if dist.is_initialized():
             dist.barrier()
             dist.destroy_process_group()
         return
+
+    if not model_is_sharded:
+        model = _apply_parallelism(
+            model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
+        )
     data_loader.reshuffle(epoch=0)
 
     num_training_steps = len(data_loader) * args.num_epochs

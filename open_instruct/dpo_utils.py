@@ -276,6 +276,8 @@ class ModelConfig:
     """The model checkpoint for weights initialization."""
     use_flash_attn: bool = True
     """Whether to use flash attention in the model training"""
+    attn_backend: str = "auto"
+    """Attention backend for OLMo-core models. Options: flash_2, flash_3, auto."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     low_cpu_mem_usage: bool = False
@@ -1080,7 +1082,13 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
                 item = {}
                 for k, v in f.items():
                     if match_string in k:
-                        item[k.replace(match_string, "")] = torch.as_tensor(v) if isinstance(v, np.ndarray) else v
+                        key = k.replace(match_string, "")
+                        if isinstance(v, np.ndarray):
+                            item[key] = torch.as_tensor(v)
+                        elif isinstance(v, list):
+                            item[key] = torch.tensor(v)
+                        else:
+                            item[key] = v
                 filtered.append(item)
             return filtered
 
