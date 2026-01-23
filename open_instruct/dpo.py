@@ -371,6 +371,17 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         collator=collator,
         device=device,
     )
+    cache_data_loader = data_loader_lib.HFDataLoader(
+        dataset=dataset,
+        batch_size=global_batch_size,
+        seed=args.seed,
+        dp_rank=dp_rank,
+        dp_world_size=dp_world_size,
+        work_dir=args.output_dir,
+        collator=collator,
+        device=device,
+        drop_last=False,
+    )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
     if args.packing:
@@ -381,7 +392,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     reference_cache = dpo_utils.build_reference_logprobs_cache(
         model=model,
-        dataloader=data_loader,
+        dataloader=cache_data_loader,
         average_log_prob=average_log_prob,
         forward_fn=forward_fn,
         full_dataset_size=len(dataset),
