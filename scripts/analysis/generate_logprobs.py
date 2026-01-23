@@ -92,8 +92,13 @@ class Config:
     dtype: str = "bfloat16"
     # NOTE: Keep utilization low (~0.4) because vLLM V1 doesn't fully release
     # memory between loads in the same Python process. Higher values (0.8+) cause
-    # OOM on the second vLLM load (bf16 → fp32). To use higher utilization, would
-    # need subprocess-based loading.
+    # OOM on the second vLLM load (bf16 → fp32).
+    #
+    # TODO: To use higher GPU utilization (~0.8+), either:
+    #   1. Fix vLLM V1 engine cleanup (may need upstream fix or workaround)
+    #   2. Split into two scripts: generate_logprobs_vllm.py (saves sequences to JSON)
+    #      and score_logprobs_hf.py (loads sequences and computes HF logprobs)
+    #   Option 2 is cleaner - each script runs one model type, can use full GPU.
     gpu_memory_utilization: float = 0.4
     attn_implementation: str = "sdpa"
     temperature: float = 1.0
