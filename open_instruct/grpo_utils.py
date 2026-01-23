@@ -275,6 +275,7 @@ def forward_for_logprobs(
     temperature: float,
     return_entropy: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Forward pass to compute log probabilities."""
     device = next(model.parameters()).device
     query_responses = query_responses.to(device)
     if attention_mask is not None:
@@ -290,6 +291,7 @@ def forward_for_logprobs(
     labels[labels == pad_token_id] = 0
     logprob_BT = model_utils.log_softmax_and_gather(logits, labels)
 
+    # For now, entropy is just for monitoring, and we don't pass gradients through it.
     entropy = None
     if return_entropy:
         with torch.no_grad():
@@ -305,6 +307,7 @@ def compute_logprobs(
     temperature: float,
     use_grad: bool = False,
 ) -> list[torch.Tensor]:
+    """Compute log probabilities for all samples in batch."""
     logprobs_BT: list[torch.Tensor] = []
 
     context = torch.enable_grad() if use_grad else torch.no_grad()
@@ -322,5 +325,6 @@ def compute_logprobs(
             response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
             logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB)
             logprobs_BT.append(logprob_BT)
+            torch.cuda.empty_cache()
 
     return logprobs_BT

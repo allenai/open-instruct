@@ -567,7 +567,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
                     self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
                 )
-                torch.cuda.empty_cache()
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
@@ -580,7 +579,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_old_logprobs_BT = grpo_utils.compute_logprobs(
                         self.model, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
                     )
-                    torch.cuda.empty_cache()
 
                 with torch.no_grad():
                     for i in range(len(data_BT.query_responses)):
