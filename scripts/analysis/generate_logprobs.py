@@ -91,7 +91,7 @@ class Config:
     max_model_len: int = 8192
     seed: int = 42
     dtype: str = "bfloat16"
-    gpu_memory_utilization: float = 0.85  # Sequential loading - vLLM cleans up before HF loads
+    gpu_memory_utilization: float = 0.4  # Keep low - vLLM cleanup is unreliable between runs
     attn_implementation: str = "sdpa"
     temperature: float = 1.0
     top_p: float = 1.0
@@ -415,7 +415,8 @@ def main():
                         help="Max CONTEXT LENGTH vLLM reserves (prompt + output combined)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--dtype", type=str, default="bfloat16")
-    parser.add_argument("--gpu-memory-utilization", type=float, default=0.85)
+    parser.add_argument("--gpu-memory-utilization", type=float, default=0.4,
+                        help="vLLM GPU memory fraction. Keep low (~0.4) for sequential bf16/fp32 runs")
     parser.add_argument("--attn-implementation", type=str, default="sdpa")
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top-p", type=float, default=1.0)
