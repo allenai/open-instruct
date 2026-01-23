@@ -553,6 +553,7 @@ def build_reference_logprobs_cache(
                     "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
                     "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
                     "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
+                    "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
                 }
             )
 
