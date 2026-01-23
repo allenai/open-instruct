@@ -1067,7 +1067,10 @@ def create_vllm_engines(
 ) -> list[ray.actor.ActorHandle]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     vllm_engines = []
-    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
+    # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
+    # Using "ray" executor causes placement group context loss in vLLM v1's
+    # subprocess-based EngineCore architecture. See: https://github.com/vllm-project/vllm/issues/30016
+    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "mp"
     use_hybrid_engine = pg is not None
     num_gpus = int(tensor_parallel_size == 1)
     if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
@@ -1103,7 +1106,11 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0", "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list()}
+                    env_vars={
+                        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
+                        "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
+                        "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
+                    }
                 ),
             )
             .remote(
@@ -1166,43 +1173,49 @@ def _send_to_vllm(
 def broadcast_weights_to_vllm(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],
-    model_update_group: torch.distributed.ProcessGroup,
+    model_update_group: torch.distributed.ProcessGroup | None,
     deepspeed_stage: int,
     gather_whole_model: bool = True,
 ) -> list[ray.ObjectRef]:
     """Broadcast DeepSpeed model weights to vLLM engines.
 
-    Must be called only on rank 0.
+    Must be called on ALL ranks when using DeepSpeed stage 3, since
+    GatheredParameters is a collective operation. Only rank 0 actually
+    sends weights to vLLM.
 
     Args:
         model: The unwrapped model (model.module from DeepSpeed engine)
         vllm_engines: List of vLLM engine actor handles
-        model_update_group: Process group for distributed broadcast
+        model_update_group: Process group for distributed broadcast (only needed on rank 0)
         deepspeed_stage: DeepSpeed ZeRO stage (3 requires GatheredParameters)
         gather_whole_model: If True, gather all params at once (more memory, faster).
             If False, gather each param individually (less memory, slower).
 
     Returns:
-        List of Ray ObjectRefs for the weight update calls
+        List of Ray ObjectRefs for the weight update calls (empty on non-rank-0)
     """
-    if torch.distributed.get_rank() != 0:
-        raise RuntimeError("broadcast_weights_to_vllm must be called only on rank 0")
-
+    is_rank_0 = torch.distributed.get_rank() == 0
     params = list(model.named_parameters())
     num_params = len(params)
     all_refs: list[ray.ObjectRef] = []
 
     if gather_whole_model:
         with deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage == 3):
-            for i, (name, param) in enumerate(params):
-                all_refs.extend(
-                    _send_to_vllm(name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group)
-                )
+            if is_rank_0:
+                for i, (name, param) in enumerate(params):
+                    all_refs.extend(
+                        _send_to_vllm(
+                            name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group
+                        )
+                    )
     else:
         for i, (name, param) in enumerate(params):
             with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage == 3):
-                all_refs.extend(
-                    _send_to_vllm(name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group)
-                )
+                if is_rank_0:
+                    all_refs.extend(
+                        _send_to_vllm(
+                            name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group
+                        )
+                    )
 
     return all_refs

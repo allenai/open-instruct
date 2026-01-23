@@ -431,6 +431,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
+        self.model_update_group = None
         if self.rank == 0:
             master_address = ray._private.services.get_node_ip_address()
             with socket.socket() as sock:
