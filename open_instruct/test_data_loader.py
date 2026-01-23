@@ -15,6 +15,12 @@ def single_example_collator(examples: list[dict]) -> dict:
     return examples[0]
 
 
+def batch_collator(examples: list[dict]) -> dict:
+    """Collator that stacks example values into lists."""
+    keys = examples[0].keys()
+    return {key: [ex[key] for ex in examples] for key in keys}
+
+
 def make_test_dataset(num_examples: int) -> datasets.Dataset:
     """Create a test dataset with the required 'index' column."""
     data = {"text": [f"example_{i}" for i in range(num_examples)], "label": list(range(num_examples))}
@@ -365,10 +371,10 @@ class TestHFDataLoader(unittest.TestCase):
             dp_rank=0,
             dp_world_size=1,
             work_dir=tempfile.gettempdir(),
-            collator=single_example_collator,
+            collator=batch_collator,
             drop_last=True,
         )
-        indices = [batch["index"] for batch in loader]
+        indices = [idx for batch in loader for idx in batch["index"]]
         expected_count = (num_examples // batch_size) * batch_size
         self.assertEqual(len(indices), expected_count)
 
@@ -389,10 +395,10 @@ class TestHFDataLoader(unittest.TestCase):
             dp_rank=0,
             dp_world_size=1,
             work_dir=tempfile.gettempdir(),
-            collator=single_example_collator,
+            collator=batch_collator,
             drop_last=False,
         )
-        indices = [batch["index"] for batch in loader]
+        indices = [idx for batch in loader for idx in batch["index"]]
         self.assertEqual(set(indices), set(range(num_examples)))
 
     @parameterized.parameterized.expand(
@@ -409,10 +415,10 @@ class TestHFDataLoader(unittest.TestCase):
                 dp_rank=dp_rank,
                 dp_world_size=dp_world_size,
                 work_dir=tempfile.gettempdir(),
-                collator=single_example_collator,
+                collator=batch_collator,
                 drop_last=False,
             )
-            all_indices.extend(batch["index"] for batch in loader)
+            all_indices.extend(idx for batch in loader for idx in batch["index"])
         self.assertEqual(set(all_indices), set(range(num_examples)))
 
 
