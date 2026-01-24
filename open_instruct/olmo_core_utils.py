@@ -5,7 +5,9 @@ This module provides common utilities for working with OLMo-core models,
 including model configuration mappings and helper functions.
 """
 
+import transformers
 from olmo_core.nn.attention import AttentionBackendName
+from olmo_core.nn.hf.checkpoint import save_hf_model
 from olmo_core.nn.transformer import TransformerConfig
 
 from open_instruct import logger_utils
@@ -62,3 +64,12 @@ def get_transformer_config(
     if attn_backend is not None:
         kwargs["attn_backend"] = AttentionBackendName(attn_backend)
     return getattr(TransformerConfig, config_name)(**kwargs)
+
+
+def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):
+    unwrapped_model = model_config.build(init_device="cpu")
+    unwrapped_model.load_state_dict(state_dict)
+    save_hf_model(save_dir=save_dir, model_state_dict=state_dict, model=unwrapped_model, save_overwrite=True)
+    tokenizer.save_pretrained(save_dir)
+    original_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
+    original_config.save_pretrained(save_dir)

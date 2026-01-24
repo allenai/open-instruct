@@ -19,7 +19,7 @@ from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
 from olmo_core.nn.attention.backend import has_flash_attn_3
-from olmo_core.nn.hf.checkpoint import load_hf_model, save_hf_model
+from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
@@ -52,15 +52,9 @@ def export_to_hf(
 
     if is_main_process:
         logger.info(f"Exporting model to HuggingFace format at {save_dir}")
-        unwrapped_model = model_config.build(init_device="cpu")
-        unwrapped_model.load_state_dict(state_dict)
-
-        save_hf_model(save_dir=save_dir, model_state_dict=state_dict, model=unwrapped_model, save_overwrite=True)
-        tokenizer.save_pretrained(save_dir)
-
-        original_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path)
-        logger.info(f"Copying original config (max_position_embeddings={original_config.max_position_embeddings})")
-        original_config.save_pretrained(save_dir)
+        olmo_core_utils.save_state_dict_as_hf(
+            model_config, state_dict, save_dir, original_model_name_or_path, tokenizer
+        )
 
 
 def _load_dataset_distributed(
