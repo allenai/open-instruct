@@ -431,6 +431,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
+        self.model_update_group = None
         if self.rank == 0:
             master_address = ray._private.services.get_node_ip_address()
             with socket.socket() as sock:
@@ -1358,6 +1359,8 @@ def create_model_and_optimizer(
         verbose=args.verbose,
         work_dir=args.output_dir,
         tool_names=tools_config.tool_call_names if tools_config else [],
+        run_name=args.run_name,
+        model_name=model_config.model_name_or_path,
         initial_state=data_prep_actor_state,
     )
 
@@ -2101,6 +2104,10 @@ def main(
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
+
+    streaming_config.save_traces = args.save_traces
+    streaming_config.rollouts_save_path = args.rollouts_save_path
+
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
 
     if args.verbose:

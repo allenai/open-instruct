@@ -137,6 +137,8 @@ class ExperimentConfig:
     """Where to save the model"""
     save_traces: bool = False
     """Whether to save learning data traces"""
+    rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
+    """Path to save rollouts (local/weka dir or gs:// path). Requires save_traces=True."""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
     keep_last_n_checkpoints: int = 3
