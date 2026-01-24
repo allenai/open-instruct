@@ -90,6 +90,13 @@ from open_instruct.dataset_transformation import (
     visualize_token,
 )
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
+from open_instruct.grpo_utils import (
+    CHECKPOINT_COMPLETE_MARKER,
+    log_verification,
+    verify_deepspeed_state_checkpoint,
+    verify_model_checkpoint,
+    verify_traces,
+)
 from open_instruct.model_utils import (
     ModelConfig,
     disable_dropout_in_model,
@@ -129,8 +136,6 @@ from open_instruct.utils import (
 )
 
 logger = logger_utils.setup_logger(__name__)
-
-CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 
 
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
@@ -1147,7 +1152,7 @@ def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerCo
             config=all_configs,
             name=args.run_name,
             save_code=True,
-            tags=[args.exp_name] + get_wandb_tags(),
+            tags=([args.exp_name] if args.exp_name else []) + get_wandb_tags(),
         )
         wandb_url = wandb.run.get_url()
         maybe_update_beaker_description(wandb_url=wandb_url)
@@ -1686,6 +1691,8 @@ def maybe_save_checkpoint(
                     policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
                         step_dir, leaderboard_name, wandb_url, training_step
                     )
+            checkpoint_valid = verify_model_checkpoint(step_dir)
+            log_verification("model_checkpoint", checkpoint_valid, args.with_tracking, training_step)
         save_time = timer.duration
 
     return save_time
@@ -1793,6 +1800,11 @@ def save_final_model(
                 policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
                     args.output_dir, leaderboard_name, wandb_url, training_step
                 )
+        final_model_valid = verify_model_checkpoint(args.output_dir)
+        log_verification("final_model", final_model_valid, args.with_tracking, training_step)
+        if args.save_traces:
+            traces_valid = verify_traces(args.output_dir, args.run_name)
+            log_verification("traces", traces_valid, args.with_tracking, training_step)
 
 
 def make_tokenizer(tc: TokenizerConfig, model_config: ModelConfig):
@@ -2037,6 +2049,8 @@ def run_training(
                     desc=f"Saving checkpoint state at step {training_step}",
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+                ds_checkpoint_valid = verify_deepspeed_state_checkpoint(args.checkpoint_state_dir, training_step)
+                log_verification("deepspeed_state_checkpoint", ds_checkpoint_valid, args.with_tracking, training_step)
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
         weight_sync_trigger_event.set()
