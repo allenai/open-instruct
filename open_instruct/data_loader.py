@@ -353,8 +353,9 @@ class StreamingDataLoaderConfig:
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
-    # Rollout saving - these fields are set dynamically from ExperimentConfig to avoid argparse conflicts
-    # Do not define them here; they are set in grpo_fast.py: streaming_config.save_traces = args.save_traces
+    # Rollout saving
+    save_traces: bool = False
+    rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
 
     # Computed at post_init
     max_possible_score: float = 1.0
@@ -397,6 +398,9 @@ class StreamingDataLoaderConfig:
             self.max_possible_score += self.verification_reward
         if self.apply_r1_style_format_reward and self.additive_format_reward:
             self.max_possible_score += self.r1_style_format_reward
+
+        if self.save_traces and not self.rollouts_save_path:
+            raise ValueError("`rollouts_save_path` must be provided when `save_traces` is True.")
 
     def build_dataloader(
         self,

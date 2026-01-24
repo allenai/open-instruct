@@ -7,7 +7,6 @@ import parameterized
 import torch
 
 import open_instruct.data_loader
-import open_instruct.grpo_utils
 
 
 def single_example_collator(examples: list[dict]) -> dict:
@@ -350,17 +349,17 @@ class TestHFDataLoader(unittest.TestCase):
             loader.global_num_tokens_in_batch(batch_without_tokens)
 
 
-class TestExperimentConfigSaveTraces(unittest.TestCase):
+class TestStreamingDataLoaderConfigSaveTraces(unittest.TestCase):
     def test_save_traces_requires_rollouts_save_path(self):
         """Test that save_traces=True with empty rollouts_save_path raises ValueError."""
         with self.assertRaises(ValueError) as context:
-            open_instruct.grpo_utils.ExperimentConfig(save_traces=True, rollouts_save_path="")
+            open_instruct.data_loader.StreamingDataLoaderConfig(save_traces=True, rollouts_save_path="")
         self.assertIn("rollouts_save_path", str(context.exception))
         self.assertIn("save_traces", str(context.exception))
 
     def test_save_traces_with_valid_path_succeeds(self):
         """Test that save_traces=True with valid path succeeds."""
-        config = open_instruct.grpo_utils.ExperimentConfig(
+        config = open_instruct.data_loader.StreamingDataLoaderConfig(
             save_traces=True, rollouts_save_path="/tmp/rollouts"
         )
         self.assertTrue(config.save_traces)
