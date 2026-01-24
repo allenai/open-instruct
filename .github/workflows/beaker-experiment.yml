@@ -330,22 +330,20 @@ jobs:
         run: |
           FAILED_EXPERIMENTS="${{ steps.wait.outputs.failed_experiment_names }}"
 
-          if [ "${{ steps.launch.outcome }}" = "failure" ]; then
+          # Skip Slack notification for timeouts (when experiments didn't finalize in time)
+          if [ -n "$FAILED_EXPERIMENTS" ]; then
+            echo "is_timeout=true" >> $GITHUB_OUTPUT
+            echo "Skipping Slack notification - experiments timed out: ${FAILED_EXPERIMENTS}"
+          elif [ "${{ steps.launch.outcome }}" = "failure" ]; then
             echo "reason=Build or launch failed" >> $GITHUB_OUTPUT
             echo "emoji=🔨" >> $GITHUB_OUTPUT
-          elif [ -n "$FAILED_EXPERIMENTS" ]; then
-            echo "reason=Beaker experiments failed or timed out: ${FAILED_EXPERIMENTS}" >> $GITHUB_OUTPUT
-            echo "emoji=⏱️" >> $GITHUB_OUTPUT
-          elif [ "${{ steps.wait.outcome }}" = "failure" ]; then
-            echo "reason=Beaker experiments failed" >> $GITHUB_OUTPUT
-            echo "emoji=💥" >> $GITHUB_OUTPUT
           else
             echo "reason=Workflow failed (see logs for details)" >> $GITHUB_OUTPUT
             echo "emoji=❌" >> $GITHUB_OUTPUT
           fi
 
       - name: Notify Slack on Failure
-        if: failure()
+        if: failure() && steps.failure-reason.outputs.is_timeout != 'true'
         uses: slackapi/slack-github-action@v2.0.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
