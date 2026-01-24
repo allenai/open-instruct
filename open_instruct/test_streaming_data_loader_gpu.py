@@ -140,6 +140,8 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             verbose=True,
             work_dir="/tmp",
             tool_names=[],
+            run_name="test_no_tools_run",
+            model_name=tokenizer_name,
         )
 
         loader = data_loader.StreamingDataLoader(
@@ -244,6 +246,8 @@ class TestStreamingDataLoaderGPU(TestGrpoFastBase):
             verbose=True,
             work_dir="/tmp",
             tool_names=["code"],
+            run_name="test_with_tools_run",
+            model_name=tokenizer_name,
         )
 
         loader = data_loader.StreamingDataLoader(

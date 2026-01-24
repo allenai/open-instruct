@@ -17,6 +17,7 @@ import pathlib
 import threading
 import time
 from concurrent import futures
+from queue import Empty
 from typing import Any, cast
 
 import datasets
@@ -24,12 +25,12 @@ import numpy as np
 import ray
 import torch
 import torch.utils.flop_counter
-import vllm
 from ray.util import queue as ray_queue
 
 from open_instruct import data_loader, dataset_transformation, grpo_utils, logger_utils, model_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import PromptRequest
+from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -95,30 +96,6 @@ def save_config(
     logger.info(f"Saved config to {config_path}")
 
 
-def get_git_commit() -> str:
-    """Get the current git commit hash."""
-    git_dir = pathlib.Path(".git")
-    if not git_dir.exists():
-        return "unknown"
-
-    head_file = git_dir / "HEAD"
-    if not head_file.exists():
-        return "unknown"
-
-    with head_file.open() as f:
-        content = f.read().strip()
-
-    if not content.startswith("ref:"):
-        # Detached HEAD
-        return content[:8]
-
-    # HEAD points to a branch
-    ref_path = git_dir / content[5:]
-
-    with ref_path.open() as ref_f:
-        return ref_f.read().strip()[:8]  # First 8 chars
-
-
 def save_benchmark_results_to_csv(
     results: list[dict[str, Any]],
     total_time: float,
@@ -126,7 +103,7 @@ def save_benchmark_results_to_csv(
     model_config: model_utils.ModelConfig,
 ) -> None:
     """Save benchmark results to CSV file."""
-    git_commit = get_git_commit()
+    git_commit = utils.get_git_commit()
     agg_results = aggregate_results(results)
     csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
 
@@ -250,6 +227,7 @@ def setup_vllm_engines(
     tokenizer_config: dataset_transformation.TokenizerConfig,
     model_config: model_utils.ModelConfig,
     max_model_len: int,
+    dataset: datasets.Dataset,
 ) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue, ray.actor.ActorHandle]:
     """Set up vLLM engines and queues."""
     ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"], "env_vars": dict(os.environ)})
@@ -284,6 +262,12 @@ def setup_vllm_engines(
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
         inflight_updates=streaming_config.inflight_updates,
+        reward_config=RewardConfig(
+            apply_verifiable_reward=streaming_config.apply_verifiable_reward,
+            verification_reward=int(streaming_config.verification_reward),
+            verifier_functions=build_all_verifiers(args, streaming_config),
+        ),
+        train_dataset=dataset,
     )
 
     logger.info("vLLM engines ready")
@@ -305,9 +289,14 @@ def simulate_weight_sync(
     ray.get(actor_manager.set_should_stop.remote(True))
     logger.debug("Set should_stop to True for weight sync simulation")
 
-    utils.ray_get_with_progress(
-        [engine.check_background_threads.remote() for engine in vllm_engines], "Health check on background threads."
-    )
+    try:
+        utils.ray_get_with_progress(
+            [engine.check_background_threads.remote() for engine in vllm_engines],
+            "Health check on background threads.",
+            timeout=120,
+        )
+    except Exception as e:
+        logger.warning(f"Health check during weight sync failed (non-fatal): {e}")
 
     # Sleep for 1 second to simulate weight sync time (from wandb metrics)
     time.sleep(1.0)
@@ -325,7 +314,7 @@ def simulate_weight_sync(
 def submission_thread(
     param_prompt_Q: ray_queue.Queue,
     dataset: datasets.Dataset,
-    generation_config: vllm.SamplingParams,
+    generation_config: vllm_utils.SamplingConfig,
     stop_event: threading.Event,
     batch_size: int,
     start_batch_idx: int,
@@ -376,21 +365,13 @@ def run_benchmark(
     )
 
     # Create sampling parameters with 'n' for multiple samples per prompt
-    generation_config = vllm.SamplingParams(
+    generation_config = vllm_utils.SamplingConfig(
         temperature=streaming_config.temperature,
         max_tokens=streaming_config.response_length,
-        min_tokens=streaming_config.response_length,
         top_p=vllm_config.vllm_top_p,
         n=streaming_config.num_samples_per_prompt_rollout,
         seed=args.seed,
-        include_stop_str_in_output=True,
-        skip_special_tokens=False,
         logprobs=1,
-        # IMPORTANT: Set output_kind to FINAL_ONLY to ensure vLLM V1 properly handles n>1
-        # With the default CUMULATIVE mode, vLLM V1 returns separate outputs for each
-        # completion, making it difficult to aggregate them correctly. FINAL_ONLY mode
-        # ensures all n completions are returned together in a single output.
-        output_kind=vllm.sampling_params.RequestOutputKind.FINAL_ONLY,
     )
 
     stop_event = threading.Event()
@@ -418,12 +399,29 @@ def run_benchmark(
         )
 
     utils.ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Checking if engines are ready.")
+
+    # Check background threads before warmup to ensure they're healthy
+    utils.ray_get_with_progress(
+        [engine.check_background_threads.remote() for engine in vllm_engines],
+        "Health check on background threads before warmup.",
+    )
+
     try:
         logger.info("Running warmup batch...")
 
-        # Collect all warmup results (one per prompt)
+        # Collect all warmup results (one per prompt) using non-blocking polling
         warmup_batch_size = warmup_end_idx - warmup_start_idx
-        warmup_results = [inference_results_Q.get() for _ in range(warmup_batch_size)]
+        warmup_results = []
+        while len(warmup_results) < warmup_batch_size:
+            try:
+                result = inference_results_Q.get(timeout=1.0)
+                warmup_results.append(result)
+            except Empty:
+                if len(warmup_results) % 10 == 0:
+                    utils.ray_get_with_progress(
+                        [engine.check_background_threads.remote() for engine in vllm_engines],
+                        f"Health check ({len(warmup_results)}/{warmup_batch_size})",
+                    )
 
         total_warmup_responses = sum(len(result.responses) for result in warmup_results)
         logger.info(
@@ -446,8 +444,17 @@ def run_benchmark(
             if submission_future.done():
                 submission_future.result()
 
-            # Collect all results for this batch (one per prompt)
-            batch_results = [inference_results_Q.get() for _ in range(streaming_config.num_unique_prompts_rollout)]
+            # Collect all results for this batch (one per prompt) using non-blocking polling
+            num_prompts = streaming_config.num_unique_prompts_rollout
+            batch_results = []
+            batch_deadline = time.time() + 1200
+            while len(batch_results) < num_prompts:
+                try:
+                    result = inference_results_Q.get(timeout=1.0)
+                    batch_results.append(result)
+                except Empty:
+                    if time.time() > batch_deadline:
+                        raise TimeoutError(f"Batch timed out, got {len(batch_results)}/{num_prompts}") from None
 
             # Simulate weight sync between batches
             weight_sync_time = simulate_weight_sync(actor_manager, vllm_engines, args)
@@ -702,7 +709,7 @@ def main() -> None:
     dataset = setup_dataset(args, streaming_config, tokenizer_config)
     max_model_len = streaming_config.max_prompt_token_length + streaming_config.response_length
     vllm_engines, param_prompt_Q, inference_results_Q, actor_manager = setup_vllm_engines(
-        args, streaming_config, vllm_config, tokenizer_config, model_config, max_model_len
+        args, streaming_config, vllm_config, tokenizer_config, model_config, max_model_len, dataset
     )
 
     # Create the timestamp here so we use it for both filenames.

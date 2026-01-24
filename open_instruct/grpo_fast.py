@@ -357,7 +357,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
             )
-        self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
+        self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
 
         if self.mpu is not None:
             self.splitter = UlyssesSPSplitter(
@@ -431,6 +431,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
+        self.model_update_group = None
         if self.rank == 0:
             master_address = ray._private.services.get_node_ip_address()
             with socket.socket() as sock:
@@ -472,46 +473,13 @@ class PolicyTrainerRayProcess(RayProcess):
         # Ensure CUDA device is set before broadcast operations.
         # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
         torch.cuda.set_device(self.local_rank)
-        model = self.model.module
-        count, num_params = 0, len(list(model.named_parameters()))
-        refss = []
-        if self.args.gather_whole_model:
-            with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
-                for name, param in model.named_parameters():
-                    count += 1  # empty_cache at last param
-                    # Fire all vllm engines for broadcast
-                    if torch.distributed.get_rank() == 0:
-                        shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
-                        refs = [
-                            engine.update_weight.remote(
-                                name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
-                            )
-                            for engine in self.vllm_engines
-                        ]
-                        refss.extend(refs)
-                    if torch.distributed.get_rank() == 0:
-                        torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-        else:  # broadcast each parameter independently
-            for name, param in model.named_parameters():
-                count += 1
-                if torch.distributed.get_rank() == 0:
-                    shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
-                    refs = [
-                        engine.update_weight.remote(
-                            name, dtype=str(param.dtype), shape=shape, empty_cache=count == num_params
-                        )
-                        for engine in self.vllm_engines
-                    ]
-                    refss.extend(refs)
-                with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
-                    if torch.distributed.get_rank() == 0:
-                        torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-
-        # Return futures instead of blocking - let caller handle completion
-        all_refs = []
-        if torch.distributed.get_rank() == 0:
-            all_refs.extend(refss)
-        return all_refs
+        return vllm_utils.broadcast_weights_to_vllm(
+            model=self.model.module,
+            vllm_engines=self.vllm_engines,
+            model_update_group=self.model_update_group,
+            deepspeed_stage=self.args.deepspeed_stage,
+            gather_whole_model=self.args.gather_whole_model,
+        )
 
     def update_ref_policy(self):
         if not self.args.load_ref_policy:
@@ -1391,6 +1359,8 @@ def create_model_and_optimizer(
         verbose=args.verbose,
         work_dir=args.output_dir,
         tool_names=tools_config.tool_call_names if tools_config else [],
+        run_name=args.run_name,
+        model_name=model_config.model_name_or_path,
         initial_state=data_prep_actor_state,
     )
 
@@ -2134,6 +2104,10 @@ def main(
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
+
+    streaming_config.save_traces = args.save_traces
+    streaming_config.rollouts_save_path = args.rollouts_save_path
+
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
 
     if args.verbose:
