@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Updated library versions via `uv lock --upgrade` (https://github.com/allenai/open-instruct/pull/1400).
 
 ### Fixed
+- Increased `MetricsTracker` max_metrics from 64 to 512 to fix `ValueError: Exceeded maximum number of metrics` when training with many tools or verifier functions (https://github.com/allenai/open-instruct/pull/1415).
 - Fixed JSON serialization error in `LocalDatasetTransformationCache.save_config` when caching datasets locally (https://github.com/allenai/open-instruct/pull/1402).
 - Now, we can support PRs from external contributors while still maintaining security for internal tokens (https://github.com/allenai/open-instruct/pull/1408).
 - Improved error handling for tool calls with missing/invalid arguments - now returns a clear error message instead of crashing (https://github.com/allenai/open-instruct/pull/1404).
