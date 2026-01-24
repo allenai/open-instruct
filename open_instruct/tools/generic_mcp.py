@@ -112,7 +112,7 @@ class GenericMCPTool(Tool):
         """Return the tool's parameter schema from MCP."""
         return self._tool_info.get("input_schema", {"type": "object", "properties": {}})
 
-    async def execute(self, **kwargs: Any) -> ToolOutput:
+    async def _execute(self, **kwargs: Any) -> ToolOutput:
         """Call the MCP tool with retry logic."""
         if self.tool_name is None:
             raise ValueError("tool_name must be set before execute")
