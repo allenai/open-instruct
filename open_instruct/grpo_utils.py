@@ -219,3 +219,5 @@ class ExperimentConfig:
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+        if self.save_traces and not self.rollouts_save_path:
+            raise ValueError("`rollouts_save_path` must be provided when `save_traces` is True.")

@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 - Now, `large_test_script.sh` exercises the `tp > 1` code path (https://github.com/allenai/open-instruct/pull/1413).
 
 ### Fixed
+- Fixed argparse conflict error for `--save_traces` by removing duplicate field definitions from `StreamingDataLoaderConfig` (https://github.com/allenai/open-instruct/pull/XXXX).
 - Increased `MetricsTracker` max_metrics from 64 to 512 to fix `ValueError: Exceeded maximum number of metrics` when training with many tools or verifier functions (https://github.com/allenai/open-instruct/pull/1415).
 - Fixed JSON serialization error in `LocalDatasetTransformationCache.save_config` when caching datasets locally (https://github.com/allenai/open-instruct/pull/1402).
 - Now, we can support PRs from external contributors while still maintaining security for internal tokens (https://github.com/allenai/open-instruct/pull/1408).
