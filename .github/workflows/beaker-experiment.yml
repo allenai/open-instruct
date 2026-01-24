@@ -324,6 +324,26 @@ jobs:
             echo "❌ **Status:** Experiments failed or timed out (image not pushed)" >> $GITHUB_STEP_SUMMARY
           fi
 
+      - name: Determine failure reason
+        id: failure-reason
+        if: failure()
+        run: |
+          FAILED_EXPERIMENTS="${{ steps.wait.outputs.failed_experiment_names }}"
+
+          if [ "${{ steps.launch.outcome }}" = "failure" ]; then
+            echo "reason=Build or launch failed" >> $GITHUB_OUTPUT
+            echo "emoji=🔨" >> $GITHUB_OUTPUT
+          elif [ -n "$FAILED_EXPERIMENTS" ]; then
+            echo "reason=Beaker experiments failed or timed out: ${FAILED_EXPERIMENTS}" >> $GITHUB_OUTPUT
+            echo "emoji=⏱️" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.wait.outcome }}" = "failure" ]; then
+            echo "reason=Beaker experiments failed" >> $GITHUB_OUTPUT
+            echo "emoji=💥" >> $GITHUB_OUTPUT
+          else
+            echo "reason=Workflow failed (see logs for details)" >> $GITHUB_OUTPUT
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+          fi
+
       - name: Notify Slack on Failure
         if: failure()
         uses: slackapi/slack-github-action@v2.0.0
@@ -332,13 +352,13 @@ jobs:
           webhook-type: incoming-webhook
           payload: |
             {
-              "text": "❌ Beaker Experiment Launch failed",
+              "text": "${{ steps.failure-reason.outputs.emoji }} Beaker Experiment Launch failed",
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "❌ *Beaker Experiment Launch* failed on `${{ github.ref_name }}`\n\n*Triggered by:* ${{ github.actor }}\n*Commit:* `${{ github.sha }}`"
+                    "text": "${{ steps.failure-reason.outputs.emoji }} *Beaker Experiment Launch* failed on `${{ github.ref_name }}`\n\n*Reason:* ${{ steps.failure-reason.outputs.reason }}\n*Triggered by:* ${{ github.actor }}\n*Commit:* `${{ github.sha }}`"
                   }
                 },
                 {
