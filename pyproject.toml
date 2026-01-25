@@ -88,6 +88,13 @@ code = [
 dr-tulu = [
     "dr_agent",
 ]
+environments = [
+    "aiohttp>=3.9.0",
+    "websockets>=12.0",
+]
+prime-intellect = [
+    "verifiers>=0.1.9",
+]
 
 [tool.uv]
 preview = true

@@ -1,0 +1,41 @@
+#!/bin/bash
+# Single GPU debug: Wiki-Search env + python tool
+#
+# Prerequisites: Install Prime Intellect env
+#   prime env install will/wiki-search
+
+VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
+    --dataset_mixer_list hamishivi/wiki_search_env_train 64 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list hamishivi/wiki_search_env_train 4 \
+    --dataset_mixer_eval_list_splits train \
+    --max_prompt_token_length 2048 \
+    --response_length 1024 \
+    --pack_length 4096 \
+    --per_device_train_batch_size 1 \
+    --num_unique_prompts_rollout 16 \
+    --num_samples_per_prompt_rollout 4 \
+    --model_name_or_path Qwen/Qwen3-1.7B \
+    --apply_verifiable_reward true \
+    --temperature 0.7 \
+    --learning_rate 3e-7 \
+    --total_episodes 100 \
+    --deepspeed_stage 2 \
+    --num_epochs 1 \
+    --num_learners_per_node 1 \
+    --vllm_tensor_parallel_size 1 \
+    --beta 0.01 \
+    --seed 3 \
+    --local_eval_every 1 \
+    --vllm_sync_backend gloo \
+    --single_gpu_mode \
+    --vllm_gpu_memory_utilization 0.3 \
+    --save_traces \
+    --vllm_enforce_eager \
+    --gradient_checkpointing \
+    --tools wiki_search python \
+    --tool_call_names wiki_search code \
+    --tool_configs '{"env_name": "will/wiki-search"}' '{"api_endpoint": "https://open-instruct-tool-server.run.app/execute", "timeout": 3}' \
+    --tool_parser_type vllm_hermes \
+    --max_tool_calls 15 \
+    --push_to_hub false

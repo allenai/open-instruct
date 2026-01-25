@@ -922,6 +922,34 @@ class CodeVerifier(VerifierFunction):
         return CodeVerifierConfig
 
 
+class EnvVerifier(VerifierFunction):
+    """
+    Verifier that returns the environment's final reward.
+
+    Use this as verifier_source for env-based tasks. The reward comes from
+    the env's step() calls, not from comparing predictions to labels.
+
+    The label should be an EnvironmentState object (passed from RequestInfo.env_state),
+    or a float/int representing the reward directly.
+    """
+
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
+        super().__init__("env", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
+    ) -> VerificationResult:
+        from open_instruct.data_types import EnvironmentState  # noqa: PLC0415
+
+        # Label contains env_state from RequestInfo
+        if isinstance(label, EnvironmentState):
+            return VerificationResult(score=label.final_reward)
+        # Fallback: label might be the reward directly
+        if isinstance(label, (int, float)):
+            return VerificationResult(score=float(label))
+        return VerificationResult(score=0.0)
+
+
 def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFunction]:
     """
     Build all verifiers with the given configs.

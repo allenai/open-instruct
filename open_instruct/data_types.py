@@ -29,6 +29,25 @@ class ToolCallStats:
 
 
 @dataclass
+class EnvironmentState:
+    """State accumulated from an RL environment during rollout."""
+
+    env_name: str
+    """Name of the environment tool."""
+    rewards: list[float] = field(default_factory=list)
+    """Rewards collected at each step."""
+    step_count: int = 0
+    """Number of steps taken."""
+    done: bool = False
+    """Whether the episode is complete."""
+
+    @property
+    def final_reward(self) -> float:
+        """Get the final reward (last reward in list, or 0.0 if empty)."""
+        return self.rewards[-1] if self.rewards else 0.0
+
+
+@dataclass
 class RequestInfo:
     """Container for tool usage information used in queue payloads."""
 
@@ -41,6 +60,8 @@ class RequestInfo:
     tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
     excess_tool_calls: list[dict[str, int]] = field(default_factory=list)
     """Per-sample dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
+    env_state: EnvironmentState | None = None
+    """State from RL environment (if any). Only one env per prompt is supported."""
 
 
 @dataclass
