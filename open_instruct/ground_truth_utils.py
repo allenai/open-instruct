@@ -939,15 +939,8 @@ class EnvVerifier(VerifierFunction):
     def __call__(
         self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
     ) -> VerificationResult:
-        from open_instruct.data_types import EnvironmentState  # noqa: PLC0415
-
-        # Label contains env_state from RequestInfo
-        if isinstance(label, EnvironmentState):
-            return VerificationResult(score=label.final_reward)
-        # Fallback: label might be the reward directly
-        if isinstance(label, (int, float)):
-            return VerificationResult(score=float(label))
-        return VerificationResult(score=0.0)
+        # Label is EnvironmentState from RequestInfo.env_state
+        return VerificationResult(score=label.final_reward)
 
 
 def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFunction]:

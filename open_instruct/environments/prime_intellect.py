@@ -9,19 +9,9 @@ Prime Intellect environments use the verifiers library spec. Install with:
 
 from typing import Any
 
+import verifiers as vf
+
 from open_instruct.environments.base import RLEnvironment, StepResult
-
-
-def _require_verifiers():
-    """Import verifiers, raising clear error if not installed."""
-    try:
-        import verifiers as vf  # noqa: PLC0415
-
-        return vf
-    except ImportError as e:
-        raise ImportError(
-            "Prime Intellect envs require 'verifiers'. Install with: uv pip install .[prime-intellect]"
-        ) from e
 
 
 class PrimeIntellectEnv(RLEnvironment):
@@ -37,8 +27,6 @@ class PrimeIntellectEnv(RLEnvironment):
             env_name: Name of the PI env (e.g., "will/wordle", "will/wiki-search")
             **env_kwargs: Additional kwargs passed to the verifiers env
         """
-        vf = _require_verifiers()
-        self._vf = vf
         self._env_name = env_name
         self._env_kwargs = env_kwargs
         self._vf_env = None
@@ -47,8 +35,7 @@ class PrimeIntellectEnv(RLEnvironment):
 
     def reset(self) -> StepResult:
         """Initialize episode, load verifiers env."""
-        # Load the installed PI env module
-        self._vf_env = self._vf.load_env(self._env_name, **self._env_kwargs)
+        self._vf_env = vf.load_env(self._env_name, **self._env_kwargs)
         self._state = {"turn": 0, "prompt": "", "completion": []}
         self._messages = []
         return StepResult("Environment ready.", reward=0.0, done=False)

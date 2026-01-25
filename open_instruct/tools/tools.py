@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from open_instruct import logger_utils
+from open_instruct.environments.env_tool import EnvironmentTool
 from open_instruct.tools.generic_mcp import GenericMCPToolConfig
 from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, log_tool_call, make_api_request
 
@@ -642,8 +643,6 @@ class EnvironmentToolConfig(BaseToolConfig):
     Environment tools wrap RLEnvironment instances for use in the tool registry.
     They support reset/step/cleanup lifecycle for multi-turn interactions.
     """
-
-    from open_instruct.environments.env_tool import EnvironmentTool  # noqa: PLC0415
 
     tool_class: ClassVar[type[Tool]] = EnvironmentTool
 
