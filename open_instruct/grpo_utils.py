@@ -244,6 +244,8 @@ def compute_grpo_loss(
         pg_losses = -advantages * ratio
         pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
     elif config.loss_fn == GRPOLossType.cispo:
+        # cispo: directly clip ratio, no lower bound.
+        # reinforce loss, so multiply by new logprobs
         pg_losses = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
         pg_losses2 = pg_losses
     else:
@@ -256,6 +258,9 @@ def compute_grpo_loss(
     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
     if ref_logprobs is not None:
+        # We want the KL loss to backpropagate through the model.
+        # We also clamp the KL loss to avoid numerical instability.
+        # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
         ref_logprobs_diff = (new_logprobs - ref_logprobs).clamp(-40.0, 40.0)
         kl_all = model_utils.estimate_kl(ref_logprobs_diff, ratio)
         kl = kl_all[config.kl_estimator]
@@ -278,8 +283,10 @@ def forward_for_logprobs(
     output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
     logits = getattr(output, "logits", output)
     logits = logits / temperature
+    # The logits at position i predict token i+1, so we align them with labels shifted by 1
     logits = logits[:, :-1]
     labels = query_responses[:, 1:].clone()
+    # Replace pad tokens with 0 to avoid index out of bounds errors in gather
     labels[labels == pad_token_id] = 0
     logprob_BT = model_utils.log_softmax_and_gather(logits, labels)
 

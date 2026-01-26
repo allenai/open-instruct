@@ -656,6 +656,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
+                    # Apply truncated importance sampling if enabled
                     tis_imp_ratio_BT = None
                     if self.args.truncated_importance_sampling_ratio_cap > 0 and vllm_logprobs_BT is not None:
                         old_logprobs_mask_BT = old_logprob_BT != INVALID_LOGPROB
@@ -673,18 +674,23 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
 
                         valid_mask_BT = response_mask_BT
+                        # Initialize importance ratio to 1.0 (no effect) for all positions
                         tis_imp_ratio_BT = torch.ones_like(old_logprob_BT)
 
                         if valid_mask_BT.any():
+                            # Calculate logprob difference only for valid positions
                             logprob_diff_is_BT = old_logprob_BT - vllm_logprobs_BT
+                            # Clamp to prevent numerical overflow in exp
                             logprob_diff_is_BT = torch.where(
                                 valid_mask_BT,
                                 logprob_diff_is_BT.clamp(-10.0, 10.0),
                                 torch.zeros_like(logprob_diff_is_BT),
                             )
+                            # Compute importance ratio only for valid positions
                             tis_imp_ratio_BT = torch.where(
                                 valid_mask_BT, torch.exp(logprob_diff_is_BT), tis_imp_ratio_BT
                             )
+                            # Apply cap
                             tis_imp_ratio_BT = torch.clamp(
                                 tis_imp_ratio_BT, max=self.args.truncated_importance_sampling_ratio_cap
                             )
@@ -714,6 +720,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
+                            # NOTE: in packed implementation, kl calculation are averages over response tokens
                             ref_logprobs_diff_BT = (new_logprobs_BT - ref_logprobs_BT[i]).clamp(-40.0, 40.0)
                             kl_4BT = estimate_kl(ref_logprobs_diff_BT, ratio_BT)
                             loss_stats_B["kl"][:, i] = masked_mean(kl_4BT, response_mask_BT).float()
