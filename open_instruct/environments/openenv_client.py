@@ -28,18 +28,22 @@ class OpenEnvClient(RLEnvironment):
         """
         self._base_url = base_url.rstrip("/")
         self._env_id = env_id
-        self._timeout = timeout
+        self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._env_kwargs = env_kwargs
         self._session_id: str | None = None
+        self._http_session: aiohttp.ClientSession | None = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create HTTP session (lazy initialization)."""
+        if self._http_session is None or self._http_session.closed:
+            self._http_session = aiohttp.ClientSession(timeout=self._timeout)
+        return self._http_session
 
     async def _request(self, method: str, endpoint: str, **kwargs) -> dict[str, Any]:
         """Make HTTP request to the OpenEnv server."""
         url = f"{self._base_url}{endpoint}"
-        timeout = aiohttp.ClientTimeout(total=self._timeout)
-        async with (
-            aiohttp.ClientSession(timeout=timeout) as session,
-            session.request(method, url, **kwargs) as response,
-        ):
+        session = await self._get_session()
+        async with session.request(method, url, **kwargs) as response:
             response.raise_for_status()
             return await response.json()
 
@@ -65,7 +69,10 @@ class OpenEnvClient(RLEnvironment):
         return {"session_id": self._session_id}
 
     async def close(self):
-        """Close the session on the remote server."""
+        """Close the session on the remote server and HTTP client."""
         if self._session_id:
             await self._request("POST", "/close", json={"session_id": self._session_id})
             self._session_id = None
+        if self._http_session and not self._http_session.closed:
+            await self._http_session.close()
+            self._http_session = None
