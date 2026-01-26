@@ -4,6 +4,7 @@ AppWorld environment wrapper.
 Wraps the existing appworld_env.py which uses AsyncServerPool for Docker container management.
 """
 
+import atexit
 from typing import Any
 
 try:
@@ -14,6 +15,9 @@ except ImportError:
     _APPWORLD_AVAILABLE = False
 
 from open_instruct.environments.base import RLEnvironment, StepResult
+
+# Global reference to AppWorld initializer for cleanup
+_appworld_initializer = None
 
 
 class AppWorldEnv(RLEnvironment):
@@ -77,10 +81,18 @@ class AppWorldEnv(RLEnvironment):
         self._world.close()
 
 
+def _cleanup_appworld_servers():
+    """Cleanup function to shut down AppWorld Docker containers."""
+    global _appworld_initializer
+    if _appworld_initializer is not None:
+        _appworld_initializer.__exit__(None, None, None)
+        _appworld_initializer = None
+
+
 async def setup_appworld_servers(pool_size: int) -> list[str]:
     """Start AppWorld Docker containers, return server URLs.
 
-    This is the setup_fn for EnvironmentPool.
+    This is the setup_fn for EnvironmentPool. Registers cleanup via atexit.
 
     Args:
         pool_size: Number of servers to start
@@ -88,14 +100,28 @@ async def setup_appworld_servers(pool_size: int) -> list[str]:
     Returns:
         List of server URLs
     """
+    global _appworld_initializer
     if not _APPWORLD_AVAILABLE:
         raise ImportError("appworld library required. Install with: pip install appworld")
+
     config = {
         "experiment_name": "verification",
         "remote_environment_url": ["http://localhost:{port}"] * pool_size,
         "raise_on_failure": True,
         "ground_truth_mode": "partial",
     }
-    initializer = AppWorld.initializer(start_servers=True, **config)
-    initializer.__enter__()
-    return [cfg["remote_environment_url"] for cfg in initializer.configs]
+    _appworld_initializer = AppWorld.initializer(start_servers=True, **config)
+    _appworld_initializer.__enter__()
+
+    # Register cleanup to run at process exit
+    atexit.register(_cleanup_appworld_servers)
+
+    return [cfg["remote_environment_url"] for cfg in _appworld_initializer.configs]
+
+
+def teardown_appworld_servers():
+    """Explicitly shut down AppWorld Docker containers.
+
+    Call this at end of training if you want to clean up before process exit.
+    """
+    _cleanup_appworld_servers()
