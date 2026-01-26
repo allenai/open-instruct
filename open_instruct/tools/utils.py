@@ -410,6 +410,9 @@ class Tool(ABC):
 
         This wrapper removes internal parameters that the training loop passes to all tools
         but that individual tool implementations don't need to handle.
+
+        Note: Subclasses (e.g., EnvironmentTool) may override this to handle internal
+        parameters like _request_id differently.
         """
         kwargs.pop("_request_id", None)
         return await self.execute(*args, **kwargs)
