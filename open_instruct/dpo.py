@@ -1,5 +1,5 @@
 """
-DPO training with OLMo-core's Trainer.
+DPO training using OLMo-core's Trainer.
 
 This module provides DPO (Direct Preference Optimization) training using
 OLMo-core's native training infrastructure.
