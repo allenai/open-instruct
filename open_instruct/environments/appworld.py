@@ -4,6 +4,7 @@ AppWorld environment wrapper.
 Wraps the existing appworld_env.py which uses AsyncServerPool for Docker container management.
 """
 
+import asyncio
 import atexit
 from typing import Any
 
@@ -111,7 +112,7 @@ class AppWorldServerManager:
             "ground_truth_mode": "partial",
         }
         self._initializer = AppWorld.initializer(start_servers=True, **config)
-        self._initializer.__enter__()
+        await asyncio.to_thread(self._initializer.__enter__)
         self._server_urls = [cfg["remote_environment_url"] for cfg in self._initializer.configs]
 
         # Register cleanup via atexit as a fallback
