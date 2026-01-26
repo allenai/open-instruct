@@ -718,6 +718,7 @@ TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     "openenv": OpenEnvConfig,  # OpenEnv HTTP-based environments
     "textarena": TextArenaEnvConfig,  # TextArena games via OpenEnv
     "wordle": TextArenaEnvConfig,  # Wordle via TextArena/OpenEnv
-    "wiki_search": PrimeIntellectEnvConfig,  # Keep verifiers for now
+    "wordle_verifiers": PrimeIntellectEnvConfig,  # Wordle via Prime Intellect verifiers
+    "wiki_search": PrimeIntellectEnvConfig,  # Wiki search via verifiers
     "appworld": AppWorldEnvConfig,
 }
