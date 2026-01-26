@@ -6,10 +6,7 @@
 #   - env_info.env_config passed to PrimeIntellectEnv
 
 # Install Prime Intellect Wiki-Search environment
-# Use pip install from wheel URL (more reliable than prime env install in containers)
-uv pip install "https://hub.primeintellect.ai/will/wiki-search/@latest/wiki_search-0.1.0-py2.py3-none-any.whl" 2>/dev/null || \
-    pip install "https://hub.primeintellect.ai/will/wiki-search/@latest/wiki_search-0.1.0-py2.py3-none-any.whl" 2>/dev/null || \
-    echo "Warning: Could not install wiki-search environment"
+uv run --extra prime-intellect prime env install will/wiki-search 2>/dev/null || true
 
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra prime-intellect open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/wiki_search_env_train 64 \
