@@ -60,8 +60,8 @@ class RequestInfo:
     tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
     excess_tool_calls: list[dict[str, int]] = field(default_factory=list)
     """Per-sample dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
-    env_state: EnvironmentState | None = None
-    """State from RL environment (if any). Only one env per prompt is supported."""
+    env_states: list[EnvironmentState | None] = field(default_factory=list)
+    """Per-sample env states. Only one env type per prompt is supported."""
 
 
 @dataclass
@@ -97,6 +97,8 @@ class PromptRequest:
     is_eval: bool = False
     active_tools: list[str] | None = None
     """List of tool names that are active for this sample. If None, all tools are active."""
+    info: dict[str, Any] | None = None
+    """Optional info dict from dataset, used for env_config and other metadata."""
 
 
 @dataclass

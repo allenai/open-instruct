@@ -930,6 +930,7 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
 
 
 TOOLS_COLUMN_KEY = "tools"
+INFO_COLUMN_KEY = "info"
 
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v2: Added per-sample tool filtering in rlvr_tokenize_v3.

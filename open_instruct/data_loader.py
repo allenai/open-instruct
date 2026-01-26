@@ -35,6 +35,7 @@ from transformers import PreTrainedTokenizer
 from open_instruct import data_types, utils
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
+    INFO_COLUMN_KEY,
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
     TOOLS_COLUMN_KEY,
@@ -526,6 +527,7 @@ def add_prompt_to_generator(
             prompt_id=f"{epoch_number}_{index}",
             is_eval=is_eval,
             active_tools=example.get(TOOLS_COLUMN_KEY),
+            info=example.get(INFO_COLUMN_KEY),
         )
     )
 

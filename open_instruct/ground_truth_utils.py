@@ -1116,11 +1116,17 @@ class RewardConfig:
                 metrics["val/format_scores"] = np.array(format_scores).mean()
 
             if self.apply_verifiable_reward:
+                # For env verifier, use env_states from infos instead of ground_truths
+                env_states = infos.env_states if hasattr(infos, "env_states") else [None] * len(decoded_responses)
+                effective_ground_truths = [
+                    env_states[i] if datasets[i] == "env" and env_states[i] is not None else ground_truths[i]
+                    for i in range(len(ground_truths))
+                ]
                 verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
                     self.verifier_functions,
                     responses,
                     decoded_responses,
-                    ground_truths,
+                    effective_ground_truths,
                     datasets,
                     reward_mult=self.verification_reward,
                     queries=queries,
