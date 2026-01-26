@@ -3,6 +3,7 @@ Thin wrapper exposing EnvironmentPool as a Tool for TOOL_REGISTRY integration.
 """
 
 import importlib
+import time
 from typing import Any
 
 from open_instruct.environments.adapter import EnvironmentPool
@@ -78,8 +79,10 @@ class EnvironmentTool(Tool):
 
     async def execute(self, request_id: str | None = None, **kwargs: Any) -> ToolOutput:
         """Called when model invokes this tool."""
+        start_time = time.perf_counter()
         result = await self.pool.step(request_id, **kwargs)
-        return ToolOutput(output=result.observation, called=True, error="", timeout=False, runtime=0.0)
+        runtime = time.perf_counter() - start_time
+        return ToolOutput(output=result.observation, called=True, error="", timeout=False, runtime=runtime)
 
     def is_done(self, request_id: str) -> bool:
         """Check if env episode is complete."""
