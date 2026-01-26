@@ -77,7 +77,7 @@ class EnvironmentTool(Tool):
         """Called at start of rollout to acquire env from pool."""
         return await self.pool.acquire(request_id, prompt, info)
 
-    async def execute(self, request_id: str | None = None, **kwargs: Any) -> ToolOutput:
+    async def execute(self, request_id: str, **kwargs: Any) -> ToolOutput:
         """Called when model invokes this tool."""
         start_time = time.perf_counter()
         result = await self.pool.step(request_id, **kwargs)
