@@ -58,7 +58,7 @@ jobs:
           printf 'Changed files:\n%s\n' "$CHANGED_FILES"
 
           declare -A CHANGE_PATTERNS=(
-            [dpo_changed]="open_instruct/(dpo_tune_cache|dpo_utils)\.py"
+            [dpo_changed]="open_instruct/(dpo|dpo_tune_cache|dpo_utils)\.py"
             [finetune_changed]="open_instruct/finetune\.py"
             [grpo_changed]="(^|/)Dockerfile$|(^|/)mason\.py$|^open_instruct/"
           )
@@ -144,7 +144,7 @@ jobs:
 
           EXPERIMENT_DEFINITIONS=(
             "grpo|scripts/train/debug/grpo_integration_test.sh|always"
-            "dpo|scripts/train/debug/dpo_integration_test.sh|${DPO_CHANGED}"
+            "dpo|scripts/train/debug/dpo/single_gpu.sh|${DPO_CHANGED}"
             "sft|scripts/train/debug/sft_integration_test.sh|${FINETUNE_CHANGED}"
           )
 
