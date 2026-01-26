@@ -97,8 +97,8 @@ class PromptRequest:
     is_eval: bool = False
     active_tools: list[str] | None = None
     """List of tool names that are active for this sample. If None, all tools are active."""
-    info: dict[str, Any] | None = None
-    """Optional info dict from dataset, used for env_config and other metadata."""
+    env_info: dict[str, Any] | None = None
+    """Optional env_info dict from dataset, used for env_config and other metadata."""
 
 
 @dataclass

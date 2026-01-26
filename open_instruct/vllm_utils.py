@@ -476,7 +476,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "prompt_token_ids": list(request.prompt),
         "start_time": time.perf_counter(),
         "active_tools": request.active_tools,
-        "info": request.info or {},
+        "env_info": request.env_info or {},
     }
 
     for j in range(request.generation_config.n):
@@ -896,7 +896,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     request_metadata = actor.request_metadata[base_request_id]
     original_prompt = request_metadata["prompt_token_ids"]
     active_tools = request_metadata["active_tools"]
-    info = request_metadata["info"]
+    env_info = request_metadata["env_info"]
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
     current_max_tokens = sampling_params.max_tokens
@@ -910,7 +910,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     # Reset environment at start of rollout
     if active_env:
         prompt_text = actor.llm_engine.tokenizer.decode(original_prompt)
-        await actor.tool_actor_map[active_env].reset.remote(request_id=sub_request_id, prompt=prompt_text, info=info)
+        await actor.tool_actor_map[active_env].reset.remote(
+            request_id=sub_request_id, prompt=prompt_text, info=env_info
+        )
 
     try:
         while True:
