@@ -81,7 +81,7 @@ for model_name_or_path in "$@"; do
             --vllm_gpu_memory_utilization 0.9 \
             --vllm_enforce_eager \
             --vllm_dtype auto \
-            --pack_length 40000 \
+            --pack_length 70000 \
             --chat_template_name "tulu_thinker" \
             --trust_remote_code \
             --seed 42 \
