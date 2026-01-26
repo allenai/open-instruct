@@ -442,7 +442,6 @@ class PolicyTrainerRayProcess(RayProcess):
             model=self.model.module,
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
-            deepspeed_stage=self.args.deepspeed_stage,
             gather_whole_model=self.args.gather_whole_model,
         )
 

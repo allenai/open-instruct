@@ -35,6 +35,12 @@ repos:
         language: system
         pass_filenames: false
         types: [python]
+      - id: ban-nonlocal
+        name: Ban nonlocal keyword
+        entry: bash -c '! grep -rn "nonlocal " open_instruct/'
+        language: system
+        pass_filenames: false
+        types: [python]
       - id: export-requirements
         name: Export requirements.txt from uv.lock
         entry: uv export --format requirements-txt --no-hashes --all-extras --no-emit-project --output-file requirements.txt
