@@ -668,6 +668,33 @@ class PrimeIntellectEnvConfig(EnvironmentToolConfig):
 
 
 @dataclass
+class OpenEnvConfig(EnvironmentToolConfig):
+    """Configuration for OpenEnv-compatible environments accessed via HTTP.
+
+    Use this for environments running as HTTP servers (local or remote).
+    """
+
+    env_class: str = "open_instruct.environments.openenv_client.OpenEnvClient"
+    base_url: str = ""
+    """Base URL of the OpenEnv server (e.g., 'http://localhost:8000')."""
+    timeout: float = 30.0
+    """Timeout in seconds for HTTP requests."""
+
+
+@dataclass
+class TextArenaEnvConfig(EnvironmentToolConfig):
+    """Configuration for TextArena environments (Wordle, etc.) via OpenEnv.
+
+    TextArena provides games like Wordle through the OpenEnv standard.
+    Run server with: TEXTARENA_ENV_ID=Wordle-v0 uvicorn textarena_env.server.app:app
+    """
+
+    env_class: str = "open_instruct.environments.textarena.TextArenaEnv"
+    base_url: str = ""
+    """Base URL of the TextArena server (e.g., 'http://localhost:8000')."""
+
+
+@dataclass
 class AppWorldEnvConfig(EnvironmentToolConfig):
     """Configuration for AppWorld environment."""
 
@@ -687,7 +714,10 @@ TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     DrAgentMCPToolConfig.tool_class.config_name: DrAgentMCPToolConfig,
     GenericMCPToolConfig.tool_class.config_name: GenericMCPToolConfig,
     # Environment tools
-    "wordle": PrimeIntellectEnvConfig,
-    "wiki_search": PrimeIntellectEnvConfig,
+    "environment": EnvironmentToolConfig,  # Generic env tool
+    "openenv": OpenEnvConfig,  # OpenEnv HTTP-based environments
+    "textarena": TextArenaEnvConfig,  # TextArena games via OpenEnv
+    "wordle": TextArenaEnvConfig,  # Wordle via TextArena/OpenEnv
+    "wiki_search": PrimeIntellectEnvConfig,  # Keep verifiers for now
     "appworld": AppWorldEnvConfig,
 }

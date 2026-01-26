@@ -100,6 +100,11 @@ appworld = [
     # PyPI versions (0.1.x) require pydantic<2.0, but dev version supports pydantic>=2.12
     "appworld @ git+https://github.com/StonyBrookNLP/appworld.git",
 ]
+openenv = [
+    # TextArena OpenEnv wrapper for games like Wordle
+    "textarena-env",
+    "uvicorn>=0.30.0",
+]
 
 [tool.uv]
 preview = true
