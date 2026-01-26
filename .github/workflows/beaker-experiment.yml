@@ -310,7 +310,7 @@ jobs:
           for i in "${!EXPERIMENT_IDS[@]}"; do
             EXP_ID="${EXPERIMENT_IDS[$i]}"
             EXP_NAME="${EXPERIMENT_NAMES[$i]}"
-            if [ -n "${FAILED_MAP[$EXP_NAME]}" ]; then
+            if [ -n "${FAILED_MAP[$EXP_NAME]:-}" ]; then
               echo "- **$EXP_NAME** ❌: [View on Beaker](https://beaker.org/ex/$EXP_ID)" >> $GITHUB_STEP_SUMMARY
             else
               echo "- **$EXP_NAME** ✅: [View on Beaker](https://beaker.org/ex/$EXP_ID)" >> $GITHUB_STEP_SUMMARY
