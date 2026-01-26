@@ -520,7 +520,6 @@ def _create_server_args(model_path: str, has_chat_template: bool) -> argparse.Na
 def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.Future | None:
     base_request_id = sub_request["base_request_id"]
     expected_n = sub_request["expected_n"]
-    logger.info(f"[accumulate_completions] Received sub_request for base_request_id={base_request_id}")
 
     if base_request_id not in actor.request_outputs:
         actor.request_outputs[base_request_id] = {
@@ -531,17 +530,14 @@ def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.F
 
     actor.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
     current_count = len(actor.request_outputs[base_request_id]["outputs"])
-    logger.info(f"[accumulate_completions] {base_request_id}: accumulated {current_count}/{expected_n} sub-requests")
 
     if current_count == expected_n:
-        logger.info(f"[accumulate_completions] {base_request_id}: All sub-requests complete, finalizing")
         return asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
 
     return None
 
 
 async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str) -> None:
-    logger.info(f"[finalize_completed_request] Starting for {base_request_id}")
     outputs = actor.request_outputs[base_request_id]["outputs"]
     ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
 
@@ -553,18 +549,14 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
         actor.request_outputs[base_request_id]["use_tools"],
         actor.request_metadata,
     )
-    logger.info(f"[finalize_completed_request] {base_request_id}: processed, is_eval={is_eval}")
 
     actor.request_outputs.pop(base_request_id)
     actor.request_metadata.pop(base_request_id, None)
 
     dataset = actor.eval_dataset if is_eval else actor.train_dataset
-    logger.info(f"[finalize_completed_request] {base_request_id}: computing rewards")
     result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
-    logger.info(f"[finalize_completed_request] {base_request_id}: rewards computed, putting to results_queue")
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
     results_queue.put(result)
-    logger.info(f"[finalize_completed_request] {base_request_id}: result put to results_queue successfully")
 
 
 async def compute_rewards(
@@ -801,14 +793,9 @@ class LLMRayActor:
         return self._should_stop_value
 
     def process_from_queue(self) -> None:
-        logger.info("[process_from_queue] Starting queue processing loop")
         finalize_futures: list[futures.Future] = []
         while True:
-            logger.info("[process_from_queue] Waiting for item from completion_queue...")
             item = self.completion_queue.get()
-            logger.info(
-                f"[process_from_queue] Got item from completion_queue: base_request_id={item['base_request_id']}"
-            )
             completion_future = accumulate_completions(self, item)
             if completion_future is not None:
                 finalize_futures.append(completion_future)
@@ -817,7 +804,6 @@ class LLMRayActor:
             for future in done:
                 future.result()
             finalize_futures = list(not_done)
-            logger.info(f"[process_from_queue] Pending finalize_futures: {len(finalize_futures)}")
 
     def init_process_group(
         self,
@@ -916,9 +902,7 @@ class LLMRayActor:
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool support, awaiting tools inline."""
-    logger.info(f"[process_request] Starting sub_request_id={sub_request_id}")
     await _check_health(actor.server_port)
-    logger.info(f"[process_request] Health check passed for {sub_request_id}")
     response_tokens = []
     response_logprobs = []
     response_masks = []
@@ -944,7 +928,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
 
     while True:
-        logger.info(f"[process_request] {sub_request_id}: Calling completions API, max_tokens={current_max_tokens}")
         # Manual construction to avoid dataclass serialization issues
         current_sampling_params = SamplingConfig(
             temperature=sampling_params.temperature,
@@ -966,13 +949,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             },
             **dataclasses.asdict(current_sampling_params),
         )
-        logger.info(f"[process_request] {sub_request_id}: API response received")
 
         output = api_response.choices[0]
-        logger.info(
-            f"[process_request] {sub_request_id}: output tokens={len(output.token_ids)}, "
-            f"finish_reason={output.finish_reason}"
-        )
         model_tokens = list(output.token_ids)
 
         response_tokens.extend(model_tokens)
@@ -1081,7 +1059,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         complete_output.excess_tool_calls = excess_tool_calls
 
     actor.active_tasks.pop(sub_request_id, None)
-    logger.info(f"[process_request] {sub_request_id}: Putting result to completion_queue")
 
     actor.completion_queue.put(
         {
@@ -1095,7 +1072,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             "use_tools": bool(actor.tool_actors),
         }
     )
-    logger.info(f"[process_request] {sub_request_id}: Result put to completion_queue successfully")
 
 
 def get_cuda_arch_list() -> str:

@@ -54,12 +54,8 @@ def get_inference_result_with_timeout(
     If the timeout is reached, performs a health check on vLLM engines
     to detect silent failures.
     """
-    logger.info(f"[get_inference_result_with_timeout] Waiting for result (timeout={timeout}s)...")
     try:
         result = inference_results_Q.get(timeout=timeout)
-        logger.info(
-            f"[get_inference_result_with_timeout] Got result: prompt_id={result.prompt_id}, index={result.index}"
-        )
         return result
     except queue.Empty as err:
         logger.error(f"Timeout ({timeout}s) waiting for inference result. Checking vLLM health...")
