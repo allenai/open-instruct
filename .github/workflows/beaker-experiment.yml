@@ -223,7 +223,13 @@ jobs:
             (
               echo "Waiting for ${EXP_NAME} to succeed: https://beaker.org/ex/${EXP_ID}"
               if beaker experiment await "$EXP_ID" 0 finalized --index --timeout 20m --interval 30s; then
-                echo "  [${EXP_NAME}] ✅ succeeded"
+                EXIT_CODE=$(beaker experiment get "$EXP_ID" --format json | jq -r '.[0].jobs[0].status.exitCode')
+                if [ "$EXIT_CODE" = "0" ]; then
+                  echo "  [${EXP_NAME}] ✅ succeeded"
+                else
+                  echo "  [${EXP_NAME}] ❌ failed with exit code ${EXIT_CODE}"
+                  echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
+                fi
               else
                 echo "  [${EXP_NAME}] ❌ did not reach finalized status within timeout"
                 echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
