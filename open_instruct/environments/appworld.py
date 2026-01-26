@@ -16,9 +16,6 @@ except ImportError:
 
 from open_instruct.environments.base import RLEnvironment, StepResult
 
-# Global reference to AppWorld initializer for cleanup
-_appworld_initializer = None
-
 
 class AppWorldEnv(RLEnvironment):
     """Wraps the existing verifiers-based AppWorldEnv.
@@ -81,18 +78,68 @@ class AppWorldEnv(RLEnvironment):
         self._world.close()
 
 
-def _cleanup_appworld_servers():
-    """Cleanup function to shut down AppWorld Docker containers."""
-    global _appworld_initializer
-    if _appworld_initializer is not None:
-        _appworld_initializer.__exit__(None, None, None)
-        _appworld_initializer = None
+class AppWorldServerManager:
+    """Manages AppWorld Docker container lifecycle.
+
+    Encapsulates server management for better modularity and testability.
+    """
+
+    _instance: "AppWorldServerManager | None" = None
+
+    def __init__(self, pool_size: int):
+        """Initialize server manager.
+
+        Args:
+            pool_size: Number of Docker containers to start.
+        """
+        if not _APPWORLD_AVAILABLE:
+            raise ImportError("appworld library required. Install with: pip install appworld")
+        self.pool_size = pool_size
+        self._initializer = None
+        self._server_urls: list[str] = []
+
+    async def start(self) -> list[str]:
+        """Start AppWorld Docker containers.
+
+        Returns:
+            List of server URLs.
+        """
+        config = {
+            "experiment_name": "verification",
+            "remote_environment_url": ["http://localhost:{port}"] * self.pool_size,
+            "raise_on_failure": True,
+            "ground_truth_mode": "partial",
+        }
+        self._initializer = AppWorld.initializer(start_servers=True, **config)
+        self._initializer.__enter__()
+        self._server_urls = [cfg["remote_environment_url"] for cfg in self._initializer.configs]
+
+        # Register cleanup via atexit as a fallback
+        atexit.register(self.stop)
+
+        return self._server_urls
+
+    def stop(self):
+        """Stop AppWorld Docker containers."""
+        if self._initializer is not None:
+            self._initializer.__exit__(None, None, None)
+            self._initializer = None
+            self._server_urls = []
+
+    @property
+    def server_urls(self) -> list[str]:
+        """Get list of server URLs."""
+        return self._server_urls
+
+
+# Module-level manager instance for backward compatibility
+_server_manager: AppWorldServerManager | None = None
 
 
 async def setup_appworld_servers(pool_size: int) -> list[str]:
     """Start AppWorld Docker containers, return server URLs.
 
-    This is the setup_fn for EnvironmentPool. Registers cleanup via atexit.
+    This is the setup_fn for EnvironmentPool.
 
     Args:
         pool_size: Number of servers to start
@@ -100,23 +147,9 @@ async def setup_appworld_servers(pool_size: int) -> list[str]:
     Returns:
         List of server URLs
     """
-    global _appworld_initializer
-    if not _APPWORLD_AVAILABLE:
-        raise ImportError("appworld library required. Install with: pip install appworld")
-
-    config = {
-        "experiment_name": "verification",
-        "remote_environment_url": ["http://localhost:{port}"] * pool_size,
-        "raise_on_failure": True,
-        "ground_truth_mode": "partial",
-    }
-    _appworld_initializer = AppWorld.initializer(start_servers=True, **config)
-    _appworld_initializer.__enter__()
-
-    # Register cleanup to run at process exit
-    atexit.register(_cleanup_appworld_servers)
-
-    return [cfg["remote_environment_url"] for cfg in _appworld_initializer.configs]
+    global _server_manager
+    _server_manager = AppWorldServerManager(pool_size)
+    return await _server_manager.start()
 
 
 def teardown_appworld_servers():
@@ -124,4 +157,7 @@ def teardown_appworld_servers():
 
     Call this at end of training if you want to clean up before process exit.
     """
-    _cleanup_appworld_servers()
+    global _server_manager
+    if _server_manager is not None:
+        _server_manager.stop()
+        _server_manager = None
