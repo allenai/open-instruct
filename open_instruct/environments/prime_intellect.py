@@ -102,8 +102,8 @@ class PrimeIntellectEnv(RLEnvironment):
         """
         self._messages.append({"role": "assistant", "content": action["content"]})
 
-        # Get env response (async in verifiers)
-        env_response, self._state = await self._vf_env.env_response(self._messages, self._state)
+        # Get env response (async in verifiers) - returns Messages, state is mutated in place
+        env_response = await self._vf_env.env_response(self._messages, self._state)
         self._messages.extend(env_response)
 
         # Check completion
