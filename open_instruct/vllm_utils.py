@@ -450,29 +450,13 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        try:
-            request = actor.prompt_queue.get(timeout=30)
-            add_request(actor, request)
-        except Exception:
-            pass
+        request = actor.prompt_queue.get()
+        add_request(actor, request)
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
-    # Use manual construction instead of dataclasses.replace() to avoid
-    # serialization issues with Ray where the dataclass may not be recognized
-    gc = request.generation_config
-    sampling_params = SamplingConfig(
-        temperature=gc.temperature,
-        top_p=gc.top_p,
-        max_tokens=gc.max_tokens,
-        n=1,  # Override n to 1
-        stop=gc.stop,
-        seed=gc.seed,
-        logprobs=gc.logprobs,
-    )
-
-    prompt_token_ids = list(request.prompt)
+    sampling_params = dataclasses.replace(request.generation_config, n=1)
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
@@ -480,23 +464,14 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "prompt_id": request.prompt_id,
         "sampling_params": sampling_params,
         "original_sampling_params": request.generation_config,
-        "prompt_token_ids": prompt_token_ids,
+        "prompt_token_ids": list(request.prompt),
         "start_time": time.perf_counter(),
         "active_tools": request.active_tools,
     }
 
     for j in range(request.generation_config.n):
         seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
-        # Manual construction to avoid dataclass serialization issues
-        sub_sampling_params = SamplingConfig(
-            temperature=sampling_params.temperature,
-            top_p=sampling_params.top_p,
-            max_tokens=sampling_params.max_tokens,
-            n=sampling_params.n,
-            stop=sampling_params.stop,
-            seed=seed,
-            logprobs=sampling_params.logprobs,
-        )
+        sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
         sub_request_id = f"{request_id}_{j}"
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request(actor, sub_request_id, sub_sampling_params), actor.loop
@@ -529,9 +504,8 @@ def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.F
         }
 
     actor.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
-    current_count = len(actor.request_outputs[base_request_id]["outputs"])
 
-    if current_count == expected_n:
+    if len(actor.request_outputs[base_request_id]["outputs"]) == expected_n:
         return asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
 
     return None
@@ -560,11 +534,8 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
 
 
 async def compute_rewards(
-    actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset | None, is_eval: bool
+    actor: "LLMRayActor", result: GenerationResult, dataset: datasets.Dataset, is_eval: bool
 ) -> tuple[list[float], dict]:
-    if actor.reward_fn is None or dataset is None:
-        return [0.0] * len(result.responses), {}
-
     index_map = actor._eval_index_map if is_eval else actor._train_index_map
     example = dataset[index_map[result.index]]
     decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
@@ -795,14 +766,12 @@ class LLMRayActor:
     def process_from_queue(self) -> None:
         finalize_futures: list[futures.Future] = []
         while True:
-            item = self.completion_queue.get()
-            completion_future = accumulate_completions(self, item)
+            completion_future = accumulate_completions(self, self.completion_queue.get())
             if completion_future is not None:
                 finalize_futures.append(completion_future)
 
             done, not_done = futures.wait(finalize_futures, timeout=0)
-            for future in done:
-                future.result()
+            [future.result() for future in done]
             finalize_futures = list(not_done)
 
     def init_process_group(
@@ -928,16 +897,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
 
     while True:
-        # Manual construction to avoid dataclass serialization issues
-        current_sampling_params = SamplingConfig(
-            temperature=sampling_params.temperature,
-            top_p=sampling_params.top_p,
-            max_tokens=current_max_tokens,
-            n=sampling_params.n,
-            stop=sampling_params.stop,
-            seed=sampling_params.seed,
-            logprobs=sampling_params.logprobs,
-        )
+        current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
         api_response = await actor.client.completions.create(
             model=actor.model_name,
             prompt=current_prompt,
@@ -1204,15 +1164,9 @@ def create_vllm_engines(
             )
         )
 
-    for i, engine in enumerate(vllm_engines):
-        try:
-            ray.get(engine.__ray_ready__.remote(), timeout=180)
-        except ray.exceptions.GetTimeoutError as err:
-            raise RuntimeError(f"vLLM engine {i} timed out during initialization") from err
-        except Exception as e:
-            raise RuntimeError(f"vLLM engine {i} failed to initialize: {e}") from e
-
-    ray_get_with_progress([engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=300)
+    ray_get_with_progress(
+        [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=1200
+    )
 
     return vllm_engines
 
