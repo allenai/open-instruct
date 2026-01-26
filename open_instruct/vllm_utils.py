@@ -939,7 +939,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 continue
 
             try:
-                tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].execute.remote(**tool_call.args)
+                tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].safe_execute.remote(
+                    **tool_call.args
+                )
             except TypeError as e:
                 # This can happen if the model generated a tool call with missing/wrong arguments
                 error_msg = f"Tool call '{tool_call.name}' failed: {e}. Args received: {tool_call.args}"

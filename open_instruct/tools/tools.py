@@ -54,7 +54,7 @@ class PythonCodeTool(Tool):
         self.api_endpoint = api_endpoint
         self.timeout = timeout
 
-    async def execute(self, code: str) -> ToolOutput:
+    async def _execute(self, code: str) -> ToolOutput:
         """Execute Python code via the API."""
         if not code or not code.strip():
             result = ToolOutput(
@@ -128,7 +128,7 @@ class JinaBrowseTool(Tool):
         if not self.api_key:
             raise ValueError("Missing JINA_API_KEY environment variable.")
 
-    async def execute(self, url: str) -> ToolOutput:
+    async def _execute(self, url: str) -> ToolOutput:
         """Fetch webpage content via Jina Reader API."""
         if not url or not url.strip():
             result = ToolOutput(
@@ -214,7 +214,7 @@ class S2SearchTool(Tool):
         if not self.api_key:
             raise ValueError("Missing S2_API_KEY environment variable.")
 
-    async def execute(self, query: str) -> ToolOutput:
+    async def _execute(self, query: str) -> ToolOutput:
         """Search Semantic Scholar for documents matching the query."""
         if not query or not query.strip():
             result = ToolOutput(
@@ -289,7 +289,7 @@ class SerperSearchTool(Tool):
         if not self.api_key:
             raise ValueError("Missing SERPER_API_KEY environment variable.")
 
-    async def execute(self, query: str) -> ToolOutput:
+    async def _execute(self, query: str) -> ToolOutput:
         """Search Google via Serper for documents matching the query."""
         if not query or not query.strip():
             result = ToolOutput(
@@ -441,7 +441,7 @@ class Crawl4AIBrowseTool(Tool):
         with open(blocklist_path, encoding="utf-8") as f:
             self.blocklist = [line.strip() for line in f if line.strip()]
 
-    async def execute(self, url: str) -> ToolOutput:
+    async def _execute(self, url: str) -> ToolOutput:
         """Fetch webpage content via Crawl4AI Docker API."""
         if not url or not url.strip():
             result = ToolOutput(
@@ -557,7 +557,7 @@ class DrAgentMCPTool(Tool):
     def get_stop_strings(self) -> list[str]:
         return self.stop_strings
 
-    async def execute(self, text: str) -> ToolOutput:
+    async def _execute(self, text: str) -> ToolOutput:
         if not text or not text.strip():
             return ToolOutput(output="", error="Empty input", called=True, timeout=False, runtime=0)
 
