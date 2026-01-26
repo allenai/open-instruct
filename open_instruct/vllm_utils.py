@@ -43,6 +43,7 @@ import vllm
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.distributed_c10d import (
     Backend,
     PrefixStore,
@@ -1176,19 +1177,55 @@ def _send_to_vllm(
     return refs
 
 
+def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]]:
+    """Get all FSDP2-wrapped submodules (excluding the root if it's FSDP2)."""
+    fsdp_modules = []
+    for name, module in model.named_modules():
+        if isinstance(module, FSDPModule) and module is not model:
+            fsdp_modules.append((name, module))
+    return fsdp_modules
+
+
+def _broadcast_fsdp2_block_params(
+    block_name: str,
+    block: FSDPModule,
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: torch.distributed.ProcessGroup,
+    name_mapper: Callable[[str], str] | None,
+    is_last_block: bool,
+    is_rank_0: bool,
+) -> list[ray.ObjectRef]:
+    """Broadcast parameters from one FSDP2 block to vLLM engines.
+
+    All ranks must call this (unshard/reshard are collective ops).
+    Only rank 0 actually sends to vLLM.
+    """
+    block.unshard()
+    refs: list[ray.ObjectRef] = []
+    if is_rank_0:
+        params = list(block.named_parameters())
+        num_params = len(params)
+        for i, (name, param) in enumerate(params):
+            full_name = f"{block_name}.{name}" if block_name else name
+            mapped_name = name_mapper(full_name) if name_mapper else full_name
+            is_last = is_last_block and (i == num_params - 1)
+            refs.extend(_send_to_vllm(mapped_name, param, param.shape, is_last, vllm_engines, model_update_group))
+    block.reshard()
+    return refs
+
+
 def _broadcast_params_to_vllm(
     params: list[tuple[str, torch.nn.Parameter]],
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup,
     name_mapper: Callable[[str], str] | None,
-    deepspeed_stage: int | None,
 ) -> list[ray.ObjectRef]:
     """Broadcast parameters to vLLM engines. Must be called on rank 0 only."""
     refs: list[ray.ObjectRef] = []
     num_params = len(params)
     for i, (name, param) in enumerate(params):
         mapped_name = name_mapper(name) if name_mapper else name
-        shape = param.ds_shape if deepspeed_stage == 3 else param.shape
+        shape = getattr(param, "ds_shape", param.shape)
         refs.extend(_send_to_vllm(mapped_name, param, shape, i == num_params - 1, vllm_engines, model_update_group))
     return refs
 
@@ -1198,7 +1235,6 @@ def broadcast_weights_to_vllm(
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup | None,
     name_mapper: Callable[[str], str] | None = None,
-    deepspeed_stage: int | None = None,
     gather_whole_model: bool = True,
 ) -> list[ray.ObjectRef]:
     """Broadcast model weights to vLLM engines.
@@ -1212,8 +1248,6 @@ def broadcast_weights_to_vllm(
         vllm_engines: List of vLLM engine actor handles
         model_update_group: Process group for distributed broadcast (only needed on rank 0)
         name_mapper: Optional function to map parameter names (e.g., OLMo-core to HF format)
-        deepspeed_stage: DeepSpeed ZeRO stage (3 requires GatheredParameters). If None,
-            auto-detects FSDP or assumes no sharding.
         gather_whole_model: If True, gather all params at once (more memory, faster).
             If False, gather each param individually (less memory, slower).
 
@@ -1222,29 +1256,43 @@ def broadcast_weights_to_vllm(
     """
     is_rank_0 = torch.distributed.get_rank() == 0
     params = list(model.named_parameters())
+    deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
+    is_fsdp2 = isinstance(model, FSDPModule)
 
     if isinstance(model, FSDP) and not gather_whole_model:
-        raise ValueError("FSDP does not support per-parameter gathering. Set gather_whole_model=True.")
+        raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
 
     if gather_whole_model:
         if isinstance(model, FSDP):
             ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
+        elif is_fsdp2:
+            ctx = model.unshard_and_reshard()
         else:
-            ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage == 3)
+            ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
         with ctx:
             if is_rank_0:
-                return _broadcast_params_to_vllm(
-                    params, vllm_engines, model_update_group, name_mapper, deepspeed_stage
-                )
+                return _broadcast_params_to_vllm(params, vllm_engines, model_update_group, name_mapper)
             return []
+    elif is_fsdp2:
+        fsdp_submodules = _get_fsdp2_submodules(model)
+        if not fsdp_submodules:
+            raise ValueError("FSDP2 model has no FSDP submodules. Set gather_whole_model=True.")
+        all_refs: list[ray.ObjectRef] = []
+        num_blocks = len(fsdp_submodules)
+        for i, (block_name, block) in enumerate(fsdp_submodules):
+            refs = _broadcast_fsdp2_block_params(
+                block_name, block, vllm_engines, model_update_group, name_mapper, i == num_blocks - 1, is_rank_0
+            )
+            all_refs.extend(refs)
+        return all_refs
     else:
         all_refs: list[ray.ObjectRef] = []
         num_params = len(params)
         for i, (name, param) in enumerate(params):
-            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage == 3):
+            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage_3):
                 if is_rank_0:
                     mapped_name = name_mapper(name) if name_mapper else name
-                    shape = param.ds_shape if deepspeed_stage == 3 else param.shape
+                    shape = getattr(param, "ds_shape", param.shape)
                     all_refs.extend(
                         _send_to_vllm(mapped_name, param, shape, i == num_params - 1, vllm_engines, model_update_group)
                     )
