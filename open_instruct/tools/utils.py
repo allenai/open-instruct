@@ -405,6 +405,15 @@ class Tool(ABC):
         """Execute the tool, must be implemented by subclasses."""
         raise NotImplementedError("execute must be implemented by subclasses.")
 
+    async def safe_execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
+        """Execute the tool after stripping internal parameters like _request_id.
+
+        This wrapper removes internal parameters that the training loop passes to all tools
+        but that individual tool implementations don't need to handle.
+        """
+        kwargs.pop("_request_id", None)
+        return await self.execute(*args, **kwargs)
+
     async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
         """Alias for execute, useful for inference scripts."""
         return await self.execute(*args, **kwargs)

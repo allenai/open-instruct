@@ -73,25 +73,29 @@ class EnvironmentTool(Tool):
         """Initialize the underlying pool (one-time setup)."""
         await self.pool.initialize()
 
-    async def reset(self, request_id: str, info: dict) -> StepResult:
+    async def reset(self, _request_id: str, info: dict) -> StepResult:
         """Called at start of rollout to acquire env from pool."""
-        return await self.pool.acquire(request_id, info)
+        return await self.pool.acquire(_request_id, info)
 
-    async def execute(self, request_id: str, **kwargs: Any) -> ToolOutput:
+    async def execute(self, _request_id: str, **kwargs: Any) -> ToolOutput:
         """Called when model invokes this tool."""
         start_time = time.perf_counter()
-        result = await self.pool.step(request_id, **kwargs)
+        result = await self.pool.step(_request_id, **kwargs)
         runtime = time.perf_counter() - start_time
         return ToolOutput(output=result.observation, called=True, error="", timeout=False, runtime=runtime)
 
-    def is_done(self, request_id: str) -> bool:
+    async def safe_execute(self, _request_id: str, **kwargs: Any) -> ToolOutput:
+        """Environment tools need _request_id, so don't strip it."""
+        return await self.execute(_request_id, **kwargs)
+
+    def is_done(self, _request_id: str) -> bool:
         """Check if env episode is complete."""
-        return self.pool.is_done(request_id)
+        return self.pool.is_done(_request_id)
 
-    def get_state(self, request_id: str) -> dict:
+    def get_state(self, _request_id: str) -> dict:
         """Get accumulated env state (rewards, step count, done)."""
-        return self.pool.get_state(request_id)
+        return self.pool.get_state(_request_id)
 
-    async def cleanup(self, request_id: str):
+    async def cleanup(self, _request_id: str):
         """Release env back to pool after rollout."""
-        await self.pool.release(request_id)
+        await self.pool.release(_request_id)

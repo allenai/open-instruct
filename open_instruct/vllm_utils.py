@@ -910,7 +910,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     # Reset environment at start of rollout
     if active_env:
-        await actor.tool_actor_map[active_env].reset.remote(request_id=sub_request_id, info=env_info)
+        await actor.tool_actor_map[active_env].reset.remote(_request_id=sub_request_id, info=env_info)
 
     try:
         while True:
@@ -968,9 +968,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     continue
 
                 try:
-                    # Pass request_id to all tools (env tools use it, regular tools ignore it)
-                    tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].execute.remote(
-                        request_id=sub_request_id, **tool_call.args
+                    # Pass _request_id to all tools (env tools use it, safe_execute strips it for regular tools)
+                    tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].safe_execute.remote(
+                        _request_id=sub_request_id, **tool_call.args
                     )
                 except TypeError as e:
                     # This can happen if the model generated a tool call with missing/wrong arguments
@@ -995,7 +995,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 # Check if env is done after env tool call
                 if active_env and tool_call.name == active_env:
                     env_done = await asyncio.to_thread(
-                        ray.get, actor.tool_actor_map[active_env].is_done.remote(sub_request_id)
+                        ray.get, actor.tool_actor_map[active_env].is_done.remote(_request_id=sub_request_id)
                     )
 
             tool_tokens, tool_logprobs, tool_masks, excess = process_tool_tokens(
@@ -1022,10 +1022,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         # Collect env state and cleanup
         if active_env:
             state_dict = await asyncio.to_thread(
-                ray.get, actor.tool_actor_map[active_env].get_state.remote(sub_request_id)
+                ray.get, actor.tool_actor_map[active_env].get_state.remote(_request_id=sub_request_id)
             )
             env_state = EnvironmentState(env_name=active_env, **state_dict)
-            await actor.tool_actor_map[active_env].cleanup.remote(sub_request_id)
+            await actor.tool_actor_map[active_env].cleanup.remote(_request_id=sub_request_id)
 
     if output.finish_reason == "stop" and len(response_tokens) == 0:
         eos_token_id = actor.llm_engine.tokenizer.eos_token_id
