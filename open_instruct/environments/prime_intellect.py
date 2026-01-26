@@ -9,7 +9,7 @@ Prime Intellect environments use the verifiers library spec. Install with:
 
 import signal
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, ClassVar
 
 try:
     from verifiers import load_environment
@@ -50,27 +50,33 @@ class PrimeIntellectEnv(RLEnvironment):
     """Adapts a verifiers MultiTurnEnv to RLEnvironment interface.
 
     Wraps verifiers' env_response()/is_completed() into step()/reset().
+    The base environment is loaded once per env_name and shared across instances.
     """
+
+    # Cache: env_name -> loaded base environment (shared across all instances)
+    _base_envs: ClassVar[dict[str, Any]] = {}
 
     def __init__(self, env_name: str, **env_kwargs: Any):
         """Initialize Prime Intellect environment.
 
         Args:
             env_name: Name of the PI env (e.g., "will/wordle", "will/wiki-search")
-            **env_kwargs: Additional kwargs passed to the verifiers env
+            **env_kwargs: Additional kwargs (currently unused, env samples from its dataset)
         """
         if not _VERIFIERS_AVAILABLE:
             raise ImportError("verifiers library required. Install with: uv pip install .[prime-intellect]")
         self._env_name = env_name
-        self._env_kwargs = env_kwargs
-        self._vf_env = None
         self._state: dict[str, Any] = {}
         self._messages: list[dict[str, str]] = []
 
+        # Load base env ONCE per env_name (shared across all instances)
+        if env_name not in PrimeIntellectEnv._base_envs:
+            with _patch_signal_for_non_main_thread():
+                PrimeIntellectEnv._base_envs[env_name] = load_environment(env_name)
+        self._vf_env = PrimeIntellectEnv._base_envs[env_name]
+
     def reset(self) -> StepResult:
-        """Initialize episode, load verifiers env."""
-        with _patch_signal_for_non_main_thread():
-            self._vf_env = load_environment(self._env_name, **self._env_kwargs)
+        """Reset episode state for a new game."""
         self._state = {"turn": 0, "prompt": "", "completion": []}
         self._messages = []
         return StepResult("Environment ready.", reward=0.0, done=False)

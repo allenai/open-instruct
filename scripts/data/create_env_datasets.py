@@ -12,18 +12,13 @@ from datasets import Dataset
 
 
 def create_wordle_dataset(num_samples: int = 100) -> Dataset:
-    """Create Wordle environment training dataset."""
-    # Sample words for Wordle (5-letter words)
-    words = [
-        "CRANE", "SLATE", "CRATE", "TRACE", "RAISE", "ARISE", "STARE", "SNARE",
-        "SHARE", "SPARE", "SCARE", "SCALE", "PLACE", "PLANE", "PLANT", "PLANK",
-        "BLANK", "BLINK", "BRINK", "BRING", "SWING", "SWINE", "SHINE", "WHINE",
-        "WHITE", "WRITE", "WROTE", "GROVE", "GLOVE", "ABOVE", "SHOVE", "STOVE",
-    ]
+    """Create Wordle environment training dataset.
     
+    The verifiers library handles word selection from its internal dataset,
+    so we don't pass target_word. Each episode samples a new word.
+    """
     examples = []
     for i in range(num_samples):
-        word = words[i % len(words)]
         examples.append({
             "messages": [
                 {
@@ -41,9 +36,9 @@ def create_wordle_dataset(num_samples: int = 100) -> Dataset:
             ],
             "tools": ["wordle"],
             "env_info": {
-                "env_config": {"target_word": word},  # Pass target word to env
+                "env_config": {},  # verifiers samples from its internal dataset
             },
-            "ground_truth": word,
+            "ground_truth": "",  # Reward comes from env, not ground_truth matching
             "dataset": "env",  # verifier source - "env" means use EnvVerifier
         })
     
