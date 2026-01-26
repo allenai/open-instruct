@@ -997,7 +997,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
                 # Check if env is done after env tool call
                 if active_env and tool_call.name == active_env:
-                    env_done = ray.get(actor.tool_actor_map[active_env].is_done.remote(sub_request_id))
+                    env_done = await asyncio.to_thread(
+                        ray.get, actor.tool_actor_map[active_env].is_done.remote(sub_request_id)
+                    )
 
             tool_tokens, tool_logprobs, tool_masks, excess = process_tool_tokens(
                 tool_outputs=outputs,
@@ -1022,7 +1024,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     finally:
         # Collect env state and cleanup
         if active_env:
-            state_dict = ray.get(actor.tool_actor_map[active_env].get_state.remote(sub_request_id))
+            state_dict = await asyncio.to_thread(
+                ray.get, actor.tool_actor_map[active_env].get_state.remote(sub_request_id)
+            )
             env_state = EnvironmentState(env_name=active_env, **state_dict)
             await actor.tool_actor_map[active_env].cleanup.remote(sub_request_id)
 
