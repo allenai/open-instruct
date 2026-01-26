@@ -22,12 +22,20 @@ class EnvironmentAdapter:
         self.rewards: list[float] = []
         self.step_count = 0
         self.done = False
+        self.prompt: str = ""
 
     async def setup(self, prompt: str, info: dict[str, Any]) -> StepResult:
-        """Create env from dataset info, then reset it."""
+        """Create env from dataset info, then reset it.
+
+        Args:
+            prompt: The original prompt text (stored for debugging/logging, may be
+                    used by some environments that need context about the task).
+            info: Dict containing 'env_config' with kwargs for the environment factory.
+        """
         self.rewards = []
         self.step_count = 0
         self.done = False
+        self.prompt = prompt
 
         env_kwargs = info["env_config"]
         self.env = self.env_factory(**env_kwargs)
