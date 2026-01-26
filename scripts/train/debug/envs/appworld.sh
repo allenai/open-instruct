@@ -1,6 +1,15 @@
 #!/bin/bash
 # Single GPU debug: AppWorld env + python tool
-# Note: Requires AppWorld servers to be started
+#
+# Prerequisites:
+#   1. Install AppWorld:
+#      pip install appworld
+#   2. Start AppWorld Docker containers (done automatically by setup_fn,
+#      but requires Docker to be running)
+#
+# Dataset: hamishivi/appworld_env_train
+#   - Uses verifier_source: "env" for EnvVerifier (reward from env.step())
+#   - env_info.env_config.task_id specifies which AppWorld task to load
 
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/appworld_env_train 32 \

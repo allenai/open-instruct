@@ -1,9 +1,15 @@
 #!/bin/bash
 # Single GPU debug: Wordle env + python tool
-# Dataset must have verifier_source: "env" for EnvVerifier
 #
-# Prerequisites: Install Prime Intellect env
-#   prime env install will/wordle
+# Prerequisites:
+#   1. Install Prime Intellect dependencies:
+#      uv pip install .[prime-intellect]
+#   2. Install the Wordle environment:
+#      prime env install will/wordle
+#
+# Dataset: hamishivi/wordle_env_train
+#   - Uses verifier_source: "env" for EnvVerifier (reward from env.step())
+#   - env_info.env_config passed to PrimeIntellectEnv
 
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/wordle_env_train 64 \
