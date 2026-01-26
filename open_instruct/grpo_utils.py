@@ -149,8 +149,6 @@ class ExperimentConfig:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     output_dir: str = "output"
     """Where to save the model"""
-    save_traces: bool = False
-    """Whether to save learning data traces"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
     keep_last_n_checkpoints: int = 3

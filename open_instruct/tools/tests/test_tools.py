@@ -31,6 +31,7 @@ from open_instruct.tools.utils import (
     ToolOutput,
     ToolsConfig,
     ToolStatistics,
+    coerce_args,
     get_openai_tool_definitions,
     make_api_request,
     truncate,
@@ -253,6 +254,83 @@ class TestPythonCodeToolConfig(unittest.TestCase):
         self.assertEqual(PythonCodeToolConfig.tool_class, PythonCodeTool)
 
 
+class TestToolArgCoercion(unittest.TestCase):
+    """Tests for safe_execute type coercion when wrong types are passed."""
+
+    def setUp(self):
+        """Set up test fixture with a PythonCodeTool."""
+        self.tool = PythonCodeTool(call_name="python", api_endpoint="http://localhost:1212/execute", timeout=3)
+
+    @parameterized.expand(
+        [("bool_true", True, "True"), ("bool_false", False, "False"), ("int", 42, "42"), ("float", 3.14, "3.14")]
+    )
+    @patch("open_instruct.tools.tools.make_api_request")
+    def test_wrong_type_coerced_to_string(self, name, wrong_type_value, expected_string, mock_api_request):
+        """Test that wrong types (bool, int, float) are coerced to string when passed to safe_execute."""
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"output": "ok", "error": None})
+
+        mock_api_request.side_effect = mock_response
+
+        # Pass wrong type - should be coerced to string
+        result = asyncio.run(self.tool.safe_execute(code=wrong_type_value))
+
+        # Verify execution succeeded (no crash, no error)
+        self.assertTrue(result.called)
+        self.assertEqual(result.error, "")
+
+        # Verify the API received the coerced string value
+        mock_api_request.assert_called_once()
+        call_args = mock_api_request.call_args
+        self.assertEqual(call_args[1]["json_payload"]["code"], expected_string)
+
+    @patch("open_instruct.tools.tools.make_api_request")
+    def test_correct_string_type_unchanged(self, mock_api_request):
+        """Test that correct string type is passed through unchanged."""
+
+        async def mock_response(*args, **kwargs):
+            return APIResponse(data={"output": "Hello", "error": None})
+
+        mock_api_request.side_effect = mock_response
+
+        result = asyncio.run(self.tool.safe_execute(code="print('hello')"))
+
+        self.assertTrue(result.called)
+        mock_api_request.assert_called_once()
+        call_args = mock_api_request.call_args
+        self.assertEqual(call_args[1]["json_payload"]["code"], "print('hello')")
+
+    def test_unconvertible_type_returns_error(self):
+        """Test that types which cannot be coerced return an error instead of crashing."""
+        # Override parameters to expect an integer
+        self.tool.parameters = {"type": "object", "properties": {"value": {"type": "integer"}}, "required": ["value"]}
+
+        # Pass a string that can't be converted to int
+        result = asyncio.run(self.tool.safe_execute(value="not_a_number"))
+
+        # Should return error, not crash
+        self.assertFalse(result.called)
+        self.assertIn("Incorrect type", result.error)
+
+    @parameterized.expand([("true_string", "true", True), ("false_string", "false", False)])
+    def test_string_to_bool_coercion(self, name, string_value, expected_bool):
+        """Test that string 'true'/'false' are correctly coerced to boolean."""
+        properties = {"flag": {"type": "boolean"}}
+
+        result = coerce_args(properties, {"flag": string_value})
+        self.assertEqual(result["flag"], expected_bool)
+
+    def test_invalid_bool_string_returns_error(self):
+        """Test that invalid boolean strings like 'yes' return an error."""
+        self.tool.parameters = {"type": "object", "properties": {"flag": {"type": "boolean"}}}
+
+        result = asyncio.run(self.tool.safe_execute(flag="not_a_bool"))
+
+        self.assertFalse(result.called)
+        self.assertIn("Incorrect type", result.error)
+
+
 class TestTruncateHelper(unittest.TestCase):
     """Tests for truncate helper function."""
 
@@ -343,7 +421,7 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
     @parameterized.expand([("empty", ""), ("whitespace", "   \n\t  "), ("none", None)])
     def test_empty_url_returns_error(self, name, url_input):
         """Test that empty/whitespace/None URL returns an error without calling API."""
-        result = asyncio.run(self.tool.execute(url_input))
+        result = asyncio.run(self.tool.safe_execute(url_input))
 
         expected = ToolOutput(
             output="", error="Empty URL. Please provide a URL to fetch.", called=True, timeout=False, runtime=0
@@ -373,7 +451,7 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("https://example.com"))
+        result = asyncio.run(self.tool.safe_execute("https://example.com"))
 
         self.assertIsInstance(result, ToolOutput)
         for expected in expected_in_output:
@@ -391,7 +469,7 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("https://invalid-url"))
+        result = asyncio.run(self.tool.safe_execute("https://invalid-url"))
 
         self.assertTrue(result.called)
         self.assertIn("Jina API error", result.error)
@@ -419,7 +497,7 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("https://example.com"))
+        result = asyncio.run(self.tool.safe_execute("https://example.com"))
 
         self.assertTrue(result.called)
         self.assertEqual(result.timeout, expected_timeout)
@@ -435,7 +513,7 @@ class TestJinaBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        asyncio.run(self.tool.execute("https://example.com"))
+        asyncio.run(self.tool.safe_execute("https://example.com"))
 
         mock_api_request.assert_called_once()
         call_args = mock_api_request.call_args
@@ -523,7 +601,7 @@ class TestS2SearchToolExecution(unittest.TestCase):
     @parameterized.expand([("empty", ""), ("whitespace", "   \n\t  "), ("none", None)])
     def test_empty_query_returns_error(self, name, query_input):
         """Test that empty/whitespace/None query returns an error without calling API."""
-        result = asyncio.run(self.tool.execute(query_input))
+        result = asyncio.run(self.tool.safe_execute(query_input))
 
         expected = ToolOutput(
             output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
@@ -546,7 +624,7 @@ class TestS2SearchToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("machine learning"))
+        result = asyncio.run(self.tool.safe_execute("machine learning"))
 
         self.assertIsInstance(result, ToolOutput)
         self.assertIn("First research paper snippet", result.output)
@@ -564,7 +642,7 @@ class TestS2SearchToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("nonexistent query"))
+        result = asyncio.run(self.tool.safe_execute("nonexistent query"))
 
         self.assertTrue(result.called)
         self.assertEqual(result.error, "Query returned no results.")
@@ -592,7 +670,7 @@ class TestS2SearchToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("test query"))
+        result = asyncio.run(self.tool.safe_execute("test query"))
 
         self.assertTrue(result.called)
         self.assertEqual(result.timeout, expected_timeout)
@@ -608,7 +686,7 @@ class TestS2SearchToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        asyncio.run(self.tool.execute("test query"))
+        asyncio.run(self.tool.safe_execute("test query"))
 
         mock_api_request.assert_called_once()
         call_args = mock_api_request.call_args
@@ -699,7 +777,7 @@ class TestSerperSearchToolExecution(unittest.TestCase):
     @parameterized.expand([("empty", ""), ("whitespace", "   \n\t  "), ("none", None)])
     def test_empty_query_returns_error(self, name, query_input):
         """Test that empty/whitespace/None query returns an error without calling API."""
-        result = asyncio.run(self.tool.execute(query_input))
+        result = asyncio.run(self.tool.safe_execute(query_input))
 
         expected = ToolOutput(
             output="", error="Empty query. Please provide a search query.", called=True, timeout=False, runtime=0
@@ -745,7 +823,7 @@ class TestSerperSearchToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("test query"))
+        result = asyncio.run(self.tool.safe_execute("test query"))
 
         self.assertIsInstance(result, ToolOutput)
         for expected in expected_in_output:
@@ -775,7 +853,7 @@ class TestSerperSearchToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("test query"))
+        result = asyncio.run(self.tool.safe_execute("test query"))
 
         self.assertTrue(result.called)
         self.assertEqual(result.timeout, expected_timeout)
@@ -791,7 +869,7 @@ class TestSerperSearchToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("nonexistent query"))
+        result = asyncio.run(self.tool.safe_execute("nonexistent query"))
 
         self.assertTrue(result.called)
         self.assertEqual(result.error, "Query returned no results.")
@@ -814,7 +892,7 @@ class TestSerperSearchToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("test query"))
+        result = asyncio.run(self.tool.safe_execute("test query"))
 
         self.assertNotIn("Result 1", result.output)
         self.assertIn("Result 2", result.output)
@@ -969,7 +1047,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
     @parameterized.expand([("empty", ""), ("whitespace", "   \n\t  "), ("none", None)])
     def test_empty_url_returns_error(self, name, url_input):
         """Test that empty/whitespace/None URL returns an error without calling API."""
-        result = asyncio.run(self.tool.execute(url_input))
+        result = asyncio.run(self.tool.safe_execute(url_input))
 
         self.assertIsInstance(result, ToolOutput)
         self.assertEqual(result.output, "")
@@ -1021,7 +1099,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("https://example.com"))
+        result = asyncio.run(self.tool.safe_execute("https://example.com"))
 
         self.assertIsInstance(result, ToolOutput)
         for expected in expected_in_output:
@@ -1039,7 +1117,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("https://invalid-url"))
+        result = asyncio.run(self.tool.safe_execute("https://invalid-url"))
 
         self.assertTrue(result.called)
         self.assertIn("Crawl4AI error", result.error)
@@ -1072,7 +1150,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(self.tool.execute("https://example.com"))
+        result = asyncio.run(self.tool.safe_execute("https://example.com"))
 
         self.assertTrue(result.called)
         self.assertEqual(result.timeout, expected_timeout)
@@ -1088,7 +1166,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        asyncio.run(self.tool.execute("https://example.com"))
+        asyncio.run(self.tool.safe_execute("https://example.com"))
 
         mock_api_request.assert_called_once()
         call_args = mock_api_request.call_args
@@ -1103,7 +1181,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        asyncio.run(self.tool.execute("https://example.com/page"))
+        asyncio.run(self.tool.safe_execute("https://example.com/page"))
 
         mock_api_request.assert_called_once()
         call_args = mock_api_request.call_args
@@ -1118,7 +1196,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        asyncio.run(self.tool.execute("https://example.com"))
+        asyncio.run(self.tool.safe_execute("https://example.com"))
 
         mock_api_request.assert_called_once()
         call_args = mock_api_request.call_args
@@ -1136,7 +1214,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(tool.execute("https://example.com"))
+        result = asyncio.run(tool.safe_execute("https://example.com"))
 
         self.assertLess(len(result.output), 100)
         self.assertTrue(result.output.startswith("A" * 50))
@@ -1154,7 +1232,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(tool.execute("https://example.com"))
+        result = asyncio.run(tool.safe_execute("https://example.com"))
 
         self.assertEqual(result.output, short_content)
         self.assertNotIn("[Content truncated]", result.output)
@@ -1171,7 +1249,7 @@ class TestCrawl4AIBrowseToolExecution(unittest.TestCase):
 
         mock_api_request.side_effect = mock_response
 
-        result = asyncio.run(tool.execute("https://example.com"))
+        result = asyncio.run(tool.safe_execute("https://example.com"))
 
         self.assertEqual(result.output, long_content)
         self.assertNotIn("[Content truncated]", result.output)
@@ -1509,7 +1587,7 @@ class TestGenericMCPToolExecution(unittest.TestCase):
         mock_call.return_value = mock_result
 
         tool = GenericMCPTool(call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool")
-        result = asyncio.run(tool.execute(query="test"))
+        result = asyncio.run(tool.safe_execute(query="test"))
 
         self.assertTrue(result.called)
         self.assertEqual(result.output, "result text")
@@ -1523,7 +1601,7 @@ class TestGenericMCPToolExecution(unittest.TestCase):
         tool = GenericMCPTool(
             call_name="search", server_url="http://localhost:8000/mcp", tool_name="my_tool", timeout=1
         )
-        result = asyncio.run(tool.execute(query="test"))
+        result = asyncio.run(tool.safe_execute(query="test"))
 
         self.assertTrue(result.called)
         self.assertTrue(result.timeout)

@@ -1,15 +1,162 @@
 import contextlib
+import datetime
+import json
+import os
 import time
-from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, dataclass, field
 from typing import Generic, TypeVar
 
 import numpy as np
 import torch
 
-from open_instruct import logger_utils
+from open_instruct import data_types, logger_utils, model_utils, utils
 
 T = TypeVar("T")
 logger = logger_utils.setup_logger(__name__)
+
+_rollout_executor = ThreadPoolExecutor(max_workers=2)
+ROLLOUT_SHARD_SIZE = 10000
+
+
+@dataclass
+class RolloutMetadata:
+    run_name: str
+    git_commit: str
+    model_name: str
+    timestamp: str
+
+
+@dataclass
+class RolloutRecord:
+    step: int
+    sample_idx: int
+    prompt_idx: int
+    prompt_tokens: list[int]
+    response_tokens: list[int]
+    reward: float
+    advantage: float
+    finish_reason: str
+    dataset: str
+    ground_truth: list[int] | None = None
+    request_info: dict | None = None
+    logprobs: list[float] | None = None
+
+
+def save_rollout_metadata(save_path: str, run_name: str, model_name: str | None) -> None:
+    """Save metadata about the rollout collection to disk.
+
+    Creates a JSONL file containing run information including git commit,
+    model name, and timestamp for traceability.
+
+    Args:
+        save_path: Directory to save metadata file.
+        run_name: Experiment run name.
+        model_name: Name/path of the model being trained.
+    """
+    metadata = RolloutMetadata(
+        run_name=run_name,
+        git_commit=utils.get_git_commit(),
+        model_name=model_name or "unknown",
+        timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    )
+    metadata_path = os.path.join(save_path, f"{run_name}_metadata.jsonl")
+    os.makedirs(save_path, exist_ok=True)
+    with open(metadata_path, "w") as f:
+        f.write(json.dumps(asdict(metadata)) + "\n")
+    logger.info(f"Saved rollout metadata to {metadata_path}")
+
+
+def _get_request_info_for_sample(request_info: data_types.RequestInfo | None, i: int) -> dict | None:
+    """Extract per-sample request info from batch-level RequestInfo."""
+    if not request_info:
+        return None
+    return {
+        "num_calls": request_info.num_calls[i] if i < len(request_info.num_calls) else 0,
+        "timeouts": request_info.timeouts[i] if i < len(request_info.timeouts) else 0,
+        "tool_errors": request_info.tool_errors[i] if i < len(request_info.tool_errors) else "",
+        "tool_outputs": request_info.tool_outputs[i] if i < len(request_info.tool_outputs) else "",
+        "tool_runtimes": request_info.tool_runtimes[i] if i < len(request_info.tool_runtimes) else 0.0,
+        "tool_calleds": request_info.tool_calleds[i] if i < len(request_info.tool_calleds) else False,
+        "tool_call_stats": (
+            [asdict(s) for s in request_info.tool_call_stats[i]] if i < len(request_info.tool_call_stats) else []
+        ),
+        "excess_tool_calls": request_info.excess_tool_calls[i] if i < len(request_info.excess_tool_calls) else {},
+    }
+
+
+def _save_rollouts(
+    save_path: str,
+    run_name: str,
+    step: int,
+    batch: model_utils.Batch,
+    result: data_types.GenerationResult,
+    advantages: np.ndarray,
+    num_samples_per_prompt: int,
+    shard_idx: int,
+) -> None:
+    shard_filename = f"{run_name}_rollouts_{shard_idx:06d}.jsonl"
+    filepath = os.path.join(save_path, shard_filename)
+    os.makedirs(save_path, exist_ok=True)
+
+    assert batch.scores is not None, "batch.scores must not be None when saving rollouts"
+
+    records = []
+    for i in range(len(batch.queries)):
+        records.append(
+            asdict(
+                RolloutRecord(
+                    step=step,
+                    sample_idx=i,
+                    prompt_idx=i // num_samples_per_prompt,
+                    prompt_tokens=batch.queries[i],
+                    response_tokens=result.responses[i],
+                    reward=float(batch.scores[i]),
+                    advantage=float(advantages[i]),
+                    finish_reason=result.finish_reasons[i],
+                    dataset=batch.datasets[i],
+                    ground_truth=batch.ground_truths[i],
+                    request_info=_get_request_info_for_sample(result.request_info, i),
+                    logprobs=result.logprobs[i] if result.logprobs else None,
+                )
+            )
+        )
+
+    with open(filepath, "a") as f:
+        for record in records:
+            f.write(json.dumps(record) + "\n")
+    logger.info(f"Saved {len(records)} rollouts to {filepath}")
+
+
+def save_rollouts_to_disk(
+    save_path: str,
+    run_name: str,
+    step: int,
+    batch: model_utils.Batch,
+    result: data_types.GenerationResult,
+    advantages: np.ndarray,
+    num_samples_per_prompt: int,
+    total_samples_written: int,
+) -> None:
+    """Asynchronously save rollout records to disk.
+
+    Submits the rollout saving task to a thread pool executor for non-blocking I/O.
+    Records are saved to JSONL files, sharded by total_samples_written.
+
+    Args:
+        save_path: Directory to save rollout files.
+        run_name: Experiment run name for file naming.
+        step: Training step number.
+        batch: Batch containing queries, scores, ground_truths, datasets.
+        result: Generation result with responses, finish_reasons, request_info.
+        advantages: Calculated advantage values per sample.
+        num_samples_per_prompt: Number of samples generated per prompt.
+        total_samples_written: Total samples written so far, used for sharding.
+    """
+    shard_idx = total_samples_written // ROLLOUT_SHARD_SIZE
+    _rollout_executor.submit(
+        _save_rollouts, save_path, run_name, step, batch, result, advantages, num_samples_per_prompt, shard_idx
+    )
 
 
 @dataclass

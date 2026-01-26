@@ -435,7 +435,7 @@ def init_process_group(
 async def _check_health(port: int) -> None:
     async with (
         aiohttp.ClientSession() as session,
-        session.get(f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=2.0)) as response,
+        session.get(f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=30.0)) as response,
     ):
         if response.status != 200:
             raise RuntimeError(f"vLLM server health check failed with status {response.status}")
@@ -658,7 +658,7 @@ class LLMRayActor:
             # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
             # when the distributed_executor_backend is not ray and
             # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in ray.get_gpu_ids())
 
     def _setup_and_start_async_engine(self, args, bundle_indices, kwargs) -> None:
         num_gpus = kwargs.pop("num_gpus")
@@ -939,7 +939,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 continue
 
             try:
-                tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].execute.remote(**tool_call.args)
+                tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].safe_execute.remote(
+                    **tool_call.args
+                )
             except TypeError as e:
                 # This can happen if the model generated a tool call with missing/wrong arguments
                 error_msg = f"Tool call '{tool_call.name}' failed: {e}. Args received: {tool_call.args}"
@@ -1072,17 +1074,19 @@ def create_vllm_engines(
     # subprocess-based EngineCore architecture. See: https://github.com/vllm-project/vllm/issues/30016
     distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "mp"
     use_hybrid_engine = pg is not None
-    num_gpus = int(tensor_parallel_size == 1)
-    if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
-        # every worker will use 0.5 GPU, so that we can schedule
-        # 2 instances on the same GPUs.
-        num_gpus = 0.5
+    if tensor_parallel_size != 1 and use_hybrid_engine:
+        raise ValueError("tensor_parallel_size > 1 is not supported with single_gpu_mode")
+    # In single_gpu_mode, use 0.5 GPU so we can schedule 2 instances on the same GPUs.
+    # Otherwise, request tensor_parallel_size GPUs so Ray sets CUDA_VISIBLE_DEVICES
+    # correctly for the "mp" distributed executor backend.
+    num_gpus = 0.5 if use_hybrid_engine and single_gpu_mode else tensor_parallel_size
 
     logger.info(f"num_gpus: {num_gpus}")
 
     if not use_hybrid_engine:
-        # Create a big placement group to ensure that all engines are packed
-        bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
+        # Create a placement group to ensure that all engines are packed.
+        # Each bundle reserves tensor_parallel_size GPUs for one engine.
+        bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
@@ -1090,8 +1094,10 @@ def create_vllm_engines(
     bundle_indices_list = get_bundle_indices_list(pg)
 
     for i in range(num_engines):
-        bundle_indices = None
-        bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+        if use_hybrid_engine:
+            bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+        else:
+            bundle_indices = [bundle_indices_list[i]]
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,

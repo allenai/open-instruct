@@ -355,7 +355,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
             )
-        self.local_metrics = utils.MetricsTracker(max_metrics=64, device=self.device)
+        self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
 
         if self.mpu is not None:
             self.splitter = UlyssesSPSplitter(
@@ -1267,6 +1267,8 @@ def create_model_and_optimizer(
         verbose=args.verbose,
         work_dir=args.output_dir,
         tool_names=tools_config.tool_call_names if tools_config else [],
+        run_name=args.run_name,
+        model_name=model_config.model_name_or_path,
         initial_state=data_prep_actor_state,
     )
 
