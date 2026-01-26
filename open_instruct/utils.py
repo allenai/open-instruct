@@ -58,6 +58,7 @@ import numpy as np
 import ray
 import requests
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 import wandb
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
@@ -1331,6 +1332,42 @@ def maybe_use_ai2_hf_entity() -> str | None:
         return "allenai"
     else:
         return None
+
+
+def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig | None:
+    """Set up exp_name, output_dir, HF Hub config, wandb_entity.
+
+    Modifies args in-place. Returns BeakerRuntimeConfig if on Beaker.
+    """
+    if getattr(args, "add_seed_and_date_to_exp_name", False):
+        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.exp_name)
+
+    if dist.is_initialized():
+        path_list = [args.output_dir]
+        dist.broadcast_object_list(path_list, src=0)
+        args.output_dir = path_list[0]
+
+    beaker_config = None
+    if is_beaker_job() and is_main_process:
+        beaker_config = maybe_get_beaker_config()
+
+    if getattr(args, "push_to_hub", False) and is_main_process:
+        if args.hf_repo_id is None:
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:
+            args.hf_entity = HfApi().whoami()["name"]
+        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.hf_repo_revision is None:
+            args.hf_repo_revision = args.exp_name
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
+    if getattr(args, "wandb_entity", None) is None:
+        args.wandb_entity = maybe_use_ai2_wandb_entity()
+
+    return beaker_config
 
 
 @retry_on_exception()
