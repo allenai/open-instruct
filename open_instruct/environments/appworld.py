@@ -6,7 +6,12 @@ Wraps the existing appworld_env.py which uses AsyncServerPool for Docker contain
 
 from typing import Any
 
-from appworld import AppWorld
+try:
+    from appworld import AppWorld
+
+    _APPWORLD_AVAILABLE = True
+except ImportError:
+    _APPWORLD_AVAILABLE = False
 
 from open_instruct.environments.base import RLEnvironment, StepResult
 
@@ -29,6 +34,8 @@ class AppWorldEnv(RLEnvironment):
             experiment_name: Name for experiment logging
             ground_truth_mode: "partial" or "full"
         """
+        if not _APPWORLD_AVAILABLE:
+            raise ImportError("appworld library required. Install with: pip install appworld")
         self._task_id = task_id
         self._server_url = server_url
         self._experiment_name = experiment_name
@@ -81,6 +88,8 @@ async def setup_appworld_servers(pool_size: int) -> list[str]:
     Returns:
         List of server URLs
     """
+    if not _APPWORLD_AVAILABLE:
+        raise ImportError("appworld library required. Install with: pip install appworld")
     config = {
         "experiment_name": "verification",
         "remote_environment_url": ["http://localhost:{port}"] * pool_size,

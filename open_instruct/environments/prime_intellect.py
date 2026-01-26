@@ -9,7 +9,12 @@ Prime Intellect environments use the verifiers library spec. Install with:
 
 from typing import Any
 
-import verifiers as vf
+try:
+    import verifiers as vf
+
+    _VERIFIERS_AVAILABLE = True
+except ImportError:
+    _VERIFIERS_AVAILABLE = False
 
 from open_instruct.environments.base import RLEnvironment, StepResult
 
@@ -27,6 +32,8 @@ class PrimeIntellectEnv(RLEnvironment):
             env_name: Name of the PI env (e.g., "will/wordle", "will/wiki-search")
             **env_kwargs: Additional kwargs passed to the verifiers env
         """
+        if not _VERIFIERS_AVAILABLE:
+            raise ImportError("verifiers library required. Install with: uv pip install .[prime-intellect]")
         self._env_name = env_name
         self._env_kwargs = env_kwargs
         self._vf_env = None
