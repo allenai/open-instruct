@@ -18,7 +18,6 @@ import queue
 import threading
 import time
 from concurrent import futures
-from queue import Empty
 from typing import Any, cast
 
 import datasets
