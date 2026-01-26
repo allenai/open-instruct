@@ -331,22 +331,26 @@ class GRPOTrainModule(TransformerTrainModule):
             local_clip_frac_sum = (loss_stats_B["clip_frac"] * local_token_counts).sum()
             local_total_tokens = local_token_counts.sum()
 
+            local_sums_list = [local_total_tokens, local_pg_loss_sum, local_kl_sum, local_clip_frac_sum]
             if self.grpo_config.record_entropy:
                 local_entropy_sum = (loss_stats_B["entropy"] * local_token_counts).sum()
-                local_sums = torch.stack(
-                    [local_total_tokens, local_pg_loss_sum, local_kl_sum, local_clip_frac_sum, local_entropy_sum]
-                )
-            else:
-                local_sums = torch.stack([local_total_tokens, local_pg_loss_sum, local_kl_sum, local_clip_frac_sum])
+                local_sums_list.append(local_entropy_sum)
 
+            local_sums = torch.stack(local_sums_list)
             dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
 
-            global_total_tokens = local_sums[0]
-            self.record_metric("train/pg_loss", (local_sums[1] / global_total_tokens).item(), reduce_type=None)
-            self.record_metric("train/kl", (local_sums[2] / global_total_tokens).item(), reduce_type=None)
-            self.record_metric("train/clip_frac", (local_sums[3] / global_total_tokens).item(), reduce_type=None)
+            global_total_tokens, global_pg_loss_sum, global_kl_sum, global_clip_frac_sum = local_sums[:4]
+
+            self.record_metric("train/pg_loss", (global_pg_loss_sum / global_total_tokens).item(), reduce_type=None)
+            self.record_metric("train/kl", (global_kl_sum / global_total_tokens).item(), reduce_type=None)
+            self.record_metric(
+                "train/clip_frac", (global_clip_frac_sum / global_total_tokens).item(), reduce_type=None
+            )
             if self.grpo_config.record_entropy:
-                self.record_metric("train/entropy", (local_sums[4] / global_total_tokens).item(), reduce_type=None)
+                global_entropy_sum = local_sums[4]
+                self.record_metric(
+                    "train/entropy", (global_entropy_sum / global_total_tokens).item(), reduce_type=None
+                )
 
     def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int:
         data_BT: data_types.CollatedBatchData = batch["batch"]
