@@ -95,9 +95,8 @@ environments = [
 prime-intellect = [
     "verifiers>=0.1.9",
 ]
-appworld = [
-    "appworld",
-]
+# Note: appworld has incompatible pydantic requirements (requires <2.0.0)
+# Install separately: pip install appworld
 
 [tool.uv]
 preview = true

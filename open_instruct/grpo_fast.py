@@ -2083,6 +2083,13 @@ def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, 
         ray.get([actor.get_openai_tool_definitions.remote() for actor in tool_actors]) if tool_actors else []
     )
 
+    # Initialize environment tools (starts Docker containers, etc.)
+    # Only env tools have initialize() that does work; regular tools have no-op or no method
+    for actor in tool_actors:
+        if ray.get(actor.get_is_environment_tool.remote()):
+            ray.get(actor.initialize.remote())
+            logger.info(f"Initialized environment tool: {ray.get(actor.get_call_name.remote())}")
+
     # Create parser temporarily to get stop sequences for generation config
     # The actual parser used during generation will be created inside vLLM actors
     stop_sequences = []
