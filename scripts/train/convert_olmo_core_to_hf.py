@@ -13,7 +13,9 @@ import torch
 import torch.distributed.checkpoint.state_dict as dcp_state_dict
 import transformers
 
-from open_instruct import olmo_core_utils
+from open_instruct import logger_utils, olmo_core_utils
+
+logger = logger_utils.setup_logger(__name__)
 
 
 def main():
@@ -34,13 +36,12 @@ def main():
 
     state_dict = {"model": model.state_dict()}
     dcp_state_dict.load_state_dict(state_dict, checkpoint_id=args.checkpoint_dir)
-    model.load_state_dict(state_dict["model"])
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_name)
     olmo_core_utils.save_state_dict_as_hf(
         model_config, state_dict["model"], args.output_dir, args.model_name, tokenizer
     )
-    print(f"Saved HuggingFace checkpoint to {args.output_dir}")
+    logger.info(f"Saved HuggingFace checkpoint to {args.output_dir}")
 
 
 if __name__ == "__main__":
