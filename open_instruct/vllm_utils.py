@@ -631,10 +631,11 @@ class LLMRayActor:
         self.env_tool_names: set[str] = set()
         if self.tool_actors:
             call_names = ray.get([actor.get_call_name.remote() for actor in self.tool_actors])
+            is_env_flags = ray.get([actor.get_is_environment_tool.remote() for actor in self.tool_actors])
             self.tool_actor_map = dict(zip(call_names, self.tool_actors))
-            # Identify environment tools (those with reset/is_done/cleanup methods)
-            for name, actor in self.tool_actor_map.items():
-                if hasattr(actor, "reset") and hasattr(actor, "is_done") and hasattr(actor, "cleanup"):
+            # Identify environment tools
+            for name, is_env in zip(call_names, is_env_flags):
+                if is_env:
                     self.env_tool_names.add(name)
 
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:

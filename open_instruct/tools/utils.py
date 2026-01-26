@@ -366,6 +366,8 @@ class Tool(ABC):
     """Name used to identify the tool when function calling."""
     parameters: dict[str, Any]
     """JSON schema for tool parameters. Exposed to the model when calling the tool."""
+    is_environment_tool: bool = False
+    """Whether this tool is an RL environment tool with reset/cleanup lifecycle."""
 
     def __init__(self, config_name: str, description: str, call_name: str, parameters: dict[str, Any]) -> None:
         self.config_name = config_name
@@ -393,6 +395,10 @@ class Tool(ABC):
     def get_openai_tool_definitions(self) -> dict[str, Any]:
         """Get tool definition in OpenAI format."""
         return get_openai_tool_definitions(self)
+
+    def get_is_environment_tool(self) -> bool:
+        """Return whether this is an environment tool with reset/cleanup lifecycle."""
+        return self.is_environment_tool
 
     @abstractmethod
     async def execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
