@@ -1181,14 +1181,14 @@ def _broadcast_params_to_vllm(
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup,
     name_mapper: Callable[[str], str] | None,
-    use_deepspeed_gather: bool,
+    deepspeed_stage: int | None,
 ) -> list[ray.ObjectRef]:
     """Broadcast parameters to vLLM engines. Must be called on rank 0 only."""
     refs: list[ray.ObjectRef] = []
     num_params = len(params)
     for i, (name, param) in enumerate(params):
         mapped_name = name_mapper(name) if name_mapper else name
-        shape = param.ds_shape if use_deepspeed_gather else param.shape
+        shape = param.ds_shape if deepspeed_stage == 3 else param.shape
         refs.extend(_send_to_vllm(mapped_name, param, shape, i == num_params - 1, vllm_engines, model_update_group))
     return refs
 
@@ -1222,31 +1222,29 @@ def broadcast_weights_to_vllm(
     """
     is_rank_0 = torch.distributed.get_rank() == 0
     params = list(model.named_parameters())
-    is_fsdp = isinstance(model, FSDP)
-    use_deepspeed_gather = deepspeed_stage == 3
 
-    if is_fsdp and not gather_whole_model:
+    if isinstance(model, FSDP) and not gather_whole_model:
         raise ValueError("FSDP does not support per-parameter gathering. Set gather_whole_model=True.")
 
     if gather_whole_model:
-        if is_fsdp:
+        if isinstance(model, FSDP):
             ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
         else:
-            ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=use_deepspeed_gather)
+            ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage == 3)
         with ctx:
             if is_rank_0:
                 return _broadcast_params_to_vllm(
-                    params, vllm_engines, model_update_group, name_mapper, use_deepspeed_gather
+                    params, vllm_engines, model_update_group, name_mapper, deepspeed_stage
                 )
             return []
     else:
         all_refs: list[ray.ObjectRef] = []
         num_params = len(params)
         for i, (name, param) in enumerate(params):
-            with deepspeed.zero.GatheredParameters([param], enabled=use_deepspeed_gather):
+            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage == 3):
                 if is_rank_0:
                     mapped_name = name_mapper(name) if name_mapper else name
-                    shape = param.ds_shape if use_deepspeed_gather else param.shape
+                    shape = param.ds_shape if deepspeed_stage == 3 else param.shape
                     all_refs.extend(
                         _send_to_vllm(mapped_name, param, shape, i == num_params - 1, vllm_engines, model_update_group)
                     )
