@@ -1230,7 +1230,7 @@ def create_vllm_engines(
 
     for i, engine in enumerate(vllm_engines):
         try:
-            ray.get(engine.__ray_ready__.remote(), timeout=60)
+            ray.get(engine.__ray_ready__.remote(), timeout=180)
         except ray.exceptions.GetTimeoutError as err:
             raise RuntimeError(f"vLLM engine {i} timed out during initialization") from err
         except Exception as e:
