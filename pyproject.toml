@@ -95,6 +95,9 @@ environments = [
 prime-intellect = [
     "verifiers>=0.1.9",
 ]
+appworld = [
+    "appworld",
+]
 
 [tool.uv]
 preview = true
