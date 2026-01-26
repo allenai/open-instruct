@@ -22,20 +22,16 @@ class EnvironmentAdapter:
         self.rewards: list[float] = []
         self.step_count = 0
         self.done = False
-        self.prompt: str = ""
 
-    async def setup(self, prompt: str, info: dict[str, Any]) -> StepResult:
+    async def setup(self, info: dict[str, Any]) -> StepResult:
         """Create env from dataset info, then reset it.
 
         Args:
-            prompt: The original prompt text (stored for debugging/logging, may be
-                    used by some environments that need context about the task).
             info: Dict containing 'env_config' with kwargs for the environment factory.
         """
         self.rewards = []
         self.step_count = 0
         self.done = False
-        self.prompt = prompt
 
         env_kwargs = info["env_config"]
         self.env = self.env_factory(**env_kwargs)
@@ -85,13 +81,13 @@ class EnvironmentPool:
         for _ in range(self.pool_size):
             await self._pool.put(EnvironmentAdapter(self.env_factory))
 
-    async def acquire(self, request_id: str, prompt: str, info: dict) -> StepResult:
+    async def acquire(self, request_id: str, info: dict) -> StepResult:
         """Get adapter from pool, setup for this request."""
         if request_id in self._active:
             raise ValueError(f"request_id '{request_id}' is already active. Each request must have a unique ID.")
         adapter = await self._pool.get()
         self._active[request_id] = adapter
-        return await adapter.setup(prompt, info)
+        return await adapter.setup(info)
 
     async def step(self, request_id: str, **action) -> StepResult:
         return await self._active[request_id].step(**action)

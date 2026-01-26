@@ -910,10 +910,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     # Reset environment at start of rollout
     if active_env:
-        prompt_text = actor.llm_engine.tokenizer.decode(original_prompt)
-        await actor.tool_actor_map[active_env].reset.remote(
-            request_id=sub_request_id, prompt=prompt_text, info=env_info
-        )
+        await actor.tool_actor_map[active_env].reset.remote(request_id=sub_request_id, info=env_info)
 
     try:
         while True:

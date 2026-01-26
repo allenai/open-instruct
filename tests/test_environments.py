@@ -71,7 +71,7 @@ class TestEnvironmentAdapter:
             info = {"env_config": {}}
 
             # Setup
-            result = await adapter.setup("test prompt", info)
+            result = await adapter.setup(info)
             assert result.observation == "Start"
             assert result.reward == 0.0
             assert adapter.done is False
@@ -101,7 +101,7 @@ class TestEnvironmentAdapter:
 
         async def _test():
             adapter = EnvironmentAdapter(MockEnv)
-            await adapter.setup("test", {"env_config": {}})
+            await adapter.setup({"env_config": {}})
             assert adapter.env is not None
             adapter.cleanup()
             assert adapter.env is None
@@ -118,11 +118,11 @@ class TestEnvironmentPool:
             await pool.initialize()
 
             # Acquire first
-            result1 = await pool.acquire("req1", "prompt1", {"env_config": {}})
+            result1 = await pool.acquire("req1", {"env_config": {}})
             assert result1.observation == "Start"
 
             # Acquire second
-            result2 = await pool.acquire("req2", "prompt2", {"env_config": {}})
+            result2 = await pool.acquire("req2", {"env_config": {}})
             assert result2.observation == "Start"
 
             # Step first

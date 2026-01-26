@@ -73,9 +73,9 @@ class EnvironmentTool(Tool):
         """Initialize the underlying pool (one-time setup)."""
         await self.pool.initialize()
 
-    async def reset(self, request_id: str, prompt: str, info: dict) -> StepResult:
+    async def reset(self, request_id: str, info: dict) -> StepResult:
         """Called at start of rollout to acquire env from pool."""
-        return await self.pool.acquire(request_id, prompt, info)
+        return await self.pool.acquire(request_id, info)
 
     async def execute(self, request_id: str, **kwargs: Any) -> ToolOutput:
         """Called when model invokes this tool."""
