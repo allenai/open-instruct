@@ -79,6 +79,8 @@ class EnvironmentPool:
 
     async def acquire(self, request_id: str, prompt: str, info: dict) -> StepResult:
         """Get adapter from pool, setup for this request."""
+        if request_id in self._active:
+            raise ValueError(f"request_id '{request_id}' is already active. Each request must have a unique ID.")
         adapter = await self._pool.get()
         self._active[request_id] = adapter
         return await adapter.setup(prompt, info)
