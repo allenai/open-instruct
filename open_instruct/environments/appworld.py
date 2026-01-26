@@ -85,8 +85,6 @@ class AppWorldServerManager:
     Encapsulates server management for better modularity and testability.
     """
 
-    _instance: "AppWorldServerManager | None" = None
-
     def __init__(self, pool_size: int):
         """Initialize server manager.
 
