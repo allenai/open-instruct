@@ -7,6 +7,7 @@ Prime Intellect environments use the verifiers library spec. Install with:
     prime env install will/wiki-search
 """
 
+import random
 import signal
 from contextlib import contextmanager
 from typing import Any, ClassVar
@@ -51,6 +52,7 @@ class PrimeIntellectEnv(RLEnvironment):
 
     Wraps verifiers' env_response()/is_completed() into step()/reset().
     The base environment is loaded once per env_name and shared across instances.
+    Each reset() samples a new problem from verifiers' internal dataset.
     """
 
     # Cache: env_name -> loaded base environment (shared across all instances)
@@ -76,8 +78,20 @@ class PrimeIntellectEnv(RLEnvironment):
         self._vf_env = PrimeIntellectEnv._base_envs[env_name]
 
     def reset(self) -> StepResult:
-        """Reset episode state for a new game."""
-        self._state = {"turn": 0, "prompt": "", "completion": []}
+        """Reset episode state by sampling a new problem from verifiers' dataset."""
+        # Sample a problem from verifiers' internal dataset
+        dataset = self._vf_env.get_dataset()
+        sample_idx = random.randint(0, len(dataset) - 1)
+        sample = dataset[sample_idx]
+
+        # Initialize state with the sampled problem (answer is the target word/answer)
+        self._state = {
+            "turn": 0,
+            "prompt": sample.get("prompt", []),
+            "completion": [],
+            "answer": sample.get("answer", ""),
+            "trajectory": [],
+        }
         self._messages = []
         return StepResult("Environment ready.", reward=0.0, done=False)
 
