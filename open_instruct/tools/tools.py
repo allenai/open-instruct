@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from open_instruct import logger_utils
+from open_instruct.environments.env_tool import EnvironmentTool
 from open_instruct.tools.generic_mcp import GenericMCPToolConfig
 from open_instruct.tools.utils import BaseToolConfig, Tool, ToolOutput, log_tool_call, make_api_request
 
@@ -630,6 +631,79 @@ class DrAgentMCPToolConfig(BaseToolConfig):
     num_results: int = 10
 
 
+# ============================================================================
+# Environment Tool Configs
+# ============================================================================
+
+
+@dataclass
+class EnvironmentToolConfig(BaseToolConfig):
+    """Configuration for RL environment tools.
+
+    Environment tools wrap RLEnvironment instances for use in the tool registry.
+    They support reset/step/cleanup lifecycle for multi-turn interactions.
+    """
+
+    tool_class: ClassVar[type[Tool]] = EnvironmentTool
+
+    env_class: str
+    """Fully qualified class name of the RLEnvironment to use."""
+    pool_size: int = 1
+    """Number of environment instances to pool for concurrent rollouts."""
+    setup_fn: str | None = None
+    """Optional fully qualified name of async setup function for heavy initialization."""
+    description: str = "RL environment tool"
+    """Description for the tool."""
+    parameters: dict[str, Any] | None = None
+    """JSON schema for tool parameters. If None, uses a default schema."""
+
+
+@dataclass
+class PrimeIntellectEnvConfig(EnvironmentToolConfig):
+    """Configuration for Prime Intellect verifiers-based environments."""
+
+    env_class: str = "open_instruct.environments.prime_intellect.PrimeIntellectEnv"
+    env_name: str = ""
+    """Name of the PI env (e.g., 'will/wordle', 'will/wiki-search')."""
+
+
+@dataclass
+class OpenEnvConfig(EnvironmentToolConfig):
+    """Configuration for OpenEnv-compatible environments accessed via HTTP.
+
+    Use this for environments running as HTTP servers (local or remote).
+    """
+
+    env_class: str = "open_instruct.environments.openenv_client.OpenEnvClient"
+    base_url: str = ""
+    """Base URL of the OpenEnv server (e.g., 'http://localhost:8000')."""
+    timeout: float = 30.0
+    """Timeout in seconds for HTTP requests."""
+
+
+@dataclass
+class TextArenaEnvConfig(EnvironmentToolConfig):
+    """Configuration for TextArena environments (Wordle, etc.) via OpenEnv.
+
+    TextArena provides games like Wordle through the OpenEnv standard.
+    Run server with: TEXTARENA_ENV_ID=Wordle-v0 uvicorn textarena_env.server.app:app
+    """
+
+    env_class: str = "open_instruct.environments.textarena.TextArenaEnv"
+    base_url: str = ""
+    """Base URL of the TextArena server (e.g., 'http://localhost:8000')."""
+
+
+@dataclass
+class AppWorldEnvConfig(EnvironmentToolConfig):
+    """Configuration for AppWorld environment."""
+
+    env_class: str = "open_instruct.environments.appworld.AppWorldEnv"
+    setup_fn: str = "open_instruct.environments.appworld.setup_appworld_servers"
+    pool_size: int = 20
+    """Number of AppWorld server instances to run."""
+
+
 # Tool Registry: Maps tool names to their config classes
 TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     PythonCodeToolConfig.tool_class.config_name: PythonCodeToolConfig,
@@ -639,4 +713,12 @@ TOOL_REGISTRY: dict[str, type[BaseToolConfig]] = {
     Crawl4AIBrowseToolConfig.tool_class.config_name: Crawl4AIBrowseToolConfig,
     DrAgentMCPToolConfig.tool_class.config_name: DrAgentMCPToolConfig,
     GenericMCPToolConfig.tool_class.config_name: GenericMCPToolConfig,
+    # Environment tools
+    "environment": EnvironmentToolConfig,  # Generic env tool
+    "openenv": OpenEnvConfig,  # OpenEnv HTTP-based environments
+    "textarena": TextArenaEnvConfig,  # TextArena games via OpenEnv
+    "wordle": TextArenaEnvConfig,  # Wordle via TextArena/OpenEnv
+    "wordle_verifiers": PrimeIntellectEnvConfig,  # Wordle via Prime Intellect verifiers
+    "wiki_search": PrimeIntellectEnvConfig,  # Wiki search via verifiers
+    "appworld": AppWorldEnvConfig,
 }

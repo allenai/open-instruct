@@ -922,6 +922,27 @@ class CodeVerifier(VerifierFunction):
         return CodeVerifierConfig
 
 
+class EnvVerifier(VerifierFunction):
+    """
+    Verifier that returns the environment's final reward.
+
+    Use this as verifier_source for env-based tasks. The reward comes from
+    the env's step() calls, not from comparing predictions to labels.
+
+    The label should be an EnvironmentState object (passed from RequestInfo.env_state),
+    or a float/int representing the reward directly.
+    """
+
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
+        super().__init__("env", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
+    ) -> VerificationResult:
+        # Label is EnvironmentState from RequestInfo.env_state
+        return VerificationResult(score=label.final_reward)
+
+
 def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFunction]:
     """
     Build all verifiers with the given configs.
@@ -1095,11 +1116,17 @@ class RewardConfig:
                 metrics["val/format_scores"] = np.array(format_scores).mean()
 
             if self.apply_verifiable_reward:
+                # For env verifier, use env_states from infos instead of ground_truths
+                env_states = infos.env_states if hasattr(infos, "env_states") else [None] * len(decoded_responses)
+                effective_ground_truths = [
+                    env_states[i] if datasets[i] == "env" and env_states[i] is not None else ground_truths[i]
+                    for i in range(len(ground_truths))
+                ]
                 verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
                     self.verifier_functions,
                     responses,
                     decoded_responses,
-                    ground_truths,
+                    effective_ground_truths,
                     datasets,
                     reward_mult=self.verification_reward,
                     queries=queries,

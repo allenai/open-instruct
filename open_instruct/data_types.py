@@ -29,6 +29,25 @@ class ToolCallStats:
 
 
 @dataclass
+class EnvironmentState:
+    """State accumulated from an RL environment during rollout."""
+
+    env_name: str
+    """Name of the environment tool."""
+    rewards: list[float] = field(default_factory=list)
+    """Rewards collected at each step."""
+    step_count: int = 0
+    """Number of steps taken."""
+    done: bool = False
+    """Whether the episode is complete."""
+
+    @property
+    def final_reward(self) -> float:
+        """Get the final reward (last reward in list, or 0.0 if empty)."""
+        return self.rewards[-1] if self.rewards else 0.0
+
+
+@dataclass
 class RequestInfo:
     """Container for tool usage information used in queue payloads."""
 
@@ -41,6 +60,8 @@ class RequestInfo:
     tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
     excess_tool_calls: list[dict[str, int]] = field(default_factory=list)
     """Per-sample dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
+    env_states: list[EnvironmentState | None] = field(default_factory=list)
+    """Per-sample env states. Only one env type per prompt is supported."""
 
 
 @dataclass
@@ -76,6 +97,8 @@ class PromptRequest:
     is_eval: bool = False
     active_tools: list[str] | None = None
     """List of tool names that are active for this sample. If None, all tools are active."""
+    env_info: dict[str, Any] | None = None
+    """Optional env_info dict from dataset, used for env_config and other metadata."""
 
 
 @dataclass
