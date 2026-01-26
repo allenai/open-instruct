@@ -84,12 +84,11 @@ class PrimeIntellectEnv(RLEnvironment):
         sample_idx = random.randint(0, len(dataset) - 1)
         sample = dataset[sample_idx]
 
-        # Initialize state with the sampled problem (answer is the target word/answer)
+        # Initialize state from sample, add fields required by verifiers
         self._state = {
+            **sample,  # Unpack all fields from the dataset sample
             "turn": 0,
-            "prompt": sample.get("prompt", []),
             "completion": [],
-            "answer": sample.get("answer", ""),
             "trajectory": [],
         }
         self._messages = []
