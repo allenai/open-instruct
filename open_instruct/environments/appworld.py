@@ -131,7 +131,11 @@ class AppWorldServerManager:
         return self._server_urls
 
 
-# Module-level manager instance for backward compatibility
+# Module-level manager instance.
+# NOTE: This global state is a pragmatic workaround for the setup_fn interface, which
+# expects a simple async function returning server URLs. The manager must persist so
+# teardown_appworld_servers() can clean up later. A future refactor could have
+# EnvironmentTool manage the manager lifecycle directly via initialize()/shutdown().
 _server_manager: AppWorldServerManager | None = None
 
 
