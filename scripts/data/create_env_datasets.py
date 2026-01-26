@@ -44,7 +44,7 @@ def create_wordle_dataset(num_samples: int = 100) -> Dataset:
                 "env_config": {"target_word": word},  # Pass target word to env
             },
             "ground_truth": word,
-            "verifier_source": "env",
+            "dataset": "env",  # verifier source - "env" means use EnvVerifier
         })
     
     return Dataset.from_list(examples)
@@ -94,7 +94,7 @@ def create_wiki_search_dataset(num_samples: int = 100) -> Dataset:
                 "env_config": {"question": question, "answer": answer},
             },
             "ground_truth": answer,
-            "verifier_source": "env",
+            "dataset": "env",  # verifier source - "env" means use EnvVerifier
         })
     
     return Dataset.from_list(examples)
@@ -156,7 +156,7 @@ def create_appworld_dataset(num_samples: int = 50) -> Dataset:
                 },
             },
             "ground_truth": task["goal"],
-            "verifier_source": "env",
+            "dataset": "env",  # verifier source - "env" means use EnvVerifier
         })
     
     return Dataset.from_list(examples)
