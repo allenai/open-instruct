@@ -6,7 +6,7 @@ the tokens with color-coding to show which tokens are masked (no loss computed) 
 unmasked (loss computed during training).
 
 Usage:
-    uv run python scripts/viz_sft_tokenization.py -d DATASET -t TOKENIZER [OPTIONS]
+    uv run python scripts/visualize_tokenization.py -d DATASET -t TOKENIZER [OPTIONS]
 
 Arguments:
     -d, --dataset       HuggingFace dataset name (required)
