@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Added generic RL environment support following the OpenEnv standard, with adapters for Prime Intellect verifiers (Wordle, Wiki-Search) and AppWorld. Environments integrate as tools with multi-turn reset/step/cleanup lifecycle. https://github.com/allenai/open-instruct/pull/1419
 - Added SLURM scripts for OLMo SFT training with checkpoint resume support and configurable shuffle seed. https://github.com/allenai/open-instruct/pull/1368
 - Added retry logic with exponential backoff to `make_api_request` for tool API calls (retries on timeouts, connection errors, 429, and 5xx). Also added configurable `max_concurrency` parameter to tool configs for controlling Ray actor concurrency per-tool. https://github.com/allenai/open-instruct/pull/1388
 - Added support for generic MCP tools during training, with some limitations (no changing tools, no tool discovery during training). For details: https://github.com/allenai/open-instruct/pull/1384
