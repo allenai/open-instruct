@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from concurrent import futures
 from datetime import timedelta
 from typing import Any
@@ -53,6 +53,7 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
@@ -1161,13 +1162,12 @@ def create_vllm_engines(
 def _send_to_vllm(
     name: str,
     param: torch.nn.Parameter,
+    shape: torch.Size,
     is_last: bool,
-    deepspeed_stage: int,
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup,
 ) -> list[ray.ObjectRef]:
     """Send a parameter to vLLM engines via broadcast."""
-    shape = param.ds_shape if deepspeed_stage == 3 else param.shape
     refs = [
         engine.update_weight.remote(name, dtype=str(param.dtype), shape=shape, empty_cache=is_last)
         for engine in vllm_engines
@@ -1180,20 +1180,23 @@ def broadcast_weights_to_vllm(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: torch.distributed.ProcessGroup | None,
-    deepspeed_stage: int,
+    name_mapper: Callable[[str], str] | None = None,
+    deepspeed_stage: int | None = None,
     gather_whole_model: bool = True,
 ) -> list[ray.ObjectRef]:
-    """Broadcast DeepSpeed model weights to vLLM engines.
+    """Broadcast model weights to vLLM engines.
 
-    Must be called on ALL ranks when using DeepSpeed stage 3, since
-    GatheredParameters is a collective operation. Only rank 0 actually
-    sends weights to vLLM.
+    Supports both DeepSpeed and FSDP sharded models. Must be called on ALL ranks
+    when using DeepSpeed stage 3 or FSDP, since gathering is a collective operation.
+    Only rank 0 actually sends weights to vLLM.
 
     Args:
-        model: The unwrapped model (model.module from DeepSpeed engine)
+        model: The unwrapped model (model.module from DeepSpeed/FSDP engine)
         vllm_engines: List of vLLM engine actor handles
         model_update_group: Process group for distributed broadcast (only needed on rank 0)
-        deepspeed_stage: DeepSpeed ZeRO stage (3 requires GatheredParameters)
+        name_mapper: Optional function to map parameter names (e.g., OLMo-core to HF format)
+        deepspeed_stage: DeepSpeed ZeRO stage (3 requires GatheredParameters). If None,
+            auto-detects FSDP or assumes no sharding.
         gather_whole_model: If True, gather all params at once (more memory, faster).
             If False, gather each param individually (less memory, slower).
 
@@ -1205,23 +1208,43 @@ def broadcast_weights_to_vllm(
     num_params = len(params)
     all_refs: list[ray.ObjectRef] = []
 
-    if gather_whole_model:
-        with deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage == 3):
-            if is_rank_0:
-                for i, (name, param) in enumerate(params):
-                    all_refs.extend(
-                        _send_to_vllm(
-                            name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group
-                        )
-                    )
+    is_fsdp = isinstance(model, FSDP)
+    use_deepspeed_gather = deepspeed_stage == 3
+
+    def get_shape(param: torch.nn.Parameter) -> torch.Size:
+        if use_deepspeed_gather:
+            return param.ds_shape
+        return param.shape
+
+    def map_name(name: str) -> str:
+        if name_mapper is not None:
+            return name_mapper(name)
+        return name
+
+    def broadcast_params() -> None:
+        nonlocal all_refs
+        if is_rank_0:
+            for i, (name, param) in enumerate(params):
+                mapped_name = map_name(name)
+                shape = get_shape(param)
+                all_refs.extend(
+                    _send_to_vllm(mapped_name, param, shape, i == num_params - 1, vllm_engines, model_update_group)
+                )
+
+    if is_fsdp:
+        with FSDP.summon_full_params(model, writeback=False, rank0_only=False):
+            broadcast_params()
+    elif gather_whole_model:
+        with deepspeed.zero.GatheredParameters(model.parameters(), enabled=use_deepspeed_gather):
+            broadcast_params()
     else:
         for i, (name, param) in enumerate(params):
-            with deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage == 3):
+            with deepspeed.zero.GatheredParameters([param], enabled=use_deepspeed_gather):
                 if is_rank_0:
+                    mapped_name = map_name(name)
+                    shape = get_shape(param)
                     all_refs.extend(
-                        _send_to_vllm(
-                            name, param, i == num_params - 1, deepspeed_stage, vllm_engines, model_update_group
-                        )
+                        _send_to_vllm(mapped_name, param, shape, i == num_params - 1, vllm_engines, model_update_group)
                     )
 
     return all_refs
