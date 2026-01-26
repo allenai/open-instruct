@@ -1,4 +1,11 @@
-"""Convert an olmo-core distributed checkpoint to HuggingFace format."""
+"""Convert an olmo-core distributed checkpoint to HuggingFace format.
+
+Example usage:
+    uv run python scripts/train/convert_olmo_core_to_hf.py \
+        --checkpoint-dir /path/to/checkpoint/step1000 \
+        --model-name allenai/OLMo-2-1124-7B \
+        --output-dir /path/to/output/hf_checkpoint
+"""
 
 import argparse
 
