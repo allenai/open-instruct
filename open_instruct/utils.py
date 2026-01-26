@@ -754,11 +754,15 @@ class ArgumentParserPlus(HfArgumentParser):
 
 # ----------------------------------------------------------------------------
 # Experiment tracking utilities
+def get_git_commit() -> str:
+    """Get the current git commit hash from environment variable."""
+    return os.environ.get("GIT_COMMIT", "unknown")
+
+
 def get_wandb_tags() -> list[str]:
     """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123,branch-main`)"""
     tags = [t for t in os.environ.get("WANDB_TAGS", "").split(",") if t != ""]
-    if "GIT_COMMIT" in os.environ:
-        git_commit = os.environ["GIT_COMMIT"]
+    if (git_commit := get_git_commit()) != "unknown":
         tags.append(f"commit: {git_commit}")
         try:
             # try finding the pull request number on github

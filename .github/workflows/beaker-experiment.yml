@@ -323,3 +323,54 @@ jobs:
           else
             echo "❌ **Status:** Experiments failed or timed out (image not pushed)" >> $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Determine failure reason
+        id: failure-reason
+        if: failure()
+        run: |
+          FAILED_EXPERIMENTS="${{ steps.wait.outputs.failed_experiment_names }}"
+
+          # Skip Slack notification for timeouts (when experiments didn't finalize in time)
+          if [ -n "$FAILED_EXPERIMENTS" ]; then
+            echo "is_timeout=true" >> $GITHUB_OUTPUT
+            echo "Skipping Slack notification - experiments timed out: ${FAILED_EXPERIMENTS}"
+          elif [ "${{ steps.launch.outcome }}" = "failure" ]; then
+            echo "reason=Build or launch failed" >> $GITHUB_OUTPUT
+            echo "emoji=🔨" >> $GITHUB_OUTPUT
+          else
+            echo "reason=Workflow failed (see logs for details)" >> $GITHUB_OUTPUT
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Notify Slack on Failure
+        if: failure() && steps.failure-reason.outputs.is_timeout != 'true'
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "${{ steps.failure-reason.outputs.emoji }} Beaker Experiment Launch failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "${{ steps.failure-reason.outputs.emoji }} *Beaker Experiment Launch* failed on `${{ github.ref_name }}`\n\n*Reason:* ${{ steps.failure-reason.outputs.reason }}\n*Triggered by:* ${{ github.actor }}\n*Commit:* `${{ github.sha }}`"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Run"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }

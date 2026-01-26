@@ -41,7 +41,7 @@ from open_instruct.dataset_transformation import (
     VERIFIER_SOURCE_KEY,
 )
 from open_instruct.model_utils import Batch
-from open_instruct.rl_utils import PackedSequences, pack_sequences
+from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
 from open_instruct.tools.utils import ToolStatistics
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
@@ -364,6 +364,10 @@ class StreamingDataLoaderConfig:
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
+    # Rollout saving
+    save_traces: bool = False
+    rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
+
     # Computed at post_init
     max_possible_score: float = 1.0
 
@@ -405,6 +409,9 @@ class StreamingDataLoaderConfig:
             self.max_possible_score += self.verification_reward
         if self.apply_r1_style_format_reward and self.additive_format_reward:
             self.max_possible_score += self.r1_style_format_reward
+
+        if self.save_traces and not self.rollouts_save_path:
+            raise ValueError("`rollouts_save_path` must be provided when `save_traces` is True.")
 
     def build_dataloader(
         self,
@@ -902,6 +909,8 @@ class DataPreparationActor:
         verbose: bool,
         work_dir: str,
         tool_names: list[str],
+        run_name: str,
+        model_name: str | None,
         initial_state: dict | None = None,
     ):
         self.inference_results_Q = inference_results_Q
@@ -919,6 +928,8 @@ class DataPreparationActor:
         self.verbose = verbose
         self.dataset = dataset
         self.tool_names = tool_names
+        self.run_name = run_name
+        self.model_name = model_name
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
@@ -937,6 +948,8 @@ class DataPreparationActor:
         self.lock = threading.Lock()
         self.shutdown_requested = False
         self.training_step = 0
+        self.total_samples_written = 0
+        self.metadata_saved = False
 
         if initial_state is not None:
             self.training_step = initial_state["training_step"]
@@ -948,6 +961,11 @@ class DataPreparationActor:
 
     def _data_preparation_loop(self):
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
+
+        if self.config.save_traces and self.config.rollouts_save_path and not self.metadata_saved:
+            save_rollout_metadata(self.config.rollouts_save_path, self.run_name, self.model_name)
+            self.metadata_saved = True
+
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
         for _ in range(num_initial_prompts):
@@ -1024,6 +1042,19 @@ class DataPreparationActor:
                 advantages = scores - mean_grouped_rewards
             else:
                 raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
+
+            if self.config.save_traces and self.config.rollouts_save_path:
+                save_rollouts_to_disk(
+                    self.config.rollouts_save_path,
+                    self.run_name,
+                    step,
+                    batch,
+                    result,
+                    advantages,
+                    self.config.num_samples_per_prompt_rollout,
+                    self.total_samples_written,
+                )
+                self.total_samples_written += len(batch.queries)
 
             if self.config.mask_truncated_completions:
                 stop_idxes = torch.tensor(
