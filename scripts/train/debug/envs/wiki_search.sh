@@ -1,12 +1,13 @@
 #!/bin/bash
 # Single GPU debug: Wiki-Search env + python tool
 #
+# Prerequisites:
+#   pip install prime
+#   prime env install will/wiki-search
+#
 # Dataset: hamishivi/wiki_search_env_train
-#   - Uses verifier_source: "env" for EnvVerifier (reward from env.step())
+#   - Uses dataset: "env" for EnvVerifier (reward from env.step())
 #   - env_info.env_config passed to PrimeIntellectEnv
-
-# Install Prime Intellect Wiki-Search environment (use wheel URL to avoid torch dependency issues)
-uv pip install "https://hub.primeintellect.ai/will/wiki-search/@latest/wiki_search-0.1.0-py2.py3-none-any.whl" 2>/dev/null || true
 
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra prime-intellect open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/wiki_search_env_train 64 \
