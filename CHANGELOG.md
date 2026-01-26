@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Refactors GRPO config into a grpo_utils.py file in preparation for Olmo-core implementation (https://github.com/allenai/open-instruct/pull/1396_.
 - Now, we save the generated rollouts to disk during RL when the --save_traces flag is passed (https://github.com/allenai/open-instruct/pull/1406).
 - Pulls out weight sync code from GRPO into a more generic function (https://github.com/allenai/open-instruct/pull/1411#pullrequestreview-3694117967)
+- Adds callbacks for GRPO training with Olmo-core's trainer (https://github.com/allenai/open-instruct/pull/1397).
 
 ### Changed
 - Updated library versions via `uv lock --upgrade` (https://github.com/allenai/open-instruct/pull/1400).
