@@ -36,7 +36,7 @@ def create_wordle_dataset(num_samples: int = 100) -> Dataset:
             ],
             "tools": ["wordle"],
             "env_info": {
-                "env_config": {},  # verifiers samples from its internal dataset
+                "env_config": {"_placeholder": True},  # verifiers samples from its internal dataset
             },
             "ground_truth": "",  # Reward comes from env, not ground_truth matching
             "dataset": "env",  # verifier source - "env" means use EnvVerifier
