@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import torch
+import torch.distributed as dist
 
 from open_instruct import data_types, model_utils
 from open_instruct.utils import (
@@ -297,25 +298,69 @@ def compute_logprobs(
     pad_token_id: int,
     temperature: float,
     use_grad: bool = False,
+    batch_size: int | None = None,
 ) -> list[torch.Tensor]:
     """Compute log probabilities for all samples in batch."""
     logprobs_BT: list[torch.Tensor] = []
+    num_samples = len(data_BT.query_responses)
+
+    if batch_size is None:
+        batch_size = 1
 
     context = torch.enable_grad() if use_grad else torch.no_grad()
     with context:
-        for i in range(len(data_BT.query_responses)):
-            logprob_BT, _ = forward_for_logprobs(
+        for start_idx in range(0, num_samples, batch_size):
+            end_idx = min(start_idx + batch_size, num_samples)
+            batch_indices = list(range(start_idx, end_idx))
+
+            batch_query_responses = torch.cat([data_BT.query_responses[i] for i in batch_indices], dim=0)
+            batch_attention_masks = torch.cat([data_BT.attention_masks[i] for i in batch_indices], dim=0)
+            batch_position_ids = torch.cat([data_BT.position_ids[i] for i in batch_indices], dim=0)
+
+            batch_logprobs, _ = forward_for_logprobs(
                 model,
-                data_BT.query_responses[i],
-                data_BT.attention_masks[i],
-                data_BT.position_ids[i],
+                batch_query_responses,
+                batch_attention_masks,
+                batch_position_ids,
                 pad_token_id,
                 temperature,
                 False,
             )
-            response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
-            logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB)
-            logprobs_BT.append(logprob_BT)
+
+            sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]
+            split_logprobs = torch.split(batch_logprobs, sample_sizes, dim=0)
+
+            for i, logprob_BT in zip(batch_indices, split_logprobs):
+                response_mask_BT = data_BT.response_masks[i].to(logprob_BT.device)
+                logprob_BT = torch.masked_fill(logprob_BT, ~response_mask_BT[:, 1:].bool(), INVALID_LOGPROB)
+                logprobs_BT.append(logprob_BT)
+
             torch.cuda.empty_cache()
 
     return logprobs_BT
+
+
+def calculate_token_counts(
+    accumulation_steps: int,
+    data_BT: data_types.CollatedBatchData,
+    device: torch.device,
+    process_group: dist.ProcessGroup | None = None,
+) -> dict[int, float]:
+    """Compute total token counts per accumulation group, all-reduced across DP ranks.
+
+    Copied from grpo_fast.py to share logic with olmo_core_train_modules.py.
+    """
+    accumulation_counts: dict[int, float] = {}
+    local_counts = [mask[:, 1:].sum().float() for mask in data_BT.response_masks]
+    if not local_counts:
+        return accumulation_counts
+
+    counts_tensor = torch.stack(local_counts).to(device)
+    dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM, group=process_group)
+
+    for i, count in enumerate(counts_tensor):
+        group_idx = i // accumulation_steps
+        key = int(group_idx * accumulation_steps)
+        accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
+
+    return accumulation_counts
