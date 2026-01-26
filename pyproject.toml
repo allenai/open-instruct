@@ -93,6 +93,7 @@ environments = [
     "websockets>=12.0",
 ]
 prime-intellect = [
+    "prime",
     "verifiers>=0.1.9",
 ]
 appworld = [
