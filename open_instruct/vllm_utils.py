@@ -1206,45 +1206,35 @@ def broadcast_weights_to_vllm(
     is_rank_0 = torch.distributed.get_rank() == 0
     params = list(model.named_parameters())
     num_params = len(params)
-    all_refs: list[ray.ObjectRef] = []
 
     is_fsdp = isinstance(model, FSDP)
     use_deepspeed_gather = deepspeed_stage == 3
 
-    def get_shape(param: torch.nn.Parameter) -> torch.Size:
-        if use_deepspeed_gather:
-            return param.ds_shape
-        return param.shape
-
-    def map_name(name: str) -> str:
-        if name_mapper is not None:
-            return name_mapper(name)
-        return name
-
-    def broadcast_params() -> None:
-        nonlocal all_refs
+    def broadcast_params() -> list[ray.ObjectRef]:
+        refs: list[ray.ObjectRef] = []
         if is_rank_0:
             for i, (name, param) in enumerate(params):
-                mapped_name = map_name(name)
-                shape = get_shape(param)
-                all_refs.extend(
+                mapped_name = name_mapper(name) if name_mapper else name
+                shape = param.ds_shape if use_deepspeed_gather else param.shape
+                refs.extend(
                     _send_to_vllm(mapped_name, param, shape, i == num_params - 1, vllm_engines, model_update_group)
                 )
+        return refs
 
     if is_fsdp:
         with FSDP.summon_full_params(model, writeback=False, rank0_only=False):
-            broadcast_params()
+            return broadcast_params()
     elif gather_whole_model:
         with deepspeed.zero.GatheredParameters(model.parameters(), enabled=use_deepspeed_gather):
-            broadcast_params()
+            return broadcast_params()
     else:
+        all_refs: list[ray.ObjectRef] = []
         for i, (name, param) in enumerate(params):
             with deepspeed.zero.GatheredParameters([param], enabled=use_deepspeed_gather):
                 if is_rank_0:
-                    mapped_name = map_name(name)
-                    shape = get_shape(param)
+                    mapped_name = name_mapper(name) if name_mapper else name
+                    shape = param.ds_shape if use_deepspeed_gather else param.shape
                     all_refs.extend(
                         _send_to_vllm(mapped_name, param, shape, i == num_params - 1, vllm_engines, model_update_group)
                     )
-
-    return all_refs
+        return all_refs
