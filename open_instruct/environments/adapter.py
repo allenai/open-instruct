@@ -96,4 +96,4 @@ class EnvironmentPool:
         """Return adapter to pool."""
         adapter = self._active.pop(request_id)
         adapter.cleanup()
-        await self._pool.put(EnvironmentAdapter(self.env_factory))
+        await self._pool.put(adapter)
