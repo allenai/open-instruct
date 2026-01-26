@@ -10,7 +10,7 @@ Prime Intellect environments use the verifiers library spec. Install with:
 from typing import Any
 
 try:
-    import verifiers as vf
+    from verifiers import load_environment
 
     _VERIFIERS_AVAILABLE = True
 except ImportError:
@@ -42,7 +42,7 @@ class PrimeIntellectEnv(RLEnvironment):
 
     def reset(self) -> StepResult:
         """Initialize episode, load verifiers env."""
-        self._vf_env = vf.load_env(self._env_name, **self._env_kwargs)
+        self._vf_env = load_environment(self._env_name, **self._env_kwargs)
         self._state = {"turn": 0, "prompt": "", "completion": []}
         self._messages = []
         return StepResult("Environment ready.", reward=0.0, done=False)
