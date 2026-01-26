@@ -1,14 +1,17 @@
 #!/bin/bash
 # Single GPU debug: AppWorld env + python tool
 #
-# Prerequisites:
-#   1. Install AppWorld separately (has pydantic <2.0 conflict):
-#      pip install appworld
-#   2. Docker must be running (containers started automatically by setup_fn)
+# NOTE: AppWorld requires pydantic<2.0 but vllm requires pydantic>=2.12
+# This script will NOT work until AppWorld updates to pydantic v2.
+# See: https://github.com/stonybrooknlp/appworld/issues for updates
 #
 # Dataset: hamishivi/appworld_env_train
 #   - Uses verifier_source: "env" for EnvVerifier (reward from env.step())
 #   - env_info.env_config.task_id specifies which AppWorld task to load
+
+echo "ERROR: AppWorld is incompatible with vllm (pydantic version conflict)"
+echo "AppWorld requires pydantic<2.0, vllm requires pydantic>=2.12"
+exit 1
 
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/appworld_env_train 32 \

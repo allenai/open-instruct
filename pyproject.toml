@@ -95,8 +95,8 @@ environments = [
 prime-intellect = [
     "verifiers>=0.1.9",
 ]
-# Note: appworld has incompatible pydantic requirements (requires <2.0.0)
-# Install separately: pip install appworld
+# Note: appworld requires pydantic<2.0 but vllm requires pydantic>=2.12
+# These are fundamentally incompatible. Install appworld separately if needed.
 
 [tool.uv]
 preview = true
