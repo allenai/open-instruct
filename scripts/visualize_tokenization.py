@@ -55,7 +55,8 @@ Output:
 """
 
 import argparse
-import os
+import gc
+import itertools
 import shutil
 
 from datasets import load_dataset
@@ -121,13 +122,17 @@ def load_tokenizer(tokenizer_arg: str):
     return tokenizer
 
 
-def get_row_by_index(dataset_name: str, row_idx: int):
+def get_row_by_index(dataset_name: str, row_idx: int) -> dict:
     """Get a specific row from a streaming dataset."""
     dataset = load_dataset(dataset_name, split="train", streaming=True)
-    for i, row in enumerate(dataset):
-        if i == row_idx:
-            return row
-    raise ValueError(f"Row index {row_idx} not found in dataset")
+    # Use islice to avoid keeping the iterator open
+    rows = list(itertools.islice(dataset, row_idx, row_idx + 1))
+    if not rows:
+        raise ValueError(f"Row index {row_idx} not found in dataset")
+    # Force cleanup of the dataset iterator to avoid PyGILState_Release error
+    del dataset
+    gc.collect()
+    return rows[0]
 
 
 def visualize_tokens(input_ids, labels, tokenizer, max_chars: int):
