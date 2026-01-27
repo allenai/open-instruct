@@ -15,10 +15,7 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str | N
             return None
     else:
         resolved_file = transformers_hub.try_to_load_from_cache(
-            model_name_or_path,
-            filename,
-            revision=revision,
-            repo_type=repo_type,
+            model_name_or_path, filename, revision=revision, repo_type=repo_type
         )
         if not isinstance(resolved_file, str):
             return None
