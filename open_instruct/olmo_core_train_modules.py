@@ -36,6 +36,8 @@ class DPOTrainModule(TrainModule):
         self.scheduler = scheduler
         self.device = device
         self.max_grad_norm = max_grad_norm
+        self.gradient_accumulation_steps = args.gradient_accumulation_steps
+        self._micro_step = 0
 
         if args.packing:
             self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
@@ -45,7 +47,7 @@ class DPOTrainModule(TrainModule):
             self._forward_fn = dpo_utils.separate_forward_olmo
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
-        state_dict: dict[str, Any] = {"model": self.model.state_dict()}
+        state_dict: dict[str, Any] = {"model": self.model.state_dict(), "_micro_step": self._micro_step}
         if optim is not False:
             state_dict["optim"] = self.optim.state_dict()
         return state_dict
@@ -54,18 +56,22 @@ class DPOTrainModule(TrainModule):
         self.model.load_state_dict(state_dict["model"])
         if "optim" in state_dict:
             self.optim.load_state_dict(state_dict["optim"])
+        if "_micro_step" in state_dict:
+            self._micro_step = state_dict["_micro_step"]
 
     def zero_grads(self) -> None:
-        self.optim.zero_grad()
+        if self._micro_step % self.gradient_accumulation_steps == 0:
+            self.optim.zero_grad()
 
     def optim_step(self) -> None:
-        if self.max_grad_norm is not None:
-            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-            self.trainer.record_metric("total grad norm", grad_norm, reduce_type=None, namespace="optim")
-        for group_idx, group in enumerate(self.optim.param_groups):
-            new_lr = self.scheduler.set_lr(group, self.trainer)
-            self.trainer.record_metric(f"LR (group {group_idx})", new_lr, namespace="optim")
-        self.optim.step()
+        if self._micro_step % self.gradient_accumulation_steps == 0:
+            if self.max_grad_norm is not None:
+                grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+                self.trainer.record_metric("total grad norm", grad_norm, reduce_type=None, namespace="optim")
+            for group_idx, group in enumerate(self.optim.param_groups):
+                new_lr = self.scheduler.set_lr(group, self.trainer)
+                self.trainer.record_metric(f"LR (group {group_idx})", new_lr, namespace="optim")
+            self.optim.step()
 
     def num_flops_per_token(self, seq_len: int) -> int:
         return self.model.num_flops_per_token(seq_len)
@@ -124,4 +130,6 @@ class DPOTrainModule(TrainModule):
             if self.args.load_balancing_loss and aux_loss is not None:
                 self.record_metric("train/aux_loss", aux_loss.detach(), ReduceType.mean)
 
-        loss.backward()
+        scaled_loss = loss / self.gradient_accumulation_steps
+        scaled_loss.backward()
+        self._micro_step += 1
