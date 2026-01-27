@@ -8,7 +8,6 @@ OLMo-core's native training infrastructure.
 import os
 import pathlib
 import shutil
-from functools import partial
 
 import bitsandbytes.optim
 import torch
@@ -33,7 +32,6 @@ from open_instruct import data_loader as data_loader_lib
 from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.beaker_callback import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import DPOTrainModule
-from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -357,12 +355,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     model, model_config = _setup_model(args, device)
 
-    if args.packing:
-        collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
-    else:
-        collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
+    collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
-    global_batch_size = args.per_device_train_batch_size * dp_world_size
+    rank_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
+    global_batch_size = rank_batch_size * dp_world_size
     data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size,
@@ -388,8 +384,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
-    if args.packing:
-        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
     average_log_prob = args.loss_type.is_average_loss
 
     cache_kwargs = dict(
@@ -443,6 +437,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         args=args,
         reference_cache=reference_cache,
         scheduler=scheduler,
+        rank_microbatch_size=args.per_device_train_batch_size,
         device=device,
         max_grad_norm=max_grad_norm,
     )
