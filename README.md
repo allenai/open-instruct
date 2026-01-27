@@ -83,6 +83,8 @@ You can run the following command for getting started:
 bash scripts/train/tulu3/finetune_8b.sh
 ```
 
+**OLMo-core SFT**: For supported models (OLMo, OLMoE, Qwen3), we recommend the more GPU-efficient [OLMo-core SFT implementation](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). See `open_instruct/olmo_core_utils.py` for the list of supported models.
+
 
 ### Preference Tuning
 

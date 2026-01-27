@@ -2,6 +2,8 @@
 
 We support Supervised finetuning (SFT) on a variety of datasets.
 
+> **OLMo-core SFT**: For supported OLMo and Qwen models, we recommend the more GPU-efficient [OLMo-core SFT implementation](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). See [OLMo 3](../olmo3.md) for the list of supported models.
+
 
 
 

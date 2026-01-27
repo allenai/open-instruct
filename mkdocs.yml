@@ -71,6 +71,8 @@ nav:
   - Get Started:
     - get_started/installation.md
     - get_started/ai2_internal_setup.md
+  - Models:
+    - olmo3.md
   - Training:
     - algorithms/dataset_transformation.md
     - algorithms/trained_model.md
