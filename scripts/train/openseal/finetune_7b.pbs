@@ -1,0 +1,70 @@
+#!/bin/bash
+#PBS -P CFP01-CF-060
+#PBS -j oe
+#PBS -k oed
+#PBS -N openseal_sft
+#PBS -q auto
+#PBS -l select=1:ngpus=2
+#PBS -l walltime=96:00:00
+
+cd $PBS_O_WORKDIR
+
+image="/app1/common/singularity-img/hopper/pytorch/pytorch_2.3.0_cuda_12.4_ngc_24.04.sif"
+
+module load singularity
+
+LOG_DIR='./logs/sft/parallel_7b'
+mkdir -p $LOG_DIR
+
+singularity exec -e \
+--env HF_HOME=/scratch/e1583535/cache \
+--env HF_DATASETS_CACHE=/scratch/e1583535/cache/datasets \
+--env TRITON_CACHE_DIR=/scratch/e1583535/cache/triton \
+$image bash << EOF > $LOG_DIR/stdout.$PBS_JOBID.log 2> $LOG_DIR/stderr.$PBS_JOBID.log
+
+# Ensure the open_instruct package (one level up from the package dir) is on PYTHONPATH
+export PYTHONPATH=/scratch/e1583535/open-instruct:${PYTHONPATH}
+
+if [ -d "/hpctmp/e1583535/virtualenvs/open-instruct" ]; then
+    source /hpctmp/e1583535/virtualenvs/open-instruct/bin/activate
+fi
+
+echo "Starting training at $(date)"
+echo "Running on host: $(hostname)"
+echo "GPU info:"
+nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits || echo "No GPU detected"
+
+# Memory optimization for CUDA
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+CUDA_VISIBLE_DEVICES=0,1
+
+accelerate launch \
+--mixed_precision bf16 \
+--num_processes 2 \
+--num_machines 1 \
+--use_deepspeed \
+--deepspeed_config_file /scratch/e1583535/open-instruct/configs/ds_configs/stage3_no_offloading_accelerate.conf \
+/scratch/e1583535/open-instruct/open_instruct/finetune.py \
+--exp_name trial_openseal_tulu \
+--model_name_or_path /scratch/e1583535/llm/nus-olmo/para-only-7B-34B-checkpoints/step8290-unsharded-hf-para-only-7B-34.7B \
+--tokenizer_name /scratch/e1583535/llm/nus-olmo/para-only-7B-34B-checkpoints/step8290-unsharded-hf-para-only-7B-34.7B \
+--output_dir /scratch/e1583535/llm/openseal-sft \
+--use_slow_tokenizer False \
+--chat_template_name olmo \
+--dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 0.001 \
+--use_flash_attn \
+--gradient_checkpointing \
+--max_seq_length 4096 \
+--per_device_train_batch_size 1 \
+--gradient_accumulation_steps 2 \
+--learning_rate 2e-5 \
+--lr_scheduler_type linear \
+--warmup_ratio 0.03 \
+--weight_decay 0.0 \
+--num_train_epochs 2 \
+--logging_steps 1 \
+--seed 8
+
+echo "Training completed at $(date)"
+EOF
