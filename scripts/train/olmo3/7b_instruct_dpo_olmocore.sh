@@ -28,7 +28,7 @@ do
         --config_name olmo3_7B \
         --chat_template_name olmo123 \
         --attn_backend flash_2 \
-        --max_seq_length 16384 \
+        --max_seq_length 8192 \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps 16 \
         --learning_rate $LR \
