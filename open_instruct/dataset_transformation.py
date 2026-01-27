@@ -936,7 +936,8 @@ TOOLS_COLUMN_KEY = "tools"
 
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v2: Added per-sample tool filtering in rlvr_tokenize_v3.
-DATASET_CACHE_VERSION = "v2"
+# v3: Fixed apply_chat_template to use return_dict=False for transformers v5 compat.
+DATASET_CACHE_VERSION = "v3"
 
 
 def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
