@@ -103,7 +103,7 @@ def process_shard(
 
     # Apply a tokenization function to each item in the dataset
     ds = raw_ds.map(
-        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])},
+        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"], return_dict=False)},
         remove_columns=raw_ds.column_names,
         num_proc=NUM_CPUS_FOR_DATASET_MAP,
     )
