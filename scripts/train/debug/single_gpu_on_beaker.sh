@@ -20,6 +20,7 @@ uv run python mason.py \
        --max_retries 0 \
        --timeout 15m \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+       --env VLLM_USE_V1=0 \
        --budget ai2/oe-adapt \
        --gpus 1 \
        --no_auto_dataset_cache \
@@ -34,7 +35,9 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path /weka/oe-adapt-default/allennlp/deletable_checkpoint/finbarrt/dpo_utils__123__1769051928/hf_model \
+    --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h/step1414078-hf \
+    --trust_remote_code \
+    --vllm_dtype auto \
     --add_bos \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \

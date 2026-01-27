@@ -17,7 +17,6 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str | N
         resolved_file = transformers_hub.try_to_load_from_cache(
             model_name_or_path,
             filename,
-            cache_dir=transformers_hub.TRANSFORMERS_CACHE,
             revision=revision,
             repo_type=repo_type,
         )
