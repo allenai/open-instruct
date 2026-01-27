@@ -36,8 +36,11 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path Qwen/Qwen2.5-7B \
-        --chat_template_name tulu_thinker \
+        --model_name_or_path /weka/oe-adapt-default/yanhongl/checkpoints/linear-rnns/OLMo3.1-7B-6T-30h/step100000-hf-v2 \
+        --trust_remote_code \
+        --add_bos \
+        --vllm_enforce_eager \
+        --chat_template_name r1_simple_chat_postpend_think \
 	--inflight_updates True \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
