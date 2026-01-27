@@ -548,12 +548,12 @@ def build_reference_logprobs_cache(
             total_examples += len(batch["index"])
 
             bs = len(batch["index"])
-            chosen_lengths = [batch["chosen_input_ids"].shape[1]] * bs
-            rejected_lengths = [batch["rejected_input_ids"].shape[1]] * bs
+            max_seq_len = max(batch["chosen_input_ids"].shape[1], batch["rejected_input_ids"].shape[1])
+            seq_lengths = [max_seq_len] * (2 * bs)
             pbar.set_postfix(
                 {
                     "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
-                    "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
+                    "MFU%": f"{model_dims.calculate_mfu(seq_lengths, time.perf_counter() - batch_start):.1f}",
                     "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
                     "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
                 }

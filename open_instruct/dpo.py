@@ -369,8 +369,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         collator=collator,
         device=device,
     )
-    # 4x batch size: forward-only (no backward), so no activation storage needed.
-    cache_batch_size = args.per_device_train_batch_size * 4 * dp_world_size
+    cache_batch_size = dp_world_size * 2  # 2 samples per device during inference (no grad)
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=cache_batch_size,
