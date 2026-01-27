@@ -29,8 +29,8 @@ do
         --chat_template_name olmo123 \
         --attn_backend flash_2 \
         --max_seq_length 16384 \
-        --per_device_train_batch_size 2 \
-        --gradient_accumulation_steps 8 \
+        --per_device_train_batch_size 1 \
+        --gradient_accumulation_steps 16 \
         --learning_rate $LR \
         --lr_scheduler_type linear \
         --warmup_ratio 0.1 \
