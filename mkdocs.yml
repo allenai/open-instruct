@@ -73,6 +73,9 @@ nav:
     - get_started/ai2_internal_setup.md
   - Models:
     - olmo3.md
+    - olmo2.md
+    - tulu3.md
+    - tulu1_tulu2.md
   - Training:
     - algorithms/dataset_transformation.md
     - algorithms/trained_model_location.md
