@@ -1,6 +1,8 @@
 # Overview
 
-For our recent [Olmo3 paper](https://arxiv.org/abs/2512.13961), we used the following scripts to train our models:
+For our recent [Olmo3 paper](https://arxiv.org/abs/2512.13961), we used the following scripts to train our models.
+
+> **Note**: OLMo 3 SFT uses the [OLMo-core SFT implementation](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft) for better GPU efficiency. DPO and RL training use open-instruct. The `build_image_and_launch.sh` script only works for open-instruct jobs (DPO, RL), not for SFT.
 
 | Model           | Script name           | Beaker Link | Wandb URL | Commit |
 |-----------------|----------------------|---|---|--------|
