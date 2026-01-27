@@ -21,7 +21,7 @@ from typing import Any
 import ray
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
+from vllm.entrypoints.openai.tool_parsers.abstract_tool_parser import ToolParser as VllmNativeToolParser
 
 from open_instruct.logger_utils import setup_logger
 from open_instruct.tools.utils import ToolCall
