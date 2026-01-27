@@ -399,20 +399,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         disable_adapter_context=None,
     )
 
-    model_is_sharded = False
-    logger.info("Caching reference logprobs (trying unsharded first)...")
-    try:
-        reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
-        logger.info("Reference logprobs cached (unsharded).")
-    except torch.cuda.OutOfMemoryError:
-        logger.warning("OOM with unsharded model, falling back to FSDP-sharded.")
-        torch.cuda.empty_cache()
-        model_is_sharded = True
-        model = _apply_parallelism(
-            model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
-        )
-        reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
-        logger.info("Reference logprobs cached (sharded).")
+    model = _apply_parallelism(
+        model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
+    )
+    logger.info("Caching reference logprobs...")
+    reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
+    logger.info("Reference logprobs cached.")
 
     if args.cache_logprobs_only:
         logger.info("--cache_logprobs_only set, exiting after cache build.")
@@ -420,11 +412,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             dist.barrier()
             dist.destroy_process_group()
         return
-
-    if not model_is_sharded:
-        model = _apply_parallelism(
-            model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
-        )
     data_loader.reshuffle(epoch=0)
 
     num_training_steps = len(data_loader) * args.num_epochs
