@@ -27,7 +27,7 @@ do
         --model_name_or_path $MODEL_NAME \
         --config_name olmo3_7B \
         --chat_template_name olmo123 \
-        --attn_backend flash_3 \
+        --attn_backend flash \
         --max_seq_length 16384 \
         --per_device_train_batch_size 4 \
         --gradient_accumulation_steps 4 \
