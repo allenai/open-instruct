@@ -35,7 +35,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h/step1414078-hf \
+    --model_name_or_path /weka/oe-adapt-default/yanhongl/checkpoints/linear-rnns/OLMo3.1-7B-6T-30h/step100000-hf-v2 \
     --trust_remote_code \
     --vllm_dtype auto \
     --add_bos \
