@@ -1,5 +1,8 @@
 #!/bin/bash
-
+#
+# Usage: ./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b-hybrid-sft-tokenization.sh
+#
+set -euo pipefail
 # Get the Beaker username to construct the image name
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
