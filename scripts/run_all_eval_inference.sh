@@ -66,7 +66,7 @@ mkdir -p "$OUTPUT_DIR"
 # Generate eval data if not present
 if [ ! -f "$DATA_DIR/aime.jsonl" ] || [ ! -f "$DATA_DIR/simpleqa.jsonl" ] || [ ! -f "$DATA_DIR/mbpp.jsonl" ] || [ ! -f "$DATA_DIR/gpqa.jsonl" ]; then
     echo "Generating eval data..."
-    python scripts/create_eval_data.py --all --output_dir "$DATA_DIR"
+    uv run python scripts/create_eval_data.py --all --output_dir "$DATA_DIR"
     echo ""
 fi
 
@@ -86,7 +86,7 @@ for dataset in "${DATASETS[@]}"; do
     echo "Input: $INPUT_FILE"
     echo "Output: $OUTPUT_FILE"
     
-    python scripts/inference_with_tools.py \
+    uv run python scripts/inference_with_tools.py \
         --input_file "$INPUT_FILE" \
         --output_file "$OUTPUT_FILE" \
         --model_name_or_path "$MODEL_PATH" \

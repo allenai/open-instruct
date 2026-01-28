@@ -70,7 +70,7 @@ echo ""
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 
 # Run inference
-python scripts/inference_with_tools.py \
+uv run python scripts/inference_with_tools.py \
     --input_file "$INPUT_FILE" \
     --output_file "$OUTPUT_FILE" \
     --model_name_or_path "$MODEL_PATH" \
