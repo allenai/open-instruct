@@ -47,7 +47,9 @@ def export_to_hf(
     logger.info("Gathering FSDP state dict...")
     state_dict = model.state_dict()
     state_dict = {
-        k: v.full_tensor().cpu(non_blocking=True) if hasattr(v, "full_tensor") else v.cpu(non_blocking=True)
+        k: v.full_tensor().to("cpu", non_blocking=True)
+        if hasattr(v, "full_tensor")
+        else v.to("cpu", non_blocking=True)
         for k, v in state_dict.items()
     }
 
