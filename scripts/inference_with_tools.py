@@ -211,7 +211,9 @@ def run_batched_generation(
             for i in active_indices
         ]
 
-        outputs = llm.generate(prompt_token_ids=active_tokens, sampling_params=active_params)
+        # Pass token IDs as list of dicts (vLLM API format)
+        prompts = [{"prompt_token_ids": tokens} for tokens in active_tokens]
+        outputs = llm.generate(prompts, sampling_params=active_params)
 
         # Process outputs and collect tool calls
         tool_calls_by_sample: dict[int, list] = {}
