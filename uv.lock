@@ -4658,8 +4658,8 @@ wheels = [
 
 [[package]]
 name = "vllm"
-version = "0.1.dev12938+g8b5615cad.cu128"
-source = { git = "https://github.com/yanhong-lbh/vllm?branch=olmo-3.5-hybrid#8b5615cad2558cd4ec2cbe82abd6bcaec8567098" }
+version = "0.1.dev12939+g669a1ffe3.cu128"
+source = { git = "https://github.com/yanhong-lbh/vllm?branch=olmo-3.5-hybrid#669a1ffe35857618de48175cc7538b60f999dd17" }
 dependencies = [
     { name = "aiohttp", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "anthropic", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
