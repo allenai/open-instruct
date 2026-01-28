@@ -64,6 +64,7 @@ import gzip
 import json
 import os
 import sys
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -109,6 +110,7 @@ from open_instruct.dataset_transformation import (
     remove_dataset_source_field,
     visualize_token,
 )
+from open_instruct import utils
 from open_instruct.utils import ArgumentParserPlus, is_beaker_job
 
 
@@ -292,6 +294,8 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     print("Collecting tokens from dataset...")
     sample: Mapping[str, Any]
     total_samples = len(train_dataset)
+    processing_start_time = time.time()
+    utils.maybe_update_beaker_description()
 
     # Skip to resume point efficiently using dataset.select()
     if start_idx > 0:
@@ -345,8 +349,8 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
             mask == 1 for mask in sample[ATTENTION_MASK_KEY]
         ), f"Expected all attention mask values to be 1, but found: {sample[ATTENTION_MASK_KEY]}"
 
-        # Save checkpoint periodically
-        if (idx + 1) % args.checkpoint_interval == 0 and idx > start_idx:
+        # Save checkpoint periodically (only if resume mode is enabled)
+        if args.resume and (idx + 1) % args.checkpoint_interval == 0 and idx > start_idx:
             save_checkpoint(output_dir, {
                 "samples_processed": idx + 1,
                 "token_ids": token_ids,
@@ -360,6 +364,11 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
                 "per_dataset_filtered": per_dataset_filtered,
             })
             print(f"\nCheckpoint saved at sample {idx + 1:,} ({len(token_ids):,} tokens)")
+            utils.maybe_update_beaker_description(
+                current_step=idx + 1,
+                total_steps=total_samples,
+                start_time=processing_start_time,
+            )
 
     train_dataset = remove_dataset_source_field(train_dataset)
 
