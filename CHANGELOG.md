@@ -4,7 +4,6 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Documentation and runtime warning for `dataset_mixer_list` format (float=proportion, int=count).
 
 ### Changed
 
