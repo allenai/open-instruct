@@ -127,6 +127,8 @@ def _apply_parallelism(
     tensor_parallel_degree: int = 1,
     context_parallel_degree: int = 1,
     pipeline_parallel_degree: int = 1,
+    shard_degree: int | None = None,
+    num_replicas: int | None = None,
 ):
     """Apply parallelism strategies to model (HSDP, TP, CP, PP).
 
@@ -145,8 +147,8 @@ def _apply_parallelism(
 
     dp_config = TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
-        num_replicas=None,
-        shard_degree=None,
+        num_replicas=num_replicas,
+        shard_degree=shard_degree,
         param_dtype=DType.bfloat16,
         reduce_dtype=DType.float32,
         wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
@@ -414,7 +416,13 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     )
 
     model = _apply_parallelism(
-        model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
+        model,
+        device,
+        args.tensor_parallel_degree,
+        args.context_parallel_degree,
+        args.pipeline_parallel_degree,
+        args.shard_degree,
+        args.num_replicas,
     )
     logger.info("Caching reference logprobs...")
     reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)

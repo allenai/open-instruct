@@ -30,6 +30,8 @@ uv run python mason.py \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
+    --shard_degree 16 \
+    --num_replicas 1 \
     --learning_rate "$LR" \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
