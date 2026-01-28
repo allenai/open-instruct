@@ -27,7 +27,7 @@ def split_batch_dpo(batch: dict[str, Any], num_microbatch_instances: int) -> lis
 
     micro_batches: dict[str, list] = {}
     for key, value in batch.items():
-        if key == "input_ids":
+        if key in ("input_ids", "token_count"):
             continue
         if isinstance(value, torch.Tensor):
             micro_batches[key] = value.split(num_microbatch_instances, dim=0)
