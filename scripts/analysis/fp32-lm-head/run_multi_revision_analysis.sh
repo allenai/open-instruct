@@ -15,7 +15,7 @@
 set -euo pipefail
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${BEAKER_IMAGE:-${BEAKER_USER}/open_instruct_auto}"
+BEAKER_IMAGE="${1:-${BEAKER_USER}/open_instruct_auto}"
 
 # Model configuration
 MODEL="${MODEL:-allenai/Olmo-3-7B-Think}"
