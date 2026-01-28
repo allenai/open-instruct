@@ -8,7 +8,6 @@ OLMo-core's native training infrastructure.
 import os
 import pathlib
 import shutil
-from functools import partial
 
 import bitsandbytes.optim
 import torch
@@ -23,7 +22,6 @@ from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
-from olmo_core.train.callbacks import CheckpointerCallback
 from olmo_core.train.train_module.transformer import (
     TransformerDataParallelConfig,
     TransformerDataParallelWrappingStrategy,
@@ -31,9 +29,8 @@ from olmo_core.train.train_module.transformer import (
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
-from open_instruct.beaker_callback import BeakerCallbackV2
+from open_instruct.olmo_core_callbacks import BeakerCallbackV2, PerfCallback
 from open_instruct.olmo_core_train_modules import DPOTrainModule
-from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -48,7 +45,12 @@ def export_to_hf(
     """
     logger.info("Gathering FSDP state dict...")
     state_dict = model.state_dict()
-    state_dict = {k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()}
+    state_dict = {
+        k: v.full_tensor().to("cpu", non_blocking=True)
+        if hasattr(v, "full_tensor")
+        else v.to("cpu", non_blocking=True)
+        for k, v in state_dict.items()
+    }
 
     if is_main_process:
         logger.info(f"Exporting model to HuggingFace format at {save_dir}")
@@ -211,14 +213,15 @@ def _setup_optimizer_and_scheduler(args: dpo_utils.ExperimentConfig, model, num_
     return optim, scheduler
 
 
-def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
+def _setup_callbacks(args: dpo_utils.ExperimentConfig, model, dp_world_size: int):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
     device_name = utils.get_device_name(torch.cuda.get_device_name(0))
     device_peak_flops = int(utils.GPU_SPECS[device_name]["flops"])
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback(
-        num_flops_per_token=model.num_flops_per_token(args.max_seq_length), device_peak_flops=device_peak_flops
+        num_flops_per_token=model.num_flops_per_token(args.max_seq_length),
+        device_peak_flops_per_second=device_peak_flops,
     )
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
@@ -234,7 +237,17 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
             config=json_config,
         )
     checkpointing_steps = int(args.checkpointing_steps)
-    trainer_callbacks["checkpointer"] = CheckpointerCallback(save_interval=checkpointing_steps, save_async=False)
+    trainer_callbacks["checkpointer"] = callbacks.CheckpointerCallback(
+        save_interval=checkpointing_steps, save_async=False
+    )
+    model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
+    trainer_callbacks["perf"] = PerfCallback(
+        model_dims=model_dims,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        num_training_gpus=dp_world_size,
+    )
+    trainer_callbacks["profiler"] = callbacks.ProfilerCallback()
     return trainer_callbacks
 
 
@@ -357,12 +370,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     model, model_config = _setup_model(args, device)
 
-    if args.packing:
-        collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
-    else:
-        collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
+    collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
-    global_batch_size = args.per_device_train_batch_size * dp_world_size
+    rank_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
+    global_batch_size = rank_batch_size * dp_world_size
     data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size,
@@ -373,8 +384,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         collator=collator,
         device=device,
     )
-    # 4x batch size: forward-only (no backward), so no activation storage needed.
-    cache_batch_size = args.per_device_train_batch_size * 4 * dp_world_size
+    cache_batch_size = dp_world_size * 2  # 2 samples per device during inference (no grad)
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=cache_batch_size,
@@ -388,8 +398,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
-    if args.packing:
-        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
     average_log_prob = args.loss_type.is_average_loss
 
     cache_kwargs = dict(
@@ -405,20 +413,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         disable_adapter_context=None,
     )
 
-    model_is_sharded = False
-    logger.info("Caching reference logprobs (trying unsharded first)...")
-    try:
-        reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
-        logger.info("Reference logprobs cached (unsharded).")
-    except torch.cuda.OutOfMemoryError:
-        logger.warning("OOM with unsharded model, falling back to FSDP-sharded.")
-        torch.cuda.empty_cache()
-        model_is_sharded = True
-        model = _apply_parallelism(
-            model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
-        )
-        reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
-        logger.info("Reference logprobs cached (sharded).")
+    model = _apply_parallelism(
+        model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
+    )
+    logger.info("Caching reference logprobs...")
+    reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
+    logger.info("Reference logprobs cached.")
 
     if args.cache_logprobs_only:
         logger.info("--cache_logprobs_only set, exiting after cache build.")
@@ -426,11 +426,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             dist.barrier()
             dist.destroy_process_group()
         return
-
-    if not model_is_sharded:
-        model = _apply_parallelism(
-            model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
-        )
     data_loader.reshuffle(epoch=0)
 
     num_training_steps = len(data_loader) * args.num_epochs
@@ -443,11 +438,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         args=args,
         reference_cache=reference_cache,
         scheduler=scheduler,
+        rank_microbatch_size=args.per_device_train_batch_size,
         device=device,
         max_grad_norm=max_grad_norm,
     )
 
-    trainer_callbacks = _setup_callbacks(args, model)
+    trainer_callbacks = _setup_callbacks(args, model, dp_world_size)
 
     trainer = train.TrainerConfig(
         save_folder=args.output_dir,

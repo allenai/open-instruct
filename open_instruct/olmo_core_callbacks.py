@@ -1,6 +1,9 @@
-"""This module only exists because Olmo-core still uses Beaker v1, so we have to write our own BeakerCallback that works with v2.
+"""OLMo-core callbacks for training.
 
-This module will be deleted once Olmo-core switches to Beaker v2."""
+This module contains custom callbacks for OLMo-core training, including:
+- BeakerCallbackV2: Beaker v2 integration (will be deleted once OLMo-core switches to Beaker v2)
+- PerfCallback: MFU and tokens_per_second metrics calculation
+"""
 
 import json
 import os
@@ -17,7 +20,7 @@ from olmo_core.train.callbacks.comet import CometCallback
 from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.common import TrainingProgress
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, utils
 from open_instruct.utils import maybe_update_beaker_description
 
 logger = logger_utils.setup_logger(__name__)
@@ -113,3 +116,67 @@ class BeakerCallbackV2(Callback):
             start_time=self._start_time,
             wandb_url=self._url,
         )
+
+
+@dataclass
+class PerfCallback(Callback):
+    """Calculates MFU and tokens_per_second using same formula as dpo_tune_cache.py."""
+
+    model_dims: utils.ModelDims
+    per_device_train_batch_size: int
+    gradient_accumulation_steps: int
+    num_training_gpus: int
+
+    _start_time: float = field(default=0.0, repr=False)
+    _interval_start_time: float = field(default=0.0, repr=False)
+    _total_tokens_processed: int = field(default=0, repr=False)
+    _last_step: int = field(default=0, repr=False)
+
+    def pre_train(self) -> None:
+        self._start_time = time.perf_counter()
+        self._interval_start_time = self._start_time
+        self._total_tokens_processed = 0
+        self._last_step = 0
+
+    def post_step(self) -> None:
+        if self.step % self.trainer.metrics_collect_interval != 0:
+            return
+        if self.step == self._last_step:
+            return
+
+        token_count_metric = self.trainer.get_metric("train/token_count")
+        if token_count_metric is None:
+            return
+        total_tokens_step = int(token_count_metric.item())
+
+        interval_end = time.perf_counter()
+        training_time = interval_end - self._interval_start_time
+        total_time_elapsed = interval_end - self._start_time
+
+        step_tokens_per_second = total_tokens_step / training_time if training_time > 0 else 0
+        self._total_tokens_processed += total_tokens_step
+        total_tokens_per_second = self._total_tokens_processed / total_time_elapsed
+
+        logging_steps = self.trainer.metrics_collect_interval
+        num_sequences = (
+            self.per_device_train_batch_size
+            * self.num_training_gpus
+            * self.gradient_accumulation_steps
+            * logging_steps
+            * 2  # * 2 for chosen + rejected
+        )
+        avg_sequence_length = total_tokens_step / num_sequences if num_sequences > 0 else 0
+
+        mfu_result = self.model_dims.approximate_learner_utilization(
+            total_tokens=total_tokens_step,
+            avg_sequence_length=avg_sequence_length,
+            training_time=training_time,
+            num_training_gpus=self.num_training_gpus,
+        )
+
+        self.trainer.record_metric("perf/mfu_step", mfu_result["mfu"], reduce_type=None)
+        self.trainer.record_metric("perf/tokens_per_second_step", step_tokens_per_second, reduce_type=None)
+        self.trainer.record_metric("perf/tokens_per_second_total", total_tokens_per_second, reduce_type=None)
+
+        self._interval_start_time = interval_end
+        self._last_step = self.step
