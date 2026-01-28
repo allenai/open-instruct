@@ -1165,4 +1165,7 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             value=self.tokenizer.pad_token_id,
         )
         result["input_ids"] = torch.cat([chosen_padded, rejected_padded], dim=0)
+        chosen_tokens = int((result["chosen_labels"] != -100).sum())
+        rejected_tokens = int((result["rejected_labels"] != -100).sum())
+        result["token_count"] = chosen_tokens + rejected_tokens
         return result

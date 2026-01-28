@@ -190,7 +190,4 @@ class DPOTrainModule(TrainModule):
             if total_aux_loss is not None:
                 self.record_metric("train/aux_loss", total_aux_loss, ReduceType.mean)
 
-            chosen_lengths = (batch["chosen_labels"] != -100).sum()
-            rejected_lengths = (batch["rejected_labels"] != -100).sum()
-            total_tokens = chosen_lengths + rejected_lengths
-            self.record_metric("train/token_count", total_tokens.float(), ReduceType.sum)
+            self.record_metric("train/token_count", float(batch["token_count"]), ReduceType.sum)
