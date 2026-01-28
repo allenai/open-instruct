@@ -200,20 +200,27 @@ def main():
         raise ValueError(f"Model mismatch: {bf16_config['model']} vs {fp32_config['model']}")
 
     model_name = bf16_config["model"]
+    revision = bf16_config.get("revision")  # May be None for older results
     dtype = bf16_config["dtype"]
 
     print("=" * 60)
     print("HuggingFace Logprobs Scoring")
     print(f"Model: {model_name}")
+    if revision:
+        print(f"Revision: {revision}")
     print(f"BF16 sequences: {len(bf16_data['results'])}")
     print(f"FP32 sequences: {len(fp32_data['results'])}")
     print("=" * 60)
 
     # Load HF model once
     print(f"\nLoading HF model...")
-    tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        model_name,
+        revision=revision,
+    )
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_name,
+        revision=revision,
         torch_dtype=getattr(torch, dtype),
         device_map="cuda",
         attn_implementation=args.attn_implementation,

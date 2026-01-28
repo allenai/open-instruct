@@ -104,6 +104,7 @@ def create_scatter_plot(
     data: Dict[str, Any],
     output_dir: Path,
     use_probs: bool = False,
+    prefix: str = "",
 ):
     """Create scatter plot comparing logprobs/probs with matched precision."""
     config = data["config"]
@@ -207,7 +208,7 @@ def create_scatter_plot(
     # Save
     model_safe = config["model"].replace("/", "_")
     metric_suffix = "probs" if use_probs else "logprobs"
-    output_path = output_dir / f"comparison_{metric_suffix}_{model_safe}.png"
+    output_path = output_dir / f"{prefix}comparison_{metric_suffix}_{model_safe}.png"
     output_dir.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
     print(f"Plot saved to {output_path}")
@@ -219,6 +220,7 @@ def create_diff_histogram(
     data: Dict[str, Any],
     output_dir: Path,
     use_probs: bool = False,
+    prefix: str = "",
 ):
     """Create histogram of differences with matched precision comparisons."""
     config = data["config"]
@@ -282,7 +284,7 @@ def create_diff_histogram(
 
     model_safe = config["model"].replace("/", "_")
     metric_suffix = "probs" if use_probs else "logprobs"
-    output_path = output_dir / f"histogram_{metric_suffix}_{model_safe}.png"
+    output_path = output_dir / f"{prefix}histogram_{metric_suffix}_{model_safe}.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
     print(f"Histogram saved to {output_path}")
 
@@ -395,6 +397,7 @@ def main():
     parser.add_argument("--show-offenders", type=int, default=0, help="Show N worst offending tokens per prompt")
     parser.add_argument("--no-scatter", action="store_true", help="Skip scatter plot")
     parser.add_argument("--no-histogram", action="store_true", help="Skip histogram")
+    parser.add_argument("--output-prefix", type=str, default="", help="Prefix for output filenames (e.g., 'step_0100_')")
     args = parser.parse_args()
 
     input_path = Path(args.input)
@@ -413,10 +416,10 @@ def main():
     print_summary(data, use_probs=use_probs)
 
     if not args.no_scatter:
-        create_scatter_plot(data, output_dir, use_probs=use_probs)
+        create_scatter_plot(data, output_dir, use_probs=use_probs, prefix=args.output_prefix)
 
     if not args.no_histogram:
-        create_diff_histogram(data, output_dir, use_probs=use_probs)
+        create_diff_histogram(data, output_dir, use_probs=use_probs, prefix=args.output_prefix)
 
     if args.show_offenders > 0:
         print_offenders(data, top_n=args.show_offenders)

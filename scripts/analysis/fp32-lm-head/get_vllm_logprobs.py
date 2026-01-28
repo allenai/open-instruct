@@ -28,7 +28,7 @@ import sys
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 import torch
 import transformers
@@ -53,6 +53,7 @@ os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 class Config:
     """Configuration for vLLM logprobs generation."""
     model: str = "hamishivi/qwen3_openthoughts2"
+    revision: Optional[str] = None
     max_tokens: int = 512
     max_model_len: int = 8192
     seed: int = 42
@@ -141,13 +142,17 @@ def get_vllm_logprobs(
         tuple of (results_list, tokenizer)
         Each result contains: prompt, query, response, logprobs, n_tokens
     """
-    tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        model_name,
+        revision=config.revision,
+    )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
     # Create vLLM engine
     llm = vllm.LLM(
         model=model_name,
+        revision=config.revision,
         seed=config.seed,
         max_model_len=config.max_model_len,
         dtype=config.dtype,
@@ -256,6 +261,8 @@ def main():
     parser.add_argument("--mode", type=str, required=True, choices=["bf16", "fp32"],
                         help="LM head precision mode")
     parser.add_argument("--model", type=str, default="hamishivi/qwen3_openthoughts2")
+    parser.add_argument("--revision", type=str, default=None,
+                        help="Model revision/branch/tag (e.g., 'step_0100' for checkpoint)")
     parser.add_argument("--prompts", type=str, nargs="+", default=DEFAULT_PROMPTS)
     parser.add_argument("--max-tokens", type=int, default=512,
                         help="Max tokens to GENERATE per response")
@@ -279,6 +286,7 @@ def main():
 
     config = Config(
         model=args.model,
+        revision=args.revision,
         max_tokens=args.max_tokens,
         max_model_len=args.max_model_len,
         seed=args.seed,
@@ -298,6 +306,8 @@ def main():
     print("=" * 60)
     print(f"vLLM Logprobs Generation ({args.mode.upper()} mode)")
     print(f"Model: {config.model}")
+    if config.revision:
+        print(f"Revision: {config.revision}")
     print(f"Max tokens: {config.max_tokens}")
     print(f"GPU memory utilization: {config.gpu_memory_utilization}")
     print(f"Prompts: {len(args.prompts)}")
