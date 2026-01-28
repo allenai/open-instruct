@@ -1052,6 +1052,7 @@ def maybe_update_beaker_description(
     start_time: float | None = None,
     wandb_url: str | None = None,
     original_descriptions: dict[str, str] = {},  # noqa: B006
+    progress_description: str = "",
 ) -> None:
     """Update Beaker experiment description with training progress and/or wandb URL.
 
@@ -1061,6 +1062,7 @@ def maybe_update_beaker_description(
         start_time: Training start time (from time.time()) (for progress tracking)
         wandb_url: Optional wandb URL to include
         original_descriptions: Cache of original descriptions for progress updates
+        progress_description: Description of what's being tracked (e.g., "caching reference logprobs")
     """
     if not is_beaker_job():
         return
@@ -1123,7 +1125,7 @@ def maybe_update_beaker_description(
                 time_str = "calculating..."
             time_label = "eta"
 
-        progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), {time_label} {time_str}]"
+        progress_bar = f"[{progress_description}{progress_pct:.1f}% complete (step {current_step}/{total_steps}), {time_label} {time_str}]"
         description_components.append(progress_bar)
     new_description = " ".join(description_components)
     try:
