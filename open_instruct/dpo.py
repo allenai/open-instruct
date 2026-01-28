@@ -22,7 +22,6 @@ from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
-from olmo_core.train.callbacks import CheckpointerCallback
 from olmo_core.train.train_module.transformer import (
     TransformerDataParallelConfig,
     TransformerDataParallelWrappingStrategy,
@@ -238,7 +237,9 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, model, dp_world_size: int
             config=json_config,
         )
     checkpointing_steps = int(args.checkpointing_steps)
-    trainer_callbacks["checkpointer"] = CheckpointerCallback(save_interval=checkpointing_steps, save_async=False)
+    trainer_callbacks["checkpointer"] = callbacks.CheckpointerCallback(
+        save_interval=checkpointing_steps, save_async=False
+    )
     model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
     trainer_callbacks["perf"] = PerfCallback(
         model_dims=model_dims,
@@ -246,6 +247,7 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, model, dp_world_size: int
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_training_gpus=dp_world_size,
     )
+    trainer_callbacks["profiler"] = callbacks.ProfilerCallback()
     return trainer_callbacks
 
 
