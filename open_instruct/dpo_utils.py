@@ -584,10 +584,7 @@ def build_reference_logprobs_cache(
             )
             if is_main_process and (step == 1 or step == total_steps or step % 10 == 0):
                 utils.maybe_update_beaker_description(
-                    current_step=step,
-                    total_steps=total_steps,
-                    start_time=cache_start_time,
-                    progress_description="caching reference logprobs",
+                    current_step=step, total_steps=total_steps, start_time=cache_start_time
                 )
 
             if supports_checkpointing and step % 100 == 0:
