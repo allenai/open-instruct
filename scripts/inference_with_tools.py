@@ -410,6 +410,14 @@ def main(config: InferenceConfig, tools_config: ToolsConfigArgs):
         max_model_len = max_prompt_len + config.max_tokens
         logger.info(f"Max prompt length: {max_prompt_len}")
 
+        # Print first prompt for debugging
+        first_prompt_text = tokenizer.decode(prompts[0], skip_special_tokens=False)
+        logger.info("=" * 60)
+        logger.info("First sample prompt (after chat template):")
+        logger.info("=" * 60)
+        print(first_prompt_text)
+        logger.info("=" * 60)
+
     logger.info(f"Creating vLLM engine (max_model_len={max_model_len})...")
     llm = LLM(
         model=config.model_name_or_path,
