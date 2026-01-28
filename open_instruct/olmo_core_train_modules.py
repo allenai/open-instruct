@@ -71,6 +71,13 @@ class DPOTrainModule(TrainModule):
         self.device = device
         self.max_grad_norm = max_grad_norm
 
+        self._total_loss = torch.tensor(0.0, device=device)
+        self._total_chosen_logps = torch.tensor(0.0, device=device)
+        self._total_rejected_logps = torch.tensor(0.0, device=device)
+        self._total_chosen_rewards = torch.tensor(0.0, device=device)
+        self._total_rejected_rewards = torch.tensor(0.0, device=device)
+        self._total_aux_loss = torch.tensor(0.0, device=device) if args.load_balancing_loss else None
+
         if args.concatenated_forward:
             self._forward_fn = dpo_utils.concatenated_forward_olmo
         else:
@@ -133,14 +140,19 @@ class DPOTrainModule(TrainModule):
         micro_batches = split_batch_dpo(batch, self.rank_microbatch_size)
         num_micro_batches = len(micro_batches)
 
-        total_loss = torch.tensor(0.0).to(self.device, non_blocking=True)
-        total_chosen_logps = torch.tensor(0.0).to(self.device, non_blocking=True)
-        total_rejected_logps = torch.tensor(0.0).to(self.device, non_blocking=True)
-        total_chosen_rewards = torch.tensor(0.0).to(self.device, non_blocking=True)
-        total_rejected_rewards = torch.tensor(0.0).to(self.device, non_blocking=True)
-        total_aux_loss = (
-            torch.tensor(0.0).to(self.device, non_blocking=True) if self.args.load_balancing_loss else None
-        )
+        self._total_loss.zero_()
+        self._total_chosen_logps.zero_()
+        self._total_rejected_logps.zero_()
+        self._total_chosen_rewards.zero_()
+        self._total_rejected_rewards.zero_()
+        if self._total_aux_loss is not None:
+            self._total_aux_loss.zero_()
+        total_loss = self._total_loss
+        total_chosen_logps = self._total_chosen_logps
+        total_rejected_logps = self._total_rejected_logps
+        total_chosen_rewards = self._total_chosen_rewards
+        total_rejected_rewards = self._total_rejected_rewards
+        total_aux_loss = self._total_aux_loss
 
         for micro_batch_idx, micro_batch in enumerate(micro_batches):
             with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
