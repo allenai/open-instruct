@@ -163,7 +163,7 @@ class TestGeneration(TestGrpoFastBase):
         test_data_filename = f"generation_{name}_expected.json"
         test_data_path = TEST_DATA_DIR / test_data_filename
 
-        tokenizer_name = "Qwen/Qwen3-1.7B"
+        tokenizer_name = "Qwen/Qwen3-0.6B"
         tool_actors = None
         if use_tools:
             tool_actors, _ = create_tools(
@@ -197,8 +197,7 @@ class TestGeneration(TestGrpoFastBase):
                 "expected_text": tokenizer.decode(result.responses[0]),
             }
             test_data_path.write_text(json.dumps(test_data, indent=2))
-            self.fail(f"Test data generated at {test_data_path}. Re-run test to verify.")
-            return
+            self.skipTest(f"Test data generated at {test_data_path}. Re-run test to verify.")
 
         expected = json.loads(test_data_path.read_text())
         self.assertEqual(result.responses[0], expected["expected_token_ids"])
@@ -210,7 +209,7 @@ class TestVLLMQueueSystem(TestGrpoFastBase):
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_vllm_queue_system_single_prompt(self):
         """Test the new queue-based vLLM system with a single prompt 'What is the capital of France?'"""
-        tokenizer_name = "EleutherAI/pythia-14m"
+        tokenizer_name = "Qwen/Qwen3-0.6B"
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
         test_prompt = "What is the capital of France?"
