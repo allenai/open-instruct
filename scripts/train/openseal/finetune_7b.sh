@@ -14,7 +14,7 @@ nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nouni
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export NCCL_TIMEOUT=3600  # Increase timeout to 1 hour
 
-CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 accelerate launch \
     --mixed_precision bf16 \

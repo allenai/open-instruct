@@ -4,7 +4,7 @@
 #PBS -k oed
 #PBS -N openseal_sft
 #PBS -q auto
-#PBS -l select=1:ngpus=2
+#PBS -l select=1:ngpus=8
 #PBS -l walltime=96:00:00
 
 cd $PBS_O_WORKDIR
@@ -35,36 +35,47 @@ echo "GPU info:"
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits || echo "No GPU detected"
 
 # Memory optimization for CUDA
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTORCH_ALLOC_CONF=expandable_segments:True
 
-CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0,1
 
 accelerate launch \
     --mixed_precision bf16 \
-    --num_processes 2 \
+    --num_processes 8 \
     --num_machines 1 \
+    --dynamo_backend no \
     --use_deepspeed \
     --deepspeed_config_file /scratch/e1583535/open-instruct/configs/ds_configs/stage3_no_offloading_accelerate.conf \
     /scratch/e1583535/open-instruct/open_instruct/finetune.py \
-    --exp_name trial_openseal_tulu \
+    --exp_name trial-openseal-sea_instruct \
     --model_name_or_path /scratch/e1583535/llm/nus-olmo/para-only-7B-34B-checkpoints/step8290-unsharded-hf-para-only-7B-34.7B \
-    --tokenizer_name /scratch/e1583535/llm/nus-olmo/para-only-7B-34B-checkpoints/step8290-unsharded-hf-para-only-7B-34.7B \
+    --tokenizer_name allenai/OLMo-2-1124-7B \
+    --tokenizer_revision main \
     --output_dir /scratch/e1583535/llm/openseal-sft \
     --use_slow_tokenizer False \
     --chat_template_name olmo \
-    --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 0.001 \
+    --dataset_mixer_list /scratch/e1583535/data/sea-instruct-dataset-messages 1.00 \
     --use_flash_attn \
     --gradient_checkpointing \
     --max_seq_length 4096 \
-    --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 2 \
+    --per_device_train_batch_size 2 \
+    --gradient_accumulation_steps 8 \
     --learning_rate 2e-5 \
     --lr_scheduler_type linear \
-    --warmup_ratio 0.03 \
+    --warmup_ratio 0.3 \
     --weight_decay 0.0 \
-    --num_train_epochs 2 \
-    --logging_steps 1 \
-    --seed 8
+    --num_train_epochs 1 \
+    --logging_steps 20 \
+    --seed 42 \
+    --checkpointing_steps 30000 \
+    --keep_last_n_checkpoints -1 \
+    --push_to_hub False \
+    --try_launch_beaker_eval_jobs False \
+    --with_tracking True \
+    --report_to wandb \
+    --wandb_project_name openseal-posttraining \
+    --wandb_entity tsangb34-national-university-of-singapore-students-union \
+    --preprocessing_num_workers 12 
 
 echo "Training completed at $(date)"
 EOF
