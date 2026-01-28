@@ -68,6 +68,8 @@ class InferenceConfig:
     seed: int = 42
     tensor_parallel_size: int = 1
     gpu_memory_utilization: float = 0.9
+    num_samples: int = 1
+    """Number of samples to generate per prompt (for majority voting / pass@k)."""
 
 
 @dataclass
@@ -439,6 +441,18 @@ def main(config: InferenceConfig, tools_config: ToolsConfigArgs):
         )
     else:
         # Batch mode
+        # Duplicate prompts for num_samples > 1
+        if config.num_samples > 1:
+            logger.info(f"Duplicating prompts {config.num_samples}x for multi-sampling...")
+            expanded_prompts = []
+            sample_indices = []  # Track which original sample each prompt came from
+            for i, prompt in enumerate(prompts):
+                for _ in range(config.num_samples):
+                    expanded_prompts.append(prompt)
+                    sample_indices.append(i)
+            prompts = expanded_prompts
+            logger.info(f"Total prompts after expansion: {len(prompts)}")
+
         logger.info("Running batched generation...")
         states = run_batched_generation(
             llm=llm,
@@ -453,16 +467,36 @@ def main(config: InferenceConfig, tools_config: ToolsConfigArgs):
         # Build output
         logger.info("Building output...")
         output_data = []
-        for sample, state in zip(input_data, states):
-            out = dict(sample)
-            out["generated_response"] = state["generated_text"]
-            out["finish_reason"] = state["finish_reason"]
-            out["num_tool_calls"] = state["num_tool_calls"]
-            if state["tool_outputs"]:
-                out["tool_outputs"] = state["tool_outputs"]
-            if state["tool_errors"]:
-                out["tool_errors"] = state["tool_errors"]
-            output_data.append(out)
+
+        if config.num_samples > 1:
+            # Group states by original sample
+            from collections import defaultdict
+            grouped_states = defaultdict(list)
+            for state, orig_idx in zip(states, sample_indices):
+                grouped_states[orig_idx].append(state)
+
+            for i, sample in enumerate(input_data):
+                out = dict(sample)
+                sample_states = grouped_states[i]
+                # Store all samples as lists
+                out["generated_responses"] = [s["generated_text"] for s in sample_states]
+                out["finish_reasons"] = [s["finish_reason"] for s in sample_states]
+                out["num_tool_calls"] = [s["num_tool_calls"] for s in sample_states]
+                out["tool_outputs"] = [s["tool_outputs"] for s in sample_states]
+                out["tool_errors"] = [s["tool_errors"] for s in sample_states]
+                out["num_samples"] = config.num_samples
+                output_data.append(out)
+        else:
+            for sample, state in zip(input_data, states):
+                out = dict(sample)
+                out["generated_response"] = state["generated_text"]
+                out["finish_reason"] = state["finish_reason"]
+                out["num_tool_calls"] = state["num_tool_calls"]
+                if state["tool_outputs"]:
+                    out["tool_outputs"] = state["tool_outputs"]
+                if state["tool_errors"]:
+                    out["tool_errors"] = state["tool_errors"]
+                output_data.append(out)
 
         logger.info(f"Saving to {config.output_file}")
         save_jsonl(output_data, config.output_file)

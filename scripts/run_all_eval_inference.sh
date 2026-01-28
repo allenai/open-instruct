@@ -71,9 +71,13 @@ if [ ! -f "$DATA_DIR/aime.jsonl" ] || [ ! -f "$DATA_DIR/simpleqa.jsonl" ] || [ !
 fi
 
 # Run inference on each dataset
-DATASETS=("aime" "simpleqa" "mbpp" "gpqa")
+# Format: dataset_name:num_samples
+DATASETS=("aime:32" "simpleqa:1" "mbpp:1" "gpqa:1")
 
-for dataset in "${DATASETS[@]}"; do
+for entry in "${DATASETS[@]}"; do
+    dataset="${entry%%:*}"
+    num_samples="${entry##*:}"
+    
     INPUT_FILE="$DATA_DIR/${dataset}.jsonl"
     OUTPUT_FILE="$OUTPUT_DIR/${dataset}_results.jsonl"
     
@@ -82,7 +86,7 @@ for dataset in "${DATASETS[@]}"; do
         continue
     fi
     
-    echo "=== Processing $dataset ==="
+    echo "=== Processing $dataset (${num_samples} samples per prompt) ==="
     echo "Input: $INPUT_FILE"
     echo "Output: $OUTPUT_FILE"
     
@@ -96,7 +100,8 @@ for dataset in "${DATASETS[@]}"; do
         --tool_parser_type "$TOOL_PARSER_TYPE" \
         --max_tool_calls "$MAX_TOOL_CALLS" \
         --max_tokens "$MAX_TOKENS" \
-        --temperature "$TEMPERATURE"
+        --temperature "$TEMPERATURE" \
+        --num_samples "$num_samples"
     
     echo "Completed $dataset"
     echo ""

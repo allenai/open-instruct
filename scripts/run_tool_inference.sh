@@ -2,10 +2,13 @@
 # Run inference with a tool-use model trained with from_instruct_sft.sh
 #
 # Usage:
-#   ./scripts/run_tool_inference.sh <model_path> <input_file> <output_file>
+#   ./scripts/run_tool_inference.sh <model_path> <input_file> <output_file> [num_samples]
 #
 # Example:
 #   ./scripts/run_tool_inference.sh /path/to/checkpoint data/aime.jsonl results/aime_results.jsonl
+#
+# With multiple samples per prompt (for majority voting):
+#   ./scripts/run_tool_inference.sh /path/to/checkpoint data/aime.jsonl results/aime_results.jsonl 32
 #
 # Or with defaults (uses Olmo-3-7B-Instruct-SFT):
 #   ./scripts/run_tool_inference.sh "" data/aime.jsonl results/aime_results.jsonl
@@ -48,6 +51,7 @@ export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 MODEL_PATH=${1:-"allenai/Olmo-3-7B-Instruct-SFT"}
 INPUT_FILE=${2:-"data/aime.jsonl"}
 OUTPUT_FILE=${3:-"results/output.jsonl"}
+NUM_SAMPLES=${4:-1}
 
 # Tool configuration (matches from_instruct_sft.sh)
 TOOLS="python serper_search jina_browse s2_search"
@@ -64,6 +68,7 @@ echo "Model: $MODEL_PATH"
 echo "Input: $INPUT_FILE"
 echo "Output: $OUTPUT_FILE"
 echo "Tools: $TOOLS"
+echo "Num samples: $NUM_SAMPLES"
 echo ""
 
 # Create output directory
@@ -80,7 +85,8 @@ uv run python scripts/inference_with_tools.py \
     --tool_parser_type "$TOOL_PARSER_TYPE" \
     --max_tool_calls "$MAX_TOOL_CALLS" \
     --max_tokens "$MAX_TOKENS" \
-    --temperature "$TEMPERATURE"
+    --temperature "$TEMPERATURE" \
+    --num_samples "$NUM_SAMPLES"
 
 echo ""
 echo "Done! Results saved to: $OUTPUT_FILE"
