@@ -52,7 +52,7 @@ TOOLS="python serper_search jina_browse s2_search"
 TOOL_CALL_NAMES="code search browse paper_search"
 TOOL_PARSER_TYPE="vllm_olmo3"
 MAX_TOOL_CALLS=5
-MAX_TOKENS=4096
+MAX_TOKENS=65536
 TEMPERATURE=0.7
 
 echo "=== Running Eval Inference ==="
