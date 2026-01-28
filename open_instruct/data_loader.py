@@ -60,7 +60,7 @@ def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, A
     """
     if device is None:
         return batch
-    return {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+    return {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
 
 class HFDataLoader(data_loader.DataLoaderBase):
