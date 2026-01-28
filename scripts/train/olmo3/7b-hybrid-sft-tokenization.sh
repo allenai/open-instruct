@@ -32,7 +32,7 @@ uv run python mason.py \
          allenai/olmo-toolu-s2-sft-m5v2-thinking-id-fixed 3.0 \
          allenai/olmo-toolu_deepresearch_thinking_DRv4-modified-system-prompts 3.0 \
       --tokenizer_name_or_path $tokenizer_path \
-      --output_dir /weka/oe-adapt-default/nathanl/dataset/olmo-hybrid \
+      --output_dir /weka/oe-adapt-default/${BEAKER_USER}/dataset/olmo-hybrid \
       --visualize True \
       --chat_template_name "olmo123" \
       --max_seq_length 32768
