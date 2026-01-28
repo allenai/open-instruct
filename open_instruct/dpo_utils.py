@@ -34,6 +34,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
@@ -145,6 +146,10 @@ class TrainingConfig:
     """If set, overrides the number of training steps. Otherwise, num_epochs is used."""
     gradient_checkpointing: bool = False
     """Turn on gradient checkpointing. Saves memory but slows training."""
+    gradient_checkpointing_mode: TransformerActivationCheckpointingMode = TransformerActivationCheckpointingMode.full
+    """Activation checkpointing mode: 'full' (every block) or 'selected_blocks' (every Nth block)."""
+    gradient_checkpointing_block_interval: int = 2
+    """Block interval when mode is 'selected_blocks'. Ignored for other modes. E.g., 2 = checkpoint every other block."""
     use_8bit_optimizer: bool = False
     """Use 8bit optimizer from bitsandbytes."""
     dpo_use_paged_optimizer: bool = False
