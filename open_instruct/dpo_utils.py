@@ -590,9 +590,10 @@ def build_reference_logprobs_cache(
                     progress_description="caching reference logprobs: ",
                 )
 
-            if supports_checkpointing and step % 100 == 0:
+            if supports_checkpointing and step % 1000 == 0:
                 if is_main_process:
                     logger.info(f"Saving partial checkpoint at step {step}")
+                    checkpoint_start = time.perf_counter()
                     torch.save(
                         {
                             "chosen_logps": chosen_tensor.cpu(),
@@ -601,6 +602,7 @@ def build_reference_logprobs_cache(
                         },
                         partial_cache_path,
                     )
+                    logger.info(f"Saved partial checkpoint in {time.perf_counter() - checkpoint_start:.1f}s")
                 if dist.is_initialized():
                     dist.barrier()
 
