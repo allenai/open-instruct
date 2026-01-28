@@ -30,7 +30,7 @@ from olmo_core.train.train_module.transformer import (
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
-from open_instruct.beaker_callback import BeakerCallbackV2
+from open_instruct.olmo_core_callbacks import BeakerCallbackV2, PerfCallback
 from open_instruct.olmo_core_train_modules import DPOTrainModule
 
 logger = logger_utils.setup_logger(__name__)
@@ -209,7 +209,7 @@ def _setup_optimizer_and_scheduler(args: dpo_utils.ExperimentConfig, model, num_
     return optim, scheduler
 
 
-def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
+def _setup_callbacks(args: dpo_utils.ExperimentConfig, model, dp_world_size: int):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
@@ -233,6 +233,13 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
         )
     checkpointing_steps = int(args.checkpointing_steps)
     trainer_callbacks["checkpointer"] = CheckpointerCallback(save_interval=checkpointing_steps, save_async=False)
+    model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
+    trainer_callbacks["perf"] = PerfCallback(
+        model_dims=model_dims,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        num_training_gpus=dp_world_size,
+    )
     return trainer_callbacks
 
 
@@ -428,7 +435,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         max_grad_norm=max_grad_norm,
     )
 
-    trainer_callbacks = _setup_callbacks(args, model)
+    trainer_callbacks = _setup_callbacks(args, model, dp_world_size)
 
     trainer = train.TrainerConfig(
         save_folder=args.output_dir,
