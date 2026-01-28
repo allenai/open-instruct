@@ -1940,6 +1940,32 @@ def load_dataset_configs(
     target_columns: list[str] | None = None,
     dataset_config_seed: int = 42,
 ) -> list[DatasetConfig]:
+    """
+    Load and configure datasets from a mixer list.
+
+    Args:
+        dataset_mixer_list: Alternating list of [dataset_name, amount, dataset_name, amount, ...].
+            The 'amount' value determines how many samples to use:
+
+            - Float values (must contain a decimal point): Interpreted as a PROPORTION of the dataset.
+              Examples: "1.0" = 100% of dataset, "0.5" = 50%, "3.0" = 300% (3x upsampling)
+
+            - Integer values (no decimal point): Interpreted as an absolute SAMPLE COUNT.
+              Examples: "100" = exactly 100 samples, "1000" = exactly 1000 samples
+
+            IMPORTANT: "1" means 1 sample, NOT 100% of the dataset. Use "1.0" for 100%.
+            This is a common source of errors - always use decimal notation for proportions.
+
+        dataset_mixer_list_splits: Split names for each dataset (e.g., ["train"]).
+            If a single split is provided, it's used for all datasets.
+        dataset_transform_fn: Transform function names to apply.
+        transform_fn_args: Arguments for transform functions.
+        target_columns: Optional list of columns to keep.
+        dataset_config_seed: Random seed for sampling.
+
+    Returns:
+        List of configured DatasetConfig objects.
+    """
     dcs = []
     if len(dataset_mixer_list_splits) == 1:
         print("by default, we will use the same split for all datasets")
@@ -1953,6 +1979,8 @@ def load_dataset_configs(
     for i in range(0, len(dataset_mixer_list), 2):
         dataset_name = dataset_mixer_list[i]
         frac_or_num_samples = dataset_mixer_list[i + 1]
+        # Parse amount: strings with "." become floats (proportions), without become ints (counts).
+        # IMPORTANT: "1" = 1 sample, "1.0" = 100% of dataset. This is a common mistake!
         frac_or_num_samples = float(frac_or_num_samples) if "." in frac_or_num_samples else int(frac_or_num_samples)
         # Uses dataset_mixer_list_splits[i] where i increments by 2 (0, 2, 4...). This works because
         # all current usage provides a single split that gets replicated to len(dataset_mixer_list).
@@ -1981,6 +2009,15 @@ def load_dataset_configs(
             new_range = int(frac_or_num_samples)
 
         print(f"Dataset {dataset_name}: {original_size} -> {new_range} samples (factor: {frac_or_num_samples})")
+
+        # Warn if using a suspiciously small integer count - likely a typo (meant "1.0" not "1")
+        if isinstance(frac_or_num_samples, int) and frac_or_num_samples <= 10 and original_size > 100:
+            logger.warning(
+                f"Dataset '{dataset_name}': Using only {frac_or_num_samples} sample(s) from {original_size} available. "
+                f"Did you mean '{float(frac_or_num_samples)}' for {frac_or_num_samples * 100}% of the dataset? "
+                f"Integer values (no decimal) = sample count, float values (with decimal) = proportion."
+            )
+
         dataset_config.update_range(new_range)
         dcs.append(dataset_config)
     return dcs
