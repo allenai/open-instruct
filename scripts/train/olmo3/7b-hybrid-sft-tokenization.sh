@@ -2,6 +2,12 @@
 #
 # Usage: ./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b-hybrid-sft-tokenization.sh
 #
+# Dataset Mixer Format:
+#   --dataset_mixer_list takes pairs of [dataset_name, amount]:
+#   - Float values (with decimal): proportion of dataset. "1.0" = 100%, "3.0" = 300% (3x upsampling)
+#   - Integer values (no decimal): absolute sample count. "100" = exactly 100 samples
+#   IMPORTANT: "1" means 1 sample, NOT 100%. Always use "1.0" for full dataset!
+#
 set -euo pipefail
 # Get the Beaker username to construct the image name
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
