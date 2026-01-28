@@ -147,7 +147,7 @@ class PerfCallback(Callback):
         token_count_metric = self.trainer.get_metric("train/token_count")
         if token_count_metric is None:
             return
-        total_tokens_step = int(token_count_metric.compute())
+        total_tokens_step = int(token_count_metric.item())
 
         interval_end = time.perf_counter()
         training_time = interval_end - self._interval_start_time
