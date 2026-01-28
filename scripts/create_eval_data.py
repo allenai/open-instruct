@@ -26,28 +26,28 @@ DATASET_CONFIGS = {
             ("math-ai/aime24", "test", None),
             ("math-ai/aime25", "test", None),
         ],
-        "instruction": "Solve this math problem step by step. The answer is an integer from 0-999. Output your final answer inside \\boxed{}.",
+        "instruction": "Solve this math problem step by step. Output your final answer inside \\boxed{}.",
         "format_fn": "format_aime",
     },
     "simpleqa": {
         "sources": [
             ("basicv8vc/SimpleQA", "test", None),
         ],
-        "instruction": "Answer the following question accurately and concisely.",
+        "instruction": "Answer the following question accurately and concisely. Output your answer inside \\boxed{}.",
         "format_fn": "format_simpleqa",
     },
     "mbpp": {
         "sources": [
             ("google-research-datasets/mbpp", "test", None),
         ],
-        "instruction": "Write a Python function to solve the following problem. Include the function definition and make sure it passes the given test cases.",
+        "instruction": "Write a Python function to solve the following problem. Include the function definition and make sure it passes the given test cases. Output your final answer inside backticks (```code```).",
         "format_fn": "format_mbpp",
     },
     "gpqa": {
         "sources": [
             ("Idavidrein/gpqa", "train", "gpqa_diamond"),  # GPQA diamond config
         ],
-        "instruction": "Answer this graduate-level science question. Choose the correct answer from the options provided. Output your answer as a single letter (A, B, C, or D).",
+        "instruction": "Answer this graduate-level science question. Choose the correct answer from the options provided. Output your answer as a single letter (A, B, C, or D). Output your answer inside \\boxed{}.",
         "format_fn": "format_gpqa",
     },
 }
