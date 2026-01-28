@@ -133,12 +133,14 @@ class DPOTrainModule(TrainModule):
         micro_batches = split_batch_dpo(batch, self.rank_microbatch_size)
         num_micro_batches = len(micro_batches)
 
-        total_loss = torch.tensor(0.0, device=self.device)
-        total_chosen_logps = torch.tensor(0.0, device=self.device)
-        total_rejected_logps = torch.tensor(0.0, device=self.device)
-        total_chosen_rewards = torch.tensor(0.0, device=self.device)
-        total_rejected_rewards = torch.tensor(0.0, device=self.device)
-        total_aux_loss = torch.tensor(0.0, device=self.device) if self.args.load_balancing_loss else None
+        total_loss = torch.tensor(0.0).to(self.device, non_blocking=True)
+        total_chosen_logps = torch.tensor(0.0).to(self.device, non_blocking=True)
+        total_rejected_logps = torch.tensor(0.0).to(self.device, non_blocking=True)
+        total_chosen_rewards = torch.tensor(0.0).to(self.device, non_blocking=True)
+        total_rejected_rewards = torch.tensor(0.0).to(self.device, non_blocking=True)
+        total_aux_loss = (
+            torch.tensor(0.0).to(self.device, non_blocking=True) if self.args.load_balancing_loss else None
+        )
 
         for micro_batch_idx, micro_batch in enumerate(micro_batches):
             with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
