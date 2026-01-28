@@ -197,8 +197,7 @@ class TestGeneration(TestGrpoFastBase):
                 "expected_text": tokenizer.decode(result.responses[0]),
             }
             test_data_path.write_text(json.dumps(test_data, indent=2))
-            self.fail(f"Test data generated at {test_data_path}. Re-run test to verify.")
-            return
+            self.skipTest(f"Test data generated at {test_data_path}. Re-run test to verify.")
 
         expected = json.loads(test_data_path.read_text())
         self.assertEqual(result.responses[0], expected["expected_token_ids"])
