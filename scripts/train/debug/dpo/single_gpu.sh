@@ -14,9 +14,9 @@ uv run python mason.py \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --gpus 1 -- torchrun --nproc_per_node=1 open_instruct/dpo.py \
-    --model_name_or_path allenai/OLMo-2-0425-1B \
-    --tokenizer_name allenai/OLMo-2-0425-1B \
-    --max_seq_length 1024 \
+    --model_name_or_path /weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115 \
+    --config_name olmo3_7B \
+    --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
     --learning_rate 5e-07 \
@@ -27,7 +27,7 @@ uv run python mason.py \
     --output_dir output/dpo_olmo_core_debug/ \
     --logging_steps 1 \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
-    --chat_template_name olmo \
+    --chat_template_name olmo123 \
     --seed 123 \
     --loss_type dpo_norm \
     --push_to_hub false \
