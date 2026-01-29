@@ -900,6 +900,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     while True:
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+        params_dict = dataclasses.asdict(current_sampling_params)
+        min_tokens = params_dict.pop("min_tokens", 0)
         api_response = await actor.client.completions.create(
             model=actor.model_name,
             prompt=current_prompt,
@@ -908,8 +910,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 "cache_salt": base_request_id,
                 "include_stop_str_in_output": True,
                 "skip_special_tokens": False,
+                "min_tokens": min_tokens,
             },
-            **dataclasses.asdict(current_sampling_params),
+            **params_dict,
         )
 
         output = api_response.choices[0]
