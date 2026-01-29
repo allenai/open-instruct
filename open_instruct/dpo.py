@@ -271,7 +271,7 @@ def _handle_post_training(
         if args.with_tracking:
             wandb_tracker = trainer_callbacks.get("wandb")
             if wandb_tracker is not None and hasattr(wandb_tracker, "run") and wandb_tracker.run is not None:
-                wandb_url = wandb_tracker.run.get_url()
+                wandb_url = wandb_tracker.run.url
         if args.hf_repo_revision is not None:
             eval_path = hf_model_path
             if beaker_config is not None and beaker_config.beaker_dataset_ids:

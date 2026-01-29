@@ -91,7 +91,7 @@ class BeakerCallbackV2(Callback):
     def _get_tracking_url(self) -> str | None:
         for callback in self.trainer.callbacks.values():
             if isinstance(callback, WandBCallback) and callback.enabled and callback.run is not None:
-                return callback.run.get_url()
+                return callback.run.url
             elif isinstance(callback, CometCallback) and callback.enabled and callback.exp is not None:
                 return callback.exp.url
         return None
