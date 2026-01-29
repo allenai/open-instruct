@@ -171,7 +171,7 @@ class TrainingConfig:
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
     compile_model: bool = False
-    """Compile the model with torch.compile for potential speedup. Must be called after activation checkpointing but before FSDP."""
+    """Compile the model with torch.compile for potential speedup. When using with activation checkpointing, use 'budget' mode (not 'full')."""
 
 
 @dataclass
