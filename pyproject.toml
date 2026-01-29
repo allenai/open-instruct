@@ -37,6 +37,7 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
     "mcp>=1.9.0",
+    "typer>=0.9.0",  # Required by appworld (git version doesn't declare it)
 ]
 
 [build-system]
@@ -98,7 +99,8 @@ prime-intellect = [
 ]
 appworld = [
     # PyPI versions (0.1.x) require pydantic<2.0, but dev version supports pydantic>=2.12
-    "appworld @ git+https://github.com/StonyBrookNLP/appworld.git",
+    # Using local clone with LFS files (git+https doesn't fetch LFS files)
+    "appworld @ file:///tmp/appworld",
 ]
 openenv = [
     # TextArena OpenEnv wrapper for games like Wordle

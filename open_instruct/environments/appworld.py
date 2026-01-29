@@ -6,6 +6,7 @@ Wraps the existing appworld_env.py which uses AsyncServerPool for Docker contain
 
 import asyncio
 import atexit
+import os
 from typing import Any
 
 try:
@@ -103,11 +104,16 @@ class AppWorldServerManager:
         Returns:
             List of server URLs.
         """
+        # Set APPWORLD_ROOT to project directory so servers can find data
+        # (Ray packages code to temp dir, but data is in project root)
+        appworld_root = os.environ.get("APPWORLD_ROOT", os.getcwd())
+
         config = {
             "experiment_name": "verification",
             "remote_environment_url": ["http://localhost:{port}"] * self.pool_size,
             "raise_on_failure": True,
-            "ground_truth_mode": "partial",
+            "ground_truth_mode": "minimal",  # Use minimal mode to match downloaded data
+            "root": appworld_root,  # Explicit root for data location
         }
         self._initializer = AppWorld.initializer(start_servers=True, **config)
         await asyncio.to_thread(self._initializer.__enter__)

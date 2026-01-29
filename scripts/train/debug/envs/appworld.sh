@@ -10,10 +10,13 @@
 #   - Uses verifier_source: "env" for EnvVerifier (reward from env.step())
 #   - env_info.env_config.task_id specifies which AppWorld task to load
 
+# Set AppWorld root to project directory (so Ray workers can find data)
+export APPWORLD_ROOT="$(pwd)"
+
 VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra appworld open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/appworld_env_train 32 \
+    --dataset_mixer_list hamishivi/appworld_env_train_fixed 32 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list hamishivi/appworld_env_train 4 \
+    --dataset_mixer_eval_list hamishivi/appworld_env_train_fixed 4 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 4096 \
     --response_length 2048 \

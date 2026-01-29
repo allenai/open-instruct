@@ -19,8 +19,9 @@ logger = logger_utils.setup_logger(__name__)
 class EnvironmentAdapter:
     """Bridges open-instruct data format to pure RLEnvironment."""
 
-    def __init__(self, env_factory: Callable[..., RLEnvironment]):
+    def __init__(self, env_factory: Callable[..., RLEnvironment], server_url: str | None = None):
         self.env_factory = env_factory
+        self.server_url = server_url  # Server URL for this adapter (if applicable)
         self.env: RLEnvironment | None = None
         self.rewards: list[float] = []
         self.step_count = 0
@@ -36,7 +37,10 @@ class EnvironmentAdapter:
         self.step_count = 0
         self.done = False
 
-        env_kwargs = info["env_config"]
+        env_kwargs = info["env_config"].copy()
+        # Inject server_url if available and not already in env_kwargs
+        if self.server_url and "server_url" not in env_kwargs:
+            env_kwargs["server_url"] = self.server_url
         self.env = self.env_factory(**env_kwargs)
         result = await self._maybe_await(self.env.reset())
         self.rewards.append(result.reward)
@@ -69,20 +73,26 @@ class EnvironmentPool:
     """Manages pool of EnvironmentAdapters for concurrent rollouts."""
 
     def __init__(
-        self, env_factory: Callable[..., RLEnvironment], pool_size: int, setup_fn: Callable[[], Any] | None = None
+        self, env_factory: Callable[..., RLEnvironment], pool_size: int, setup_fn: Callable[[int], Any] | None = None
     ):
         self.env_factory = env_factory
         self.pool_size = pool_size
         self.setup_fn = setup_fn
         self._pool: asyncio.Queue[EnvironmentAdapter] = asyncio.Queue()
         self._active: dict[str, EnvironmentAdapter] = {}  # request_id -> adapter
+        self._server_urls: list[str] = []  # Server URLs from setup_fn
 
     async def initialize(self):
         """One-time setup (e.g., spawn AppWorld servers)."""
         if self.setup_fn:
-            await self.setup_fn()
-        for _ in range(self.pool_size):
-            await self._pool.put(EnvironmentAdapter(self.env_factory))
+            result = await self.setup_fn(self.pool_size)
+            # If setup_fn returns server URLs, store them
+            if result and isinstance(result, list):
+                self._server_urls = result
+        for i in range(self.pool_size):
+            # Pass server_url to adapter if available
+            server_url = self._server_urls[i] if i < len(self._server_urls) else None
+            await self._pool.put(EnvironmentAdapter(self.env_factory, server_url=server_url))
 
     async def acquire(self, request_id: str, info: dict) -> StepResult:
         """Get adapter from pool, setup for this request."""
