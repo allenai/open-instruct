@@ -262,7 +262,9 @@ class HFDataLoader(data_loader.DataLoaderBase):
         Returns:
             Total number of tokens across all ranks.
         """
-        return batch["input_ids"].numel() * self.dp_world_size
+        if "input_ids" in batch:
+            return batch["input_ids"].numel() * self.dp_world_size
+        return (batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()) * self.dp_world_size
 
 
 @dataclass
