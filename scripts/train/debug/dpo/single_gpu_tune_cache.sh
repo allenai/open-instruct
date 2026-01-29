@@ -29,6 +29,7 @@ uv run python mason.py \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --chat_template_name olmo \
     --seed 123 \
+    --loss_type dpo_norm \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \
     --with_tracking
