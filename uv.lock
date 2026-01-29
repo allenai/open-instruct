@@ -2171,7 +2171,7 @@ wheels = [
 
 [[package]]
 name = "model-hosting-container-standards"
-version = "0.1.12"
+version = "0.1.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -2182,9 +2182,9 @@ dependencies = [
     { name = "starlette", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "supervisor", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/23/cc/014bdcc700f1d4393578b55df09c1ed76b57feb9a542208d8c25e7c0bb1b/model_hosting_container_standards-0.1.12.tar.gz", hash = "sha256:5a38814201d319eaf258d816697caa16d39b5222319c2d5116d779b30babe602", size = 79119, upload-time = "2025-12-15T23:02:58.848Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/b7/a6a31b4dfd30d14b1019dc358f09c9d88ca38e555ba7c976e7d3e6b593fe/model_hosting_container_standards-0.1.13.tar.gz", hash = "sha256:27a1333410dde2719286a300a2803e24fdde407baa91894eb845c0f268aa194d", size = 79116, upload-time = "2026-01-09T21:45:20.683Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2d/f6/b18dc9407c76f8dc40062f5810404fa09f5012a4e1960d8d26c7f5ba32c3/model_hosting_container_standards-0.1.12-py3-none-any.whl", hash = "sha256:2266079ab655187e525f2b5ff3b45d8a84938cfabc17b1bfd23d7b13d2bed3f5", size = 105739, upload-time = "2025-12-15T23:02:57.644Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/37/6dc61971ba31450bbed460b5f40543f0915e352680534e3bcaf57116d8d7/model_hosting_container_standards-0.1.13-py3-none-any.whl", hash = "sha256:be307d4a988cc660df4e6bd8bdedb7917844bac940e332f9fd001cb385d7994c", size = 105738, upload-time = "2026-01-09T21:45:18.959Z" },
 ]
 
 [[package]]
@@ -2778,7 +2778,7 @@ requires-dist = [
     { name = "torch", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", specifier = ">=2.9.0,<2.10", index = "https://download.pytorch.org/whl/cu130" },
     { name = "transformers", git = "https://github.com/yanhong-lbh/transformers?branch=olmo-3.5-hybrid-clean" },
     { name = "uvicorn", specifier = ">=0.20.0" },
-    { name = "vllm", marker = "sys_platform != 'darwin'", git = "https://github.com/yanhong-lbh/vllm?branch=olmo-3.5-hybrid" },
+    { name = "vllm", marker = "sys_platform != 'darwin'", git = "https://github.com/yanhong-lbh/vllm?branch=olmo-3.5-hybrid-clean" },
     { name = "wandb", specifier = "==0.23.1" },
 ]
 provides-extras = ["code", "dr-tulu"]
@@ -4658,8 +4658,8 @@ wheels = [
 
 [[package]]
 name = "vllm"
-version = "0.1.dev12939+g669a1ffe3.cu128"
-source = { git = "https://github.com/yanhong-lbh/vllm?branch=olmo-3.5-hybrid#669a1ffe35857618de48175cc7538b60f999dd17" }
+version = "0.1.dev13067+g608847845.cu128"
+source = { git = "https://github.com/yanhong-lbh/vllm?branch=olmo-3.5-hybrid-clean#6088478454884b584555a7543c937385888e91e6" }
 dependencies = [
     { name = "aiohttp", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "anthropic", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
