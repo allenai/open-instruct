@@ -59,8 +59,8 @@ TOOL_CALL_NAMES="code search browse paper_search"
 TOOL_PARSER_TYPE="vllm_olmo3"
 MAX_TOOL_CALLS=5
 
-# Generation settings (matches training config)
-MAX_TOKENS=63488
+# Generation settings
+MAX_TOKENS=8192
 TEMPERATURE=0.7
 
 echo "=== Tool Inference ==="
