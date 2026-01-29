@@ -35,5 +35,5 @@ uv run python mason.py \
     --with_tracking \
     --gradient_checkpointing \
     --gradient_checkpointing_mode selected_modules \
-    --gradient_checkpointing_modules 'blocks.*.feed_forward' \
+    --gradient_checkpointing_modules 'blocks.*.feed_forward' 'blocks.*.attention' \
     --compile_model

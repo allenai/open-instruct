@@ -45,7 +45,7 @@ uv run python mason.py \
     --beta 5 \
     --gradient_checkpointing \
     --gradient_checkpointing_mode selected_modules \
-    --gradient_checkpointing_modules 'blocks.*.feed_forward' \
+    --gradient_checkpointing_modules 'blocks.*.feed_forward' 'blocks.*.attention' \
     --compile_model \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \
