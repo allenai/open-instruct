@@ -323,6 +323,7 @@ def get_env_vars(
                 [
                     beaker.BeakerEnvVar(name="NCCL_SOCKET_IFNAME", value="ib"),
                     beaker.BeakerEnvVar(name="NCCL_IB_HCA", value="^=mlx5_bond_0"),
+                    beaker.BeakerEnvVar(name="NCCL_BLOCKING_WAIT", value="0"),
                 ]
             )
     # if all cluster is in gcp we add the following env
