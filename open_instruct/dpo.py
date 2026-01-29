@@ -124,6 +124,7 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
 
     if args.compile_model:
         logger.info("Applying torch.compile to model blocks...")
+        torch._dynamo.config.assume_static_by_default = False
         model.apply_compile()
 
     return model, model_config
