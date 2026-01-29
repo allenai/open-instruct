@@ -589,7 +589,11 @@ class LLMRayActor:
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
-        self.inference_batch_size = self.get_kv_cache_info()
+        try:
+            self.inference_batch_size = self.get_kv_cache_info()
+        except Exception as e:
+            logger.warning(f"Failed to get KV cache info: {e}. Using default batch size of 64.")
+            self.inference_batch_size = 64
         self._init_executor()
         # comes after executor as it requires tokenizer access.
         self._init_tool_parser(tool_parser_type)
