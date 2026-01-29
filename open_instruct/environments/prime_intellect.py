@@ -7,8 +7,10 @@ Prime Intellect environments use the verifiers library spec. Install with:
     prime env install will/wiki-search
 """
 
+import asyncio
 import random
 import signal
+import time
 from contextlib import contextmanager
 from typing import Any, ClassVar
 
@@ -19,7 +21,10 @@ try:
 except ImportError:
     _VERIFIERS_AVAILABLE = False
 
+from open_instruct import logger_utils
 from open_instruct.environments.base import RLEnvironment, StepResult
+
+logger = logger_utils.setup_logger(__name__)
 
 
 @contextmanager
@@ -77,12 +82,14 @@ class PrimeIntellectEnv(RLEnvironment):
                 PrimeIntellectEnv._base_envs[env_name] = load_environment(env_name)
         self._vf_env = PrimeIntellectEnv._base_envs[env_name]
 
-    def reset(self) -> StepResult:
+    async def reset(self) -> StepResult:
         """Reset episode state by sampling a new problem from verifiers' dataset."""
+        logger.info(f"[PrimeIntellectEnv] reset() called for {self._env_name}")
         # Sample a problem from verifiers' internal dataset
         dataset = self._vf_env.get_dataset()
         sample_idx = random.randint(0, len(dataset) - 1)
         sample = dataset[sample_idx]
+        logger.info(f"[PrimeIntellectEnv] sampled index {sample_idx}, setting up state...")
 
         # Initialize state from sample, add fields required by verifiers
         self._state = {
@@ -90,7 +97,13 @@ class PrimeIntellectEnv(RLEnvironment):
             "turn": 0,
             "completion": [],
             "trajectory": [],
+            # Timing dict required by verifiers for scoring
+            "timing": {"start_time": time.time(), "scoring_ms": 0.0, "total_ms": 0.0, "generation_ms": 0.0},
         }
+        # Setup verifiers state (e.g., initializes ta_env for TextArena environments)
+        logger.info("[PrimeIntellectEnv] calling setup_state...")
+        await self._vf_env.setup_state(self._state)
+        logger.info("[PrimeIntellectEnv] setup_state complete")
         self._messages = []
         return StepResult("Environment ready.", reward=0.0, done=False)
 
@@ -98,26 +111,45 @@ class PrimeIntellectEnv(RLEnvironment):
         """Execute action on env.
 
         Args:
-            action: Dict with "content" key containing the model's message/tool call
+            action: Dict with tool call arguments (e.g., {'guess': 'BREAD'} for wordle)
+                    or "content" key containing the model's message/tool call
         """
-        self._messages.append({"role": "assistant", "content": action["content"]})
+        logger.info(f"[PrimeIntellectEnv] step() called with action: {str(action)[:100]}...")
+        # Handle action formats:
+        # 1. {'content': '<guess>BREAD</guess>'} - raw XML content from model (fallback)
+        # 2. {'guess': 'BREAD'} - structured tool call arguments (converted to XML)
+
+        # Translate parameter names for compatibility (e.g., "word" -> "guess" for Wordle)
+        if "word" in action and "guess" not in action:
+            action = {**action, "guess": action.pop("word")}
+
+        content = action["content"] if "content" in action else "".join(f"<{k}>{v}</{k}>" for k, v in action.items())
+        assistant_msg = {"role": "assistant", "content": content}
+        self._messages.append(assistant_msg)
+        self._state["completion"].append(assistant_msg)
 
         # Get env response (async in verifiers) - returns Messages, state is mutated in place
+        logger.info("[PrimeIntellectEnv] calling env_response...")
         env_response = await self._vf_env.env_response(self._messages, self._state)
+        logger.info(f"[PrimeIntellectEnv] env_response returned {len(env_response)} messages")
         self._messages.extend(env_response)
+        self._state["completion"].extend(env_response)
 
-        # Check completion
-        done = await self._vf_env.is_completed(self._messages, self._state)
+        # Check completion using has_final_env_response (more reliable than is_completed)
+        done = await self._vf_env.has_final_env_response(self._state)
+        logger.info(f"[PrimeIntellectEnv] has_final_env_response returned done={done}")
 
         # Get reward from rubric if done
         reward = 0.0
         if done:
-            scores = await self._vf_env.rubric.score_rollout(
-                self._state["prompt"], self._messages, self._state["answer"], self._state
-            )
-            reward = scores["reward"]
+            logger.info("[PrimeIntellectEnv] scoring rollout...")
+            score_sem = asyncio.Semaphore(1)
+            await self._vf_env.rubric.score_rollout(self._state, score_sem)
+            reward = self._state.get("reward", 0.0)
+            logger.info(f"[PrimeIntellectEnv] score_rollout complete, reward={reward}")
 
         observation = env_response[-1]["content"]
+        logger.info(f"[PrimeIntellectEnv] step() returning, obs: {observation[:100] if observation else ''}")
         return StepResult(observation, reward=reward, done=done)
 
     def close(self):

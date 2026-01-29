@@ -665,6 +665,21 @@ class PrimeIntellectEnvConfig(EnvironmentToolConfig):
     env_class: str = "open_instruct.environments.prime_intellect.PrimeIntellectEnv"
     env_name: str = ""
     """Name of the PI env (e.g., 'will/wordle', 'will/wiki-search')."""
+    pool_size: int = 512
+    """Number of environment instances to pool for concurrent rollouts."""
+    description: str = "Prime Intellect environment for interactive tasks"
+    parameters: dict[str, Any] | None = None
+    """JSON schema for tool parameters. Defaults to Wordle schema if env_name contains 'wordle'."""
+
+    def __post_init__(self):
+        """Set default parameters based on env_name if not explicitly provided."""
+        if self.parameters is None and "wordle" in self.env_name.lower():
+            # Default Wordle parameters schema
+            self.parameters = {
+                "type": "object",
+                "properties": {"word": {"type": "string", "description": "Your 5-letter guess for the Wordle game"}},
+                "required": ["word"],
+            }
 
 
 @dataclass
@@ -692,6 +707,18 @@ class TextArenaEnvConfig(EnvironmentToolConfig):
     env_class: str = "open_instruct.environments.textarena.TextArenaEnv"
     base_url: str = ""
     """Base URL of the TextArena server (e.g., 'http://localhost:8000')."""
+    parameters: dict[str, Any] | None = None
+    """JSON schema for tool parameters. Defaults to Wordle schema for wordle tool."""
+
+    def __post_init__(self):
+        """Set default parameters for Wordle if not explicitly provided."""
+        if self.parameters is None:
+            # Default Wordle parameters schema
+            self.parameters = {
+                "type": "object",
+                "properties": {"word": {"type": "string", "description": "Your 5-letter guess for the Wordle game"}},
+                "required": ["word"],
+            }
 
 
 @dataclass

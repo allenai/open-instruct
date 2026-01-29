@@ -10,7 +10,10 @@ import inspect
 from collections.abc import Callable
 from typing import Any
 
+from open_instruct import logger_utils
 from open_instruct.environments.base import RLEnvironment, StepResult
+
+logger = logger_utils.setup_logger(__name__)
 
 
 class EnvironmentAdapter:

@@ -70,7 +70,7 @@ from open_instruct.data_types import (
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.tools.parsers import ToolParser, create_tool_parser
-from open_instruct.tools.utils import ToolOutput
+from open_instruct.tools.utils import ToolCall, ToolOutput
 from open_instruct.utils import ModelDims, get_device_name, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
@@ -949,10 +949,19 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             # Sometimes the model will make a tool call that *looks* valid,
             # but actually that tool doesn't exist for it! So we filter these out.
             tool_calls = [tc for tc in tool_calls if tc.name in allowed_tools]
-            if not tool_calls:
-                break
 
-            # Execute tool calls
+            # If no tool calls, check for environment fallback
+            if not tool_calls:
+                # Fallback: if active environment but no tool call, pass raw text
+                if active_env:
+                    logger.info(
+                        f"[process_requests] No tool calls found, passing raw text to environment {active_env}"
+                    )
+                    tool_calls = [ToolCall(name=active_env, args={"content": output.text})]
+                else:
+                    break
+
+            # Execute tool calls (may include env tool + other tools)
             outputs: list[str] = []
             env_done = False
             for tool_call in tool_calls:

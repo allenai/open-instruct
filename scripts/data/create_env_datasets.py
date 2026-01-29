@@ -11,27 +11,76 @@ import argparse
 from datasets import Dataset
 
 
-def create_wordle_dataset(num_samples: int = 100) -> Dataset:
+def create_wordle_dataset(num_samples: int = 100, use_xml_prompting: bool = True) -> Dataset:
     """Create Wordle environment training dataset.
-    
+
     The verifiers library handles word selection from its internal dataset,
     so we don't pass target_word. Each episode samples a new word.
+
+    Args:
+        num_samples: Number of examples to create.
+        use_xml_prompting: If True, prompt model to generate XML tags directly.
+                          If False, use tool-calling interface.
+    """
+    examples = []
+    for i in range(num_samples):
+        if use_xml_prompting:
+            # Prompt-based XML generation (no tool interface)
+            system_content = (
+                "You are playing Wordle. Guess a 5-letter word. After each guess, "
+                "you'll receive feedback showing which letters are correct.\n\n"
+                "To submit a guess, wrap your word in XML tags like this: <guess>WORD</guess>\n\n"
+                "Feedback format:\n"
+                "- G (Green): Correct letter in correct position\n"
+                "- Y (Yellow): Correct letter in wrong position\n"
+                "- X (Gray): Letter not in the word"
+            )
+            tools = []  # No tools - model generates XML directly
+        else:
+            # Tool-calling interface
+            system_content = (
+                "You are playing Wordle. Guess a 5-letter word. After each guess, "
+                "you'll receive feedback: green (correct position), yellow (wrong position), "
+                "gray (not in word). Use the wordle tool to submit guesses."
+            )
+            tools = ["wordle"]
+
+        examples.append({
+            "messages": [
+                {"role": "system", "content": system_content},
+                {
+                    "role": "user",
+                    "content": "Start a new game of Wordle. You have 6 guesses to find the secret word.",
+                },
+            ],
+            "tools": tools,
+            "env_info": {
+                "env_config": {"_placeholder": True},  # verifiers samples from its internal dataset
+            },
+            "ground_truth": "",  # Reward comes from env, not ground_truth matching
+            "dataset": "env",  # verifier source - "env" means use EnvVerifier
+        })
+
+    return Dataset.from_list(examples)
+
+
+def create_wordle_expert_dataset(num_samples: int = 1000) -> Dataset:
+    """Create simple Wordle dataset with expert prompt.
+
+    Uses a minimal user prompt that relies on system_prompt_override_file
+    for detailed instructions.
+
+    Args:
+        num_samples: Number of examples to create (default 1000).
     """
     examples = []
     for i in range(num_samples):
         examples.append({
             "messages": [
+                {"role": "system", "content": ""},  # Will be overridden by system_prompt_override_file
                 {
-                    "role": "system",
-                    "content": (
-                        "You are playing Wordle. Guess a 5-letter word. After each guess, "
-                        "you'll receive feedback: green (correct position), yellow (wrong position), "
-                        "gray (not in word). Use the wordle tool to submit guesses."
-                    ),
-                },
-                {
-                    "role": "user", 
-                    "content": "Start a new game of Wordle. You have 6 guesses to find the secret word.",
+                    "role": "user",
+                    "content": "Play Wordle like an expert.",
                 },
             ],
             "tools": ["wordle"],
@@ -41,7 +90,7 @@ def create_wordle_dataset(num_samples: int = 100) -> Dataset:
             "ground_truth": "",  # Reward comes from env, not ground_truth matching
             "dataset": "env",  # verifier source - "env" means use EnvVerifier
         })
-    
+
     return Dataset.from_list(examples)
 
 
@@ -65,7 +114,7 @@ def create_wiki_search_dataset(num_samples: int = 100) -> Dataset:
         ("Who was the first President of the United States?", "George Washington"),
         ("What year was the Declaration of Independence signed?", "1776"),
     ]
-    
+
     examples = []
     for i in range(num_samples):
         question, answer = questions[i % len(questions)]
@@ -91,7 +140,7 @@ def create_wiki_search_dataset(num_samples: int = 100) -> Dataset:
             "ground_truth": answer,
             "dataset": "env",  # verifier source - "env" means use EnvVerifier
         })
-    
+
     return Dataset.from_list(examples)
 
 
@@ -105,7 +154,7 @@ def create_appworld_dataset(num_samples: int = 50) -> Dataset:
             "goal": "Add contact to address book",
         },
         {
-            "task_id": "task_002", 
+            "task_id": "task_002",
             "description": "Send an email to alice@example.com with subject 'Meeting Tomorrow'",
             "goal": "Send email successfully",
         },
@@ -125,7 +174,7 @@ def create_appworld_dataset(num_samples: int = 50) -> Dataset:
             "goal": "Find and save restaurant",
         },
     ]
-    
+
     examples = []
     for i in range(num_samples):
         task = tasks[i % len(tasks)]
@@ -153,7 +202,7 @@ def create_appworld_dataset(num_samples: int = 50) -> Dataset:
             "ground_truth": task["goal"],
             "dataset": "env",  # verifier source - "env" means use EnvVerifier
         })
-    
+
     return Dataset.from_list(examples)
 
 
@@ -161,35 +210,44 @@ def main():
     parser = argparse.ArgumentParser(description="Create and push environment datasets")
     parser.add_argument("--push", action="store_true", help="Push datasets to HuggingFace Hub")
     parser.add_argument("--namespace", default="hamishivi", help="HuggingFace namespace")
+    parser.add_argument("--num-samples", type=int, default=100, help="Number of samples per dataset")
     args = parser.parse_args()
-    
-    print("Creating Wordle dataset...")
-    wordle_ds = create_wordle_dataset(100)
+
+    print("Creating Wordle dataset (tool-based)...")
+    wordle_ds = create_wordle_dataset(args.num_samples, use_xml_prompting=False)
     print(f"  Created {len(wordle_ds)} examples")
-    
+
+    print("Creating Wordle Expert dataset...")
+    wordle_expert_ds = create_wordle_expert_dataset(1000)
+    print(f"  Created {len(wordle_expert_ds)} examples")
+
     print("Creating Wiki-Search dataset...")
-    wiki_ds = create_wiki_search_dataset(100)
+    wiki_ds = create_wiki_search_dataset(args.num_samples)
     print(f"  Created {len(wiki_ds)} examples")
-    
+
     print("Creating AppWorld dataset...")
-    appworld_ds = create_appworld_dataset(50)
+    appworld_ds = create_appworld_dataset(min(50, args.num_samples))
     print(f"  Created {len(appworld_ds)} examples")
-    
+
     if args.push:
         print(f"\nPushing to HuggingFace Hub ({args.namespace})...")
-        
+
         wordle_name = f"{args.namespace}/wordle_env_train"
         print(f"  Pushing {wordle_name}...")
         wordle_ds.push_to_hub(wordle_name, private=False)
-        
+
+        wordle_expert_name = f"{args.namespace}/wordle_expert_train"
+        print(f"  Pushing {wordle_expert_name}...")
+        wordle_expert_ds.push_to_hub(wordle_expert_name, private=False)
+
         wiki_name = f"{args.namespace}/wiki_search_env_train"
         print(f"  Pushing {wiki_name}...")
         wiki_ds.push_to_hub(wiki_name, private=False)
-        
+
         appworld_name = f"{args.namespace}/appworld_env_train"
         print(f"  Pushing {appworld_name}...")
         appworld_ds.push_to_hub(appworld_name, private=False)
-        
+
         print("\nDone! Datasets pushed successfully.")
     else:
         print("\nDatasets created locally. Use --push to upload to HuggingFace Hub.")

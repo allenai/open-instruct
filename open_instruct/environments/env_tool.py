@@ -6,9 +6,12 @@ import importlib
 import time
 from typing import Any
 
+from open_instruct import logger_utils
 from open_instruct.environments.adapter import EnvironmentPool
 from open_instruct.environments.base import RLEnvironment, StepResult
 from open_instruct.tools.utils import Tool, ToolOutput
+
+logger = logger_utils.setup_logger(__name__)
 
 
 def _import_class(fully_qualified_name: str) -> type:
@@ -48,11 +51,24 @@ class EnvironmentTool(Tool):
             parameters: JSON schema for tool parameters.
             **env_kwargs: Additional kwargs passed to env_class constructor.
         """
+        # Set default parameters based on environment type if not provided
+        if parameters is None:
+            env_name = env_kwargs.get("env_name", "")
+            if "wordle" in env_name.lower():
+                # Default Wordle parameters
+                parameters = {
+                    "type": "object",
+                    "properties": {
+                        "word": {"type": "string", "description": "Your 5-letter guess for the Wordle game"}
+                    },
+                    "required": ["word"],
+                }
+            else:
+                # Generic empty schema
+                parameters = {"type": "object", "properties": {}}
+
         super().__init__(
-            config_name=self.config_name,
-            description=description,
-            call_name=call_name,
-            parameters=parameters or {"type": "object", "properties": {}},
+            config_name=self.config_name, description=description, call_name=call_name, parameters=parameters
         )
 
         # Import and store env class
@@ -75,13 +91,20 @@ class EnvironmentTool(Tool):
 
     async def reset(self, _request_id: str, info: dict) -> StepResult:
         """Called at start of rollout to acquire env from pool."""
-        return await self.pool.acquire(_request_id, info)
+        logger.info(f"[EnvironmentTool] reset called for {_request_id}")
+        result = await self.pool.acquire(_request_id, info)
+        logger.info(
+            f"[EnvironmentTool] reset done for {_request_id}: {result.observation[:100] if result.observation else ''}"
+        )
+        return result
 
     async def execute(self, _request_id: str, **kwargs: Any) -> ToolOutput:
         """Called when model invokes this tool."""
+        logger.info(f"[EnvironmentTool] execute called for {_request_id} with kwargs: {kwargs}")
         start_time = time.perf_counter()
         result = await self.pool.step(_request_id, **kwargs)
         runtime = time.perf_counter() - start_time
+        logger.info(f"[EnvironmentTool] execute done for {_request_id}, runtime={runtime:.2f}s, done={result.done}")
         return ToolOutput(output=result.observation, called=True, error="", timeout=False, runtime=runtime)
 
     async def safe_execute(self, _request_id: str, **kwargs: Any) -> ToolOutput:
@@ -98,4 +121,6 @@ class EnvironmentTool(Tool):
 
     async def cleanup(self, _request_id: str):
         """Release env back to pool after rollout."""
+        logger.info(f"[EnvironmentTool] cleanup called for {_request_id}")
         await self.pool.release(_request_id)
+        logger.info(f"[EnvironmentTool] cleanup done for {_request_id}")

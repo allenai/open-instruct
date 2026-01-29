@@ -8,7 +8,8 @@ Run server with: TEXTARENA_ENV_ID=Wordle-v0 uvicorn textarena_env.server.app:app
 from typing import Any
 
 try:
-    from textarena_env import TextArenaAction, TextArenaEnv as TextArenaClient
+    from textarena_env import TextArenaAction
+    from textarena_env import TextArenaEnv as TextArenaClient
 
     _TEXTARENA_AVAILABLE = True
 except ImportError:
@@ -48,12 +49,18 @@ class TextArenaEnv(RLEnvironment):
             info={"messages": [], "current_player_id": result.observation.current_player_id},
         )
 
-    async def step(self, message: str) -> StepResult:
+    async def step(self, action: dict[str, Any]) -> StepResult:
         """Execute action (submit a guess/message to the game).
 
         Args:
-            message: The message to send (e.g., "[crane]" for Wordle guess)
+            action: Action dict with "word" or "message" key (e.g., {"word": "crane"})
         """
+        # Extract message from action dict
+        word = action.get("word") or action.get("message", "")
+
+        # TextArena Wordle expects words wrapped in square brackets
+        message = f"[{word}]" if word and not word.startswith("[") else word
+
         # TextArena expects action wrapped in TextArenaAction
         result = self._client.step(TextArenaAction(message=message))
 
@@ -69,10 +76,7 @@ class TextArenaEnv(RLEnvironment):
             observation=observation,
             reward=result.reward,
             done=result.done,
-            info={
-                "messages": messages_content,
-                "current_player_id": result.observation.current_player_id,
-            },
+            info={"messages": messages_content, "current_player_id": result.observation.current_player_id},
         )
 
     def close(self):

@@ -1020,8 +1020,9 @@ async def apply_verifiable_reward(
     for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
         zip(responses, decoded_responses, ground_truths, datasets, queries)
     ):
-        ground_truth_list = [ground_truth] if isinstance(ground_truth, str) else ground_truth
-        dataset_list = [dataset] if isinstance(dataset, str) else dataset
+        # Wrap ground_truth and dataset in lists if not already
+        ground_truth_list = ground_truth if isinstance(ground_truth, (list, tuple)) else [ground_truth]
+        dataset_list = dataset if isinstance(dataset, (list, tuple)) else [dataset]
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
 
         for gt, ds in zip(ground_truth_list, dataset_list):
@@ -1118,8 +1119,17 @@ class RewardConfig:
             if self.apply_verifiable_reward:
                 # For env verifier, use env_states from infos instead of ground_truths
                 env_states = infos.env_states if hasattr(infos, "env_states") else [None] * len(decoded_responses)
+
+                def is_env_dataset(ds):
+                    """Check if dataset is 'env', handling both string and list formats."""
+                    if isinstance(ds, str):
+                        return ds == "env"
+                    elif isinstance(ds, list):
+                        return "env" in ds
+                    return False
+
                 effective_ground_truths = [
-                    env_states[i] if datasets[i] == "env" and env_states[i] is not None else ground_truths[i]
+                    env_states[i] if is_env_dataset(datasets[i]) and env_states[i] is not None else ground_truths[i]
                     for i in range(len(ground_truths))
                 ]
                 verifiable_rewards, per_func_rewards = await apply_verifiable_reward(

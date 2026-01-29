@@ -102,8 +102,7 @@ appworld = [
 ]
 openenv = [
     # TextArena OpenEnv wrapper for games like Wordle
-    "textarena-env",
-    "uvicorn>=0.30.0",
+    "openenv-textarena @ git+https://github.com/meta-pytorch/OpenEnv.git#subdirectory=envs/textarena_env",
 ]
 
 [tool.uv]

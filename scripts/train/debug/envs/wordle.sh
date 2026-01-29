@@ -57,7 +57,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra openenv open_instruct/grpo_fa
     --apply_verifiable_reward true \
     --temperature 0.7 \
     --learning_rate 3e-7 \
-    --total_episodes 100 \
+    --total_episodes 192 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
