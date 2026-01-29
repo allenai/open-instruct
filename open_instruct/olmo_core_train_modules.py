@@ -159,10 +159,6 @@ class DPOTrainModule(TrainModule):
         for micro_batch_idx, micro_batch in enumerate(micro_batches):
             with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
                 is_average = self.args.loss_type.is_average_loss
-                logger.info(
-                    f"DPO forward: loss_type={self.args.loss_type}, "
-                    f"type={type(self.args.loss_type)}, is_average_loss={is_average}"
-                )
                 policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
                     self.model,
                     micro_batch,
