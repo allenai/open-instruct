@@ -29,8 +29,8 @@ do
         --chat_template_name olmo123 \
         --attn_backend flash_2 \
         --max_seq_length 16384 \
-        --per_device_train_batch_size 2 \
-        --gradient_accumulation_steps 8 \
+        --per_device_train_batch_size 1 \
+        --gradient_accumulation_steps 16 \
         --shard_degree 32 \
         --num_replicas 1 \
         --learning_rate $LR \
@@ -53,5 +53,7 @@ do
         --loss_type dpo_norm \
         --beta 5 \
         --gradient_checkpointing \
+        --gradient_checkpointing_mode budget \
+        --activation_memory_budget 0.5 \
         --with_tracking
 done

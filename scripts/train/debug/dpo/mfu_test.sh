@@ -26,7 +26,7 @@ uv run python mason.py \
     --model_name_or_path $MODEL_NAME \
     --config_name olmo3_7B \
     --chat_template_name olmo123 \
-    --attn_backend flash_3 \
+    --attn_backend flash_2 \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 1 \
