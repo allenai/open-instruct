@@ -365,9 +365,11 @@ def run_benchmark(
     )
 
     # Create sampling parameters with 'n' for multiple samples per prompt
+    # Set min_tokens = max_tokens to force exact response length for benchmarking
     generation_config = vllm_utils.SamplingConfig(
         temperature=streaming_config.temperature,
         max_tokens=streaming_config.response_length,
+        min_tokens=streaming_config.response_length,
         top_p=vllm_config.vllm_top_p,
         n=streaming_config.num_samples_per_prompt_rollout,
         seed=args.seed,
