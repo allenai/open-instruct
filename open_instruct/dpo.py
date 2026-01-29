@@ -429,7 +429,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     )
     logger.info("Caching reference logprobs...")
     reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
-    logger.info("Reference logprobs cached.")
+    cache_mem_bytes = sum(t.numel() * t.element_size() for t in reference_cache.tensors.values())
+    cache_mem_gib = cache_mem_bytes / (1024**3)
+    cache_mem_pct = 100 * cache_mem_bytes / torch.cuda.get_device_properties(0).total_memory
+    logger.info(f"Reference logprobs cached, using {cache_mem_gib:.2f} GiB of GPU RAM ({cache_mem_pct:.1f}%).")
 
     if args.cache_logprobs_only:
         logger.info("--cache_logprobs_only set, exiting after cache build.")
