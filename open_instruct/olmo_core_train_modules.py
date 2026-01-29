@@ -199,6 +199,9 @@ class DPOTrainModule(TrainModule):
                 margin = total_chosen_rewards - total_rejected_rewards
                 self.record_metric("train/rewards_chosen", total_chosen_rewards, ReduceType.mean)
                 self.record_metric("train/rewards_rejected", total_rejected_rewards, ReduceType.mean)
+                self.record_metric(
+                    "train/rewards_average", (total_chosen_rewards + total_rejected_rewards) / 2, ReduceType.mean
+                )
                 self.record_metric("train/rewards_accuracy", accuracy, ReduceType.mean)
                 self.record_metric("train/rewards_margin", margin, ReduceType.mean)
 
