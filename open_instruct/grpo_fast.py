@@ -1149,6 +1149,9 @@ def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerCo
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
         )
+        # Set training_step as the default x-axis metric
+        wandb.define_metric("training_step")
+        wandb.define_metric("*", step_metric="training_step")
         wandb_url = wandb.run.get_url()
         maybe_update_beaker_description(wandb_url=wandb_url)
 
@@ -1653,7 +1656,7 @@ def one_training_step(
         for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
                 metrics[key] = wandb.Histogram(value)
-        wandb.log(metrics, step=episode)
+        wandb.log(metrics, step=training_step)
 
     return num_step_tokens
 
@@ -1761,7 +1764,7 @@ def maybe_evaluate(
 
         if args.with_tracking:
             eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
-            wandb.log(eval_metrics, step=episode)
+            wandb.log(eval_metrics, step=training_step)
         else:
             print_rich_table(df.iloc[:1])
         del table
