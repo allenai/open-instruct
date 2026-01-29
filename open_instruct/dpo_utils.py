@@ -638,6 +638,9 @@ def build_reference_logprobs_cache(
     model.train()
     cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
 
+    cache_memory_bytes = chosen_tensor.numel() * chosen_tensor.element_size() * 2
+    logger.info(f"Reference cache memory: {cache_memory_bytes / 1e9:.2f} GB ({chosen_tensor.numel()} samples)")
+
     if is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
@@ -1055,6 +1058,7 @@ def concatenated_forward_olmo(
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
     logits = model(concatenated_batch["concatenated_input_ids"]).to(torch.float32)
+    logger.info(f"Logits tensor: {logits.shape}, {logits.numel() * logits.element_size() / 1e9:.2f} GB")
 
     if not packing:
         all_logps = _get_batch_logps(
