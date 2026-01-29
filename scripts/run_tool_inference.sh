@@ -48,7 +48,7 @@ export S2_API_KEY
 # Allow long context (matches training config)
 export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 
-MODEL_PATH=${1:-"allenai/Olmo-3-7B-Instruct-SFT"}
+MODEL_PATH=${1:-"/weka/oe-adapt-default/allennlp/deletable_checkpoint/hamishivi/olmo3_7b_tool_use_test__1__1769424753_checkpoints/step_1500"}
 INPUT_FILE=${2:-"data/aime.jsonl"}
 OUTPUT_FILE=${3:-"results/output.jsonl"}
 NUM_SAMPLES=${4:-1}
