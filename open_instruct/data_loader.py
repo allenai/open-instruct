@@ -20,6 +20,7 @@ from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from queue import Empty
 from typing import Any, Literal
 
 import numpy as np
@@ -559,6 +560,7 @@ def accumulate_inference_batches(
     training_step: int | None = None,
     verbose: bool = False,
     max_possible_score: float = 1.0,
+    requeue_on_timeout: bool = True,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -596,11 +598,22 @@ def accumulate_inference_batches(
         f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
     )
     num_prompts_sampled = 0
+    collected_results = []  # Track results for potential requeue on timeout
     while num_prompts_sampled < num_prompts:
         logger.info(
             f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts} from inference_results_Q"
         )
-        result = inference_results_Q.get(timeout=timeout)
+        try:
+            result = inference_results_Q.get(timeout=timeout)
+        except Empty:
+            if requeue_on_timeout and collected_results:
+                logger.info(
+                    f"[accumulate_inference_batches] Timeout with {len(collected_results)}/{num_prompts} results, requeuing"
+                )
+                for r in collected_results:
+                    inference_results_Q.put(r)
+            raise
+        collected_results.append(result)
         logger.info(
             f"[accumulate_inference_batches] Got result {num_prompts_sampled + 1}/{num_prompts}, type: {type(result).__name__}"
         )
