@@ -141,6 +141,12 @@ class DPOTrainModule(TrainModule):
 
         micro_batches = split_batch_dpo(batch, self.rank_microbatch_size)
         num_micro_batches = len(micro_batches)
+        batch_size = batch["chosen_input_ids"].shape[0]
+        logger.info(
+            f"train_batch: batch_size={batch_size}, rank_microbatch_size={self.rank_microbatch_size}, "
+            f"num_micro_batches={num_micro_batches}, loss_type={self.args.loss_type}, "
+            f"is_average_loss={self.args.loss_type.is_average_loss}"
+        )
 
         self._total_loss.zero_()
         self._total_chosen_logps.zero_()
@@ -182,8 +188,15 @@ class DPOTrainModule(TrainModule):
                 loss = loss / num_micro_batches
 
                 total_loss += loss.detach()
-                total_chosen_logps += policy_chosen_logps.mean().detach() / num_micro_batches
-                total_rejected_logps += policy_rejected_logps.mean().detach() / num_micro_batches
+                chosen_logp_mean = policy_chosen_logps.mean().detach()
+                rejected_logp_mean = policy_rejected_logps.mean().detach()
+                total_chosen_logps += chosen_logp_mean / num_micro_batches
+                total_rejected_logps += rejected_logp_mean / num_micro_batches
+                if micro_batch_idx == 0:
+                    logger.info(
+                        f"microbatch[0]: policy_chosen_logps shape={policy_chosen_logps.shape}, "
+                        f"raw values={policy_chosen_logps.tolist()}, mean={chosen_logp_mean.item():.4f}"
+                    )
                 if self.args.loss_type.computes_reward_metrics:
                     total_chosen_rewards += chosen_rewards.mean().detach() / num_micro_batches
                     total_rejected_rewards += rejected_rewards.mean().detach() / num_micro_batches
@@ -193,6 +206,10 @@ class DPOTrainModule(TrainModule):
                 loss.backward()
 
         if not dry_run:
+            logger.info(
+                f"Recording metrics: total_chosen_logps={total_chosen_logps.item():.4f}, "
+                f"total_rejected_logps={total_rejected_logps.item():.4f}"
+            )
             self.record_metric("train/loss", total_loss, ReduceType.mean)
             self.record_metric("train/logps_chosen", total_chosen_logps, ReduceType.mean)
             self.record_metric("train/logps_rejected", total_rejected_logps, ReduceType.mean)
