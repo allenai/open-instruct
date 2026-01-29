@@ -119,6 +119,7 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
         model.apply_activation_checkpointing(
             args.gradient_checkpointing_mode,
             block_interval=args.gradient_checkpointing_block_interval,
+            modules=args.gradient_checkpointing_modules,
             activation_memory_budget=args.activation_memory_budget,
         )
 

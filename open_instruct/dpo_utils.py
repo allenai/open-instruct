@@ -152,6 +152,8 @@ class TrainingConfig:
     """Block interval when mode is 'selected_blocks'. Ignored for other modes. E.g., 2 = checkpoint every other block."""
     activation_memory_budget: float | None = None
     """Memory budget for activation checkpointing (0-1). Only used when mode is 'budget'. 0=recompute all activations, 1=recompute none. Requires torch.compile."""
+    gradient_checkpointing_modules: list[str] | None = None
+    """Module patterns for 'selected_modules' mode. E.g., ['blocks.*.feed_forward']. Globs supported."""
     use_8bit_optimizer: bool = False
     """Use 8bit optimizer from bitsandbytes."""
     dpo_use_paged_optimizer: bool = False

@@ -34,4 +34,6 @@ uv run python mason.py \
     --try_launch_beaker_eval_jobs false \
     --with_tracking \
     --gradient_checkpointing \
+    --gradient_checkpointing_mode selected_modules \
+    --gradient_checkpointing_modules 'blocks.*.feed_forward' \
     --compile_model
