@@ -434,8 +434,12 @@ class ExperimentConfig(
         return fn
 
     def __post_init__(self):
+        original_loss_type = self.loss_type
         if isinstance(self.loss_type, str):
             self.loss_type = DPOLossType(self.loss_type)
+            logger.info(
+                f"Converted loss_type from str '{original_loss_type}' to {type(self.loss_type)}: {self.loss_type}"
+            )
 
         if isinstance(self.gradient_checkpointing_mode, str):
             self.gradient_checkpointing_mode = TransformerActivationCheckpointingMode(self.gradient_checkpointing_mode)
@@ -844,6 +848,7 @@ def _get_batch_logps(logits: torch.Tensor, labels: torch.Tensor, average_log_pro
     labels[labels == -100] = 0
 
     per_token_logps = log_softmax_and_gather(logits, labels)
+    logger.debug(f"_get_batch_logps called with average_log_prob={average_log_prob}")
 
     if average_log_prob:
         return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
