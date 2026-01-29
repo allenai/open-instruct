@@ -14,6 +14,16 @@ do
         --preemptible \
         --image $BEAKER_IMAGE --pure_docker_mode \
         --env OLMO_SHARED_FS=1 \
+        --env OMP_NUM_THREADS=8 \
+        --env TORCH_LOGS=recompiles,graph_breaks \
+        --env NCCL_DEBUG=INFO \
+        --env NCCL_PROTO=Simple,LL128 \
+        --env NCCL_MIN_NCHANNELS=4 \
+        --env NCCL_BUFFSIZE=8388608 \
+        --env NCCL_ALGO=Ring,Tree \
+        --env NCCL_IB_GID_INDEX=3 \
+        --env NCCL_IB_TIMEOUT=23 \
+        --env NCCL_IB_RETRY_CNT=7 \
         --num_nodes 4 \
         --budget ai2/oe-adapt \
         --gpus 8 -- torchrun \
