@@ -36,7 +36,7 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path /weka/oe-adapt-default/yanhongl/checkpoints/linear-rnns/OLMo3.1-7B-6T-30h/step100000-hf-v2 \
+        --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h-long-context-drope/step23842-hf \
         --trust_remote_code \
         --add_bos \
         --vllm_enforce_eager \
