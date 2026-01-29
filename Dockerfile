@@ -72,6 +72,20 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
 
+ENV TORCH_CUDA_ARCH_LIST="8.0 9.0"
+
+ARG FLASH_ATTN_3_SHA="92ca9da8d66f7b34ff50dc080ec0fef9661260d6"
+ARG FA3_MAX_JOBS=16
+RUN git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/Dao-AILab/flash-attention.git && \
+    cd flash-attention && \
+    git fetch --depth 1 origin ${FLASH_ATTN_3_SHA} && \
+    git checkout ${FLASH_ATTN_3_SHA} && \
+    git submodule update --init --depth 1 && \
+    cd hopper && \
+    FLASH_ATTENTION_DISABLE_FP16=TRUE MAX_JOBS=${FA3_MAX_JOBS} /stage/.venv/bin/python setup.py install && \
+    cd / && \
+    rm -rf flash-attention
+
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts
