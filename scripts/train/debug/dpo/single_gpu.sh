@@ -35,5 +35,4 @@ uv run python mason.py \
     --gradient_checkpointing \
     --gradient_checkpointing_mode budget \
     --activation_memory_budget 0.1 \
-    --compile_model \
-    --packing
+    --compile_model

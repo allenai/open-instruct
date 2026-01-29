@@ -66,6 +66,5 @@ do
         --gradient_checkpointing_mode budget \
         --activation_memory_budget 0.15 \
         --compile_model \
-        --packing \
         --with_tracking
 done
