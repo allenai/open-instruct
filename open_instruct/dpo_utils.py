@@ -1142,6 +1142,8 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
     adapted from https://github.com/huggingface/transformers/blob/main/src/transformers/data/data_collator.py#L517C1
     """
 
+    max_length: int | None = None
+
     def __call__(self, features, return_tensors=None):
         # call the original collator on chosen and rejected separately, then combine
         def filter_batch(match_string, features):
@@ -1169,15 +1171,16 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             result["rejected_" + k] = rejected_features[k]
         if "index" in features[0]:
             result["index"] = torch.tensor([f["index"] for f in features])
-        max_len = max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
+        batch_max_len = max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
+        pad_len = self.max_length if self.max_length is not None else batch_max_len
         chosen_padded = torch.nn.functional.pad(
             result["chosen_input_ids"],
-            (0, max_len - result["chosen_input_ids"].shape[1]),
+            (0, pad_len - result["chosen_input_ids"].shape[1]),
             value=self.tokenizer.pad_token_id,
         )
         rejected_padded = torch.nn.functional.pad(
             result["rejected_input_ids"],
-            (0, max_len - result["rejected_input_ids"].shape[1]),
+            (0, pad_len - result["rejected_input_ids"].shape[1]),
             value=self.tokenizer.pad_token_id,
         )
         result["input_ids"] = torch.cat([chosen_padded, rejected_padded], dim=0)

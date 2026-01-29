@@ -160,6 +160,7 @@ class DPOTrainModule(TrainModule):
                     self.model,
                     micro_batch,
                     average_log_prob=self.args.loss_type.is_average_loss,
+                    packing=self.args.packing,
                     output_router_logits=self.args.load_balancing_loss,
                 )
 

@@ -30,6 +30,7 @@ from open_instruct import data_loader as data_loader_lib
 from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2, PerfCallback
 from open_instruct.olmo_core_train_modules import DPOTrainModule
+from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -379,7 +380,13 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     model, model_config = _setup_model(args, device)
 
-    collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
+    if args.packing:
+        logger.info("Using packing/padding-free collation")
+        collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
+    else:
+        collator = dpo_utils.DataCollatorForSeq2SeqDPO(
+            tokenizer=tokenizer, model=None, padding="longest", max_length=args.max_seq_length
+        )
 
     rank_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
     global_batch_size = rank_batch_size * dp_world_size
