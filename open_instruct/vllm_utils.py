@@ -508,14 +508,18 @@ def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.F
         }
 
     actor.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
+    current_count = len(actor.request_outputs[base_request_id]["outputs"])
+    logger.info(f"[accumulate_completions] {base_request_id}: collected {current_count}/{expected_n} completions")
 
-    if len(actor.request_outputs[base_request_id]["outputs"]) == expected_n:
+    if current_count == expected_n:
+        logger.info(f"[accumulate_completions] {base_request_id}: all {expected_n} completions collected, finalizing")
         return asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
 
     return None
 
 
 async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str) -> None:
+    logger.info(f"[finalize_completed_request] Starting finalization for {base_request_id}")
     outputs = actor.request_outputs[base_request_id]["outputs"]
     ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
 
@@ -531,10 +535,14 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
     actor.request_outputs.pop(base_request_id)
     actor.request_metadata.pop(base_request_id, None)
 
+    logger.info(f"[finalize_completed_request] Computing rewards for {base_request_id}")
     dataset = actor.eval_dataset if is_eval else actor.train_dataset
     result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, dataset, is_eval)
+
+    logger.info(f"[finalize_completed_request] Putting result for {base_request_id} in results_queue")
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
     results_queue.put(result)
+    logger.info(f"[finalize_completed_request] Completed finalization for {base_request_id}")
 
 
 async def compute_rewards(
@@ -930,6 +938,14 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             output = api_response.choices[0]
             model_tokens = list(output.token_ids)
 
+            # Exit if no tokens generated (prevents infinite loops)
+            if len(model_tokens) == 0:
+                logger.warning(
+                    f"[process_request] No tokens generated for {sub_request_id}. "
+                    f"Finish reason: {output.finish_reason}. Breaking generation loop."
+                )
+                break
+
             response_tokens.extend(model_tokens)
             current_prompt.extend(model_tokens)
 
@@ -1063,10 +1079,15 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     actor.active_tasks.pop(sub_request_id, None)
 
+    expected_n = actor.request_metadata[base_request_id]["original_sampling_params"].n
+    logger.info(
+        f"[process_request] Completed {sub_request_id}, putting in completion_queue "
+        f"(base_request={base_request_id}, expected_n={expected_n})"
+    )
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
-            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
+            "expected_n": expected_n,
             "request_output": RequestOutput(
                 request_id=sub_request_id,
                 prompt_token_ids=actor.request_metadata[base_request_id]["prompt_token_ids"],
