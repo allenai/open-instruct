@@ -174,7 +174,7 @@ class PerfCallback(Callback):
             num_training_gpus=self.num_training_gpus,
         )
 
-        self.trainer.record_metric("perf/mfu_step", mfu_result["mfu"], reduce_type=None)
+        self.trainer.record_metric("perf/mfu", mfu_result["mfu"], reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second_step", step_tokens_per_second, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second_total", total_tokens_per_second, reduce_type=None)
 
