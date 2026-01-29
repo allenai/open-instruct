@@ -214,8 +214,8 @@ OLMO_3=(
     # Math
     # [faster] minerva_math_500::hamish_zs_reasoning
     "minerva_math::hamish_zs_reasoning_deepseek"
-    # "gsm8k::zs_cot_latex_deepseek"
-    "omega_500:0-shot-chat_deepseek" # FULL: "omega:0-shot-chat"
+    "omega_500:0-shot-chat_deepseek" 
+    # FULL: "omega:0-shot-chat"
     "aime:zs_cot_r1::pass_at_32_2024_deepseek"
     "aime:zs_cot_r1::pass_at_32_2025_deepseek"
 
@@ -223,18 +223,11 @@ OLMO_3=(
     "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek"
     "mbppplus:0-shot-chat::tulu-thinker_deepseek"
     "livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags"
-    # [TODO not merged] codeeditorbench - requires separate server
-    # [TODO, maybe] cruxeval
 
     # Chat / IF / Vibes
     "alpaca_eval_v3::hamish_zs_reasoning_deepseek"
     "ifeval::hamish_zs_reasoning_deepseek"
     "ifeval_ood::tulu-thinker-deepseek"
-    # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
-    # [expensive, typos vibes] styled_evals::tulu
-    # [optional, typos compare] styled_math500::tulu
-    # [optional, typos compare] styled_popqa::tulu
-    # [optional, typos compare] styled_truthfulqa::tulu
 
     # Tool Use
     "bfcl_all::std" # This requires special logic on model_args and metadata, handled below
@@ -242,9 +235,7 @@ OLMO_3=(
 
 OLMO_3_UNSEEN=(
     "mmlu_pro:0shot_cot::tulu3"
-    # [TODO, not implemented] Humanity's Last Exam
-    # [TODO, not implemented] SuperGPQA
-    # [TODO, not implemented] BigBenchExtraHard
+
     "livecodebench_codegeneration::tulu-thinker-hidden_no_think_tags"
     "ifbench::tulu"
 )
