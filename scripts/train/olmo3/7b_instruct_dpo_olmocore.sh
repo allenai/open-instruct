@@ -53,7 +53,6 @@ do
         --loss_type dpo_norm \
         --beta 5 \
         --gradient_checkpointing \
-        --gradient_checkpointing_mode budget \
-        --activation_memory_budget 0.25 \
+        --gradient_checkpointing_mode full \
         --with_tracking
 done
