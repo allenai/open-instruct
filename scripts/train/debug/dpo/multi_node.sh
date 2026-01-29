@@ -5,7 +5,6 @@ LR=1e-6
 EXP_NAME=olmo2-7b-DPO-debug-16k-${LR}
 
 uv run python mason.py \
-    --cluster ai2/saturn \
     --cluster ai2/jupiter \
     --description "2 node DPO run with OLMo2-7B, 16k sequence length (OLMo-core)." \
     --workspace ai2/open-instruct-dev \
@@ -17,6 +16,7 @@ uv run python mason.py \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
+    --env TORCH_LOGS=recompiles,graph_breaks \
     --gpus 8 -- torchrun \
     --nnodes=2 \
     --node_rank=\$BEAKER_REPLICA_RANK \
