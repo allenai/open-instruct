@@ -170,6 +170,8 @@ class TrainingConfig:
     """Number of data parallel replicas. None means auto-calculate. Set to 1 for pure FSDP."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
+    compile_model: bool = False
+    """Compile the model with torch.compile for potential speedup. Must be called after activation checkpointing but before FSDP."""
 
 
 @dataclass

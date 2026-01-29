@@ -121,6 +121,10 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
             activation_memory_budget=args.activation_memory_budget,
         )
 
+    if args.compile_model:
+        logger.info("Applying torch.compile to model blocks...")
+        model.apply_compile()
+
     return model, model_config
 
 
