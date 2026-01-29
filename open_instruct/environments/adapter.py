@@ -73,7 +73,10 @@ class EnvironmentPool:
     """Manages pool of EnvironmentAdapters for concurrent rollouts."""
 
     def __init__(
-        self, env_factory: Callable[..., RLEnvironment], pool_size: int, setup_fn: Callable[[int], Any] | None = None
+        self,
+        env_factory: Callable[..., RLEnvironment],
+        pool_size: int,
+        setup_fn: Callable[[], Any] | Callable[[int], Any] | None = None,
     ):
         self.env_factory = env_factory
         self.pool_size = pool_size
@@ -85,7 +88,14 @@ class EnvironmentPool:
     async def initialize(self):
         """One-time setup (e.g., spawn AppWorld servers)."""
         if self.setup_fn:
-            result = await self.setup_fn(self.pool_size)
+            # Check if setup_fn accepts pool_size parameter for backward compatibility
+            sig = inspect.signature(self.setup_fn)
+            if len(sig.parameters) > 0:
+                # New style: setup_fn accepts pool_size
+                result = await self.setup_fn(self.pool_size)
+            else:
+                # Old style: setup_fn takes no parameters
+                result = await self.setup_fn()
             # If setup_fn returns server URLs, store them
             if result and isinstance(result, list):
                 self._server_urls = result
