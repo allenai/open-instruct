@@ -63,6 +63,18 @@ class EnvironmentTool(Tool):
                     },
                     "required": ["word"],
                 }
+            elif "appworld" in env_class.lower():
+                # Default AppWorld parameters
+                parameters = {
+                    "type": "object",
+                    "properties": {
+                        "api_code": {
+                            "type": "string",
+                            "description": "Python code to execute in the AppWorld environment. Use the AppWorld API to interact with the task.",
+                        }
+                    },
+                    "required": ["api_code"],
+                }
             else:
                 # Generic empty schema
                 parameters = {"type": "object", "properties": {}}
@@ -124,3 +136,17 @@ class EnvironmentTool(Tool):
         logger.info(f"[EnvironmentTool] cleanup called for {_request_id}")
         await self.pool.release(_request_id)
         logger.info(f"[EnvironmentTool] cleanup done for {_request_id}")
+
+    def get_primary_param_name(self) -> str:
+        """Get the primary parameter name from the tool schema.
+
+        Returns the first required parameter name, or 'content' as fallback.
+        """
+        required = self.parameters.get("required", [])
+        if required and len(required) > 0:
+            return required[0]
+        # Fallback to first property if no required params
+        properties = self.parameters.get("properties", {})
+        if properties:
+            return next(iter(properties.keys()))
+        return "content"  # Ultimate fallback

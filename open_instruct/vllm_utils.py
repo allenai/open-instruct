@@ -970,10 +970,13 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             if not tool_calls:
                 # Fallback: if active environment but no tool call, pass raw text
                 if active_env:
+                    # Get the primary parameter name from the environment tool
+                    param_name = await actor.tool_actor_map[active_env].get_primary_param_name.remote()
                     logger.info(
-                        f"[process_requests] No tool calls found, passing raw text to environment {active_env}"
+                        f"[process_requests] No tool calls found, passing raw text to environment {active_env} "
+                        f"with parameter '{param_name}'"
                     )
-                    tool_calls = [ToolCall(name=active_env, args={"content": output.text})]
+                    tool_calls = [ToolCall(name=active_env, args={param_name: output.text})]
                 else:
                     break
 
@@ -994,13 +997,18 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
                 try:
                     # Pass _request_id to all tools (env tools use it, safe_execute strips it for regular tools)
+                    logger.debug(
+                        f"[process_request] Calling tool '{tool_call.name}' with args: {list(tool_call.args.keys())}"
+                    )
                     tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].safe_execute.remote(
                         _request_id=sub_request_id, **tool_call.args
                     )
                 except TypeError as e:
                     # This can happen if the model generated a tool call with missing/wrong arguments
-                    error_msg = f"Tool call '{tool_call.name}' failed: {e}. Args received: {tool_call.args}"
-                    logger.warning(error_msg)
+                    error_msg = (
+                        f"Tool call '{tool_call.name}' failed with TypeError: {e}. Args received: {tool_call.args}"
+                    )
+                    logger.error(error_msg)
                     tool_result = ToolOutput(output="", error=error_msg, called=True, timeout=False, runtime=0.0)
 
                 timeout = timeout or tool_result.timeout
