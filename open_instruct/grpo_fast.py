@@ -1149,7 +1149,7 @@ def setup_experiment_tracking(args: grpo_utils.ExperimentConfig, tc: TokenizerCo
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
         )
-        wandb_url = wandb.run.get_url()
+        wandb_url = wandb.run.url
         maybe_update_beaker_description(wandb_url=wandb_url)
 
     return beaker_config, wandb_url
@@ -1367,7 +1367,7 @@ def create_model_and_optimizer(
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
     # This ensures policy trainer actors are scheduled first, which affects how Ray schedules
     # the vLLM placement group and prevents port collisions during vLLM initialization.
-    wandb_url = wandb.run.get_url() if args.with_tracking else None
+    wandb_url = wandb.run.url if args.with_tracking else None
     policy_group = ModelGroup(
         pg,
         PolicyTrainerRayProcess,
