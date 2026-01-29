@@ -54,7 +54,6 @@ do
         --beta 5 \
         --gradient_checkpointing \
         --gradient_checkpointing_mode budget \
-        --activation_memory_budget 0.5 \
-        --concatenated_forward false \
+        --activation_memory_budget 0.25 \
         --with_tracking
 done
