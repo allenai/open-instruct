@@ -37,7 +37,10 @@ nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nouni
 # Memory optimization for CUDA
 export PYTORCH_ALLOC_CONF=expandable_segments:True
 
-export CUDA_VISIBLE_DEVICES=0,1
+# Set NCCL timeout to 1 hour (from default 30 min)
+export NCCL_DEBUG=INFO
+export NCCL_BLOCKING_WAIT=1
+export NCCL_TIMEOUT=3600
 
 accelerate launch \
     --mixed_precision bf16 \
@@ -45,7 +48,7 @@ accelerate launch \
     --num_machines 1 \
     --dynamo_backend no \
     --use_deepspeed \
-    --deepspeed_config_file /scratch/e1583535/open-instruct/configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_config_file /scratch/e1583535/open-instruct/configs/ds_configs/stage3_offloading_accelerate.conf \
     /scratch/e1583535/open-instruct/open_instruct/finetune.py \
     --exp_name trial-openseal-sea_instruct \
     --model_name_or_path /scratch/e1583535/llm/nus-olmo/para-only-7B-34B-checkpoints/step8290-unsharded-hf-para-only-7B-34.7B \
@@ -74,8 +77,7 @@ accelerate launch \
     --with_tracking True \
     --report_to wandb \
     --wandb_project_name openseal-posttraining \
-    --wandb_entity tsangb34-national-university-of-singapore-students-union \
-    --preprocessing_num_workers 12 
-
+    --wandb_entity tsangb34-national-university-of-singapore-students-union 
+    
 echo "Training completed at $(date)"
 EOF
