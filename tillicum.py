@@ -579,12 +579,14 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
         if not args.no_uv:
             command = ["uv", "run"] + command
 
-        # Quote arguments properly, but preserve shell variables like $EXPERIMENT_DIR
+        # Quote arguments properly, using double quotes for shell variables (allows expansion)
         quoted_parts = []
         for arg in command:
             if "$" in arg:
-                # Don't quote arguments containing shell variables
-                quoted_parts.append(arg)
+                # Use double quotes for arguments with shell variables (allows expansion)
+                # Escape any existing double quotes and backticks in the argument
+                escaped = arg.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`")
+                quoted_parts.append(f'"{escaped}"')
             else:
                 quoted_parts.append(shlex.quote(arg))
         cmd_str = " ".join(quoted_parts)
