@@ -1,24 +1,30 @@
 #!/bin/bash
 # Run inference on all eval datasets via Beaker
 #
-# Usage:
-#   ./scripts/beaker_eval_inference.sh [model_path] [output_dir]
+# Usage (via build_image_and_launch.sh):
+#   ./scripts/train/build_image_and_launch.sh scripts/beaker_eval_inference.sh [model_path] [output_dir]
 #
 # Example:
-#   ./scripts/beaker_eval_inference.sh
-#   ./scripts/beaker_eval_inference.sh /weka/path/to/checkpoint /output/results
+#   ./scripts/train/build_image_and_launch.sh scripts/beaker_eval_inference.sh
+#   ./scripts/train/build_image_and_launch.sh scripts/beaker_eval_inference.sh /weka/path/to/checkpoint /output/results
 
 set -e
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 
-MODEL_PATH=${1:-"/weka/oe-adapt-default/allennlp/deletable_checkpoint/hamishivi/olmo3_7b_tool_use_test__1__1769424753_checkpoints/step_1500"}
-OUTPUT_DIR=${2:-"/output/results"}
+# First arg is the image (passed by build_image_and_launch.sh)
+IMAGE=${1:-"hamishivi/open_instruct_dev_2302"}
+MODEL_PATH=${2:-"/weka/oe-adapt-default/allennlp/deletable_checkpoint/hamishivi/olmo3_7b_tool_use_test__1__1769424753_checkpoints/step_1500"}
+OUTPUT_DIR=${3:-"/output/results"}
 DATA_DIR="/output/data"
+
+echo "Using image: $IMAGE"
+echo "Model path: $MODEL_PATH"
+echo "Output dir: $OUTPUT_DIR"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --image hamishivi/open_instruct_dev_2302 \
+    --image "$IMAGE" \
     --description "Tool use eval inference" \
     --pure_docker_mode \
     --workspace ai2/tulu-thinker \
