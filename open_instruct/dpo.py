@@ -109,7 +109,9 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     model = model_config.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
-    load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
+    state_dict = model.state_dict()
+    load_hf_model(args.model_name_or_path, state_dict, work_dir=args.output_dir)
+    model.load_state_dict(state_dict)
     model = model.to(device=device, dtype=torch.bfloat16)
 
     if args.gradient_checkpointing:
