@@ -9,7 +9,9 @@ from olmo_core.optim.scheduler import Scheduler
 from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import EvalBatchSpec, TrainModule
 
-from open_instruct import dpo_utils, model_utils
+from open_instruct import dpo_utils, logger_utils, model_utils
+
+logger = logger_utils.setup_logger(__name__)
 
 
 class DPOTrainModule(TrainModule):
@@ -43,6 +45,8 @@ class DPOTrainModule(TrainModule):
             self._forward_fn = dpo_utils.concatenated_forward_olmo
         else:
             self._forward_fn = dpo_utils.separate_forward_olmo
+
+        self._batch_counter = 0
 
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state_dict: dict[str, Any] = {"model": self.model.state_dict()}
@@ -87,6 +91,13 @@ class DPOTrainModule(TrainModule):
 
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
         self.model.train()
+
+        if self._batch_counter < 3:
+            batch_indices = batch.get("index", "N/A")
+            if hasattr(batch_indices, "tolist"):
+                batch_indices = batch_indices.tolist()
+            logger.info(f"DEBUG [dpo.py] batch={self._batch_counter} indices={batch_indices}")
+        self._batch_counter += 1
 
         average_log_prob = self.args.loss_type.is_average_loss
         policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(

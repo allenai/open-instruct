@@ -434,6 +434,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         )
     data_loader.reshuffle(epoch=0)
 
+    first_batch_indices = [data_loader.dataset[i]["index"] for i in range(min(10, len(data_loader.dataset)))]
+    logger.info(f"DEBUG [dpo.py] First 10 dataset indices after reshuffle: {first_batch_indices}")
+
     num_training_steps = len(data_loader) * args.num_epochs
     optim, scheduler = _setup_optimizer_and_scheduler(args, model, num_training_steps)
 

@@ -562,7 +562,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         else:
             active_dataloader = train_dataloader
         # we need to average the log probs for simpo loss
-        for batch in active_dataloader:
+        for batch_idx, batch in enumerate(active_dataloader):
+            if epoch == 0 and batch_idx < 3:
+                batch_indices = batch["index"].tolist() if "index" in batch else "N/A"
+                logger.info(f"DEBUG [dpo_tune_cache.py] epoch={epoch} batch={batch_idx} indices={batch_indices}")
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
             with accelerator.accumulate(model):
