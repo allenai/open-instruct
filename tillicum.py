@@ -414,6 +414,9 @@ def get_passthrough_env_vars() -> dict[str, str]:
 
 def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], experiment_dir: str) -> str:
     """Generate a Slurm batch script for Tillicum."""
+    # Expand $USER for SBATCH directives (they don't expand shell vars)
+    experiment_dir_expanded = experiment_dir.replace("$USER", os.environ.get("USER", "unknown"))
+    
     lines = ["#!/bin/bash"]
 
     # SBATCH directives
@@ -435,22 +438,22 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
     mem = args.mem if args.mem else f"{args.gpus * 200}G"
     lines.append(f"#SBATCH --mem={mem}")
 
-    # Output/error files - use experiment directory
+    # Output/error files - use experiment directory (expanded, since SBATCH doesn't expand $USER)
     if args.output:
         lines.append(f"#SBATCH --output={args.output}")
     else:
-        lines.append(f"#SBATCH --output={experiment_dir}/logs/slurm-%j.out")
+        lines.append(f"#SBATCH --output={experiment_dir_expanded}/logs/slurm-%j.out")
 
     if args.error:
         lines.append(f"#SBATCH --error={args.error}")
     else:
-        lines.append(f"#SBATCH --error={experiment_dir}/logs/slurm-%j.err")
+        lines.append(f"#SBATCH --error={experiment_dir_expanded}/logs/slurm-%j.err")
 
     lines.append("")
 
     # Create experiment directory structure
     lines.append("# Create experiment directory structure")
-    lines.append(f"export EXPERIMENT_DIR={experiment_dir}")
+    lines.append(f"export EXPERIMENT_DIR={experiment_dir_expanded}")
     lines.append("mkdir -p $EXPERIMENT_DIR/logs $EXPERIMENT_DIR/output $EXPERIMENT_DIR/checkpoints $EXPERIMENT_DIR/rollouts")
     lines.append('echo "Experiment directory: $EXPERIMENT_DIR"')
     lines.append("")
