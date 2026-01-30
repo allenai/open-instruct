@@ -58,6 +58,7 @@ uv run python tillicum.py \
     --save_traces \
     '--rollouts_save_path=$EXPERIMENT_DIR/rollouts' \
     '--output_dir=$EXPERIMENT_DIR/output' \
+    '--dataset_local_cache_dir=$DATASET_LOCAL_CACHE_DIR' \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --single_gpu_mode \

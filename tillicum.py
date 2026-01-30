@@ -82,6 +82,9 @@ TILLICUM_CACHE_VARS = {
     "TRITON_CACHE_DIR": "/gpfs/scrubbed/$USER/.cache/triton",
 }
 
+# Default dataset cache directory for open-instruct (replaces local_dataset_cache)
+TILLICUM_DATASET_CACHE_DIR = "/gpfs/scrubbed/$USER/.cache/open_instruct_dataset_cache"
+
 
 def generate_id(length: int = 8) -> str:
     """Generate a random base-36 string of `length` digits."""
@@ -512,8 +515,10 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
     for name, value in TILLICUM_CACHE_VARS.items():
         # Don't quote - we want $USER to expand at runtime
         lines.append(f"export {name}={value}")
+    # Dataset cache for open-instruct
+    lines.append(f"export DATASET_LOCAL_CACHE_DIR={TILLICUM_DATASET_CACHE_DIR}")
     lines.append("# Create cache directories if they don't exist")
-    lines.append("mkdir -p $HF_HOME $HF_DATASETS_CACHE $HF_HUB_CACHE $TRITON_CACHE_DIR 2>/dev/null || true")
+    lines.append("mkdir -p $HF_HOME $HF_DATASETS_CACHE $HF_HUB_CACHE $TRITON_CACHE_DIR $DATASET_LOCAL_CACHE_DIR 2>/dev/null || true")
     lines.append("")
 
     # Passthrough env vars from local environment (these override Tillicum defaults)
