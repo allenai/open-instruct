@@ -63,7 +63,7 @@ do
         --beta 5 \
         --gradient_checkpointing \
         --gradient_checkpointing_mode budget \
-        --activation_memory_budget 0.5 \
+        --activation_memory_budget 0.1 \
         --compile_model \
         --with_tracking
 done
