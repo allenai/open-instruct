@@ -18,7 +18,6 @@
 # with subdirs: logs/, output/, checkpoints/, rollouts/
 
 uv run python tillicum.py \
-    --qos normal \
     --gpus 8 \
     --time 04:00:00 \
     --job_name grpo_8gpu_debug \

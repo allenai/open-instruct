@@ -20,7 +20,6 @@
 # Use $EXPERIMENT_DIR in your training command to reference this path.
 
 uv run python tillicum.py \
-    --qos normal \
     --gpus 1 \
     --time 01:00:00 \
     --job_name grpo_debug \
