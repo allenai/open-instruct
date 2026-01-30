@@ -212,7 +212,7 @@ OLMO_3=(
     # "agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek"
 
     # Math
-    minerva_math_500::hamish_zs_reasoning
+    "minerva_math_500::hamish_zs_reasoning"
     # # "minerva_math::hamish_zs_reasoning_deepseek"
     # "omega_500:0-shot-chat_deepseek" 
     # # FULL: "omega:0-shot-chat"
