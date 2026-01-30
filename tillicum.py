@@ -93,6 +93,15 @@ def generate_id(length: int = 8) -> str:
 global_wandb_id = generate_id()
 
 
+def generate_experiment_dir(job_name: str) -> str:
+    """Generate a unique experiment directory path under /gpfs/scrubbed/$USER/experiments/"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    unique_id = generate_id(6)
+    # Clean job name for filesystem (replace spaces/special chars)
+    clean_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_name)
+    return f"/gpfs/scrubbed/$USER/experiments/{clean_name}_{timestamp}_{unique_id}"
+
+
 def parse_env_var(env_var_str: str) -> dict[str, str]:
     """Parse environment variable string in the format 'name=value'"""
     if "=" not in env_var_str:
@@ -403,7 +412,7 @@ def get_passthrough_env_vars() -> dict[str, str]:
     return env_vars
 
 
-def build_slurm_script(args: argparse.Namespace, commands: list[list[str]]) -> str:
+def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], experiment_dir: str) -> str:
     """Generate a Slurm batch script for Tillicum."""
     lines = ["#!/bin/bash"]
 
@@ -426,15 +435,24 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]]) -> s
     mem = args.mem if args.mem else f"{args.gpus * 200}G"
     lines.append(f"#SBATCH --mem={mem}")
 
-    # Output/error files
+    # Output/error files - use experiment directory
     if args.output:
         lines.append(f"#SBATCH --output={args.output}")
     else:
-        lines.append("#SBATCH --output=slurm-%j.out")
+        lines.append(f"#SBATCH --output={experiment_dir}/logs/slurm-%j.out")
 
     if args.error:
         lines.append(f"#SBATCH --error={args.error}")
+    else:
+        lines.append(f"#SBATCH --error={experiment_dir}/logs/slurm-%j.err")
 
+    lines.append("")
+
+    # Create experiment directory structure
+    lines.append("# Create experiment directory structure")
+    lines.append(f"export EXPERIMENT_DIR={experiment_dir}")
+    lines.append("mkdir -p $EXPERIMENT_DIR/logs $EXPERIMENT_DIR/output $EXPERIMENT_DIR/checkpoints $EXPERIMENT_DIR/rollouts")
+    lines.append('echo "Experiment directory: $EXPERIMENT_DIR"')
     lines.append("")
 
     # Job info header
@@ -445,6 +463,7 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]]) -> s
     lines.append('echo "Job Name: $SLURM_JOB_NAME"')
     lines.append('echo "Node: $SLURM_NODELIST"')
     lines.append('echo "GPUs: $CUDA_VISIBLE_DEVICES"')
+    lines.append('echo "Experiment Dir: $EXPERIMENT_DIR"')
     lines.append('echo "Start Time: $(date)"')
     lines.append('echo "=========================================="')
     lines.append("")
@@ -665,6 +684,9 @@ def main():
     estimated_cost = estimate_cost(args.gpus, args.nodes, args.time)
     total_gpus = args.gpus * args.nodes
 
+    # Generate experiment directory
+    experiment_dir = generate_experiment_dir(args.job_name)
+
     # Show job info
     if args.dry_run:
         console.rule("[bold yellow]Tillicum Job - DRY RUN[/bold yellow]")
@@ -680,6 +702,17 @@ def main():
         console.log(f"GPUs: {args.gpus}")
     console.log(f"Time: {args.time}")
     console.log(f"Job Name: {args.job_name}")
+
+    # Show experiment directory
+    console.log("")
+    console.rule("[bold magenta]Experiment Directory[/bold magenta]")
+    # Replace $USER with actual user for display
+    display_dir = experiment_dir.replace("$USER", os.environ.get("USER", "$USER"))
+    console.log(f"[bold]{display_dir}[/bold]")
+    console.log(f"  logs/        - Slurm output logs")
+    console.log(f"  output/      - Model output (use --output_dir $EXPERIMENT_DIR/output)")
+    console.log(f"  checkpoints/ - Training checkpoints")
+    console.log(f"  rollouts/    - Rollout traces (use --rollouts_save_path $EXPERIMENT_DIR/rollouts)")
 
     # Show passthrough env vars
     passthrough_vars = get_passthrough_env_vars()
@@ -728,7 +761,7 @@ def main():
     console.log("")
 
     # Generate script
-    script = build_slurm_script(args, commands)
+    script = build_slurm_script(args, commands, experiment_dir)
 
     if args.dry_run:
         console.rule("[bold cyan]Generated Slurm Script[/bold cyan]")
@@ -740,9 +773,10 @@ def main():
         job_id = submit_batch_job(script, dry_run=False)
         if job_id:
             console.log("")
-            console.log(f"Monitor job: [bold]squeue -j {job_id}[/bold]")
-            console.log(f"Cancel job:  [bold]scancel {job_id}[/bold]")
-            console.log(f"Job efficiency (after completion): [bold]seff {job_id}[/bold]")
+            console.log(f"Monitor job:    [bold]squeue -j {job_id}[/bold]")
+            console.log(f"Cancel job:     [bold]scancel {job_id}[/bold]")
+            console.log(f"View logs:      [bold]tail -f {display_dir}/logs/slurm-{job_id}.out[/bold]")
+            console.log(f"Job efficiency: [bold]seff {job_id}[/bold] (after completion)")
 
 
 def _parse_hours(time_str: str) -> float:

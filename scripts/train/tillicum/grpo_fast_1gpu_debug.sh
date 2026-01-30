@@ -13,8 +13,11 @@
 # Note: Uses cuda/13.0.0 which requires gcc/13.4.0 on Tillicum.
 # Check available modules with `module avail cuda`
 #
-# IMPORTANT: Update SCRATCH_DIR to your scratch space on Tillicum!
-SCRATCH_DIR="${SCRATCH_DIR:-/gpfs/scrubbed/$USER}"
+# tillicum.py automatically creates an experiment directory at:
+#   /gpfs/scrubbed/$USER/experiments/{job_name}_{timestamp}_{id}/
+# with subdirs: logs/, output/, checkpoints/, rollouts/
+#
+# Use $EXPERIMENT_DIR in your training command to reference this path.
 
 uv run python tillicum.py \
     --qos debug \
@@ -54,8 +57,8 @@ uv run python tillicum.py \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
     --save_traces \
-    --rollouts_save_path "${SCRATCH_DIR}/rollouts/" \
-    --output_dir "${SCRATCH_DIR}/output/" \
+    '--rollouts_save_path=$EXPERIMENT_DIR/rollouts' \
+    '--output_dir=$EXPERIMENT_DIR/output' \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --single_gpu_mode \
