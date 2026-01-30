@@ -1881,7 +1881,9 @@ def run_training(
     else:
         eval_data_loader = None
     training_start_time = time.perf_counter()  # Track overall training start time
-    logger.info(f"[DEBUG] BEAKER_JOB_ID in env: {'BEAKER_JOB_ID' in os.environ}, BEAKER_WORKLOAD_ID: {os.environ.get('BEAKER_WORKLOAD_ID', 'NOT SET')}")
+    logger.info(
+        f"[DEBUG] BEAKER_JOB_ID in env: {'BEAKER_JOB_ID' in os.environ}, BEAKER_WORKLOAD_ID: {os.environ.get('BEAKER_WORKLOAD_ID', 'NOT SET')}"
+    )
     maybe_update_beaker_description(
         current_step=resume_training_step - 1,
         total_steps=args.num_training_steps,

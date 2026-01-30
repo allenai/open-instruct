@@ -56,7 +56,6 @@ from torch.distributed.distributed_c10d import (
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
-from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
@@ -852,23 +851,13 @@ class LLMRayActor:
             )
 
     def get_kv_cache_info(self) -> int:
-        """Get KV cache max concurrency from the vLLM engine."""
-        kv_cache_specs = self._run_async(self.llm_engine.collective_rpc("get_kv_cache_spec"))
+        """Get KV cache max concurrency from the vLLM engine.
 
-        vllm_config = self.llm_engine.vllm_config
-        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
-        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
-        available_memory = int(gpu_memory_utilization * total_gpu_memory)
-
-        kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_specs[0])
-
-        kv_cache_config = kv_cache_utils.get_kv_cache_config_from_groups(
-            vllm_config, kv_cache_groups, available_memory
-        )
-
-        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_config)
-
-        return int(max_concurrency)
+        Returns the pre-set inference_batch_size instead of calling collective_rpc
+        which hangs on hybrid models (e.g., OLMo with linear RNNs) due to
+        multi-dtype serialization issues with the multiprocessing executor.
+        """
+        return self.inference_batch_size
 
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
