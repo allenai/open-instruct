@@ -951,7 +951,9 @@ def concatenated_forward(
         f"input_ids.shape={input_ids.shape} "
         f"input_ids[0,:10]={input_ids[0, :10].tolist()} "
         f"attn_mask[0,:10]={attn_mask[0, :10].tolist() if attn_mask is not None else 'None'} "
-        f"labels[0,:10]={labels[0, :10].tolist()}"
+        f"labels[0,:10]={labels[0, :10].tolist()} "
+        f"chosen_input[445:450]={input_ids[0, 445:450].tolist()} "
+        f"rejected_input[445:450]={input_ids[1, 445:450].tolist()}"
     )
 
     if output_router_logits:
@@ -1116,12 +1118,15 @@ def concatenated_forward_olmo(
             concatenated_batch["concatenated_attention_mask"],
         )
 
+        rejected_start = cu_doc_lens[1].item()
         logger.info(
             f"DEBUG [OLMo forward] "
             f"packed_input_ids.shape={packed_input_ids.shape} "
             f"packed_input_ids[0,:10]={packed_input_ids[0, :10].tolist()} "
             f"cu_doc_lens={cu_doc_lens.tolist()} "
-            f"labels[0,:10]={concatenated_batch['concatenated_labels'][0, :10].tolist()}"
+            f"labels[0,:10]={concatenated_batch['concatenated_labels'][0, :10].tolist()} "
+            f"chosen_input[445:450]={packed_input_ids[0, 445:450].tolist()} "
+            f"rejected_input[445:450]={packed_input_ids[0, rejected_start + 445 : rejected_start + 450].tolist()}"
         )
 
         packed_logits = model(packed_input_ids, cu_doc_lens=cu_doc_lens, max_doc_len=max_doc_len).to(torch.float32)
