@@ -14,7 +14,7 @@ BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 
 # First arg is the image (passed by build_image_and_launch.sh)
 IMAGE=${1:-"hamishivi/open_instruct_dev_2302"}
-MODEL_PATH=${2:-"/weka/oe-adapt-default/allennlp/deletable_checkpoint/hamishivi/olmo3_7b_tool_use_test__1__1769424753_checkpoints/step_1500"}
+MODEL_PATH=${2:-"allenai/OLMo-3-8B-Instruct"}
 OUTPUT_DIR=${3:-"/output/results"}
 DATA_DIR="/output/data"
 
@@ -23,13 +23,12 @@ echo "Model path: $MODEL_PATH"
 echo "Output dir: $OUTPUT_DIR"
 
 uv run python mason.py \
-    --cluster ai2/jupiter \
+    --cluster ai2/ceres \
     --image "$IMAGE" \
     --description "Tool use eval inference" \
     --pure_docker_mode \
     --workspace ai2/tulu-thinker \
-    --priority normal \
-    --preemptible \
+    --priority urgent \
     --num_nodes 1 \
     --max_retries 0 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
