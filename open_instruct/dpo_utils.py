@@ -1069,6 +1069,7 @@ def separate_forward_olmo(
     model: nn.Module,
     batch: dict[str, list | torch.Tensor],
     average_log_prob: bool = False,
+    packing: bool = False,
     output_router_logits: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Run the model on chosen and rejected inputs separately.
@@ -1080,6 +1081,7 @@ def separate_forward_olmo(
         model: The model to run (OLMo-core style model).
         batch: Dictionary containing chosen and rejected inputs.
         average_log_prob: Whether to average the log probabilities.
+        packing: Whether to use padding-free packing.
         output_router_logits: Unused for OLMo-core models (MoE aux loss handled separately).
 
     Returns:
@@ -1089,14 +1091,27 @@ def separate_forward_olmo(
     chosen_batch = process_batch(batch, "chosen")
     chosen_logits = model(chosen_batch["input_ids"]).to(torch.float32)
 
-    chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
+    if packing:
+        chosen_logps = pf_get_batch_logps(
+            chosen_logits, chosen_batch["labels"], chosen_batch["cu_seq_lens_k"], average_log_prob=average_log_prob
+        )
+    else:
+        chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
     del chosen_batch, chosen_logits
     torch.cuda.empty_cache()
 
     rejected_batch = process_batch(batch, "rejected")
     rejected_logits = model(rejected_batch["input_ids"]).to(torch.float32)
 
-    rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
+    if packing:
+        rejected_logps = pf_get_batch_logps(
+            rejected_logits,
+            rejected_batch["labels"],
+            rejected_batch["cu_seq_lens_k"],
+            average_log_prob=average_log_prob,
+        )
+    else:
+        rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
     del rejected_batch, rejected_logits
     torch.cuda.empty_cache()
 

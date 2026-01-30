@@ -414,7 +414,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
-    if args.packing and args.concatenated_forward:
+    if args.packing:
         forward_fn = functools.partial(forward_fn, packing=True)
     average_log_prob = args.loss_type.is_average_loss
 

@@ -160,14 +160,12 @@ class DPOTrainModule(TrainModule):
         for micro_batch_idx, micro_batch in enumerate(micro_batches):
             with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
                 is_average = self.args.loss_type.is_average_loss
-                forward_kwargs = {
-                    "average_log_prob": is_average,
-                    "output_router_logits": self.args.load_balancing_loss,
-                }
-                if self.args.concatenated_forward:
-                    forward_kwargs["packing"] = self.args.packing
                 policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
-                    self.model, micro_batch, **forward_kwargs
+                    self.model,
+                    micro_batch,
+                    average_log_prob=is_average,
+                    packing=self.args.packing,
+                    output_router_logits=self.args.load_balancing_loss,
                 )
 
                 losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
