@@ -8,7 +8,7 @@ do
         --cluster ai2/jupiter \
         --description "OLMo3-7B DPO with OLMo-core, 4 nodes, 16k seq len" \
         --workspace ai2/olmo-instruct \
-	--no_auto_dataset_cache \
+        --no_auto_dataset_cache \
         --priority urgent \
         --preemptible \
         --image $BEAKER_IMAGE --pure_docker_mode \
