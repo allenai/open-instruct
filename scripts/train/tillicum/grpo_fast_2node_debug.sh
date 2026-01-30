@@ -28,9 +28,9 @@ uv run python tillicum.py \
     "$@" \
     -- \
     python open_instruct/grpo_fast.py \
-    --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 512 \
+    --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 4096 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 128 \
+    --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 256 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 512 \
     --response_length 512 \
