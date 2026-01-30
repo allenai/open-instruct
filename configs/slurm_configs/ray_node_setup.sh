@@ -51,11 +51,20 @@ if [ "${SLURM_NODEID:-0}" == "0" ]; then
 else
     echo "Starting Ray worker node $SLURM_NODEID on $(hostname)"
     
-    # Wait for head to be ready
-    echo "Waiting for Ray head at ${MASTER_ADDR}:${RAY_NODE_PORT}..."
-    sleep 10
-    
     export RAY_ADDRESS="${MASTER_ADDR}:${RAY_NODE_PORT}"
+    
+    # Wait for head to be ready (poll up to 60s)
+    echo "Waiting for Ray head at ${RAY_ADDRESS}..."
+    WORKER_WAIT=0
+    while [ $WORKER_WAIT -lt 60 ]; do
+        if ray status --address=$RAY_ADDRESS 2>/dev/null | grep -q 'node'; then
+            echo "Ray head is ready!"
+            break
+        fi
+        sleep 5
+        WORKER_WAIT=$((WORKER_WAIT + 5))
+        echo "Still waiting for head... (${WORKER_WAIT}s)"
+    done
     
     # Build ray start command with optional GPU specification
     RAY_CMD="ray start --address=${RAY_ADDRESS}"
