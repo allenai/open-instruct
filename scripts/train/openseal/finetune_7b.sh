@@ -11,8 +11,12 @@ echo "GPU info:"
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits || echo "No GPU detected"
 
 # Memory optimization for CUDA
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export NCCL_TIMEOUT=3600  # Increase timeout to 1 hour
+export PYTORCH_ALLOC_CONF=expandable_segments:True
+
+# Set NCCL timeout to 1 hour (from default 30 min)
+export NCCL_DEBUG=INFO
+export TORCH_NCCL_BLOCKING_WAIT=1
+export NCCL_TIMEOUT=3600
 
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 
@@ -22,24 +26,32 @@ accelerate launch \
     --num_machines 1 \
     --dynamo_backend no \
     --use_deepspeed \
-    --deepspeed_config_file /localhome/tansang/open-instruct/configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_config_file /localhome/tansang/open-instruct/configs/ds_configs/stage3_offloading_accelerate.conf \
     /localhome/tansang/open-instruct/open_instruct/finetune.py \
-    --exp_name trial_openseal_tulu \
+    --exp_name trial_openseal_SeaInstructSample \
     --model_name_or_path /localhome/tansang/llm/nus-olmo/parallel_only_7B_ckpt/step8290-unsharded-hf \
     --tokenizer_name /localhome/tansang/llm/nus-olmo/parallel_only_7B_ckpt/step8290-unsharded-hf \
     --output_dir /localhome/tansang/llm/openseal-sft \
     --use_slow_tokenizer False \
     --chat_template_name olmo \
-    --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 0.001 \
+    --dataset_mixer_list /localhome/tansang/data/sea-instruct-dataset-samples/sft_stage_1 1.00 \
     --use_flash_attn \
     --gradient_checkpointing \
     --max_seq_length 4096 \
-    --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 2 \
+    --per_device_train_batch_size 2 \
+    --gradient_accumulation_steps 16 \
     --learning_rate 2e-5 \
     --lr_scheduler_type linear \
-    --warmup_ratio 0.03 \
+    --warmup_ratio 0.3 \
     --weight_decay 0.0 \
-    --num_train_epochs 1 \
+    --num_train_epochs 2 \
     --logging_steps 1 \
-    --seed 8
+    --seed 42 \
+    --checkpointing_steps epoch \
+    --keep_last_n_checkpoints -1 \
+    --push_to_hub False \
+    --try_launch_beaker_eval_jobs False \
+    --with_tracking True \
+    --report_to wandb \
+    --wandb_project_name openseal-posttraining \
+    --wandb_entity tsangb34-national-university-of-singapore-students-union 
