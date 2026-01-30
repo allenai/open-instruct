@@ -447,6 +447,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         args=args,
         reference_cache=reference_cache,
         scheduler=scheduler,
+        rank_microbatch_size=args.per_device_train_batch_size,
         device=device,
         max_grad_norm=max_grad_norm,
     )
