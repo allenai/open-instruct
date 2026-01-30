@@ -161,6 +161,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # ------------------------------------------------------------
     # Set up runtime variables
+    beaker_config = maybe_get_beaker_config() if is_beaker_job() else None
     if args.add_seed_and_date_to_exp_name:
         args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     else:
@@ -182,8 +183,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         if args.hf_repo_revision is None:
             args.hf_repo_revision = args.exp_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-        if is_beaker_job():
-            beaker_config = maybe_get_beaker_config()
 
     # ------------------------------------------------------------
     # Initialize the trackers we use, and also store our configuration.
@@ -196,7 +195,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         # (Optional) Ai2 internal tracking
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
-        if accelerator.is_main_process and is_beaker_job():
+        if accelerator.is_main_process and beaker_config is not None:
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
         accelerator.init_trackers(
