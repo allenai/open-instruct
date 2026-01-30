@@ -1096,6 +1096,7 @@ def maybe_update_beaker_description(
         description_components.append(wandb_url)
 
     if current_step is not None:
+        logger.info(f"[Beaker] Updating description with progress: step {current_step}/{total_steps}")
         progress_pct = (current_step / total_steps) * 100
         elapsed_time = time.perf_counter() - start_time
 
@@ -1116,7 +1117,9 @@ def maybe_update_beaker_description(
         description_components.append(progress_bar)
     new_description = " ".join(description_components)
     # Update the workload description using the workload object we got earlier
+    logger.info(f"[Beaker] Setting description to: {new_description[:200]}...")
     client.workload.update(workload, description=new_description)
+    logger.info("[Beaker] Description updated successfully")
 
 
 def sync_gs_bucket(src_path: str, dest_path: str) -> None:
