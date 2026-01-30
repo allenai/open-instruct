@@ -158,6 +158,10 @@ class TrainingConfig:
     """Pipeline parallelism degree. Default 1 (disabled)."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
+    shard_degree: int | None = None
+    """FSDP shard degree. None means auto-detect."""
+    num_replicas: int | None = None
+    """Number of FSDP replicas. None means auto-detect."""
 
 
 @dataclass
