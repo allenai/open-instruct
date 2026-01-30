@@ -108,23 +108,23 @@ def get_args():
 Examples:
   # Run a simple Python script with 1 GPU (debug QOS)
   # Commands are automatically wrapped with 'uv run'
-  python tillicum.py --qos debug --gpus 1 --time 00:30:00 -- python my_script.py
+  uv run python tillicum.py --qos debug --gpus 1 --time 00:30:00 -- python my_script.py
 
   # Run training with 4 GPUs (normal QOS)
-  python tillicum.py --gpus 4 --time 08:00:00 --job_name my_training -- \\
+  uv run python tillicum.py --gpus 4 --time 08:00:00 --job_name my_training -- \\
       python open_instruct/finetune.py --model_name_or_path meta-llama/Llama-3-8B
 
   # Multi-node training with 2 nodes x 8 GPUs each (16 GPUs total)
   # (accelerate args are automatically added for multi-node!)
-  python tillicum.py --gpus 8 --nodes 2 --time 12:00:00 --job_name multinode -- \\
+  uv run python tillicum.py --gpus 8 --nodes 2 --time 12:00:00 --job_name multinode -- \\
       accelerate launch --num_processes 8 \\
       open_instruct/grpo_fast.py --model_name_or_path meta-llama/Llama-3-8B
 
   # Interactive job for debugging
-  python tillicum.py --qos interactive --gpus 2 --time 04:00:00 --interactive
+  uv run python tillicum.py --qos interactive --gpus 2 --time 04:00:00 --interactive
 
   # Without uv (if you have your own environment setup)
-  python tillicum.py --gpus 1 --time 01:00:00 --no_uv -- python my_script.py
+  uv run python tillicum.py --gpus 1 --time 01:00:00 --no_uv -- python my_script.py
 
 QOS Options:
   normal      24 hours max, up to 16 GPUs per job (default)

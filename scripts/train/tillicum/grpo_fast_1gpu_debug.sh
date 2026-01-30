@@ -13,7 +13,7 @@
 # Note: Uses cuda/13.0.0 which is available on Tillicum.
 # Check available modules with `module avail cuda`
 
-python tillicum.py \
+uv run python tillicum.py \
     --qos debug \
     --gpus 1 \
     --time 01:00:00 \
