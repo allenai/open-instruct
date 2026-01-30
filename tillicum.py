@@ -553,14 +553,13 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
         lines.append("export MASTER_PORT=29500")
         lines.append(f"export WORLD_SIZE={args.nodes * args.gpus}")
         lines.append(f"export GPUS_PER_NODE={args.gpus}")
-        lines.append("export NODE_RANK=$SLURM_NODEID")
+        # Note: NODE_RANK is set inside srun where SLURM_NODEID is available
         lines.append("")
         lines.append("# NCCL settings for multi-node communication")
         lines.append("export NCCL_IB_DISABLE=0")
         lines.append("export NCCL_NET_GDR_LEVEL=2")
         lines.append("")
         lines.append('echo "Master node: $MASTER_ADDR"')
-        lines.append('echo "Node rank: $NODE_RANK"')
         lines.append('echo "World size: $WORLD_SIZE"')
 
     lines.append("")
@@ -593,7 +592,11 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
 
         # For multi-node jobs, use srun to launch across nodes
         if args.nodes > 1:
-            lines.append(f"srun --nodes={args.nodes} --ntasks-per-node=1 bash -c '{cmd_str}'")
+            # Use double quotes for bash -c so variables expand properly
+            # Escape internal double quotes in the command
+            escaped_cmd = cmd_str.replace('"', '\\"')
+            # Set NODE_RANK inside srun where SLURM_NODEID is available (escape $ so it expands inside srun)
+            lines.append(f'srun --nodes={args.nodes} --ntasks-per-node=1 bash -c "export NODE_RANK=\\$SLURM_NODEID; echo Node rank: \\$NODE_RANK; {escaped_cmd}"')
         else:
             lines.append(cmd_str)
         lines.append("")
