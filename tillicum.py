@@ -193,6 +193,13 @@ QOS Options:
         default=[],
     )
     parser.add_argument(
+        "--module",
+        type=str,
+        action="append",
+        help="Modules to load (e.g., cuda). Can be specified multiple times.",
+        default=[],
+    )
+    parser.add_argument(
         "--no_uv",
         action="store_true",
         help="Don't wrap commands with 'uv run' (uv is used by default)",
@@ -432,6 +439,24 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]]) -> s
     lines.append('echo "Start Time: $(date)"')
     lines.append('echo "=========================================="')
     lines.append("")
+
+    # Module loading (e.g., cuda)
+    if args.module:
+        lines.append("# Load modules")
+        for module in args.module:
+            lines.append(f"module load {module}")
+        lines.append("")
+        # Set CUDA_HOME if not already set (needed for DeepSpeed)
+        lines.append("# Ensure CUDA_HOME is set (required for DeepSpeed)")
+        lines.append('if [ -z "$CUDA_HOME" ]; then')
+        lines.append('    if [ -d "/usr/local/cuda" ]; then')
+        lines.append('        export CUDA_HOME=/usr/local/cuda')
+        lines.append('    elif [ -n "$CUDA_PATH" ]; then')
+        lines.append('        export CUDA_HOME=$CUDA_PATH')
+        lines.append("    fi")
+        lines.append("fi")
+        lines.append('echo "CUDA_HOME: $CUDA_HOME"')
+        lines.append("")
 
     # Working directory
     if args.working_dir:

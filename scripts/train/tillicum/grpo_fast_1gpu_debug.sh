@@ -9,12 +9,16 @@
 #
 # Or with dry-run to preview:
 #   bash scripts/train/tillicum/grpo_fast_1gpu_debug.sh --dry_run
+#
+# Note: You may need to adjust --module based on your Tillicum setup.
+# Common modules: cuda, cuda/12.1, etc. Check with `module avail cuda`
 
 python tillicum.py \
     --qos debug \
     --gpus 1 \
     --time 01:00:00 \
     --job_name grpo_debug \
+    --module cuda \
     "$@" \
     -- \
     python open_instruct/grpo_fast.py \
