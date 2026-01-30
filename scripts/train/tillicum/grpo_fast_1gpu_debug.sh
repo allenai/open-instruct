@@ -10,7 +10,7 @@
 # Or with dry-run to preview:
 #   bash scripts/train/tillicum/grpo_fast_1gpu_debug.sh --dry_run
 #
-# Note: Uses cuda/13.0.0 which is available on Tillicum.
+# Note: Uses cuda/13.0.0 which requires gcc/13.4.0 on Tillicum.
 # Check available modules with `module avail cuda`
 
 uv run python tillicum.py \
@@ -18,6 +18,7 @@ uv run python tillicum.py \
     --gpus 1 \
     --time 01:00:00 \
     --job_name grpo_debug \
+    --module gcc/13.4.0 \
     --module cuda/13.0.0 \
     "$@" \
     -- \
