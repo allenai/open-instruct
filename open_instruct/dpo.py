@@ -5,10 +5,10 @@ This module provides DPO (Direct Preference Optimization) training using
 OLMo-core's native training infrastructure.
 """
 
+import functools
 import os
 import pathlib
 import shutil
-from functools import partial
 
 import bitsandbytes.optim
 import torch
@@ -20,10 +20,9 @@ from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
 from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
+from olmo_core.nn.transformer import TransformerActivationCheckpointingMode
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
-from olmo_core.train.callbacks import CheckpointerCallback
 from olmo_core.train.train_module.transformer import (
     TransformerDataParallelConfig,
     TransformerDataParallelWrappingStrategy,
@@ -31,7 +30,7 @@ from olmo_core.train.train_module.transformer import (
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
-from open_instruct.beaker_callback import BeakerCallbackV2
+from open_instruct.olmo_core_callbacks import BeakerCallbackV2, PerfCallback
 from open_instruct.olmo_core_train_modules import DPOTrainModule
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
@@ -48,7 +47,12 @@ def export_to_hf(
     """
     logger.info("Gathering FSDP state dict...")
     state_dict = model.state_dict()
-    state_dict = {k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()}
+    state_dict = {
+        k: v.full_tensor().to("cpu", non_blocking=True)
+        if hasattr(v, "full_tensor")
+        else v.to("cpu", non_blocking=True)
+        for k, v in state_dict.items()
+    }
 
     if is_main_process:
         logger.info(f"Exporting model to HuggingFace format at {save_dir}")
@@ -113,8 +117,18 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     model = model.to(device=device, dtype=torch.bfloat16)
 
     if args.gradient_checkpointing:
-        logger.info("Enabling activation checkpointing...")
-        model.apply_activation_checkpointing(TransformerActivationCheckpointingMode.full)
+        checkpointing_mode = TransformerActivationCheckpointingMode(args.gradient_checkpointing_mode)
+        logger.info(f"Enabling activation checkpointing (mode={checkpointing_mode.value})...")
+        model.apply_activation_checkpointing(
+            checkpointing_mode,
+            block_interval=args.gradient_checkpointing_block_interval,
+            modules=args.gradient_checkpointing_modules,
+            activation_memory_budget=args.activation_memory_budget,
+        )
+
+    if args.compile_model:
+        logger.info("Applying torch.compile to model blocks...")
+        model.apply_compile()
 
     return model, model_config
 
@@ -125,6 +139,8 @@ def _apply_parallelism(
     tensor_parallel_degree: int = 1,
     context_parallel_degree: int = 1,
     pipeline_parallel_degree: int = 1,
+    shard_degree: int | None = None,
+    num_replicas: int | None = None,
 ):
     """Apply parallelism strategies to model (HSDP, TP, CP, PP).
 
@@ -143,8 +159,8 @@ def _apply_parallelism(
 
     dp_config = TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
-        num_replicas=None,
-        shard_degree=None,
+        num_replicas=num_replicas,
+        shard_degree=shard_degree,
         param_dtype=DType.bfloat16,
         reduce_dtype=DType.float32,
         wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
@@ -211,7 +227,7 @@ def _setup_optimizer_and_scheduler(args: dpo_utils.ExperimentConfig, model, num_
     return optim, scheduler
 
 
-def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
+def _setup_callbacks(args: dpo_utils.ExperimentConfig, model, dp_world_size: int):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
@@ -234,7 +250,17 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
             config=json_config,
         )
     checkpointing_steps = int(args.checkpointing_steps)
-    trainer_callbacks["checkpointer"] = CheckpointerCallback(save_interval=checkpointing_steps, save_async=False)
+    trainer_callbacks["checkpointer"] = callbacks.CheckpointerCallback(
+        save_interval=checkpointing_steps, save_async=False
+    )
+    model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
+    trainer_callbacks["perf"] = PerfCallback(
+        model_dims=model_dims,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        num_training_gpus=dp_world_size,
+    )
+    trainer_callbacks["profiler"] = callbacks.ProfilerCallback()
     return trainer_callbacks
 
 
@@ -271,7 +297,7 @@ def _handle_post_training(
         if args.with_tracking:
             wandb_tracker = trainer_callbacks.get("wandb")
             if wandb_tracker is not None and hasattr(wandb_tracker, "run") and wandb_tracker.run is not None:
-                wandb_url = wandb_tracker.run.url
+                wandb_url = wandb_tracker.run.get_url()
         if args.hf_repo_revision is not None:
             eval_path = hf_model_path
             if beaker_config is not None and beaker_config.beaker_dataset_ids:
@@ -358,11 +384,16 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     model, model_config = _setup_model(args, device)
 
     if args.packing:
+        logger.info("Using packing/padding-free collation")
         collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
-        collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
+        max_length = args.max_seq_length if args.compile_model else None
+        collator = dpo_utils.DataCollatorForSeq2SeqDPO(
+            tokenizer=tokenizer, model=None, padding="longest", max_length=max_length
+        )
 
-    global_batch_size = args.per_device_train_batch_size * dp_world_size
+    rank_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
+    global_batch_size = rank_batch_size * dp_world_size
     data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size,
@@ -373,8 +404,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         collator=collator,
         device=device,
     )
-    # 4x batch size: forward-only (no backward), so no activation storage needed.
-    cache_batch_size = args.per_device_train_batch_size * 4 * dp_world_size
+    cache_batch_size = dp_world_size * 2  # 2 samples per device during inference (no grad)
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=cache_batch_size,
@@ -389,7 +419,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
     if args.packing:
-        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
+        forward_fn = functools.partial(forward_fn, packing=True)
     average_log_prob = args.loss_type.is_average_loss
 
     cache_kwargs = dict(
@@ -405,20 +435,21 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         disable_adapter_context=None,
     )
 
-    model_is_sharded = False
-    logger.info("Caching reference logprobs (trying unsharded first)...")
-    try:
-        reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
-        logger.info("Reference logprobs cached (unsharded).")
-    except torch.cuda.OutOfMemoryError:
-        logger.warning("OOM with unsharded model, falling back to FSDP-sharded.")
-        torch.cuda.empty_cache()
-        model_is_sharded = True
-        model = _apply_parallelism(
-            model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
-        )
-        reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
-        logger.info("Reference logprobs cached (sharded).")
+    model = _apply_parallelism(
+        model,
+        device,
+        args.tensor_parallel_degree,
+        args.context_parallel_degree,
+        args.pipeline_parallel_degree,
+        args.shard_degree,
+        args.num_replicas,
+    )
+    logger.info("Caching reference logprobs...")
+    reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
+    cache_mem_bytes = sum(t.numel() * t.element_size() for t in reference_cache.tensors.values())
+    cache_mem_gib = cache_mem_bytes / (1024**3)
+    cache_mem_pct = 100 * cache_mem_bytes / torch.cuda.get_device_properties(0).total_memory
+    logger.info(f"Reference logprobs cached, using {cache_mem_gib:.2f} GiB of GPU RAM ({cache_mem_pct:.1f}%).")
 
     if args.cache_logprobs_only:
         logger.info("--cache_logprobs_only set, exiting after cache build.")
@@ -426,11 +457,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             dist.barrier()
             dist.destroy_process_group()
         return
-
-    if not model_is_sharded:
-        model = _apply_parallelism(
-            model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
-        )
     data_loader.reshuffle(epoch=0)
 
     num_training_steps = len(data_loader) * args.num_epochs
@@ -443,11 +469,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         args=args,
         reference_cache=reference_cache,
         scheduler=scheduler,
+        rank_microbatch_size=args.per_device_train_batch_size,
         device=device,
         max_grad_norm=max_grad_norm,
     )
 
-    trainer_callbacks = _setup_callbacks(args, model)
+    trainer_callbacks = _setup_callbacks(args, model, dp_world_size)
 
     trainer = train.TrainerConfig(
         save_folder=args.output_dir,

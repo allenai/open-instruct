@@ -21,6 +21,7 @@ import contextlib
 import enum
 import functools
 import hashlib
+import itertools
 import json
 import os
 import pathlib
@@ -50,6 +51,16 @@ from open_instruct.padding_free_collator import concatenated_inputs as pf_concat
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
 logger = logger_utils.setup_logger(__name__)
+
+PAD_VALUES: dict[str, int] = {"labels": -100, "attention_mask": 0}
+
+
+def pad_tensor_to_length(tensor: torch.Tensor, target_length: int, pad_value: int) -> torch.Tensor:
+    """Pad a tensor along dimension 1 to the target length."""
+    current_len = tensor.shape[1]
+    if current_len >= target_length:
+        return tensor
+    return torch.nn.functional.pad(tensor, (0, target_length - current_len), value=pad_value)
 
 
 def config_to_json_serializable(obj: object) -> object:
@@ -144,6 +155,12 @@ class TrainingConfig:
     """If set, overrides the number of training steps. Otherwise, num_epochs is used."""
     gradient_checkpointing: bool = False
     """Turn on gradient checkpointing. Saves memory but slows training."""
+    gradient_checkpointing_mode: str = "full"
+    """Activation checkpointing mode: full, selected_blocks, selected_modules, selected_ops, or budget."""
+    gradient_checkpointing_block_interval: int = 1
+    """Interval between blocks for selected_blocks mode."""
+    gradient_checkpointing_modules: list[str] | None = None
+    """List of module names for selected_modules mode."""
     use_8bit_optimizer: bool = False
     """Use 8bit optimizer from bitsandbytes."""
     dpo_use_paged_optimizer: bool = False
@@ -158,6 +175,14 @@ class TrainingConfig:
     """Pipeline parallelism degree. Default 1 (disabled)."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
+    compile_model: bool = False
+    """Whether to apply torch.compile to model blocks."""
+    activation_memory_budget: float | None = None
+    """Memory budget for activation checkpointing (0.0-1.0). None means no budget-based checkpointing."""
+    shard_degree: int | None = None
+    """FSDP shard degree. None means auto-detect."""
+    num_replicas: int | None = None
+    """Number of FSDP replicas. None means auto-detect."""
 
 
 @dataclass
@@ -999,7 +1024,7 @@ def concatenated_forward_olmo(
         all_logps = pf_get_batch_logps(
             logits,
             concatenated_batch["concatenated_labels"],
-            concatenated_batch["concatenated_cu_seq_lens"],
+            concatenated_batch["concatenated_cu_seq_lens_q"],
             average_log_prob=average_log_prob,
         )
     chosen_logps = all_logps[:bs]
@@ -1011,6 +1036,7 @@ def separate_forward_olmo(
     model: nn.Module,
     batch: dict[str, list | torch.Tensor],
     average_log_prob: bool = False,
+    packing: bool = False,
     output_router_logits: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Run the model on chosen and rejected inputs separately.
@@ -1022,6 +1048,7 @@ def separate_forward_olmo(
         model: The model to run (OLMo-core style model).
         batch: Dictionary containing chosen and rejected inputs.
         average_log_prob: Whether to average the log probabilities.
+        packing: Whether to use padding-free packing.
         output_router_logits: Unused for OLMo-core models (MoE aux loss handled separately).
 
     Returns:
@@ -1031,14 +1058,27 @@ def separate_forward_olmo(
     chosen_batch = process_batch(batch, "chosen")
     chosen_logits = model(chosen_batch["input_ids"]).to(torch.float32)
 
-    chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
+    if packing:
+        chosen_logps = pf_get_batch_logps(
+            chosen_logits, chosen_batch["labels"], chosen_batch["cu_seq_lens_k"], average_log_prob=average_log_prob
+        )
+    else:
+        chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
     del chosen_batch, chosen_logits
     torch.cuda.empty_cache()
 
     rejected_batch = process_batch(batch, "rejected")
     rejected_logits = model(rejected_batch["input_ids"]).to(torch.float32)
 
-    rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
+    if packing:
+        rejected_logps = pf_get_batch_logps(
+            rejected_logits,
+            rejected_batch["labels"],
+            rejected_batch["cu_seq_lens_k"],
+            average_log_prob=average_log_prob,
+        )
+    else:
+        rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
     del rejected_batch, rejected_logits
     torch.cuda.empty_cache()
 
@@ -1074,6 +1114,8 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
     adapted from https://github.com/huggingface/transformers/blob/main/src/transformers/data/data_collator.py#L517C1
     """
 
+    max_length: int | None = None
+
     def __call__(self, features, return_tensors=None):
         # call the original collator on chosen and rejected separately, then combine
         def filter_batch(match_string, features):
@@ -1101,6 +1143,13 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             result["rejected_" + k] = rejected_features[k]
         if "index" in features[0]:
             result["index"] = torch.tensor([f["index"] for f in features])
+
+        if self.max_length is not None:
+            for prefix, key in itertools.product(["chosen_", "rejected_"], ["input_ids", "attention_mask", "labels"]):
+                full_key = f"{prefix}{key}"
+                pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
+                result[full_key] = pad_tensor_to_length(result[full_key], self.max_length, pad_value)
+
         max_len = max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
         chosen_padded = torch.nn.functional.pad(
             result["chosen_input_ids"],
@@ -1113,4 +1162,7 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             value=self.tokenizer.pad_token_id,
         )
         result["input_ids"] = torch.cat([chosen_padded, rejected_padded], dim=0)
+        chosen_tokens = int((result["chosen_labels"] != -100).sum())
+        rejected_tokens = int((result["rejected_labels"] != -100).sum())
+        result["token_count"] = chosen_tokens + rejected_tokens
         return result
