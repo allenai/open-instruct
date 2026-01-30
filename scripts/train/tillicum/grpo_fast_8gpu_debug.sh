@@ -36,7 +36,7 @@ uv run python tillicum.py \
     --per_device_train_batch_size 2 \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen3-0.6B \
+    --model_name_or_path meta-llama/Llama-3.1-8B \
     --stop_strings "</answer>" \
     --apply_verifiable_reward true \
     --temperature 0.7 \
@@ -44,7 +44,7 @@ uv run python tillicum.py \
     --chat_template_name r1_simple_chat_postpend_think \
     --learning_rate 3e-7 \
     --total_episodes 500 \
-    --deepspeed_stage 2 \
+    --deepspeed_stage 3 \
     --num_epochs 1 \
     --num_learners_per_node 4 \
     --vllm_num_engines 4 \
