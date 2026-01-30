@@ -1013,7 +1013,7 @@ def concatenated_forward_olmo(
         all_logps = pf_get_batch_logps(
             logits,
             concatenated_batch["concatenated_labels"],
-            concatenated_batch["concatenated_cu_seq_lens"],
+            concatenated_batch["concatenated_cu_seq_lens_q"],
             average_log_prob=average_log_prob,
         )
     chosen_logps = all_logps[:bs]
@@ -1142,4 +1142,7 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             value=self.tokenizer.pad_token_id,
         )
         result["input_ids"] = torch.cat([chosen_padded, rejected_padded], dim=0)
+        chosen_tokens = int((result["chosen_labels"] != -100).sum())
+        rejected_tokens = int((result["rejected_labels"] != -100).sum())
+        result["token_count"] = chosen_tokens + rejected_tokens
         return result
