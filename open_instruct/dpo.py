@@ -5,10 +5,10 @@ This module provides DPO (Direct Preference Optimization) training using
 OLMo-core's native training infrastructure.
 """
 
+import functools
 import os
 import pathlib
 import shutil
-from functools import partial
 
 import torch
 import torch.distributed as dist
@@ -298,7 +298,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     else:
         collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
-    global_batch_size = args.per_device_train_batch_size * dp_world_size
+    rank_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
+    global_batch_size = rank_batch_size * dp_world_size
     data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size,
@@ -309,8 +310,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         collator=collator,
         device=device,
     )
-    # 4x batch size: forward-only (no backward), so no activation storage needed.
-    cache_batch_size = args.per_device_train_batch_size * 4 * dp_world_size
+    cache_batch_size = dp_world_size * 2  # 2 samples per device during inference (no grad)
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=cache_batch_size,
@@ -325,7 +325,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
     if args.packing:
-        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
+        forward_fn = functools.partial(forward_fn, packing=True)
     average_log_prob = args.loss_type.is_average_loss
 
     cache_kwargs = dict(
@@ -366,7 +366,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     train_module = DPOTrainModule(
         model=model,
         optim=optim_config,
-        rank_microbatch_size=args.per_device_train_batch_size * args.max_seq_length,
+        sample_microbatch_size=args.per_device_train_batch_size,
         max_sequence_length=args.max_seq_length,
         dpo_config=args,
         dp_config=dp_config,

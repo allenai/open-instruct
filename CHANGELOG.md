@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Gradient accumulation/microbatching support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1447).
 - Warning when eval prompts are queuing up (new eval round starts before the previous one completes) (https://github.com/allenai/open-instruct/pull/1461).
 - OLMo 3 tokenizer settings documentation covering chat template decisions for Instruct and Think models (https://github.com/allenai/open-instruct/pull/1455).
 - torch.compile support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1445).
