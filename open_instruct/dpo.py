@@ -339,8 +339,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     is_main_process = dp_rank == 0
 
     dataset = _load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
-    dataset = dataset.shuffle(seed=args.seed)
-    dataset.set_format(type="pt")  # Must be after shuffle (shuffle resets format)
+    dataset.set_format(type="pt")
 
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
     parallelism_factor = args.tensor_parallel_degree * args.context_parallel_degree * args.pipeline_parallel_degree
