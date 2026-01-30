@@ -150,20 +150,13 @@ class DPOTrainModule(TrainModule):
         self._total_rejected_rewards.zero_()
         if self._total_aux_loss is not None:
             self._total_aux_loss.zero_()
-        total_loss = self._total_loss
-        total_chosen_logps = self._total_chosen_logps
-        total_rejected_logps = self._total_rejected_logps
-        total_chosen_rewards = self._total_chosen_rewards
-        total_rejected_rewards = self._total_rejected_rewards
-        total_aux_loss = self._total_aux_loss
 
         for micro_batch_idx, micro_batch in enumerate(micro_batches):
             with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
-                is_average = self.args.loss_type.is_average_loss
                 policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
                     self.model,
                     micro_batch,
-                    average_log_prob=is_average,
+                    average_log_prob=self.args.loss_type.is_average_loss,
                     packing=self.args.packing,
                     output_router_logits=self.args.load_balancing_loss,
                 )
@@ -182,39 +175,39 @@ class DPOTrainModule(TrainModule):
 
                 loss = loss / num_micro_batches
 
-                total_loss += loss.detach()
-                chosen_logp_mean = policy_chosen_logps.mean().detach()
-                rejected_logp_mean = policy_rejected_logps.mean().detach()
-                total_chosen_logps += chosen_logp_mean / num_micro_batches
-                total_rejected_logps += rejected_logp_mean / num_micro_batches
+                self._total_loss += loss.detach()
+                self._total_chosen_logps += policy_chosen_logps.mean().detach() / num_micro_batches
+                self._total_rejected_logps += policy_rejected_logps.mean().detach() / num_micro_batches
                 if self.args.loss_type.computes_reward_metrics:
-                    total_chosen_rewards += chosen_rewards.mean().detach() / num_micro_batches
-                    total_rejected_rewards += rejected_rewards.mean().detach() / num_micro_batches
-                if total_aux_loss is not None and aux_loss is not None:
-                    total_aux_loss += aux_loss.detach() / num_micro_batches
+                    self._total_chosen_rewards += chosen_rewards.mean().detach() / num_micro_batches
+                    self._total_rejected_rewards += rejected_rewards.mean().detach() / num_micro_batches
+                if self._total_aux_loss is not None and aux_loss is not None:
+                    self._total_aux_loss += aux_loss.detach() / num_micro_batches
 
                 loss.backward()
 
         self.model.post_batch(dry_run=dry_run)
 
         if not dry_run:
-            self.record_metric("train/loss", total_loss, ReduceType.mean)
-            self.record_metric("train/logps_chosen", total_chosen_logps, ReduceType.mean)
-            self.record_metric("train/logps_rejected", total_rejected_logps, ReduceType.mean)
+            self.record_metric("train/loss", self._total_loss, ReduceType.mean)
+            self.record_metric("train/logps_chosen", self._total_chosen_logps, ReduceType.mean)
+            self.record_metric("train/logps_rejected", self._total_rejected_logps, ReduceType.mean)
 
             if self.args.loss_type.computes_reward_metrics:
-                accuracy = (total_chosen_rewards > total_rejected_rewards).float()
-                margin = total_chosen_rewards - total_rejected_rewards
-                self.record_metric("train/rewards_chosen", total_chosen_rewards, ReduceType.mean)
-                self.record_metric("train/rewards_rejected", total_rejected_rewards, ReduceType.mean)
+                accuracy = (self._total_chosen_rewards > self._total_rejected_rewards).float()
+                margin = self._total_chosen_rewards - self._total_rejected_rewards
+                self.record_metric("train/rewards_chosen", self._total_chosen_rewards, ReduceType.mean)
+                self.record_metric("train/rewards_rejected", self._total_rejected_rewards, ReduceType.mean)
                 self.record_metric(
-                    "train/rewards_average", (total_chosen_rewards + total_rejected_rewards) / 2, ReduceType.mean
+                    "train/rewards_average",
+                    (self._total_chosen_rewards + self._total_rejected_rewards) / 2,
+                    ReduceType.mean,
                 )
                 self.record_metric("train/rewards_accuracy", accuracy, ReduceType.mean)
                 self.record_metric("train/rewards_margin", margin, ReduceType.mean)
 
-            if total_aux_loss is not None:
-                self.record_metric("train/aux_loss", total_aux_loss, ReduceType.mean)
+            if self._total_aux_loss is not None:
+                self.record_metric("train/aux_loss", self._total_aux_loss, ReduceType.mean)
 
             if "token_count" in batch:
                 self.record_metric("train/token_count", float(batch["token_count"]), ReduceType.sum)
