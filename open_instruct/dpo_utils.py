@@ -496,7 +496,7 @@ def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) ->
 
 def build_reference_logprobs_cache(
     model: torch.nn.Module,
-    dataloader: torch.utils.data.DataLoader | data_loader_lib.HFDataLoader,
+    dataloader: data_loader_lib.HFDataLoader,
     average_log_prob: bool,
     forward_fn: Callable,
     full_dataset_size: int,
@@ -511,8 +511,7 @@ def build_reference_logprobs_cache(
 
     Args:
         model: The model to compute logprobs with.
-        dataloader: DataLoader providing batches with 'index' key. If an HFDataLoader is passed,
-            incremental checkpointing is enabled via state_dict/load_state_dict.
+        dataloader: HFDataLoader providing batches with 'index' key.
         average_log_prob: Whether to average log probs over sequence length.
         forward_fn: Forward function to compute logprobs.
         full_dataset_size: Total number of samples in the dataset.
@@ -544,15 +543,13 @@ def build_reference_logprobs_cache(
     if dist.is_initialized():
         dist.barrier()
 
-    supports_checkpointing = hasattr(dataloader, "state_dict") and hasattr(dataloader, "load_state_dict")
-
     model.eval()
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
     rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
 
     partial_cache_path = cache_path.with_suffix(".partial.pt")
     start_step = 0
-    if supports_checkpointing and partial_cache_path.exists():
+    if partial_cache_path.exists():
         logger.info(f"Loading partial reference logprobs cache from {partial_cache_path}")
         checkpoint = torch.load(partial_cache_path, map_location="cpu", weights_only=False)
         chosen_tensor = checkpoint["chosen_logps"].to(device)
@@ -564,11 +561,7 @@ def build_reference_logprobs_cache(
     total_tokens = 0
     total_examples = 0
     cache_start_time = time.perf_counter()
-    total_steps = (
-        int(dataloader.total_batches)  # type: ignore[attr-defined]
-        if hasattr(dataloader, "total_batches")
-        else len(dataloader)
-    )
+    total_steps = dataloader.total_batches
 
     with torch.no_grad():
         pbar = tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")
@@ -582,9 +575,6 @@ def build_reference_logprobs_cache(
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
-
-            if supports_checkpointing:
-                dataloader.batches_processed += 1
 
             batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
             total_tokens += batch_tokens
@@ -606,7 +596,7 @@ def build_reference_logprobs_cache(
                     current_step=step, total_steps=total_steps, start_time=cache_start_time
                 )
 
-            if supports_checkpointing and step % 1000 == 0:
+            if step % 1000 == 0:
                 if is_main_process:
                     logger.info(f"Saving partial checkpoint at step {step}")
                     checkpoint_start = time.perf_counter()
@@ -1142,8 +1132,6 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
     adapted from https://github.com/huggingface/transformers/blob/main/src/transformers/data/data_collator.py#L517C1
     """
 
-    max_length: int | None = None
-
     def __call__(self, features, return_tensors=None):
         # call the original collator on chosen and rejected separately, then combine
         def filter_batch(match_string, features):
@@ -1171,23 +1159,6 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             result["rejected_" + k] = rejected_features[k]
         if "index" in features[0]:
             result["index"] = torch.tensor([f["index"] for f in features])
-        if self.max_length is not None:
-            for prefix in ["chosen_", "rejected_"]:
-                for key in ["input_ids", "attention_mask", "labels"]:
-                    full_key = prefix + key
-                    if full_key in result:
-                        tensor = result[full_key]
-                        current_len = tensor.shape[1]
-                        if current_len < self.max_length:
-                            if key == "labels":
-                                pad_value = -100
-                            elif key == "attention_mask":
-                                pad_value = 0
-                            else:
-                                pad_value = self.tokenizer.pad_token_id
-                            result[full_key] = torch.nn.functional.pad(
-                                tensor, (0, self.max_length - current_len), value=pad_value
-                            )
         result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
         chosen_tokens = int((result["chosen_labels"] != -100).sum())
         rejected_tokens = int((result["rejected_labels"] != -100).sum())

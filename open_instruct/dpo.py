@@ -385,9 +385,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         logger.info("Using packing/padding-free collation")
         collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
-        collator = dpo_utils.DataCollatorForSeq2SeqDPO(
-            tokenizer=tokenizer, model=None, padding="longest", max_length=args.max_seq_length
-        )
+        collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
     rank_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
     global_batch_size = rank_batch_size * dp_world_size
