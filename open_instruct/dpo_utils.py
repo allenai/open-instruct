@@ -772,15 +772,23 @@ def _get_batch_logps(logits: torch.Tensor, labels: torch.Tensor, average_log_pro
     logits = logits[:, :-1, :]
     loss_mask = labels != -100
 
+    num_tokens_per_sample = loss_mask.sum(-1)
+    logger.info(
+        f"DEBUG [_get_batch_logps] average_log_prob={average_log_prob}, batch_size={logits.shape[0]}, seq_len={logits.shape[1]}"
+    )
+    logger.info(f"DEBUG [_get_batch_logps] num_tokens_per_sample={num_tokens_per_sample[:4].tolist()}")
+
     # dummy token; we'll ignore the losses on these tokens later
     labels[labels == -100] = 0
 
     per_token_logps = log_softmax_and_gather(logits, labels)
 
     if average_log_prob:
-        return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
+        result = (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
     else:
-        return (per_token_logps * loss_mask).sum(-1)
+        result = (per_token_logps * loss_mask).sum(-1)
+    logger.info(f"DEBUG [_get_batch_logps] result logps={result[:4].tolist()}")
+    return result
 
 
 def process_batch(batch: dict[str, list | torch.Tensor], prefix: str, pad_value: int = 0) -> dict[str, torch.Tensor]:

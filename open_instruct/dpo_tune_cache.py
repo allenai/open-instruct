@@ -566,12 +566,23 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
             with accelerator.accumulate(model):
+                average_log_prob = args.loss_type.is_average_loss
                 policy_chosen_logps, policy_rejected_logps, aux_loss = args.forward_fn(
-                    model,
-                    batch,
-                    average_log_prob=args.loss_type.is_average_loss,
-                    output_router_logits=args.load_balancing_loss,
+                    model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
+
+                chosen_tokens = (batch["chosen_labels"] != -100).sum().item()
+                rejected_tokens = (batch["rejected_labels"] != -100).sum().item()
+                logger.info(f"DEBUG [dpo_tune_cache.py] average_log_prob={average_log_prob}")
+                logger.info(
+                    f"DEBUG [dpo_tune_cache.py] policy_chosen_logps shape={policy_chosen_logps.shape}, values={policy_chosen_logps[:4].tolist()}"
+                )
+                logger.info(
+                    f"DEBUG [dpo_tune_cache.py] policy_rejected_logps shape={policy_rejected_logps.shape}, values={policy_rejected_logps[:4].tolist()}"
+                )
+                logger.info(
+                    f"DEBUG [dpo_tune_cache.py] chosen_tokens={chosen_tokens}, rejected_tokens={rejected_tokens}"
+                )
                 losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
                     args,
                     batch,
