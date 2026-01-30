@@ -116,10 +116,18 @@ class DPOTrainModule(TrainModule):
             if self.args.loss_type.computes_reward_metrics:
                 accuracy = (chosen_rewards > rejected_rewards).float().mean()
                 margin = (chosen_rewards - rejected_rewards).mean()
+                average_rewards = ((chosen_rewards + rejected_rewards) / 2).mean()
                 self.record_metric("train/rewards_chosen", chosen_rewards.mean().detach(), ReduceType.mean)
                 self.record_metric("train/rewards_rejected", rejected_rewards.mean().detach(), ReduceType.mean)
                 self.record_metric("train/rewards_accuracy", accuracy.detach(), ReduceType.mean)
                 self.record_metric("train/rewards_margin", margin.detach(), ReduceType.mean)
+                self.record_metric("train/rewards_average", average_rewards.detach(), ReduceType.mean)
+
+            chosen_lengths = (batch["chosen_labels"] != -100).sum()
+            rejected_lengths = (batch["rejected_labels"] != -100).sum()
+            self.record_metric(
+                "train/token_count", (chosen_lengths + rejected_lengths).detach().float(), ReduceType.sum
+            )
 
             if self.args.load_balancing_loss and aux_loss is not None:
                 self.record_metric("train/aux_loss", aux_loss.detach(), ReduceType.mean)
