@@ -65,5 +65,8 @@ do
         --gradient_checkpointing_mode budget \
         --activation_memory_budget 0.1 \
         --compile_model \
-        --with_tracking
+        --with_tracking \
+        --try_launch_beaker_eval_jobs False \
+        --push_to_hub False \
+        --try_auto_save_to_beaker False
 done
