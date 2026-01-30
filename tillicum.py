@@ -593,11 +593,13 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
         # This starts Ray on all nodes and runs the command ONLY on the head node
         if args.nodes > 1:
             lines.append(f"# Using ray symmetric-run for {args.nodes}-node cluster")
-            lines.append(f"srun --nodes={args.nodes} --ntasks={args.nodes} \\")
+            lines.append(f"# --export=ALL ensures env vars are passed to all nodes")
+            lines.append(f"srun --nodes={args.nodes} --ntasks={args.nodes} --export=ALL \\")
             lines.append(f"    ray symmetric-run \\")
-            lines.append(f"    --address $IP_HEAD \\")
+            lines.append(f"    --address \"$IP_HEAD\" \\")
             lines.append(f"    --min-nodes {args.nodes} \\")
             lines.append(f"    --num-gpus {args.gpus} \\")
+            lines.append(f"    --verbose \\")
             lines.append(f"    -- \\")
             lines.append(f"    {cmd_str}")
         else:
