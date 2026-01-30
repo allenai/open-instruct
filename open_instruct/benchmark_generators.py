@@ -12,6 +12,7 @@ import csv
 import dataclasses
 import gc
 import json
+import logging
 import os
 import pathlib
 import threading
@@ -21,6 +22,8 @@ from queue import Empty
 from typing import Any, cast
 
 import datasets
+
+logging.getLogger("vllm").setLevel(logging.INFO)
 import numpy as np
 import ray
 import torch
