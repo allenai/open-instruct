@@ -132,6 +132,7 @@ class DPOTrainModule(TrainModule):
         with contextlib.ExitStack() as stack:
             if isinstance(self.model, FSDPModule):
                 self.model.set_is_last_backward(is_last_mb)
+                self.model.set_requires_all_reduce(is_last_mb)
             elif isinstance(self.model, DDP) and not is_last_mb:
                 stack.enter_context(self.model.no_sync())
             yield
@@ -195,6 +196,8 @@ class DPOTrainModule(TrainModule):
                     total_aux_loss += aux_loss.detach() / num_micro_batches
 
                 loss.backward()
+
+        self.model.post_batch(dry_run=dry_run)
 
         if not dry_run:
             self.record_metric("train/loss", total_loss, ReduceType.mean)
