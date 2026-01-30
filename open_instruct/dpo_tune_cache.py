@@ -263,10 +263,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
-        logger.info(
-            f"DEBUG [dpo_tune_cache.py] after shuffle seed={args.seed} "
-            f"first_10_indices={train_dataset['index'][:10].tolist()}"
-        )
     if accelerator.is_main_process:
         visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
 
@@ -410,7 +406,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         collate_fn = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
 
     train_dataloader = DataLoader(
-        train_dataset, shuffle=False, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
+        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
     )
 
     # Optimizer
