@@ -931,6 +931,18 @@ def concatenated_forward(
         for k, v in concatenated_batch.items()
         if k.startswith("concatenated_") and not k.endswith("labels")
     }
+
+    input_ids = inputs["input_ids"]
+    attn_mask = inputs.get("attention_mask")
+    labels = concatenated_batch["concatenated_labels"]
+    logger.info(
+        f"DEBUG [HF forward] "
+        f"input_ids.shape={input_ids.shape} "
+        f"input_ids[0,:10]={input_ids[0, :10].tolist()} "
+        f"attn_mask[0,:10]={attn_mask[0, :10].tolist() if attn_mask is not None else 'None'} "
+        f"labels[0,:10]={labels[0, :10].tolist()}"
+    )
+
     if output_router_logits:
         outputs = model(**inputs, output_router_logits=True)
         logits = outputs.logits.to(torch.float32)
@@ -938,6 +950,13 @@ def concatenated_forward(
     else:
         logits = model(**inputs).logits.to(torch.float32)
         aux_loss = None
+
+    logger.info(
+        f"DEBUG [HF forward] "
+        f"logits.shape={logits.shape} "
+        f"logits[0,0,:5]={logits[0, 0, :5].tolist()} "
+        f"logits[0,-1,:5]={logits[0, -1, :5].tolist()}"
+    )
 
     if not packing:
         all_logps = _get_batch_logps(
@@ -953,6 +972,9 @@ def concatenated_forward(
         )
     chosen_logps = all_logps[:bs]
     rejected_logps = all_logps[bs:]
+
+    logger.info(f"DEBUG [HF forward] chosen_logps={chosen_logps.tolist()} rejected_logps={rejected_logps.tolist()}")
+
     return chosen_logps, rejected_logps, aux_loss
 
 
@@ -1058,10 +1080,35 @@ def concatenated_forward_olmo(
             concatenated_batch["concatenated_labels"],
             concatenated_batch["concatenated_attention_mask"],
         )
+
+        logger.info(
+            f"DEBUG [OLMo forward] "
+            f"packed_input_ids.shape={packed_input_ids.shape} "
+            f"packed_input_ids[0,:10]={packed_input_ids[0, :10].tolist()} "
+            f"cu_doc_lens={cu_doc_lens.tolist()} "
+            f"labels[0,:10]={concatenated_batch['concatenated_labels'][0, :10].tolist()}"
+        )
+
         packed_logits = model(packed_input_ids, cu_doc_lens=cu_doc_lens, max_doc_len=max_doc_len).to(torch.float32)
+
+        logger.info(
+            f"DEBUG [OLMo forward] "
+            f"packed_logits.shape={packed_logits.shape} "
+            f"packed_logits[0,0,:5]={packed_logits[0, 0, :5].tolist()} "
+            f"packed_logits[0,-1,:5]={packed_logits[0, -1, :5].tolist()}"
+        )
+
         batch_size = concatenated_batch["concatenated_input_ids"].shape[0]
         max_seq_len = concatenated_batch["concatenated_input_ids"].shape[1]
         logits = unpack_to_padded(packed_logits, cu_doc_lens, batch_size, max_seq_len)
+
+        logger.info(
+            f"DEBUG [OLMo forward] "
+            f"logits.shape={logits.shape} "
+            f"logits[0,0,:5]={logits[0, 0, :5].tolist()} "
+            f"logits[0,-1,:5]={logits[0, -1, :5].tolist()}"
+        )
+
         all_logps = _get_batch_logps(
             logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
         )
@@ -1081,6 +1128,9 @@ def concatenated_forward_olmo(
 
     chosen_logps = all_logps[:bs]
     rejected_logps = all_logps[bs:]
+
+    logger.info(f"DEBUG [OLMo forward] chosen_logps={chosen_logps.tolist()} rejected_logps={rejected_logps.tolist()}")
+
     return chosen_logps, rejected_logps, None
 
 
