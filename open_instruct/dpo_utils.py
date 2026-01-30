@@ -34,10 +34,12 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
 
+from open_instruct import data_loader as data_loader_lib
 from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
@@ -144,6 +146,14 @@ class TrainingConfig:
     """If set, overrides the number of training steps. Otherwise, num_epochs is used."""
     gradient_checkpointing: bool = False
     """Turn on gradient checkpointing. Saves memory but slows training."""
+    gradient_checkpointing_mode: TransformerActivationCheckpointingMode = TransformerActivationCheckpointingMode.full
+    """Activation checkpointing mode: 'full' (every block) or 'selected_blocks' (every Nth block)."""
+    gradient_checkpointing_block_interval: int = 2
+    """Block interval when mode is 'selected_blocks'. Ignored for other modes. E.g., 2 = checkpoint every other block."""
+    activation_memory_budget: float | None = None
+    """Memory budget for activation checkpointing (0-1). Only used when mode is 'budget'. 0=recompute all activations, 1=recompute none. Requires torch.compile."""
+    gradient_checkpointing_modules: list[str] | None = None
+    """Module patterns for 'selected_modules' mode. E.g., ['blocks.*.feed_forward']. Globs supported."""
     use_8bit_optimizer: bool = False
     """Use 8bit optimizer from bitsandbytes."""
     dpo_use_paged_optimizer: bool = False
@@ -156,8 +166,14 @@ class TrainingConfig:
     """Context parallelism degree. Default 1 (disabled)."""
     pipeline_parallel_degree: int = 1
     """Pipeline parallelism degree. Default 1 (disabled)."""
+    shard_degree: int | None = None
+    """FSDP shard degree. None means auto-calculate. Set to total GPU count for pure FSDP."""
+    num_replicas: int | None = None
+    """Number of data parallel replicas. None means auto-calculate. Set to 1 for pure FSDP."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
+    compile_model: bool = False
+    """Compile the model with torch.compile for potential speedup. When using with activation checkpointing, use 'budget' mode (not 'full')."""
 
 
 @dataclass
@@ -423,6 +439,9 @@ class ExperimentConfig(
         if isinstance(self.loss_type, str):
             self.loss_type = DPOLossType(self.loss_type)
 
+        if isinstance(self.gradient_checkpointing_mode, str):
+            self.gradient_checkpointing_mode = TransformerActivationCheckpointingMode(self.gradient_checkpointing_mode)
+
         if self.dataset_name is None and self.dataset_mixer is None and self.mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
         if (
@@ -477,7 +496,7 @@ def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) ->
 
 def build_reference_logprobs_cache(
     model: torch.nn.Module,
-    dataloader: torch.utils.data.DataLoader,
+    dataloader: torch.utils.data.DataLoader | data_loader_lib.HFDataLoader,
     average_log_prob: bool,
     forward_fn: Callable,
     full_dataset_size: int,
@@ -492,13 +511,15 @@ def build_reference_logprobs_cache(
 
     Args:
         model: The model to compute logprobs with.
-        dataloader: DataLoader providing batches with 'index' key.
+        dataloader: DataLoader providing batches with 'index' key. If an HFDataLoader is passed,
+            incremental checkpointing is enabled via state_dict/load_state_dict.
         average_log_prob: Whether to average log probs over sequence length.
         forward_fn: Forward function to compute logprobs.
         full_dataset_size: Total number of samples in the dataset.
         device: Device to place tensors on.
         cache_path: Path to save/load cache from.
         is_main_process: Whether this is the main process.
+        model_dims: Model dimensions for MFU calculation.
         use_lora: Whether LoRA is enabled (requires disable_adapter_context).
         disable_adapter_context: Callable returning context manager to disable LoRA adapter.
 
@@ -523,16 +544,35 @@ def build_reference_logprobs_cache(
     if dist.is_initialized():
         dist.barrier()
 
+    supports_checkpointing = hasattr(dataloader, "state_dict") and hasattr(dataloader, "load_state_dict")
+
     model.eval()
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
     rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
 
+    partial_cache_path = cache_path.with_suffix(".partial.pt")
+    start_step = 0
+    if supports_checkpointing and partial_cache_path.exists():
+        logger.info(f"Loading partial reference logprobs cache from {partial_cache_path}")
+        checkpoint = torch.load(partial_cache_path, map_location="cpu", weights_only=False)
+        chosen_tensor = checkpoint["chosen_logps"].to(device)
+        rejected_tensor = checkpoint["rejected_logps"].to(device)
+        dataloader.load_state_dict(checkpoint["dataloader_state"])
+        start_step = dataloader.batches_processed
+        logger.info(f"Resumed from step {start_step}")
+
     total_tokens = 0
     total_examples = 0
+    cache_start_time = time.perf_counter()
+    total_steps = (
+        int(dataloader.total_batches)  # type: ignore[attr-defined]
+        if hasattr(dataloader, "total_batches")
+        else len(dataloader)
+    )
 
     with torch.no_grad():
         pbar = tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")
-        for batch in pbar:
+        for step, batch in enumerate(pbar, start=start_step + 1):
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
@@ -543,21 +583,46 @@ def build_reference_logprobs_cache(
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
 
+            if supports_checkpointing:
+                dataloader.batches_processed += 1
+
             batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
             total_tokens += batch_tokens
             total_examples += len(batch["index"])
 
             bs = len(batch["index"])
-            chosen_lengths = [batch["chosen_input_ids"].shape[1]] * bs
-            rejected_lengths = [batch["rejected_input_ids"].shape[1]] * bs
+            max_seq_len = max(batch["chosen_input_ids"].shape[1], batch["rejected_input_ids"].shape[1])
+            seq_lengths = [max_seq_len] * (2 * bs)
             pbar.set_postfix(
                 {
                     "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
-                    "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
+                    "MFU%": f"{model_dims.calculate_mfu(seq_lengths, time.perf_counter() - batch_start):.1f}",
                     "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
                     "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
                 }
             )
+            if is_main_process and (step == 1 or step == total_steps or step % 10 == 0):
+                utils.maybe_update_beaker_description(
+                    current_step=step, total_steps=total_steps, start_time=cache_start_time
+                )
+
+            if supports_checkpointing and step % 1000 == 0:
+                if is_main_process:
+                    logger.info(f"Saving partial checkpoint at step {step}")
+                    checkpoint_start = time.perf_counter()
+                    torch.save(
+                        {
+                            "chosen_logps": chosen_tensor.cpu(),
+                            "rejected_logps": rejected_tensor.cpu(),
+                            "dataloader_state": dataloader.state_dict(),
+                        },
+                        partial_cache_path,
+                    )
+                    logger.info(f"Saved partial checkpoint in {time.perf_counter() - checkpoint_start:.1f}s")
+                if dist.is_initialized():
+                    dist.barrier()
+
+    torch.cuda.empty_cache()
 
     if dist.is_initialized():
         dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
@@ -578,6 +643,9 @@ def build_reference_logprobs_cache(
     if is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
+        if partial_cache_path.exists():
+            partial_cache_path.unlink()
+            logger.info(f"Deleted partial checkpoint {partial_cache_path}")
 
     if dist.is_initialized():
         dist.barrier()
@@ -1074,6 +1142,8 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
     adapted from https://github.com/huggingface/transformers/blob/main/src/transformers/data/data_collator.py#L517C1
     """
 
+    max_length: int | None = None
+
     def __call__(self, features, return_tensors=None):
         # call the original collator on chosen and rejected separately, then combine
         def filter_batch(match_string, features):
@@ -1101,16 +1171,25 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             result["rejected_" + k] = rejected_features[k]
         if "index" in features[0]:
             result["index"] = torch.tensor([f["index"] for f in features])
-        max_len = max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
-        chosen_padded = torch.nn.functional.pad(
-            result["chosen_input_ids"],
-            (0, max_len - result["chosen_input_ids"].shape[1]),
-            value=self.tokenizer.pad_token_id,
-        )
-        rejected_padded = torch.nn.functional.pad(
-            result["rejected_input_ids"],
-            (0, max_len - result["rejected_input_ids"].shape[1]),
-            value=self.tokenizer.pad_token_id,
-        )
-        result["input_ids"] = torch.cat([chosen_padded, rejected_padded], dim=0)
+        if self.max_length is not None:
+            for prefix in ["chosen_", "rejected_"]:
+                for key in ["input_ids", "attention_mask", "labels"]:
+                    full_key = prefix + key
+                    if full_key in result:
+                        tensor = result[full_key]
+                        current_len = tensor.shape[1]
+                        if current_len < self.max_length:
+                            if key == "labels":
+                                pad_value = -100
+                            elif key == "attention_mask":
+                                pad_value = 0
+                            else:
+                                pad_value = self.tokenizer.pad_token_id
+                            result[full_key] = torch.nn.functional.pad(
+                                tensor, (0, self.max_length - current_len), value=pad_value
+                            )
+        result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
+        chosen_tokens = int((result["chosen_labels"] != -100).sum())
+        rejected_tokens = int((result["rejected_labels"] != -100).sum())
+        result["token_count"] = chosen_tokens + rejected_tokens
         return result
