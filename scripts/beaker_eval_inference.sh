@@ -27,7 +27,7 @@ uv run python mason.py \
     --image "$IMAGE" \
     --description "Tool use eval inference" \
     --pure_docker_mode \
-    --workspace ai2/tulu-thinker \
+    --workspace ai2/olmo-instruct \
     --priority urgent \
     --num_nodes 1 \
     --max_retries 0 \
