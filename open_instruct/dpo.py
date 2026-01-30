@@ -20,6 +20,7 @@ from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
 from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
+from olmo_core.nn.transformer import TransformerActivationCheckpointingMode
 from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
 from olmo_core.train.train_module.transformer import (
@@ -116,9 +117,10 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     model = model.to(device=device, dtype=torch.bfloat16)
 
     if args.gradient_checkpointing:
-        logger.info(f"Enabling activation checkpointing (mode={args.gradient_checkpointing_mode.value})...")
+        checkpointing_mode = TransformerActivationCheckpointingMode(args.gradient_checkpointing_mode)
+        logger.info(f"Enabling activation checkpointing (mode={checkpointing_mode.value})...")
         model.apply_activation_checkpointing(
-            args.gradient_checkpointing_mode,
+            checkpointing_mode,
             block_interval=args.gradient_checkpointing_block_interval,
             modules=args.gradient_checkpointing_modules,
             activation_memory_budget=args.activation_memory_budget,
