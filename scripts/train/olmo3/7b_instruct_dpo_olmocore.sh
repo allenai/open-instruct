@@ -10,7 +10,6 @@ do
         --workspace ai2/olmo-instruct \
 	--no_auto_dataset_cache \
         --priority urgent \
-        --max_retries 2 \
         --preemptible \
         --image $BEAKER_IMAGE --pure_docker_mode \
         --env OLMO_SHARED_FS=1 \
