@@ -45,7 +45,7 @@ uv run python mason.py \
     --beta 5 \
     --gradient_checkpointing \
     --gradient_checkpointing_mode budget \
-    --activation_memory_budget 0.5 \
+    --activation_memory_budget 0.3 \
     --compile_model \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \
