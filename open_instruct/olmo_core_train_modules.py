@@ -9,9 +9,7 @@ from olmo_core.optim.scheduler import Scheduler
 from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import EvalBatchSpec, TrainModule
 
-from open_instruct import dpo_utils, logger_utils, model_utils
-
-logger = logger_utils.setup_logger(__name__)
+from open_instruct import dpo_utils, model_utils
 
 
 class DPOTrainModule(TrainModule):
@@ -94,17 +92,6 @@ class DPOTrainModule(TrainModule):
         policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
             self.model, batch, average_log_prob=average_log_prob, output_router_logits=self.args.load_balancing_loss
         )
-
-        chosen_tokens = (batch["chosen_labels"] != -100).sum().item()
-        rejected_tokens = (batch["rejected_labels"] != -100).sum().item()
-        logger.info(f"DEBUG [dpo.py] average_log_prob={average_log_prob}")
-        logger.info(
-            f"DEBUG [dpo.py] policy_chosen_logps shape={policy_chosen_logps.shape}, values={policy_chosen_logps[:4].tolist()}"
-        )
-        logger.info(
-            f"DEBUG [dpo.py] policy_rejected_logps shape={policy_rejected_logps.shape}, values={policy_rejected_logps[:4].tolist()}"
-        )
-        logger.info(f"DEBUG [dpo.py] chosen_tokens={chosen_tokens}, rejected_tokens={rejected_tokens}")
 
         losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
             self.args,
