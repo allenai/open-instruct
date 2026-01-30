@@ -97,12 +97,19 @@ class DPOTrainModule(TrainModule):
             if hasattr(batch_indices, "tolist"):
                 batch_indices = batch_indices.tolist()
             logger.info(f"DEBUG [dpo.py] batch={self._batch_counter} indices={batch_indices}")
-        self._batch_counter += 1
 
         average_log_prob = self.args.loss_type.is_average_loss
         policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
             self.model, batch, average_log_prob=average_log_prob, output_router_logits=self.args.load_balancing_loss
         )
+
+        if self._batch_counter < 3:
+            logger.info(
+                f"DEBUG [dpo.py] batch={self._batch_counter} "
+                f"chosen_logps={policy_chosen_logps.tolist()} "
+                f"rejected_logps={policy_rejected_logps.tolist()}"
+            )
+        self._batch_counter += 1
 
         losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
             self.args,

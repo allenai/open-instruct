@@ -573,6 +573,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                 policy_chosen_logps, policy_rejected_logps, aux_loss = args.forward_fn(
                     model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
+                if epoch == 0 and batch_idx < 3:
+                    logger.info(
+                        f"DEBUG [dpo_tune_cache.py] batch={batch_idx} "
+                        f"chosen_logps={policy_chosen_logps.tolist()} "
+                        f"rejected_logps={policy_rejected_logps.tolist()}"
+                    )
 
                 losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
                     args,
