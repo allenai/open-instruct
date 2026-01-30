@@ -113,8 +113,14 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     model = model.to(device=device, dtype=torch.bfloat16)
 
     if args.gradient_checkpointing:
-        logger.info("Enabling activation checkpointing...")
-        model.apply_activation_checkpointing(TransformerActivationCheckpointingMode.full)
+        checkpointing_mode = TransformerActivationCheckpointingMode(args.gradient_checkpointing_mode)
+        logger.info(f"Enabling activation checkpointing (mode={checkpointing_mode.value})...")
+        model.apply_activation_checkpointing(
+            checkpointing_mode,
+            block_interval=args.gradient_checkpointing_block_interval,
+            modules=args.gradient_checkpointing_modules,
+            activation_memory_budget=args.activation_memory_budget,
+        )
 
     return model, model_config
 
