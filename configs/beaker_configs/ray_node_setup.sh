@@ -13,7 +13,8 @@ echo PATH=$PATH
 
 # python3 -c "import os, ray; print(os.path.dirname(ray.__file__))"
 
-BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
+# Resolve to IPv4 address (getent ahostsv4 ensures we get IPv4, not IPv6)
+BEAKER_LEADER_REPLICA_IP=$(getent ahostsv4 ${BEAKER_LEADER_REPLICA_HOSTNAME} | head -1 | awk '{print $1}')
 
 RAY_NODE_PORT=8888
 mkdir -p "$HOME/.triton/autotune"  # Create Triton autotune cache directory to silence warnings
