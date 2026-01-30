@@ -27,7 +27,6 @@ import shlex
 import string
 import subprocess
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -596,17 +595,23 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
     return "\n".join(lines)
 
 
-def submit_batch_job(script_content: str, dry_run: bool = False) -> str | None:
+def submit_batch_job(script_content: str, experiment_dir: str, dry_run: bool = False) -> str | None:
     """Submit a batch job to Slurm."""
     if dry_run:
         console.rule("[bold blue]Slurm Script (Dry Run)[/bold blue]")
         console.print(Text(script_content))
         return None
 
-    # Write script to temp file and submit
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".slurm", delete=False) as f:
+    # Create experiment directory and save script there
+    # Replace $USER with actual username for the local path
+    local_experiment_dir = experiment_dir.replace("$USER", os.environ.get("USER", "unknown"))
+    os.makedirs(local_experiment_dir, exist_ok=True)
+    
+    script_path = os.path.join(local_experiment_dir, "job.slurm")
+    with open(script_path, "w") as f:
         f.write(script_content)
-        script_path = f.name
+    
+    console.log(f"Saved script to: [bold]{script_path}[/bold]")
 
     try:
         result = subprocess.run(
@@ -624,9 +629,6 @@ def submit_batch_job(script_content: str, dry_run: bool = False) -> str | None:
         console.log(f"[red]Error submitting job:[/red]")
         console.log(e.stderr)
         raise
-    finally:
-        # Clean up temp file
-        os.unlink(script_path)
 
 
 def run_interactive_job(args: argparse.Namespace) -> None:
@@ -771,7 +773,7 @@ def main():
         console.rule("[bold yellow]DRY RUN - No job submitted[/bold yellow]")
     else:
         console.log("Submitting job to Slurm...")
-        job_id = submit_batch_job(script, dry_run=False)
+        job_id = submit_batch_job(script, experiment_dir, dry_run=False)
         if job_id:
             console.log("")
             console.log(f"Monitor job:    [bold]squeue -j {job_id}[/bold]")
