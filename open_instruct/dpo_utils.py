@@ -850,15 +850,9 @@ def _get_batch_logps(logits: torch.Tensor, labels: torch.Tensor, average_log_pro
     labels[labels == -100] = 0
 
     per_token_logps = log_softmax_and_gather(logits, labels)
-    logger.debug(f"_get_batch_logps called with average_log_prob={average_log_prob}")
 
     masked_logps_sum = (per_token_logps * loss_mask).sum(-1)
     token_counts = loss_mask.sum(-1)
-    logger.info(
-        f"_get_batch_logps: average_log_prob={average_log_prob}, "
-        f"masked_logps_sum={masked_logps_sum.tolist()}, "
-        f"token_counts={token_counts.tolist()}"
-    )
 
     if average_log_prob:
         return masked_logps_sum / token_counts

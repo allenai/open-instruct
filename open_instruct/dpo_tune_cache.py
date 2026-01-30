@@ -575,11 +575,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     average_log_prob=args.loss_type.is_average_loss,
                     output_router_logits=args.load_balancing_loss,
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
-                logger.info(
-                    f"[OLD] policy_chosen_logps shape={policy_chosen_logps.shape}, "
-                    f"values={policy_chosen_logps.tolist()}, mean={policy_chosen_logps.mean().item():.4f}, "
-                    f"is_average_loss={args.loss_type.is_average_loss}"
-                )
                 losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
                     args,
                     batch,
