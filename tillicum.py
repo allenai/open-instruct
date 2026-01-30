@@ -553,7 +553,8 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
         lines.append("export MASTER_PORT=29500")
         lines.append(f"export WORLD_SIZE={args.nodes * args.gpus}")
         lines.append(f"export GPUS_PER_NODE={args.gpus}")
-        # Note: NODE_RANK is set inside srun where SLURM_NODEID is available
+        lines.append("export RAY_PORT=6379")
+        lines.append("export RAY_ADDRESS=$MASTER_ADDR:$RAY_PORT")
         lines.append("")
         lines.append("# NCCL settings for multi-node communication")
         lines.append("export NCCL_IB_DISABLE=0")
@@ -561,6 +562,16 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
         lines.append("")
         lines.append('echo "Master node: $MASTER_ADDR"')
         lines.append('echo "World size: $WORLD_SIZE"')
+        lines.append("")
+        lines.append("# Start Ray cluster on all nodes using ray_node_setup.sh")
+        lines.append('echo "Starting Ray cluster..."')
+        lines.append(f"srun --nodes={args.nodes} --ntasks-per-node=1 bash configs/slurm_configs/ray_node_setup.sh &")
+        lines.append("RAY_SETUP_PID=$!")
+        lines.append("")
+        lines.append("# Wait for Ray cluster to initialize")
+        lines.append("sleep 30")
+        lines.append('echo "Ray cluster status:"')
+        lines.append("ray status || echo 'Warning: Could not get Ray status'")
 
     lines.append("")
 
@@ -590,15 +601,23 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
                 quoted_parts.append(shlex.quote(arg))
         cmd_str = " ".join(quoted_parts)
 
-        # For multi-node jobs, use srun to launch across nodes
+        # For multi-node jobs with Ray, run on head node only (Ray handles distribution)
         if args.nodes > 1:
-            # Use double quotes for bash -c so variables expand properly
-            # Escape internal double quotes in the command
-            escaped_cmd = cmd_str.replace('"', '\\"')
-            # Set NODE_RANK inside srun where SLURM_NODEID is available (escape $ so it expands inside srun)
-            lines.append(f'srun --nodes={args.nodes} --ntasks-per-node=1 bash -c "export NODE_RANK=\\$SLURM_NODEID; echo Node rank: \\$NODE_RANK; {escaped_cmd}"')
+            # Ray cluster is already running, just execute the command on head node
+            # Ray placement groups will distribute work to other nodes
+            lines.append(f"# Running on head node - Ray will distribute to {args.nodes} nodes")
+            lines.append(cmd_str)
         else:
             lines.append(cmd_str)
+        lines.append("")
+
+    # Cleanup Ray cluster for multi-node jobs
+    if args.nodes > 1:
+        lines.append("# Stop Ray cluster")
+        lines.append('echo "Stopping Ray cluster..."')
+        lines.append("ray stop --force || true")
+        lines.append("# Kill Ray setup processes on all nodes")
+        lines.append("kill $RAY_SETUP_PID 2>/dev/null || true")
         lines.append("")
 
     # Job completion footer
