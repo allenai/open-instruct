@@ -4,7 +4,7 @@ BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --description "Single GPU DPO cache run with OLMo-core, for debugging purposes." \
+    --description "Single GPU DPO run with accelerate (dpo_tune_cache.py), for debugging purposes." \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
