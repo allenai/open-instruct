@@ -579,11 +579,12 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
         if not args.no_uv:
             command = ["uv", "run"] + command
 
-        # Quote arguments properly, but preserve shell variables like $NODE_RANK
+        # Quote arguments properly, but preserve shell variables like $EXPERIMENT_DIR
         quoted_parts = []
         for arg in command:
-            if arg.startswith("$"):
-                quoted_parts.append(arg)  # Don't quote shell variables
+            if "$" in arg:
+                # Don't quote arguments containing shell variables
+                quoted_parts.append(arg)
             else:
                 quoted_parts.append(shlex.quote(arg))
         cmd_str = " ".join(quoted_parts)

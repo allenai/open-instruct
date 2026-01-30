@@ -55,9 +55,9 @@ uv run python tillicum.py \
     --vllm_sync_backend nccl \
     --vllm_gpu_memory_utilization 0.8 \
     --save_traces \
-    '--rollouts_save_path=$EXPERIMENT_DIR/rollouts' \
-    '--output_dir=$EXPERIMENT_DIR/output' \
-    '--dataset_local_cache_dir=$DATASET_LOCAL_CACHE_DIR' \
+    --rollouts_save_path='$EXPERIMENT_DIR/rollouts' \
+    --output_dir='$EXPERIMENT_DIR/output' \
+    --dataset_local_cache_dir='$DATASET_LOCAL_CACHE_DIR' \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --push_to_hub false \
