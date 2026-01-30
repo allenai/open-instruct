@@ -116,6 +116,10 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
         logger.info("Enabling activation checkpointing...")
         model.apply_activation_checkpointing(TransformerActivationCheckpointingMode.full)
 
+    if args.compile_model:
+        logger.info("Applying torch.compile to model blocks...")
+        model.apply_compile()
+
     return model, model_config
 
 
@@ -358,9 +362,13 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     model, model_config = _setup_model(args, device)
 
     if args.packing:
+        logger.info("Using packing/padding-free collation")
         collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
-        collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
+        max_length = args.max_seq_length if args.compile_model else None
+        collator = dpo_utils.DataCollatorForSeq2SeqDPO(
+            tokenizer=tokenizer, model=None, padding="longest", max_length=max_length
+        )
 
     global_batch_size = args.per_device_train_batch_size * dp_world_size
     data_loader = data_loader_lib.HFDataLoader(
