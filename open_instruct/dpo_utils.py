@@ -962,11 +962,24 @@ def concatenated_forward(
         logits = model(**inputs).logits.to(torch.float32)
         aux_loss = None
 
+    label_mask_chosen = labels[0] != -100
+    label_mask_rejected = labels[1] != -100
+    first_label_pos_chosen = label_mask_chosen.nonzero()[0].item() if label_mask_chosen.any() else -1
+    last_label_pos_chosen = label_mask_chosen.nonzero()[-1].item() if label_mask_chosen.any() else -1
+    first_label_pos_rejected = label_mask_rejected.nonzero()[0].item() if label_mask_rejected.any() else -1
+    last_label_pos_rejected = label_mask_rejected.nonzero()[-1].item() if label_mask_rejected.any() else -1
     logger.info(
         f"DEBUG [HF forward] "
         f"logits.shape={logits.shape} "
         f"logits[0,0,:5]={logits[0, 0, :5].tolist()} "
         f"logits[0,-1,:5]={logits[0, -1, :5].tolist()}"
+    )
+    logger.info(
+        f"DEBUG [HF forward] label positions: "
+        f"chosen=[{first_label_pos_chosen}, {last_label_pos_chosen}] "
+        f"rejected=[{first_label_pos_rejected}, {last_label_pos_rejected}] "
+        f"logits[0,{first_label_pos_chosen - 1},:5]={logits[0, int(first_label_pos_chosen) - 1, :5].tolist() if first_label_pos_chosen > 0 else 'N/A'} "
+        f"logits[1,{first_label_pos_rejected - 1},:5]={logits[1, int(first_label_pos_rejected) - 1, :5].tolist() if first_label_pos_rejected > 0 else 'N/A'}"
     )
 
     if not packing:
@@ -1124,11 +1137,25 @@ def concatenated_forward_olmo(
         max_seq_len = concatenated_batch["concatenated_input_ids"].shape[1]
         logits = unpack_to_padded(packed_logits, cu_doc_lens, batch_size, max_seq_len)
 
+        labels = concatenated_batch["concatenated_labels"]
+        label_mask_chosen = labels[0] != -100
+        label_mask_rejected = labels[1] != -100
+        first_label_pos_chosen = label_mask_chosen.nonzero()[0].item() if label_mask_chosen.any() else -1
+        last_label_pos_chosen = label_mask_chosen.nonzero()[-1].item() if label_mask_chosen.any() else -1
+        first_label_pos_rejected = label_mask_rejected.nonzero()[0].item() if label_mask_rejected.any() else -1
+        last_label_pos_rejected = label_mask_rejected.nonzero()[-1].item() if label_mask_rejected.any() else -1
         logger.info(
             f"DEBUG [OLMo forward] "
             f"logits.shape={logits.shape} "
             f"logits[0,0,:5]={logits[0, 0, :5].tolist()} "
             f"logits[0,-1,:5]={logits[0, -1, :5].tolist()}"
+        )
+        logger.info(
+            f"DEBUG [OLMo forward] label positions: "
+            f"chosen=[{first_label_pos_chosen}, {last_label_pos_chosen}] "
+            f"rejected=[{first_label_pos_rejected}, {last_label_pos_rejected}] "
+            f"logits[0,{first_label_pos_chosen - 1},:5]={logits[0, int(first_label_pos_chosen) - 1, :5].tolist() if first_label_pos_chosen > 0 else 'N/A'} "
+            f"logits[1,{first_label_pos_rejected - 1},:5]={logits[1, int(first_label_pos_rejected) - 1, :5].tolist() if first_label_pos_rejected > 0 else 'N/A'}"
         )
 
         all_logps = _get_batch_logps(
