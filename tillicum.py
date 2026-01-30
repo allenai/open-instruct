@@ -74,6 +74,15 @@ DEFAULT_ENV_VARS = {
     "VLLM_ATTENTION_BACKEND": "FLASH_ATTN",
 }
 
+# Tillicum-specific cache paths (uses $USER which expands at runtime)
+# These replace the AI2 /weka paths
+TILLICUM_CACHE_VARS = {
+    "HF_HOME": "/gpfs/scrubbed/$USER/.cache/huggingface",
+    "HF_DATASETS_CACHE": "/gpfs/scrubbed/$USER/.cache/huggingface/datasets",
+    "HF_HUB_CACHE": "/gpfs/scrubbed/$USER/.cache/huggingface/hub",
+    "TRITON_CACHE_DIR": "/gpfs/scrubbed/$USER/.cache/triton",
+}
+
 
 def generate_id(length: int = 8) -> str:
     """Generate a random base-36 string of `length` digits."""
@@ -475,7 +484,17 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]]) -> s
         for name, value in DEFAULT_ENV_VARS.items():
             lines.append(f"export {name}={shlex.quote(value)}")
 
-    # Passthrough env vars from local environment
+    # Tillicum-specific cache paths (uses /gpfs/scrubbed instead of /weka)
+    lines.append("")
+    lines.append("# Tillicum cache paths (uses scratch space)")
+    for name, value in TILLICUM_CACHE_VARS.items():
+        # Don't quote - we want $USER to expand at runtime
+        lines.append(f"export {name}={value}")
+    lines.append("# Create cache directories if they don't exist")
+    lines.append("mkdir -p $HF_HOME $HF_DATASETS_CACHE $HF_HUB_CACHE $TRITON_CACHE_DIR 2>/dev/null || true")
+    lines.append("")
+
+    # Passthrough env vars from local environment (these override Tillicum defaults)
     passthrough_vars = get_passthrough_env_vars()
     wandb_vars_added = []
     hf_vars_added = []
@@ -486,6 +505,7 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]]) -> s
             lines.append(f"export {name}={shlex.quote(value)}")
             wandb_vars_added.append(name)
         elif name in HF_PASSTHROUGH_VARS and not args.no_hf_passthrough:
+            # HF cache vars from local env override Tillicum defaults
             lines.append(f"export {name}={shlex.quote(value)}")
             hf_vars_added.append(name)
 
