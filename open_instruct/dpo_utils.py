@@ -935,6 +935,15 @@ def concatenated_forward(
     input_ids = inputs["input_ids"]
     attn_mask = inputs.get("attention_mask")
     labels = concatenated_batch["concatenated_labels"]
+
+    embed_weight: torch.Tensor = model.model.embed_tokens.weight  # type: ignore[assignment,union-attr]
+    logger.info(
+        f"DEBUG [HF forward] "
+        f"embed_weight.shape={embed_weight.shape} "
+        f"embed_weight[0,:5]={embed_weight.data[0, :5].tolist()} "
+        f"embed_weight.mean()={float(embed_weight.mean()):.6f}"
+    )
+
     logger.info(
         f"DEBUG [HF forward] "
         f"input_ids.shape={input_ids.shape} "
@@ -1072,6 +1081,14 @@ def concatenated_forward_olmo(
     """
     del output_router_logits
     bs = batch["chosen_input_ids"].shape[0]
+
+    embed_weight: torch.Tensor = model.embeddings.weight  # type: ignore[assignment,union-attr]
+    logger.info(
+        f"DEBUG [OLMo forward] "
+        f"embed_weight.shape={embed_weight.shape} "
+        f"embed_weight[0,:5]={embed_weight.data[0, :5].tolist()} "
+        f"embed_weight.mean()={float(embed_weight.mean()):.6f}"
+    )
 
     if not packing:
         concatenated_batch = concatenated_inputs(batch)
