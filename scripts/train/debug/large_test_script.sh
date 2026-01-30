@@ -40,7 +40,7 @@ uv run python mason.py \
         --trust_remote_code \
         --add_bos \
         --vllm_enforce_eager \
-        --chat_template_name r1_simple_chat_postpend_think \
+        --chat_template_name tulu_thinker \
 	--inflight_updates True \
         --stop_strings "</answer>" \
         --non_stop_penalty False \
