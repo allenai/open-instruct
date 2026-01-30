@@ -55,7 +55,7 @@ from typing import Any, Literal
 import numpy as np
 import torch
 import transformers
-from datasets import Dataset, concatenate_datasets, load_dataset
+from datasets import Dataset, concatenate_datasets, load_dataset, load_from_disk
 from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
@@ -1010,7 +1010,7 @@ TOKENIZED_PREFERENCE_DATASET_KEYS = [
 
 # TODO: allow passing in sft_message key, so we can train on "chosen" of pref dataset.
 def sft_tokenize_v1(
-    row: dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
+    row: dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY, max_seq_length: int | None = None
 ):
     prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
@@ -1574,6 +1574,19 @@ class DatasetConfig:
             dataset = load_dataset(
                 "parquet", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
+        elif os.path.exists(self.dataset_name) and os.path.isdir(self.dataset_name):
+            # Check if this is a saved dataset (has dataset_info.json)
+            if os.path.exists(os.path.join(self.dataset_name, "dataset_info.json")):
+                dataset = load_from_disk(self.dataset_name)
+                if isinstance(dataset, dict):
+                    # If it's a DatasetDict, get the specified split
+                    dataset = dataset[self.dataset_split]
+            else:
+                # Try loading as a directory with the specified split
+                raise ValueError(
+                    f"Directory {self.dataset_name} exists but is not a valid saved dataset. "
+                    f"Please check the path or use a valid dataset."
+                )
         else:
             # commit hash only works for hf datasets
             self.dataset_commit_hash = get_commit_hash(
