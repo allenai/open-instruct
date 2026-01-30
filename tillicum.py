@@ -124,22 +124,23 @@ def get_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run a simple Python script with 1 GPU (debug QOS)
+  # Run a simple Python script with 1 GPU
   # Commands are automatically wrapped with 'uv run'
-  uv run python tillicum.py --qos debug --gpus 1 --time 00:30:00 -- python my_script.py
+  uv run python tillicum.py --gpus 1 --time 01:00:00 -- python my_script.py
 
-  # Run training with 4 GPUs (normal QOS)
+  # Run training with 4 GPUs
   uv run python tillicum.py --gpus 4 --time 08:00:00 --job_name my_training -- \\
       python open_instruct/finetune.py --model_name_or_path meta-llama/Llama-3-8B
+
+  # Full node (8 GPUs) training
+  uv run python tillicum.py --gpus 8 --time 12:00:00 --job_name fullnode -- \\
+      python open_instruct/grpo_fast.py --num_learners_per_node 4 --vllm_num_engines 4
 
   # Multi-node training with 2 nodes x 8 GPUs each (16 GPUs total)
   # (accelerate args are automatically added for multi-node!)
   uv run python tillicum.py --gpus 8 --nodes 2 --time 12:00:00 --job_name multinode -- \\
       accelerate launch --num_processes 8 \\
       open_instruct/grpo_fast.py --model_name_or_path meta-llama/Llama-3-8B
-
-  # Interactive job for debugging
-  uv run python tillicum.py --qos interactive --gpus 2 --time 04:00:00 --interactive
 
   # Without uv (if you have your own environment setup)
   uv run python tillicum.py --gpus 1 --time 01:00:00 --no_uv -- python my_script.py
