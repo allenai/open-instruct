@@ -57,6 +57,7 @@ uv run python tillicum.py \
     --local_eval_every 10 \
     --vllm_sync_backend nccl \
     --vllm_gpu_memory_utilization 0.8 \
+    --with_tracking \
     --save_traces \
     --rollouts_save_path='$EXPERIMENT_DIR/rollouts' \
     --output_dir='$EXPERIMENT_DIR/output' \
