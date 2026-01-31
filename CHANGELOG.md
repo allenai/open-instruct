@@ -16,5 +16,6 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Fixed evaluation responses being lost on timeout in grpo_fast by requeuing partial results (https://github.com/allenai/open-instruct/pull/1439).
 - Beaker Experiment Launch now passes (https://github.com/allenai/open-instruct/pull/1424#pullrequestreview-3708034780).
+- Avoided synchronous CUDA transfers when moving batches to device (https://github.com/allenai/open-instruct/pull/0000).
 
 ### Removed
