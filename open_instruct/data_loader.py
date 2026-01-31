@@ -221,9 +221,13 @@ class HFDataLoader(data_loader.DataLoaderBase):
         generator = torch.Generator()
         generator.manual_seed(self.seed + epoch)
         all_indices = torch.randperm(len(self._full_dataset), generator=generator).numpy()
+        test_gen = torch.Generator().manual_seed(123)
+        test_perm = torch.randperm(100, generator=test_gen)
         logger.info(
             f"DEBUG [HFDataLoader] _reshard epoch={epoch} seed={self.seed} "
-            f"first_10_indices={all_indices[:10].tolist()}"
+            f"first_10_indices={all_indices[:10].tolist()} "
+            f"torch_version={torch.__version__} "
+            f"test_randperm_100_seed123={test_perm[:10].tolist()}"
         )
         if self._excluded_indices:
             mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
