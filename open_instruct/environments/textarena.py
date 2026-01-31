@@ -34,11 +34,17 @@ class TextArenaEnv(RLEnvironment):
         if not _TEXTARENA_AVAILABLE:
             raise ImportError("textarena-env required. Install with: uv pip install textarena-env")
         self._base_url = base_url
-        self._client = TextArenaClient(base_url=base_url)
+        self._client: TextArenaClient | None = None
         self._last_observation: str = ""
+
+    def _ensure_client(self):
+        """Lazily create and connect the client when needed."""
+        if self._client is None:
+            self._client = TextArenaClient(base_url=self._base_url)
 
     def reset(self) -> StepResult:
         """Reset environment and get initial observation."""
+        self._ensure_client()
         result = self._client.reset()
         # Extract the game prompt/instructions
         self._last_observation = result.observation.prompt
@@ -55,6 +61,7 @@ class TextArenaEnv(RLEnvironment):
         Args:
             action: Action dict with "word" or "message" key (e.g., {"word": "crane"})
         """
+        self._ensure_client()
         # Extract message from action dict
         word = action.get("word") or action.get("message", "")
 

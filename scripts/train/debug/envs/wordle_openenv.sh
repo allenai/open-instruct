@@ -73,13 +73,13 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra openenv open_instruct/grpo_fa
     --local_eval_every 1 \
     --vllm_sync_backend gloo \
     --single_gpu_mode \
-    --vllm_gpu_memory_utilization 0.3 \
+    --vllm_gpu_memory_utilization 0.55 \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --tools wordle python \
     --tool_call_names wordle code \
-    --tool_configs "{\"base_url\": \"${TEXTARENA_URL}\", \"pool_size\": 4}" '{"api_endpoint": "https://open-instruct-tool-server.run.app/execute", "timeout": 3}' \
+    --tool_configs "{\"base_url\": \"${TEXTARENA_URL}\", \"pool_size\": 1}" '{"api_endpoint": "https://open-instruct-tool-server.run.app/execute", "timeout": 3}' \
     --tool_parser_type vllm_hermes \
     --max_tool_calls 10 \
     --filter_zero_std_samples false \
