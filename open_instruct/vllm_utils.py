@@ -56,7 +56,6 @@ from torch.distributed.distributed_c10d import (
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
-from vllm.v1.core import kv_cache_utils
 
 from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
@@ -105,6 +104,7 @@ class SamplingConfig:
     temperature: float = 0.7
     top_p: float = 1.0
     max_tokens: int = 256
+    min_tokens: int = 0
     n: int = 1
     stop: list[str] | None = None
     seed: int | None = None
@@ -586,7 +586,8 @@ class LLMRayActor:
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
-        self.inference_batch_size = self.get_kv_cache_info()
+        # Skip get_kv_cache_info() - it hangs on hybrid models due to multi-dtype serialization issues
+        self.inference_batch_size = 64
         self._init_executor()
         # comes after executor as it requires tokenizer access.
         self._init_tool_parser(tool_parser_type)
@@ -847,23 +848,13 @@ class LLMRayActor:
             )
 
     def get_kv_cache_info(self) -> int:
-        """Get KV cache max concurrency from the vLLM engine."""
-        kv_cache_specs = self._run_async(self.llm_engine.collective_rpc("get_kv_cache_spec"))
+        """Get KV cache max concurrency from the vLLM engine.
 
-        vllm_config = self.llm_engine.vllm_config
-        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
-        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
-        available_memory = int(gpu_memory_utilization * total_gpu_memory)
-
-        kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_specs[0])
-
-        kv_cache_config = kv_cache_utils.get_kv_cache_config_from_groups(
-            vllm_config, kv_cache_groups, available_memory
-        )
-
-        max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_config)
-
-        return int(max_concurrency)
+        Returns the pre-set inference_batch_size instead of calling collective_rpc
+        which hangs on hybrid models (e.g., OLMo with linear RNNs) due to
+        multi-dtype serialization issues with the multiprocessing executor.
+        """
+        return self.inference_batch_size
 
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
@@ -895,6 +886,8 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
     while True:
         current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+        params_dict = dataclasses.asdict(current_sampling_params)
+        min_tokens = params_dict.pop("min_tokens", 0)
         api_response = await actor.client.completions.create(
             model=actor.model_name,
             prompt=current_prompt,
@@ -903,8 +896,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 "cache_salt": base_request_id,
                 "include_stop_str_in_output": True,
                 "skip_special_tokens": False,
+                "min_tokens": min_tokens,
             },
-            **dataclasses.asdict(current_sampling_params),
+            **params_dict,
         )
 
         output = api_response.choices[0]
@@ -1075,6 +1069,7 @@ def create_vllm_engines(
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
+    vllm_dtype: str = "bfloat16",
 ) -> list[ray.actor.ActorHandle]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     vllm_engines = []
@@ -1136,7 +1131,7 @@ def create_vllm_engines(
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
-                dtype="bfloat16",
+                dtype=vllm_dtype,
                 seed=seed + i,
                 distributed_executor_backend=distributed_executor_backend,
                 enable_prefix_caching=enable_prefix_caching,
