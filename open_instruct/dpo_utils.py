@@ -21,6 +21,7 @@ import contextlib
 import enum
 import functools
 import hashlib
+import itertools
 import json
 import os
 import pathlib
@@ -50,6 +51,16 @@ from open_instruct.padding_free_collator import concatenated_inputs as pf_concat
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
 logger = logger_utils.setup_logger(__name__)
+
+PAD_VALUES: dict[str, int] = {"labels": -100, "attention_mask": 0}
+
+
+def pad_tensor_to_length(tensor: torch.Tensor, target_length: int, pad_value: int) -> torch.Tensor:
+    """Pad a tensor along dimension 1 to the target length."""
+    current_len = tensor.shape[1]
+    if current_len >= target_length:
+        return tensor
+    return torch.nn.functional.pad(tensor, (0, target_length - current_len), value=pad_value)
 
 
 def config_to_json_serializable(obj: object) -> object:
@@ -158,6 +169,8 @@ class TrainingConfig:
     """Pipeline parallelism degree. Default 1 (disabled)."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
+    compile_model: bool = False
+    """Whether to apply torch.compile to model blocks."""
 
 
 @dataclass
@@ -1074,6 +1087,8 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
     adapted from https://github.com/huggingface/transformers/blob/main/src/transformers/data/data_collator.py#L517C1
     """
 
+    max_length: int | None = None
+
     def __call__(self, features, return_tensors=None):
         # call the original collator on chosen and rejected separately, then combine
         def filter_batch(match_string, features):
@@ -1101,6 +1116,13 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             result["rejected_" + k] = rejected_features[k]
         if "index" in features[0]:
             result["index"] = torch.tensor([f["index"] for f in features])
+
+        if self.max_length is not None:
+            for prefix, key in itertools.product(["chosen_", "rejected_"], ["input_ids", "attention_mask", "labels"]):
+                full_key = f"{prefix}{key}"
+                pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
+                result[full_key] = pad_tensor_to_length(result[full_key], self.max_length, pad_value)
+
         max_len = max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
         chosen_padded = torch.nn.functional.pad(
             result["chosen_input_ids"],
