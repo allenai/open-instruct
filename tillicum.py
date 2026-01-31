@@ -816,9 +816,8 @@ def run_interactive_job(args: argparse.Namespace) -> None:
     os.execvp("salloc", cmd)
 
 
-def estimate_cost(gpus_per_node: int, nodes: int, time_str: str) -> float:
-    """Estimate job cost based on GPU hours."""
-    # Parse time string (HH:MM:SS or D-HH:MM:SS)
+def _parse_hours(time_str: str) -> float:
+    """Parse time string (HH:MM:SS or D-HH:MM:SS) to hours."""
     parts = time_str.split("-")
     if len(parts) == 2:
         days = int(parts[0])
@@ -828,7 +827,12 @@ def estimate_cost(gpus_per_node: int, nodes: int, time_str: str) -> float:
         time_part = parts[0]
 
     h, m, s = map(int, time_part.split(":"))
-    total_hours = days * 24 + h + m / 60 + s / 3600
+    return days * 24 + h + m / 60 + s / 3600
+
+
+def estimate_cost(gpus_per_node: int, nodes: int, time_str: str) -> float:
+    """Estimate job cost based on GPU hours."""
+    total_hours = _parse_hours(time_str)
 
     # $0.90 per GPU hour, total GPUs = gpus_per_node * nodes
     total_gpus = gpus_per_node * nodes
@@ -935,20 +939,6 @@ def main():
             console.log(f"Cancel job:     [bold]scancel {job_id}[/bold]")
             console.log(f"View logs:      [bold]tail -f {display_dir}/logs/slurm-{job_id}.out[/bold]")
             console.log(f"Job efficiency: [bold]seff {job_id}[/bold] (after completion)")
-
-
-def _parse_hours(time_str: str) -> float:
-    """Parse time string to hours for cost calculation."""
-    parts = time_str.split("-")
-    if len(parts) == 2:
-        days = int(parts[0])
-        time_part = parts[1]
-    else:
-        days = 0
-        time_part = parts[0]
-
-    h, m, s = map(int, time_part.split(":"))
-    return days * 24 + h + m / 60 + s / 3600
 
 
 if __name__ == "__main__":
