@@ -31,7 +31,7 @@ from olmo_core.train.train_module.transformer import (
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
-from open_instruct.beaker_callback import BeakerCallbackV2
+from open_instruct.olmo_core_callbacks import BeakerCallbackV2, PerfCallback
 from open_instruct.olmo_core_train_modules import DPOTrainModule
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
@@ -112,9 +112,10 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
     model = model.to(device=device, dtype=torch.bfloat16)
 
-    if args.gradient_checkpointing:
-        logger.info("Enabling activation checkpointing...")
-        model.apply_activation_checkpointing(TransformerActivationCheckpointingMode.full)
+    logger.info(f"Applying activation checkpointing (budget={args.activation_memory_budget})...")
+    model.apply_activation_checkpointing(
+        TransformerActivationCheckpointingMode.budget, activation_memory_budget=args.activation_memory_budget
+    )
 
     return model, model_config
 
@@ -211,7 +212,7 @@ def _setup_optimizer_and_scheduler(args: dpo_utils.ExperimentConfig, model, num_
     return optim, scheduler
 
 
-def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
+def _setup_callbacks(args: dpo_utils.ExperimentConfig, model, dp_world_size: int):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
@@ -235,6 +236,13 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, model):
         )
     checkpointing_steps = int(args.checkpointing_steps)
     trainer_callbacks["checkpointer"] = CheckpointerCallback(save_interval=checkpointing_steps, save_async=False)
+    model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
+    trainer_callbacks["perf"] = PerfCallback(
+        model_dims=model_dims,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        num_training_gpus=dp_world_size,
+    )
     return trainer_callbacks
 
 
@@ -271,7 +279,7 @@ def _handle_post_training(
         if args.with_tracking:
             wandb_tracker = trainer_callbacks.get("wandb")
             if wandb_tracker is not None and hasattr(wandb_tracker, "run") and wandb_tracker.run is not None:
-                wandb_url = wandb_tracker.run.url
+                wandb_url = wandb_tracker.run.get_url()
         if args.hf_repo_revision is not None:
             eval_path = hf_model_path
             if beaker_config is not None and beaker_config.beaker_dataset_ids:
@@ -447,7 +455,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         max_grad_norm=max_grad_norm,
     )
 
-    trainer_callbacks = _setup_callbacks(args, model)
+    trainer_callbacks = _setup_callbacks(args, model, dp_world_size)
 
     trainer = train.TrainerConfig(
         save_folder=args.output_dir,
