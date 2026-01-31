@@ -89,9 +89,24 @@ def eval_aime(results: list[dict]) -> dict:
     total = 0
     details = []
     
+    # Track by year
+    by_year = {}
+    
     for sample in results:
         total += 1
         ground_truth = sample.get("answer", sample.get("solution", ""))
+        source = sample.get("source", "")
+        
+        # Determine year from source
+        year = "unknown"
+        if "aime24" in source.lower() or "2024" in source:
+            year = "2024"
+        elif "aime25" in source.lower() or "2025" in source:
+            year = "2025"
+        
+        if year not in by_year:
+            by_year[year] = {"correct": 0, "total": 0}
+        by_year[year]["total"] += 1
         
         # Handle multi-sample (majority voting)
         if "generated_responses" in sample:
@@ -127,9 +142,11 @@ def eval_aime(results: list[dict]) -> dict:
         
         if is_correct:
             correct += 1
+            by_year[year]["correct"] += 1
         
         details.append({
             "id": sample.get("id", total - 1),
+            "year": year,
             "ground_truth": ground_truth,
             "predicted": predicted,
             "vote_count": count if "generated_responses" in sample else None,
@@ -137,13 +154,27 @@ def eval_aime(results: list[dict]) -> dict:
         })
     
     accuracy = correct / total if total > 0 else 0
+    
+    # Calculate per-year accuracy
+    year_results = {}
+    for year, counts in sorted(by_year.items()):
+        year_acc = counts["correct"] / counts["total"] if counts["total"] > 0 else 0
+        year_results[year] = {
+            "accuracy": year_acc,
+            "correct": counts["correct"],
+            "total": counts["total"],
+        }
+    
     print(f"\nAIME Results:")
-    print(f"  Accuracy: {accuracy:.2%} ({correct}/{total})")
+    print(f"  Overall Accuracy: {accuracy:.2%} ({correct}/{total})")
+    for year, yr in sorted(year_results.items()):
+        print(f"  AIME {year}: {yr['accuracy']:.2%} ({yr['correct']}/{yr['total']})")
     
     return {
         "accuracy": accuracy,
         "correct": correct,
         "total": total,
+        "by_year": year_results,
         "details": details,
     }
 
