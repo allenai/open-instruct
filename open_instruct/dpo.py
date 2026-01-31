@@ -112,9 +112,10 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
     model = model.to(device=device, dtype=torch.bfloat16)
 
-    if args.gradient_checkpointing:
-        logger.info("Enabling activation checkpointing...")
-        model.apply_activation_checkpointing(TransformerActivationCheckpointingMode.full)
+    logger.info(f"Applying activation checkpointing (budget={args.activation_memory_budget})...")
+    model.apply_activation_checkpointing(
+        TransformerActivationCheckpointingMode.budget, activation_memory_budget=args.activation_memory_budget
+    )
 
     return model, model_config
 
