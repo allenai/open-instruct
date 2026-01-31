@@ -616,18 +616,14 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
 
     # Passthrough env vars from local environment (these override Tillicum defaults)
     passthrough_vars = get_passthrough_env_vars()
-    wandb_vars_added = []
-    hf_vars_added = []
 
     for name, value in passthrough_vars.items():
         # Check if it's a WANDB or HF variable and if passthrough is enabled
         if name in WANDB_PASSTHROUGH_VARS and not args.no_wandb_passthrough:
             lines.append(f"export {name}={shlex.quote(value)}")
-            wandb_vars_added.append(name)
         elif name in HF_PASSTHROUGH_VARS and not args.no_hf_passthrough:
             # HF cache vars from local env override Tillicum defaults
             lines.append(f"export {name}={shlex.quote(value)}")
-            hf_vars_added.append(name)
 
     # User-specified env vars (these override passthrough)
     for env_var in args.env:
