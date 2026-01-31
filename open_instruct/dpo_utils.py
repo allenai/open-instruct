@@ -1136,9 +1136,7 @@ def concatenated_forward_olmo(
             f"DEBUG [OLMo forward] "
             f"packed_logits.shape={packed_logits.shape} "
             f"packed_logits[0,0,:5]={packed_logits[0, 0, :5].tolist()} "
-            f"packed_logits[0,-1,:5]={packed_logits[0, -1, :5].tolist()} "
-            f"packed_logits[0,447,:5]={packed_logits[0, 447, :5].tolist()} "
-            f"packed_logits[0,{rejected_start}+447,:5]={packed_logits[0, rejected_start + 447, :5].tolist() if rejected_start + 447 < packed_logits.shape[1] else 'N/A'}"
+            f"packed_logits[0,-1,:5]={packed_logits[0, -1, :5].tolist()}"
         )
 
         batch_size = concatenated_batch["concatenated_input_ids"].shape[0]
