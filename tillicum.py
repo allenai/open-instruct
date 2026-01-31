@@ -266,6 +266,22 @@ QOS Options:
         action="store_true",
         help="Don't automatically rewrite accelerate launch commands for multi-node",
     )
+    parser.add_argument(
+        "--requeue",
+        type=int,
+        nargs="?",
+        const=10,
+        default=None,
+        metavar="MAX_REQUEUES",
+        help="Auto-requeue job when approaching time limit (default: 10 max requeues). "
+        "Sends SIGUSR1 5min before timeout to trigger checkpoint and resubmit.",
+    )
+    parser.add_argument(
+        "--requeue_signal_time",
+        type=int,
+        default=300,
+        help="Seconds before time limit to send signal (default: 300 = 5 minutes)",
+    )
 
     # Parse mason args from command args
     tillicum_args, command_args = parser.parse_known_args()
@@ -287,6 +303,11 @@ QOS Options:
     # Warn about multi-node with non-normal QOS
     if tillicum_args.nodes > 1 and tillicum_args.qos != "normal":
         console.log(f"[yellow]Warning: Multi-node jobs typically require 'normal' QOS, not '{tillicum_args.qos}'[/yellow]")
+
+    # Auto-enable resumable mode when requeue is enabled
+    if tillicum_args.requeue is not None and not tillicum_args.resumable:
+        tillicum_args.resumable = True
+        console.log("[yellow]Auto-enabled resumable mode for requeue support[/yellow]")
 
     # Auto-detect resumable mode for open-instruct commands
     if commands and not tillicum_args.resumable:
@@ -428,6 +449,12 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
     lines.append(f"#SBATCH --gres=gpu:{args.gpus}")
     lines.append(f"#SBATCH --time={args.time}")
 
+    # Auto-requeue configuration
+    if args.requeue is not None:
+        # Send SIGUSR1 before time limit to allow graceful checkpoint and requeue
+        lines.append(f"#SBATCH --signal=SIGUSR1@{args.requeue_signal_time}")
+        lines.append("#SBATCH --open-mode=append")  # Append to log files on requeue
+
     # Multi-node configuration
     if args.nodes > 1:
         lines.append(f"#SBATCH --nodes={args.nodes}")
@@ -471,8 +498,76 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
     lines.append('echo "GPUs: $CUDA_VISIBLE_DEVICES"')
     lines.append('echo "Experiment Dir: $EXPERIMENT_DIR"')
     lines.append('echo "Start Time: $(date)"')
+
+    # Requeue counter and handler
+    if args.requeue is not None:
+        lines.append(f'echo "Requeue: enabled (max {args.requeue} requeues)"')
+        lines.append("")
+        lines.append("# Track requeue count")
+        lines.append("REQUEUE_COUNT_FILE=$EXPERIMENT_DIR/.requeue_count")
+        lines.append("if [ -f $REQUEUE_COUNT_FILE ]; then")
+        lines.append("    REQUEUE_COUNT=$(cat $REQUEUE_COUNT_FILE)")
+        lines.append("else")
+        lines.append("    REQUEUE_COUNT=0")
+        lines.append("fi")
+        lines.append('echo "Current requeue count: $REQUEUE_COUNT"')
+
     lines.append('echo "=========================================="')
     lines.append("")
+
+    # Auto-requeue signal handler
+    if args.requeue is not None:
+        lines.append("# Auto-requeue signal handler")
+        lines.append("# SIGUSR1 is sent by SLURM before time limit")
+        lines.append("requeue_handler() {")
+        lines.append('    echo ""')
+        lines.append('    echo "=========================================="')
+        lines.append('    echo "SIGUSR1 received - approaching time limit"')
+        lines.append('    echo "Initiating graceful shutdown for requeue..."')
+        lines.append('    echo "=========================================="')
+        lines.append("")
+        lines.append("    # Check if we've exceeded max requeues")
+        lines.append(f"    if [ $REQUEUE_COUNT -ge {args.requeue} ]; then")
+        lines.append(f'        echo "ERROR: Max requeues ({args.requeue}) exceeded. Not requeuing."')
+        lines.append("        exit 1")
+        lines.append("    fi")
+        lines.append("")
+        lines.append("    # Increment requeue count")
+        lines.append("    REQUEUE_COUNT=$((REQUEUE_COUNT + 1))")
+        lines.append("    echo $REQUEUE_COUNT > $REQUEUE_COUNT_FILE")
+        lines.append('    echo "Requeue count updated to: $REQUEUE_COUNT"')
+        lines.append("")
+        lines.append("    # Send SIGTERM to child processes to trigger graceful shutdown")
+        lines.append("    # Training scripts should save checkpoint on SIGTERM")
+        lines.append('    echo "Sending SIGTERM to training process..."')
+        lines.append("    kill -TERM $TRAINING_PID 2>/dev/null || true")
+        lines.append("")
+        lines.append("    # Wait for training to save checkpoint (up to 4 minutes)")
+        lines.append('    echo "Waiting for checkpoint save (up to 4 minutes)..."')
+        lines.append("    for i in $(seq 1 48); do")
+        lines.append("        if ! kill -0 $TRAINING_PID 2>/dev/null; then")
+        lines.append('            echo "Training process exited."')
+        lines.append("            break")
+        lines.append("        fi")
+        lines.append("        sleep 5")
+        lines.append("    done")
+        lines.append("")
+        lines.append("    # Resubmit the job")
+        lines.append('    echo "Resubmitting job..."')
+        lines.append("    SLURM_SCRIPT=$EXPERIMENT_DIR/job.slurm")
+        lines.append("    if [ -f $SLURM_SCRIPT ]; then")
+        lines.append("        NEW_JOB_ID=$(sbatch $SLURM_SCRIPT | awk '{print $4}')")
+        lines.append('        echo "Requeued as job $NEW_JOB_ID"')
+        lines.append("    else")
+        lines.append('        echo "ERROR: Could not find $SLURM_SCRIPT for requeue"')
+        lines.append("    fi")
+        lines.append("")
+        lines.append("    exit 0")
+        lines.append("}")
+        lines.append("")
+        lines.append("trap requeue_handler SIGUSR1")
+        lines.append('echo "Requeue handler installed (SIGUSR1)"')
+        lines.append("")
 
     # Module loading (e.g., cuda)
     if args.module:
@@ -622,7 +717,15 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
         # For multi-node jobs, run on head node (Ray handles distribution via placement groups)
         if args.nodes > 1:
             lines.append(f"# Running on head node - Ray distributes to {args.nodes} nodes via placement groups")
-            lines.append(cmd_str)
+
+        # If requeue is enabled, run in background and track PID for signal handling
+        if args.requeue is not None:
+            lines.append(f"{cmd_str} &")
+            lines.append("TRAINING_PID=$!")
+            lines.append('echo "Training started with PID: $TRAINING_PID"')
+            lines.append("wait $TRAINING_PID")
+            lines.append("TRAINING_EXIT_CODE=$?")
+            lines.append('echo "Training exited with code: $TRAINING_EXIT_CODE"')
         else:
             lines.append(cmd_str)
         lines.append("")
