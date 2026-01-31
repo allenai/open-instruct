@@ -64,6 +64,7 @@ import gzip
 import json
 import os
 import sys
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -73,8 +74,8 @@ import numpy as np
 from tqdm import tqdm
 
 
-def save_checkpoint(output_dir: str, checkpoint_data: dict[str, Any]) -> None:
-    """Save checkpoint to disk atomically."""
+def save_checkpoint_metadata(output_dir: str, checkpoint_data: dict[str, Any]) -> None:
+    """Save checkpoint metadata to disk atomically (excludes token data)."""
     checkpoint_path = os.path.join(output_dir, "_checkpoint.json")
     tmp_path = checkpoint_path + ".tmp"
     with open(tmp_path, "w") as f:
@@ -83,7 +84,7 @@ def save_checkpoint(output_dir: str, checkpoint_data: dict[str, Any]) -> None:
 
 
 def load_checkpoint(output_dir: str) -> Optional[dict[str, Any]]:
-    """Load checkpoint from disk if it exists."""
+    """Load checkpoint metadata from disk if it exists."""
     checkpoint_path = os.path.join(output_dir, "_checkpoint.json")
     if os.path.exists(checkpoint_path):
         with open(checkpoint_path) as f:
@@ -92,11 +93,45 @@ def load_checkpoint(output_dir: str) -> Optional[dict[str, Any]]:
 
 
 def remove_checkpoint(output_dir: str) -> None:
-    """Remove checkpoint file after successful completion."""
+    """Remove checkpoint files after successful completion."""
     checkpoint_path = os.path.join(output_dir, "_checkpoint.json")
     if os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)
-        print(f"Removed checkpoint file: {checkpoint_path}")
+        logger.info(f"Removed checkpoint file: {checkpoint_path}")
+    for partial_file in ["_partial_tokens.bin", "_partial_labels.bin", "_partial_boundaries.bin"]:
+        partial_path = os.path.join(output_dir, partial_file)
+        if os.path.exists(partial_path):
+            os.remove(partial_path)
+            logger.info(f"Removed partial file: {partial_path}")
+
+
+def append_tokens_to_disk(
+    output_dir: str,
+    token_ids: list[int],
+    labels_mask: list[int],
+    document_boundaries: list[tuple[int, int]],
+    token_dtype: np.dtype,
+) -> None:
+    """Append tokens to binary files (append-only, no loading required)."""
+    with open(os.path.join(output_dir, "_partial_tokens.bin"), "ab") as f:
+        f.write(np.array(token_ids, dtype=token_dtype).tobytes())
+    with open(os.path.join(output_dir, "_partial_labels.bin"), "ab") as f:
+        f.write(np.array(labels_mask, dtype=np.bool_).tobytes())
+    with open(os.path.join(output_dir, "_partial_boundaries.bin"), "ab") as f:
+        f.write(np.array(document_boundaries, dtype=np.int64).tobytes())
+
+
+def load_progress(output_dir: str, token_dtype: np.dtype) -> tuple[int, list[tuple[int, int]]]:
+    """Load progress info from partial files (token count and boundaries, not full data)."""
+    tokens_path = os.path.join(output_dir, "_partial_tokens.bin")
+    boundaries_path = os.path.join(output_dir, "_partial_boundaries.bin")
+
+    if os.path.exists(tokens_path):
+        token_count = os.path.getsize(tokens_path) // np.dtype(token_dtype).itemsize
+        boundaries_data = np.fromfile(boundaries_path, dtype=np.int64).reshape(-1, 2)
+        boundaries = [tuple(b) for b in boundaries_data.tolist()]
+        return token_count, boundaries
+    return 0, []
 
 from open_instruct.dataset_transformation import (
     ATTENTION_MASK_KEY,
@@ -109,7 +144,10 @@ from open_instruct.dataset_transformation import (
     remove_dataset_source_field,
     visualize_token,
 )
+from open_instruct import logger_utils, utils
 from open_instruct.utils import ArgumentParserPlus, is_beaker_job
+
+logger = logger_utils.setup_logger(__name__)
 
 
 @dataclass
@@ -182,19 +220,19 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         if os.path.exists(beaker_cache_dir):
             args.dataset_local_cache_dir = beaker_cache_dir
 
-    print("Verify these values match the tokenizer config used in Olmo-core:")
-    print(f"Tokenizer vocab_size: {tc.tokenizer.vocab_size}")
-    print(f"Tokenizer bos_token_id: {tc.tokenizer.bos_token_id}")
-    print(f"Tokenizer pad_token_id: {tc.tokenizer.pad_token_id}")
-    print(f"Tokenizer eos_token_id: {tc.tokenizer.eos_token_id}")
-    print(f"Tokenizer chat_template: {tc.tokenizer.chat_template}")
+    logger.info("Verify these values match the tokenizer config used in Olmo-core:")
+    logger.info(f"Tokenizer vocab_size: {tc.tokenizer.vocab_size}")
+    logger.info(f"Tokenizer bos_token_id: {tc.tokenizer.bos_token_id}")
+    logger.info(f"Tokenizer pad_token_id: {tc.tokenizer.pad_token_id}")
+    logger.info(f"Tokenizer eos_token_id: {tc.tokenizer.eos_token_id}")
+    logger.info(f"Tokenizer chat_template: {tc.tokenizer.chat_template}")
 
     output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
 
     tokenizer_output_dir = os.path.join(output_dir, "tokenizer")
     os.makedirs(tokenizer_output_dir, exist_ok=True)
-    print(f"Saving tokenizer to {tokenizer_output_dir}...")
+    logger.info(f"Saving tokenizer to {tokenizer_output_dir}...")
     tc.tokenizer.save_pretrained(tokenizer_output_dir)
 
     # Check if chat_template.jinja exists and add it to tokenizer_config.json
@@ -209,9 +247,9 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
             tokenizer_config["chat_template"] = chat_template_content
             with open(tokenizer_config_path, "w") as f:
                 json.dump(tokenizer_config, f, indent=2)
-            print(f"Added chat_template from {chat_template_path} to tokenizer_config.json")
+            logger.info(f"Added chat_template from {chat_template_path} to tokenizer_config.json")
 
-    print("Tokenizer saved successfully!")
+    logger.info("Tokenizer saved successfully!")
 
     if args.tokenizer_config_only:
         return
@@ -240,58 +278,63 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     train_dataset = train_dataset.shuffle(seed=args.shuffle_seed)
 
     if args.visualize:
-        print("Visualizing first example...")
+        logger.info("Visualizing first example...")
         visualize_token(train_dataset[0][INPUT_IDS_KEY], tc.tokenizer)
-        print("Labels:", train_dataset[0][LABELS_KEY])
-        print("Attention mask:", train_dataset[0][ATTENTION_MASK_KEY])
+        logger.info("Labels:", train_dataset[0][LABELS_KEY])
+        logger.info("Attention mask:", train_dataset[0][ATTENTION_MASK_KEY])
 
     if args.num_examples > 0:
-        print(f"Selecting {args.num_examples} examples for debugging")
+        logger.info(f"Selecting {args.num_examples} examples for debugging")
         train_dataset = train_dataset.select(range(args.num_examples))
 
-    # Initialize state (centralized to avoid duplication)
-    state = {
-        "samples_processed": 0,
-        "token_ids": [],
-        "labels_mask": [],
-        "document_boundaries": [],
-        "current_position": 0,
-        "num_samples_skipped": 0,
-        "per_dataset_counts": {},
-        "per_dataset_tokens": {},
-        "per_dataset_trainable_tokens": {},
-        "per_dataset_filtered": {},
-    }
+    # Determine token dtype early (needed for incremental checkpointing)
+    vocab_size = tc.tokenizer.vocab_size
+    token_dtype = None
+    for dtype in (np.uint8, np.uint16, np.uint32, np.uint64):
+        if (vocab_size - 1) <= np.iinfo(dtype).max:
+            token_dtype = dtype
+            logger.info(f"Using dtype '{dtype}' for token_ids based on vocab size {vocab_size}")
+            break
+    if token_dtype is None:
+        raise ValueError(f"Vocab size {vocab_size} is too big for any numpy integer dtype!")
+
+    # Initialize state
+    start_idx = 0
+    current_position = 0
+    num_samples_skipped = 0
+    per_dataset_counts: dict[str, int] = {}
+    per_dataset_tokens: dict[str, int] = {}
+    per_dataset_trainable_tokens: dict[str, int] = {}
+    per_dataset_filtered: dict[str, int] = {}
+
+    # In-memory buffers (flushed to disk at each checkpoint)
+    token_ids: list[int] = []
+    labels_mask: list[int] = []
+    document_boundaries: list[tuple[int, int]] = []
 
     # Check for existing checkpoint to resume from
     checkpoint = load_checkpoint(output_dir) if args.resume else None
     if checkpoint:
-        state.update(checkpoint)
-        # JSON converts tuples to lists, convert back
-        state["document_boundaries"] = [tuple(b) for b in state["document_boundaries"]]
-        print(f"=== RESUMING from checkpoint ===")
-        print(f"  Samples already processed: {state['samples_processed']:,}")
-        print(f"  Tokens collected: {len(state['token_ids']):,}")
-        print(f"  Remaining samples: {len(train_dataset) - state['samples_processed']:,}")
-        print(f"================================")
+        start_idx = checkpoint["samples_processed"]
+        current_position, _ = load_progress(output_dir, token_dtype)
+        num_samples_skipped = checkpoint["num_samples_skipped"]
+        per_dataset_counts = checkpoint["per_dataset_counts"]
+        per_dataset_tokens = checkpoint["per_dataset_tokens"]
+        per_dataset_trainable_tokens = checkpoint["per_dataset_trainable_tokens"]
+        per_dataset_filtered = checkpoint["per_dataset_filtered"]
+        logger.info(f"=== RESUMING from checkpoint ===")
+        logger.info(f"  Samples already processed: {start_idx:,}")
+        logger.info(f"  Tokens on disk: {current_position:,}")
+        logger.info(f"  Remaining samples: {len(train_dataset) - start_idx:,}")
+        logger.info(f"================================")
     elif args.resume:
-        print("No checkpoint found, starting from beginning...")
+        logger.info("No checkpoint found, starting from beginning...")
 
-    # Extract state into local variables for convenience
-    start_idx = state["samples_processed"]
-    token_ids = state["token_ids"]
-    labels_mask = state["labels_mask"]
-    document_boundaries = state["document_boundaries"]
-    current_position = state["current_position"]
-    num_samples_skipped = state["num_samples_skipped"]
-    per_dataset_counts = state["per_dataset_counts"]
-    per_dataset_tokens = state["per_dataset_tokens"]
-    per_dataset_trainable_tokens = state["per_dataset_trainable_tokens"]
-    per_dataset_filtered = state["per_dataset_filtered"]
-
-    print("Collecting tokens from dataset...")
+    logger.info("Collecting tokens from dataset...")
     sample: Mapping[str, Any]
     total_samples = len(train_dataset)
+    processing_start_time = time.time()
+    utils.maybe_update_beaker_description()
 
     # Skip to resume point efficiently using dataset.select()
     if start_idx > 0:
@@ -345,13 +388,14 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
             mask == 1 for mask in sample[ATTENTION_MASK_KEY]
         ), f"Expected all attention mask values to be 1, but found: {sample[ATTENTION_MASK_KEY]}"
 
-        # Save checkpoint periodically
+        # Save checkpoint periodically (flush to disk and save metadata)
         if (idx + 1) % args.checkpoint_interval == 0 and idx > start_idx:
-            save_checkpoint(output_dir, {
+            append_tokens_to_disk(output_dir, token_ids, labels_mask, document_boundaries, token_dtype)
+            token_ids.clear()
+            labels_mask.clear()
+            document_boundaries.clear()
+            save_checkpoint_metadata(output_dir, {
                 "samples_processed": idx + 1,
-                "token_ids": token_ids,
-                "labels_mask": labels_mask,
-                "document_boundaries": document_boundaries,
                 "current_position": current_position,
                 "num_samples_skipped": num_samples_skipped,
                 "per_dataset_counts": per_dataset_counts,
@@ -359,25 +403,43 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
                 "per_dataset_trainable_tokens": per_dataset_trainable_tokens,
                 "per_dataset_filtered": per_dataset_filtered,
             })
-            print(f"\nCheckpoint saved at sample {idx + 1:,} ({len(token_ids):,} tokens)")
+            logger.info(f"\nCheckpoint saved at sample {idx + 1:,} ({current_position:,} tokens)")
+            utils.maybe_update_beaker_description(
+                current_step=idx + 1,
+                total_steps=total_samples,
+                start_time=processing_start_time,
+            )
 
     train_dataset = remove_dataset_source_field(train_dataset)
 
+    # Flush any remaining tokens in memory to disk
+    if token_ids:
+        append_tokens_to_disk(output_dir, token_ids, labels_mask, document_boundaries, token_dtype)
+
+    # Load all data from partial files
+    tokens_path = os.path.join(output_dir, "_partial_tokens.bin")
+    labels_path = os.path.join(output_dir, "_partial_labels.bin")
+    boundaries_path = os.path.join(output_dir, "_partial_boundaries.bin")
+
+    all_token_ids = np.fromfile(tokens_path, dtype=token_dtype)
+    all_labels_mask = np.fromfile(labels_path, dtype=np.bool_)
+    all_boundaries = np.fromfile(boundaries_path, dtype=np.int64).reshape(-1, 2)
+    all_document_boundaries = [tuple(b) for b in all_boundaries.tolist()]
+
     # Calculate final statistics
     total_instances = len(train_dataset)
-    total_tokens = len(token_ids)
-    total_trainable_tokens = sum(labels_mask)
+    total_tokens = len(all_token_ids)
+    total_trainable_tokens = int(all_labels_mask.sum())
 
-    print(f"Total sequences: {total_instances}")
-    print(f"Total tokens: {total_tokens}")
-    print(f"Maximum token ID: {max(token_ids)}")
-    print(f"Labels mask sum (trainable tokens): {total_trainable_tokens}")
-    print("Writing data to numpy files...")
-    print(f"Number of samples that should be skipped: {num_samples_skipped}")
+    logger.info(f"Total sequences: {total_instances}")
+    logger.info(f"Total tokens: {total_tokens}")
+    logger.info(f"Maximum token ID: {all_token_ids.max()}")
+    logger.info(f"Labels mask sum (trainable tokens): {total_trainable_tokens}")
+    logger.info("Writing data to numpy files...")
+    logger.info(f"Number of samples that should be skipped: {num_samples_skipped}")
 
     def write_memmap_chunked(base_filename, data, dtype, max_size_gb=1):
         """Write data to multiple memmap files if size exceeds max_size_gb."""
-        # Calculate size in bytes
         item_size = np.dtype(dtype).itemsize
         max_size_bytes = max_size_gb * 1024**3
 
@@ -393,57 +455,39 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
             mmap.flush()
             chunks.append(mmap)
             chunk_boundaries.append((i, i + len(chunk_data)))
-            print(f"Written {filename} ({len(chunk_data) * item_size / 1024**3:.2f} GB)")
+            logger.info(f"Written {filename} ({len(chunk_data) * item_size / 1024**3:.2f} GB)")
 
         return chunks, chunk_boundaries
 
-    def write_metadata_for_chunks(base_filename, document_boundaries, chunk_boundaries):
+    def write_metadata_for_chunks(base_filename, doc_boundaries, chunk_boundaries):
         """Write metadata files for each chunk with document boundaries."""
-
         for chunk_idx, (chunk_start, chunk_end) in enumerate(chunk_boundaries):
             metadata_filename = f"{base_filename}_part_{chunk_idx:04d}.csv.gz"
 
             with gzip.open(metadata_filename, "wt") as f:
-                # Find all documents that overlap with this chunk
-                for doc_start, doc_end in document_boundaries:
-                    # Check if document overlaps with chunk
+                for doc_start, doc_end in doc_boundaries:
                     if doc_end > chunk_start and doc_start < chunk_end:
-                        # Adjust boundaries relative to chunk start
                         adjusted_start = max(0, doc_start - chunk_start)
                         adjusted_end = min(chunk_end - chunk_start, doc_end - chunk_start)
-
-                        # Only write if there's actual content in this chunk
                         if adjusted_end > adjusted_start:
                             f.write(f"{adjusted_start},{adjusted_end}\n")
 
-            print(f"Written metadata {metadata_filename}")
+            logger.info(f"Written metadata {metadata_filename}")
 
-    # Choose dtype based on vocab size - Olmo-core does the
-    # same operation to infer the dtype of the token_ids array.
-    vocab_size = tc.tokenizer.vocab_size
-    token_dtype = None
-    for dtype in (np.uint8, np.uint16, np.uint32, np.uint64):
-        if (vocab_size - 1) <= np.iinfo(dtype).max:
-            token_dtype = dtype
-            print(f"Using `dtype '{dtype}' for token_ids based on vocab size {vocab_size}")
-            break
-    if token_dtype is None:
-        raise ValueError(f"Vocab size {vocab_size} is too big for any numpy integer dtype!")
-
-    print(f"Writing converted data to {output_dir}")
-    _, token_chunk_boundaries = write_memmap_chunked(f"{output_dir}/token_ids", token_ids, token_dtype)
-    write_metadata_for_chunks(f"{output_dir}/token_ids", document_boundaries, token_chunk_boundaries)
+    logger.info(f"Writing converted data to {output_dir}")
+    _, token_chunk_boundaries = write_memmap_chunked(f"{output_dir}/token_ids", all_token_ids, token_dtype)
+    write_metadata_for_chunks(f"{output_dir}/token_ids", all_document_boundaries, token_chunk_boundaries)
 
     # Write labels_mask using the same chunk boundaries as token_ids
     for i, (start, end) in enumerate(token_chunk_boundaries):
-        chunk_data = labels_mask[start:end]
+        chunk_data = all_labels_mask[start:end]
         filename = f"{output_dir}/labels_mask_part_{i:04d}.npy"
         mmap = np.memmap(filename, mode="w+", dtype=np.bool_, shape=(len(chunk_data),))
         mmap[:] = chunk_data
         mmap.flush()
-        print(f"Written {filename} ({len(chunk_data) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
+        logger.info(f"Written {filename} ({len(chunk_data) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
 
-    print("Data conversion completed successfully!")
+    logger.info("Data conversion completed successfully!")
 
     # Remove checkpoint file on successful completion
     remove_checkpoint(output_dir)
@@ -543,7 +587,7 @@ def write_dataset_statistics(
     json_path = os.path.join(output_dir, "dataset_statistics.json")
     with open(json_path, "w") as f:
         json.dump(stats_data, f, indent=2)
-    print(f"Written dataset statistics to {json_path}")
+    logger.info(f"Written dataset statistics to {json_path}")
 
     # Write human-readable text file
     text_path = os.path.join(output_dir, "dataset_statistics.txt")
@@ -607,7 +651,7 @@ def write_dataset_statistics(
         f.write(f"- Instances filtered out: {stats_data['overall_statistics']['instances_filtered']}\n")
         f.write(f"- Average sequence length: {stats_data['overall_statistics']['average_sequence_length']:.1f}\n")
 
-    print(f"Written human-readable statistics to {text_path}")
+    logger.info(f"Written human-readable statistics to {text_path}")
 
 
 if __name__ == "__main__":
