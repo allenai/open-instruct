@@ -464,6 +464,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         save_overwrite=True,
     ).build(train_module, data_loader)
 
+    trainer.epoch = 0
+
     logger.info("Starting training...")
     trainer.fit()
     logger.info("Training complete.")
