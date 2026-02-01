@@ -969,14 +969,27 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             # If no tool calls, check for environment fallback
             if not tool_calls:
                 # Fallback: if active environment but no tool call, pass raw text
+                # BUT: ToolEnv environments should NOT use fallback tool calls - they complete naturally
+                # when the model stops generating tool calls (triggers no_tools_called condition)
                 if active_env:
-                    # Get the primary parameter name from the environment tool
-                    param_name = await actor.tool_actor_map[active_env].get_primary_param_name.remote()
-                    logger.info(
-                        f"[process_requests] No tool calls found, passing raw text to environment {active_env} "
-                        f"with parameter '{param_name}'"
-                    )
-                    tool_calls = [ToolCall(name=active_env, args={param_name: output.text})]
+                    # Check if this is a ToolEnv that should skip fallback
+                    is_tool_env = await actor.tool_actor_map[active_env].is_tool_env.remote()
+                    if is_tool_env:
+                        logger.info(
+                            f"[process_requests] No tool calls found for ToolEnv {active_env}, "
+                            "passing final answer to environment (no tool execution)"
+                        )
+                        # Pass the final answer to env but mark it as content (not a tool call)
+                        # This ensures it gets added to state for scoring, but without tool_calls
+                        tool_calls = [ToolCall(name=active_env, args={"content": output.text})]
+                    else:
+                        # TextArenaEnv and others - use fallback with primary param
+                        param_name = await actor.tool_actor_map[active_env].get_primary_param_name.remote()
+                        logger.info(
+                            f"[process_requests] No tool calls found, passing raw text to environment {active_env} "
+                            f"with parameter '{param_name}'"
+                        )
+                        tool_calls = [ToolCall(name=active_env, args={param_name: output.text})]
                 else:
                     break
 

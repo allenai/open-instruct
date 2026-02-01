@@ -150,3 +150,27 @@ class EnvironmentTool(Tool):
         if properties:
             return next(iter(properties.keys()))
         return "content"  # Ultimate fallback
+
+    def is_tool_env(self) -> bool:
+        """Check if this environment uses verifiers ToolEnv (vs TextArenaEnv).
+
+        ToolEnv environments should NOT use fallback tool calls - they rely on
+        the model explicitly generating tool calls and completing naturally when
+        it stops doing so.
+        """
+        # Check if the environment class is PrimeIntellectEnv wrapping a ToolEnv
+        if self._env_class.__name__ == "PrimeIntellectEnv":
+            try:
+
+                # Get a sample environment instance to check its type
+                # We can check the class name or verifiers module
+                env_name = self._env_kwargs.get("env_name", "")
+                # Known ToolEnv environments
+                if "wiki" in env_name.lower():
+                    return True
+                # TextArenaEnv environments
+                if "wordle" in env_name.lower() or "appworld" in env_name.lower():
+                    return False
+            except Exception:
+                pass
+        return False

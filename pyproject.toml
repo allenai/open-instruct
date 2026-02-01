@@ -100,7 +100,8 @@ prime-intellect = [
 appworld = [
     # PyPI versions (0.1.x) require pydantic<2.0, but dev version supports pydantic>=2.12
     # Using local clone with LFS files (git+https doesn't fetch LFS files)
-    "appworld @ file:///tmp/appworld",
+    # Note: appworld is already installed in the venv, commenting out broken path
+    # "appworld @ file:///tmp/appworld",
 ]
 openenv = [
     # TextArena OpenEnv wrapper for games like Wordle

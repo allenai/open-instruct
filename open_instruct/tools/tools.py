@@ -673,13 +673,37 @@ class PrimeIntellectEnvConfig(EnvironmentToolConfig):
 
     def __post_init__(self):
         """Set default parameters based on env_name if not explicitly provided."""
-        if self.parameters is None and "wordle" in self.env_name.lower():
-            # Default Wordle parameters schema
-            self.parameters = {
-                "type": "object",
-                "properties": {"word": {"type": "string", "description": "Your 5-letter guess for the Wordle game"}},
-                "required": ["word"],
-            }
+        if self.parameters is None:
+            if "wordle" in self.env_name.lower():
+                # Default Wordle parameters schema
+                self.parameters = {
+                    "type": "object",
+                    "properties": {
+                        "word": {"type": "string", "description": "Your 5-letter guess for the Wordle game"}
+                    },
+                    "required": ["word"],
+                }
+            elif "wiki" in self.env_name.lower():
+                # Default Wiki-Search parameters schema
+                # Supports 3 operations: search_pages(query), view_sections(page_id), read_section(section_id)
+                self.parameters = {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search query to find relevant Wikipedia articles (for search_pages operation)",
+                        },
+                        "page_id": {
+                            "type": "string",
+                            "description": "Page ID to view sections of (for view_sections operation)",
+                        },
+                        "section_id": {
+                            "type": "string",
+                            "description": "Section ID to read content from (for read_section operation)",
+                        },
+                    },
+                    # No required fields - any one of the three operations can be used
+                }
 
 
 @dataclass

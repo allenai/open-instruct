@@ -28,7 +28,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra appworld open_instruct/grpo_f
     --apply_verifiable_reward true \
     --temperature 0.7 \
     --learning_rate 3e-7 \
-    --total_episodes 50 \
+    --total_episodes 80 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
@@ -38,7 +38,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra appworld open_instruct/grpo_f
     --local_eval_every 1 \
     --vllm_sync_backend gloo \
     --single_gpu_mode \
-    --vllm_gpu_memory_utilization 0.3 \
+    --vllm_gpu_memory_utilization 0.5 \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
