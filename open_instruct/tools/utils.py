@@ -3,6 +3,7 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
@@ -357,6 +358,55 @@ def get_openai_tool_definitions(tool: "Tool") -> dict[str, Any]:
     }
 
 
+def _coerce_bool(value: Any) -> bool:
+    """Coerce a value to boolean, handling string 'true'/'false' correctly."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+        raise ValueError(f"Cannot coerce '{value}' to boolean")
+    return bool(value)
+
+
+# JSON schema type to Python coercion function
+_COERCERS: dict[str, Callable[[Any], Any]] = {
+    "string": str,
+    "number": float,
+    "integer": int,
+    "boolean": _coerce_bool,
+    "array": list,
+    "object": dict,
+}
+
+
+def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Coerce arguments to match the expected types in a JSON schema properties dict.
+
+    Args:
+        properties: The "properties" dict from a JSON schema.
+        kwargs: The keyword arguments to coerce.
+
+    Returns:
+        A new dict with coerced values.
+
+    Raises:
+        ValueError or TypeError if coercion fails.
+    """
+    coerced = dict(kwargs)
+    for name, value in kwargs.items():
+        if name not in properties:
+            continue
+        expected_type = properties[name].get("type")
+        if expected_type not in _COERCERS:
+            continue
+        coerced[name] = _COERCERS[expected_type](value)
+    return coerced
+
+
 class Tool(ABC):
     config_name: str
     """Name used to specify the tool in the CLI."""
@@ -401,9 +451,23 @@ class Tool(ABC):
         return self.is_environment_tool
 
     @abstractmethod
-    async def execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
-        """Execute the tool, must be implemented by subclasses."""
-        raise NotImplementedError("execute must be implemented by subclasses.")
+    async def _execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
+        """Execute the tool. Must be implemented by subclasses."""
+        raise NotImplementedError("_execute must be implemented by subclasses.")
+
+    async def safe_execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
+        """Coerce arguments and execute the tool.
+
+        This method coerces kwargs to match the tool's parameter schema types
+        before calling _execute(). Use this instead of _execute() when you want
+        automatic type coercion (e.g., when calling from Ray actors).
+        """
+        try:
+            properties = self.parameters.get("properties", {})
+            coerced_kwargs = coerce_args(properties, kwargs)
+        except (ValueError, TypeError) as e:
+            return ToolOutput(output="", error=f"Incorrect type: {e}", called=False, timeout=False, runtime=0)
+        return await self._execute(*args, **coerced_kwargs)
 
     async def safe_execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
         """Execute the tool after stripping internal parameters like _request_id.
@@ -418,8 +482,8 @@ class Tool(ABC):
         return await self.execute(*args, **kwargs)
 
     async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
-        """Alias for execute, useful for inference scripts."""
-        return await self.execute(*args, **kwargs)
+        """Alias for safe_execute, useful for inference scripts."""
+        return await self.safe_execute(*args, **kwargs)
 
 
 @dataclass

@@ -29,6 +29,7 @@ uv run python mason.py \
        --secret SERPER_API_KEY=${BEAKER_USER}_SERPER_API_KEY \
        --secret JINA_API_KEY=${BEAKER_USER}_JINA_API_KEY \
        --gpus 8 \
+       --no_auto_dataset_cache \
        -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/tulu_3_rewritten_100k 1.0 \
     --dataset_mixer_list_splits train \

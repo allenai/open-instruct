@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Added generic RL environment support following the OpenEnv standard, with adapters for Prime Intellect verifiers (Wordle, Wiki-Search) and AppWorld. Environments integrate as tools with multi-turn reset/step/cleanup lifecycle. https://github.com/allenai/open-instruct/pull/1419
+- Budget mode gradient checkpointing support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1444).
+- PerfCallback for MFU metrics in OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1442).
+- NVIDIA H200 GPU support in `GPU_SPECS` (https://github.com/allenai/open-instruct/pull/1441).
+- Documentation and runtime warning for `dataset_mixer_list` format (float=proportion, int=count) (https://github.com/allenai/open-instruct/pull/1434).
 - Added SLURM scripts for OLMo SFT training with checkpoint resume support and configurable shuffle seed. https://github.com/allenai/open-instruct/pull/1368
 - Added retry logic with exponential backoff to `make_api_request` for tool API calls (retries on timeouts, connection errors, 429, and 5xx). Also added configurable `max_concurrency` parameter to tool configs for controlling Ray actor concurrency per-tool. https://github.com/allenai/open-instruct/pull/1388
 - Added support for generic MCP tools during training, with some limitations (no changing tools, no tool discovery during training). For details: https://github.com/allenai/open-instruct/pull/1384
@@ -17,18 +21,12 @@ All notable changes to this project will be documented in this file.
 - Pulls out weight sync code from GRPO into a more generic function (https://github.com/allenai/open-instruct/pull/1411#pullrequestreview-3694117967)
 
 ### Changed
-- Updated library versions via `uv lock --upgrade` (https://github.com/allenai/open-instruct/pull/1400).
-- Now, `large_test_script.sh` exercises the `tp > 1` code path (https://github.com/allenai/open-instruct/pull/1413).
+
+- Updated vllm version to 0.14.1 (https://github.com/allenai/open-instruct/pull/1433).
+- Changed default wandb x-axis from `episode` to `training_step` for grpo_fast (https://github.com/allenai/open-instruct/pull/1437).
 
 ### Fixed
-- Fixed argparse conflict error for `--save_traces` by removing duplicate field definitions from `StreamingDataLoaderConfig` (https://github.com/allenai/open-instruct/pull/1416).
-- Increased `MetricsTracker` max_metrics from 64 to 512 to fix `ValueError: Exceeded maximum number of metrics` when training with many tools or verifier functions (https://github.com/allenai/open-instruct/pull/1415).
-- Fixed JSON serialization error in `LocalDatasetTransformationCache.save_config` when caching datasets locally (https://github.com/allenai/open-instruct/pull/1402).
-- Now, we can support PRs from external contributors while still maintaining security for internal tokens (https://github.com/allenai/open-instruct/pull/1408).
-- Improved error handling for tool calls with missing/invalid arguments - now returns a clear error message instead of crashing (https://github.com/allenai/open-instruct/pull/1404).
-- Fixed `GenerationConfig` validation error when saving OLMo-3 models - config is now set after unwrapping the model, and OLMo-3 is detected from both `chat_template_name` and model name (https://github.com/allenai/open-instruct/pull/1404).
-- Fixed the benchmark so that it runs (https://github.com/allenai/open-instruct/pull/1401).
+- Fixed evaluation responses being lost on timeout in grpo_fast by requeuing partial results (https://github.com/allenai/open-instruct/pull/1439).
+- Beaker Experiment Launch now passes (https://github.com/allenai/open-instruct/pull/1424#pullrequestreview-3708034780).
 
 ### Removed
-- Removed `open_instruct/ppo.py` and related PPO training scripts (https://github.com/allenai/open-instruct/pull/1395).
-- Removed `scripts/train/debug/tool_grpo_fast.sh`; use `scripts/train/debug/tools/olmo_3_parser_multigpu.sh` for tool use experiments (https://github.com/allenai/open-instruct/pull/1404).

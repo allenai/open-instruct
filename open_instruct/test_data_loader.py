@@ -15,6 +15,12 @@ def single_example_collator(examples: list[dict]) -> dict:
     return examples[0]
 
 
+def batch_collator(examples: list[dict]) -> dict:
+    """Collator that stacks example values into lists."""
+    keys = examples[0].keys()
+    return {key: [ex[key] for ex in examples] for key in keys}
+
+
 def make_test_dataset(num_examples: int) -> datasets.Dataset:
     """Create a test dataset with the required 'index' column."""
     data = {"text": [f"example_{i}" for i in range(num_examples)], "label": list(range(num_examples))}
@@ -347,6 +353,73 @@ class TestHFDataLoader(unittest.TestCase):
         batch_without_tokens = {"labels": torch.zeros(4, 128)}
         with self.assertRaises(ValueError):
             loader.global_num_tokens_in_batch(batch_without_tokens)
+
+    @parameterized.parameterized.expand(
+        [
+            ("size_17_batch_4", 17, 4),
+            ("size_23_batch_8", 23, 8),
+            ("size_10_batch_3", 10, 3),
+            ("size_33_batch_16", 33, 16),
+        ]
+    )
+    def test_drop_last_true_drops_remainder(self, name, num_examples, batch_size):
+        dataset = make_test_dataset(num_examples)
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset,
+            batch_size=batch_size,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=batch_collator,
+            drop_last=True,
+        )
+        indices = [idx for batch in loader for idx in batch["index"]]
+        expected_count = (num_examples // batch_size) * batch_size
+        self.assertEqual(len(indices), expected_count)
+
+    @parameterized.parameterized.expand(
+        [
+            ("size_17_batch_4", 17, 4),
+            ("size_23_batch_8", 23, 8),
+            ("size_10_batch_3", 10, 3),
+            ("size_33_batch_16", 33, 16),
+        ]
+    )
+    def test_drop_last_false_covers_all_indices(self, name, num_examples, batch_size):
+        dataset = make_test_dataset(num_examples)
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset,
+            batch_size=batch_size,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=batch_collator,
+            drop_last=False,
+        )
+        indices = [idx for batch in loader for idx in batch["index"]]
+        self.assertEqual(set(indices), set(range(num_examples)))
+
+    @parameterized.parameterized.expand(
+        [("dp2_size_17_batch_4", 17, 4, 2), ("dp4_size_23_batch_8", 23, 8, 4), ("dp2_size_33_batch_16", 33, 16, 2)]
+    )
+    def test_drop_last_false_multi_rank_covers_all_indices(self, name, num_examples, batch_size, dp_world_size):
+        dataset = make_test_dataset(num_examples)
+        all_indices = []
+        for dp_rank in range(dp_world_size):
+            loader = open_instruct.data_loader.HFDataLoader(
+                dataset=dataset,
+                batch_size=batch_size,
+                seed=42,
+                dp_rank=dp_rank,
+                dp_world_size=dp_world_size,
+                work_dir=tempfile.gettempdir(),
+                collator=batch_collator,
+                drop_last=False,
+            )
+            all_indices.extend(idx for batch in loader for idx in batch["index"])
+        self.assertEqual(set(all_indices), set(range(num_examples)))
 
 
 class TestStreamingDataLoaderConfigSaveTraces(unittest.TestCase):
