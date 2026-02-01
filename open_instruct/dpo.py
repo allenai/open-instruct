@@ -126,6 +126,8 @@ def _apply_parallelism(
     tensor_parallel_degree: int = 1,
     context_parallel_degree: int = 1,
     pipeline_parallel_degree: int = 1,
+    shard_degree: int | None = None,
+    num_replicas: int | None = None,
 ):
     """Apply parallelism strategies to model (HSDP, TP, CP, PP).
 
@@ -135,6 +137,8 @@ def _apply_parallelism(
         tensor_parallel_degree: Tensor parallelism degree (default 1, disabled).
         context_parallel_degree: Context parallelism degree (default 1, disabled).
         pipeline_parallel_degree: Pipeline parallelism degree (default 1, disabled).
+        shard_degree: FSDP shard degree (None = auto-detect).
+        num_replicas: Number of FSDP replicas (None = auto-detect).
 
     Returns:
         The model with parallelism applied.
@@ -144,8 +148,8 @@ def _apply_parallelism(
 
     dp_config = TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
-        num_replicas=None,
-        shard_degree=None,
+        num_replicas=num_replicas,
+        shard_degree=shard_degree,
         param_dtype=DType.bfloat16,
         reduce_dtype=DType.float32,
         wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
@@ -413,20 +417,21 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         disable_adapter_context=None,
     )
 
-    model_is_sharded = False
-    logger.info("Caching reference logprobs (trying unsharded first)...")
-    try:
-        reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
-        logger.info("Reference logprobs cached (unsharded).")
-    except torch.cuda.OutOfMemoryError:
-        logger.warning("OOM with unsharded model, falling back to FSDP-sharded.")
-        torch.cuda.empty_cache()
-        model_is_sharded = True
-        model = _apply_parallelism(
-            model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
-        )
-        reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
-        logger.info("Reference logprobs cached (sharded).")
+    model = _apply_parallelism(
+        model,
+        device,
+        args.tensor_parallel_degree,
+        args.context_parallel_degree,
+        args.pipeline_parallel_degree,
+        args.shard_degree,
+        args.num_replicas,
+    )
+    logger.info("Caching reference logprobs...")
+    reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
+    cache_mem_bytes = sum(t.numel() * t.element_size() for t in reference_cache.tensors.values())
+    cache_mem_gib = cache_mem_bytes / (1024**3)
+    cache_mem_pct = 100 * cache_mem_bytes / torch.cuda.get_device_properties(device).total_memory
+    logger.info(f"Reference logprobs cached, using {cache_mem_gib:.2f} GiB of GPU RAM ({cache_mem_pct:.1f}%).")
 
     if args.cache_logprobs_only:
         logger.info("--cache_logprobs_only set, exiting after cache build.")
@@ -434,11 +439,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             dist.barrier()
             dist.destroy_process_group()
         return
-
-    if not model_is_sharded:
-        model = _apply_parallelism(
-            model, device, args.tensor_parallel_degree, args.context_parallel_degree, args.pipeline_parallel_degree
-        )
     data_loader.reshuffle(epoch=0)
 
     num_training_steps = len(data_loader) * args.num_epochs
