@@ -55,14 +55,6 @@ logger = logger_utils.setup_logger(__name__)
 PAD_VALUES: dict[str, int] = {"labels": -100, "attention_mask": 0}
 
 
-def pad_tensor_to_length(tensor: torch.Tensor, target_length: int, pad_value: int) -> torch.Tensor:
-    """Pad a tensor along dimension 1 to the target length."""
-    current_len = tensor.shape[1]
-    if current_len >= target_length:
-        return tensor
-    return torch.nn.functional.pad(tensor, (0, target_length - current_len), value=pad_value)
-
-
 def config_to_json_serializable(obj: object) -> object:
     """Convert config object to JSON-serializable format."""
     if isinstance(obj, dict):
@@ -1058,26 +1050,11 @@ def separate_forward_olmo(
     return chosen_logps, rejected_logps, None
 
 
-def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float, dim: int = -1) -> torch.Tensor:
-    """Pad a tensor to a specified length along a given dimension.
-
-    Args:
-        tensor: The input tensor to pad.
-        length: The target length for the specified dimension.
-        pad_value: The value to use for padding.
-        dim: The dimension along which to pad.
-
-    Returns:
-        The padded tensor, or the original tensor if already at least the target length.
-    """
-    if tensor.size(dim) >= length:
+def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float) -> torch.Tensor:
+    """Pad a tensor to a specified length along the last dimension."""
+    if tensor.size(-1) >= length:
         return tensor
-    else:
-        pad_size = list(tensor.shape)
-        pad_size[dim] = length - tensor.size(dim)
-        return torch.cat(
-            [tensor, pad_value * torch.ones(*pad_size, dtype=tensor.dtype, device=tensor.device)], dim=dim
-        )
+    return torch.nn.functional.pad(tensor, (0, length - tensor.size(-1)), value=pad_value)
 
 
 @dataclass
@@ -1117,22 +1094,16 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
         if "index" in features[0]:
             result["index"] = torch.tensor([f["index"] for f in features])
 
-        if self.max_length is not None:
-            for prefix, key in itertools.product(["chosen_", "rejected_"], ["input_ids", "attention_mask", "labels"]):
-                full_key = f"{prefix}{key}"
-                pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
-                result[full_key] = pad_tensor_to_length(result[full_key], self.max_length, pad_value)
+        target_len = (
+            self.max_length
+            if self.max_length is not None
+            else max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
+        )
 
-        max_len = max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
-        chosen_padded = torch.nn.functional.pad(
-            result["chosen_input_ids"],
-            (0, max_len - result["chosen_input_ids"].shape[1]),
-            value=self.tokenizer.pad_token_id,
-        )
-        rejected_padded = torch.nn.functional.pad(
-            result["rejected_input_ids"],
-            (0, max_len - result["rejected_input_ids"].shape[1]),
-            value=self.tokenizer.pad_token_id,
-        )
-        result["input_ids"] = torch.cat([chosen_padded, rejected_padded], dim=0)
+        for prefix, key in itertools.product(["chosen_", "rejected_"], ["input_ids", "attention_mask", "labels"]):
+            full_key = f"{prefix}{key}"
+            pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
+            result[full_key] = pad_to_length(result[full_key], target_len, pad_value)
+
+        result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
         return result
