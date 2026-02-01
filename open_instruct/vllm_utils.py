@@ -435,7 +435,7 @@ def init_process_group(
 async def _check_health(port: int) -> None:
     async with (
         aiohttp.ClientSession() as session,
-        session.get(f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=30.0)) as response,
+        session.get(f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=300.0)) as response,
     ):
         if response.status != 200:
             raise RuntimeError(f"vLLM server health check failed with status {response.status}")
@@ -868,6 +868,54 @@ class LLMRayActor:
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool support, awaiting tools inline."""
+    base_request_id = split_request_id(sub_request_id)["base_id"]
+
+    try:
+        await _process_request_inner(actor, sub_request_id, sampling_params)
+    except Exception as e:
+        # Catch any unexpected exceptions and create an error response.
+        # This prevents exceptions from propagating and crashing the health check.
+        logger.error(f"Request {sub_request_id} failed with exception: {e}")
+
+        # Create a minimal error response with EOS token so training can continue
+        eos_token_id = actor.llm_engine.tokenizer.eos_token_id
+        complete_output = CompletionOutput(
+            index=split_request_id(sub_request_id)["request_index"],
+            token_ids=[eos_token_id],
+            cumulative_logprob=float("nan"),
+            logprobs=[float("nan")],
+            finish_reason="error",
+        )
+        if actor.tool_actors:
+            complete_output.mask = [1]
+            complete_output.num_calls = 0
+            complete_output.timeout = isinstance(e, TimeoutError)
+            complete_output.tool_error = str(e)
+            complete_output.tool_output = ""
+            complete_output.tool_runtime = 0.0
+            complete_output.tool_called = False
+            complete_output.tool_call_stats = []
+            complete_output.excess_tool_calls = {}
+
+        actor.completion_queue.put(
+            {
+                "base_request_id": base_request_id,
+                "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
+                "request_output": RequestOutput(
+                    request_id=sub_request_id,
+                    prompt_token_ids=actor.request_metadata[base_request_id]["prompt_token_ids"],
+                    outputs=[complete_output],
+                ),
+                "use_tools": bool(actor.tool_actors),
+            }
+        )
+    finally:
+        # Always remove the task from active_tasks
+        actor.active_tasks.pop(sub_request_id, None)
+
+
+async def _process_request_inner(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
+    """Inner implementation of process_request."""
     await _check_health(actor.server_port)
     response_tokens = []
     response_logprobs = []
@@ -1014,8 +1062,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         complete_output.tool_called = tool_called
         complete_output.tool_call_stats = tool_call_stats
         complete_output.excess_tool_calls = excess_tool_calls
-
-    actor.active_tasks.pop(sub_request_id, None)
 
     actor.completion_queue.put(
         {
