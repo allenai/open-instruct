@@ -110,18 +110,22 @@ class EnvironmentTool(Tool):
         )
         return result
 
-    async def execute(self, _request_id: str, **kwargs: Any) -> ToolOutput:
-        """Called when model invokes this tool."""
-        logger.info(f"[EnvironmentTool] execute called for {_request_id} with kwargs: {kwargs}")
+    async def _execute(self, _request_id: str, **kwargs: Any) -> ToolOutput:
+        """Execute environment step with request ID."""
+        logger.info(f"[EnvironmentTool] _execute called for {_request_id} with kwargs: {kwargs}")
         start_time = time.perf_counter()
         result = await self.pool.step(_request_id, **kwargs)
         runtime = time.perf_counter() - start_time
-        logger.info(f"[EnvironmentTool] execute done for {_request_id}, runtime={runtime:.2f}s, done={result.done}")
+        logger.info(f"[EnvironmentTool] _execute done for {_request_id}, runtime={runtime:.2f}s, done={result.done}")
         return ToolOutput(output=result.observation, called=True, error="", timeout=False, runtime=runtime)
 
     async def safe_execute(self, _request_id: str, **kwargs: Any) -> ToolOutput:
-        """Environment tools need _request_id, so don't strip it."""
-        return await self.execute(_request_id, **kwargs)
+        """Environment tools need _request_id parameter preserved.
+
+        Unlike regular tools, environment tools require _request_id to track
+        multi-turn episodes, so we don't strip it before calling _execute.
+        """
+        return await self._execute(_request_id=_request_id, **kwargs)
 
     def is_done(self, _request_id: str) -> bool:
         """Check if env episode is complete."""
@@ -161,7 +165,6 @@ class EnvironmentTool(Tool):
         # Check if the environment class is PrimeIntellectEnv wrapping a ToolEnv
         if self._env_class.__name__ == "PrimeIntellectEnv":
             try:
-
                 # Get a sample environment instance to check its type
                 # We can check the class name or verifiers module
                 env_name = self._env_kwargs.get("env_name", "")
