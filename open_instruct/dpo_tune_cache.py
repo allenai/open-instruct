@@ -26,6 +26,7 @@ with contextlib.suppress(Exception):
 
 # isort: on
 import math
+import pathlib
 import random
 import shutil
 import time
@@ -42,7 +43,7 @@ from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
 
@@ -161,6 +162,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # ------------------------------------------------------------
     # Set up runtime variables
+    beaker_config = maybe_get_beaker_config() if is_beaker_job() else None
     if args.add_seed_and_date_to_exp_name:
         args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     else:
@@ -182,8 +184,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         if args.hf_repo_revision is None:
             args.hf_repo_revision = args.exp_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-        if is_beaker_job():
-            beaker_config = maybe_get_beaker_config()
 
     # ------------------------------------------------------------
     # Initialize the trackers we use, and also store our configuration.
@@ -196,7 +196,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         # (Optional) Ai2 internal tracking
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
-        if accelerator.is_main_process and is_beaker_job():
+        if accelerator.is_main_process and beaker_config is not None:
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
         accelerator.init_trackers(
@@ -227,7 +227,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # Make one log on every process with the configuration for debugging.
     logger_utils.setup_logger()
-    logger.info(accelerator.state, main_process_only=False)
+    logger.info(accelerator.state)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
         transformers.utils.logging.set_verbosity_info()
@@ -405,8 +405,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     else:
         collate_fn = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
 
+    train_sampler = RandomSampler(train_dataset, generator=torch.Generator().manual_seed(args.seed))
     train_dataloader = DataLoader(
-        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
+        train_dataset, sampler=train_sampler, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
     )
 
     # Optimizer
@@ -520,15 +521,20 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # Cache the logprobs
     if args.loss_type.needs_reference_model:
+        ref_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
+        reference_cache_path = pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt"
         reference_cache = dpo_utils.build_reference_logprobs_cache(
             model=model,
             dataloader=train_dataloader,
-            accelerator=accelerator,
             average_log_prob=args.loss_type.is_average_loss,
             forward_fn=args.forward_fn,
             full_dataset_size=original_dataset_size,
-            reference_cache_hash=dpo_utils.compute_reference_cache_hash(args, tc),
+            device=accelerator.device,
+            cache_path=reference_cache_path,
+            is_main_process=accelerator.is_main_process,
+            model_dims=model_dims,
             use_lora=args.use_lora,
+            disable_adapter_context=None,
         )
         logger.info("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
@@ -557,16 +563,24 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         else:
             active_dataloader = train_dataloader
         # we need to average the log probs for simpo loss
-        for batch in active_dataloader:
+        for batch_idx, batch in enumerate(active_dataloader):
+            if epoch == 0 and batch_idx < 3:
+                batch_indices = batch["index"].tolist() if "index" in batch else "N/A"
+                logger.info(f"DEBUG [dpo_tune_cache.py] epoch={epoch} batch={batch_idx} indices={batch_indices}")
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
             with accelerator.accumulate(model):
+                average_log_prob = args.loss_type.is_average_loss
                 policy_chosen_logps, policy_rejected_logps, aux_loss = args.forward_fn(
-                    model,
-                    batch,
-                    average_log_prob=args.loss_type.is_average_loss,
-                    output_router_logits=args.load_balancing_loss,
+                    model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
+                if epoch == 0 and batch_idx < 3:
+                    logger.info(
+                        f"DEBUG [dpo_tune_cache.py] batch={batch_idx} "
+                        f"chosen_logps={policy_chosen_logps.tolist()} "
+                        f"rejected_logps={policy_rejected_logps.tolist()}"
+                    )
+
                 losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
                     args,
                     batch,
@@ -615,7 +629,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     # single all reduce to save time, avoiding per metric all reduce
                     global_metrics_tensor = accelerator.reduce(local_metrics.metrics, reduction="mean")
                     global_metrics_tensor /= args.gradient_accumulation_steps * args.logging_steps
-                    global_metrics_tensor[local_metrics.names2idx["token_count"]] *= accelerator.num_processes
+                    global_metrics_tensor[local_metrics.names2idx["token_count"]] *= (
+                        accelerator.num_processes * args.gradient_accumulation_steps * args.logging_steps
+                    )
                     global_metrics = {
                         name: global_metrics_tensor[index].item() for name, index in local_metrics.names2idx.items()
                     }

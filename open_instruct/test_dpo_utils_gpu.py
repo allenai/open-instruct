@@ -80,7 +80,10 @@ class OlmoStyleModel(torch.nn.Module):
         self.embed = torch.nn.Embedding(vocab_size, 64)
         self.linear = torch.nn.Linear(64, vocab_size)
 
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, input_ids: torch.Tensor, cu_doc_lens: torch.Tensor | None = None, max_doc_len: int | None = None
+    ) -> torch.Tensor:
+        del cu_doc_lens, max_doc_len
         return self.linear(self.embed(input_ids))
 
 

@@ -109,7 +109,9 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     model = model_config.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
-    load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
+    state_dict = model.state_dict()
+    load_hf_model(args.model_name_or_path, state_dict, work_dir=args.output_dir)
+    model.load_state_dict(state_dict)
     model = model.to(device=device, dtype=torch.bfloat16)
 
     logger.info(f"Applying activation checkpointing (budget={args.activation_memory_budget})...")
@@ -350,7 +352,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     dataset = _load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
     dataset = dataset.shuffle(seed=args.seed)
-    dataset.set_format(type="pt")  # Must be after shuffle (shuffle resets format)
+    dataset.set_format(type="pt")
 
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
     parallelism_factor = args.tensor_parallel_degree * args.context_parallel_degree * args.pipeline_parallel_degree
@@ -374,7 +376,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     else:
         collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
-    global_batch_size = args.per_device_train_batch_size * dp_world_size
+    global_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps * dp_world_size
     data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size,
@@ -384,6 +386,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         work_dir=args.output_dir,
         collator=collator,
         device=device,
+        drop_last=False,
     )
     # 4x batch size: forward-only (no backward), so no activation storage needed.
     cache_batch_size = args.per_device_train_batch_size * 4 * dp_world_size
@@ -441,6 +444,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         return
     data_loader.reshuffle(epoch=0)
 
+    first_batch_indices = [data_loader.dataset[i]["index"] for i in range(min(10, len(data_loader.dataset)))]
+    logger.info(f"DEBUG [dpo.py] First 10 dataset indices after reshuffle: {first_batch_indices}")
+
     num_training_steps = len(data_loader) * args.num_epochs
     optim, scheduler = _setup_optimizer_and_scheduler(args, model, num_training_steps)
 
@@ -451,6 +457,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         args=args,
         reference_cache=reference_cache,
         scheduler=scheduler,
+        rank_microbatch_size=args.per_device_train_batch_size,
         device=device,
         max_grad_norm=max_grad_norm,
     )
@@ -464,6 +471,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         callbacks=trainer_callbacks,
         save_overwrite=True,
     ).build(train_module, data_loader)
+
+    trainer.epoch = 0
 
     logger.info("Starting training...")
     trainer.fit()

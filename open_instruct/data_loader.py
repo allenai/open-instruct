@@ -217,13 +217,23 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """Reshard the dataset for a given epoch.
 
         Uses index-based shuffling to avoid copying the dataset.
+        Uses PyTorch RNG to match PyTorch DataLoader shuffle behavior.
         """
-        rng = np.random.default_rng(self.seed + epoch)
-        all_indices = np.arange(len(self._full_dataset))
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + epoch)
+        dataset_len = len(self._full_dataset)
+        all_indices = torch.randperm(dataset_len, generator=generator).numpy()
+        test_gen = torch.Generator().manual_seed(123)
+        test_perm = torch.randperm(dataset_len, generator=test_gen)
+        logger.info(
+            f"DEBUG [HFDataLoader] _reshard epoch={epoch} seed={self.seed} "
+            f"dataset_len={dataset_len} "
+            f"first_10_indices={all_indices[:10].tolist()} "
+            f"test_randperm_same_len_seed123={test_perm[:10].tolist()}"
+        )
         if self._excluded_indices:
             mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
             all_indices = all_indices[mask]
-        rng.shuffle(all_indices)
 
         global_size = len(all_indices)
         total_batches = global_size // self._batch_size
