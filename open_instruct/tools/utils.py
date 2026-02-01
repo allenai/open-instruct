@@ -456,30 +456,27 @@ class Tool(ABC):
         raise NotImplementedError("_execute must be implemented by subclasses.")
 
     async def safe_execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
-        """Coerce arguments and execute the tool.
+        """Execute the tool after stripping internal parameters and coercing types.
 
-        This method coerces kwargs to match the tool's parameter schema types
-        before calling _execute(). Use this instead of _execute() when you want
-        automatic type coercion (e.g., when calling from Ray actors).
+        This wrapper:
+        1. Removes internal parameters like _request_id that the training loop passes
+        2. Coerces kwargs to match the tool's parameter schema types
+        3. Calls _execute() with the cleaned and coerced arguments
+
+        Note: Subclasses (e.g., EnvironmentTool) may override this to handle internal
+        parameters like _request_id differently.
         """
+        # Strip internal parameters
+        kwargs.pop("_request_id", None)
+
+        # Coerce argument types
         try:
             properties = self.parameters.get("properties", {})
             coerced_kwargs = coerce_args(properties, kwargs)
         except (ValueError, TypeError) as e:
             return ToolOutput(output="", error=f"Incorrect type: {e}", called=False, timeout=False, runtime=0)
+
         return await self._execute(*args, **coerced_kwargs)
-
-    async def safe_execute(self, *args: Any, **kwargs: Any) -> ToolOutput:
-        """Execute the tool after stripping internal parameters like _request_id.
-
-        This wrapper removes internal parameters that the training loop passes to all tools
-        but that individual tool implementations don't need to handle.
-
-        Note: Subclasses (e.g., EnvironmentTool) may override this to handle internal
-        parameters like _request_id differently.
-        """
-        kwargs.pop("_request_id", None)
-        return await self.execute(*args, **kwargs)
 
     async def __call__(self, *args: Any, **kwargs: Any) -> ToolOutput:
         """Alias for safe_execute, useful for inference scripts."""

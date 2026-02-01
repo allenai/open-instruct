@@ -725,12 +725,20 @@ class TextArenaEnvConfig(EnvironmentToolConfig):
     """Configuration for TextArena environments (Wordle, etc.) via OpenEnv.
 
     TextArena provides games like Wordle through the OpenEnv standard.
-    Run server with: TEXTARENA_ENV_ID=Wordle-v0 uvicorn textarena_env.server.app:app
+    Servers must be started externally before training (see wordle_openenv.sh).
+
+    For multi-server parallel mode:
+    - Start N servers on ports 8765, 8766, ..., 8765+N-1
+    - Set pool_size=N in tool_configs
+    - setup_fn will return URLs to connect to these servers
     """
 
     env_class: str = "open_instruct.environments.textarena.TextArenaEnv"
+    setup_fn: str = "open_instruct.environments.textarena.setup_textarena_servers"
+    pool_size: int = 1
+    """Number of TextArena server instances. Set via tool_configs."""
     base_url: str = ""
-    """Base URL of the TextArena server (e.g., 'http://localhost:8000')."""
+    """Base URL for single server mode (deprecated, use pool_size instead)."""
     parameters: dict[str, Any] | None = None
     """JSON schema for tool parameters. Defaults to Wordle schema for wordle tool."""
 

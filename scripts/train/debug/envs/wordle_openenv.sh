@@ -4,7 +4,8 @@
 # Dataset: hamishivi/wordle_env_train
 #   - Uses dataset: "env" for EnvVerifier (reward from env.step())
 #
-# This script starts a local TextArena server and connects to it.
+# This script starts multiple TextArena servers for parallel rollouts.
+# Starts 16 servers on ports 8765-8780 for concurrent episodes.
 #
 # Model: Qwen3-0.6B with /no_think mode (optimal for base model training)
 #   - Fixed tool schema (includes "word" parameter)
@@ -13,35 +14,32 @@
 set -e
 
 # Configuration
-TEXTARENA_PORT=${TEXTARENA_PORT:-8765}
-TEXTARENA_URL="http://localhost:${TEXTARENA_PORT}"
+export TEXTARENA_ENV_ID=Wordle-v0
+POOL_SIZE=16
+BASE_PORT=8765
 
-# Start TextArena server in background
-echo "Starting TextArena Wordle server on port ${TEXTARENA_PORT}..."
-TEXTARENA_ENV_ID=Wordle-v0 uv run --extra openenv \
-    python -m uvicorn textarena_env.server.app:app \
-    --host 0.0.0.0 --port ${TEXTARENA_PORT} &
-SERVER_PID=$!
-
-# Wait for server to be ready
-echo "Waiting for server to start..."
-for i in {1..30}; do
-    if curl -s "${TEXTARENA_URL}/health" > /dev/null 2>&1; then
-        echo "Server ready!"
-        break
-    fi
-    if [ $i -eq 30 ]; then
-        echo "Server failed to start"
-        kill $SERVER_PID 2>/dev/null || true
-        exit 1
-    fi
-    sleep 1
+# Start multiple TextArena servers in background
+echo "Starting ${POOL_SIZE} TextArena servers..."
+PIDS=()
+for i in $(seq 0 $((POOL_SIZE-1))); do
+    PORT=$((BASE_PORT + i))
+    uv run --extra openenv python -m uvicorn textarena_env.server.app:app \
+        --host 0.0.0.0 --port ${PORT} > /dev/null 2>&1 &
+    PIDS+=($!)
+    echo "  Started server $((i+1))/${POOL_SIZE} on port ${PORT}"
 done
+
+# Wait for servers to be ready
+echo "Waiting for servers to start..."
+sleep 10
+echo "Servers should be ready (skipping health checks for speed)"
 
 # Cleanup function
 cleanup() {
-    echo "Stopping TextArena server..."
-    kill $SERVER_PID 2>/dev/null || true
+    echo "Stopping TextArena servers..."
+    for PID in "${PIDS[@]}"; do
+        kill ${PID} 2>/dev/null || true
+    done
 }
 trap cleanup EXIT
 
@@ -79,7 +77,7 @@ VLLM_ALLOW_INSECURE_SERIALIZATION=1 uv run --extra openenv open_instruct/grpo_fa
     --gradient_checkpointing \
     --tools wordle python \
     --tool_call_names wordle code \
-    --tool_configs "{\"base_url\": \"${TEXTARENA_URL}\", \"pool_size\": 1}" '{"api_endpoint": "https://open-instruct-tool-server.run.app/execute", "timeout": 3}' \
+    --tool_configs "{\"pool_size\": ${POOL_SIZE}}" '{"api_endpoint": "https://open-instruct-tool-server.run.app/execute", "timeout": 3}' \
     --tool_parser_type vllm_hermes \
     --max_tool_calls 10 \
     --filter_zero_std_samples false \
