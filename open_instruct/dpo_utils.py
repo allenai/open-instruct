@@ -989,17 +989,16 @@ def concatenated_forward_olmo(
     del output_router_logits
     if not packing:
         concatenated_batch = concatenated_inputs(batch)
-    else:
-        concatenated_batch, bs = pf_concatenated_inputs(batch)
-
-    logits = model(concatenated_batch["concatenated_input_ids"]).to(torch.float32)
-
-    if not packing:
+        logits = model(concatenated_batch["concatenated_input_ids"]).to(torch.float32)
         all_logps = _get_batch_logps(
             logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
         )
         bs = batch["chosen_input_ids"].shape[0]
     else:
+        concatenated_batch, bs = pf_concatenated_inputs(batch)
+        logits = model(
+            concatenated_batch["concatenated_input_ids"], position_ids=concatenated_batch["concatenated_position_ids"]
+        ).to(torch.float32)
         all_logps = pf_get_batch_logps(
             logits,
             concatenated_batch["concatenated_labels"],
@@ -1009,6 +1008,35 @@ def concatenated_forward_olmo(
     chosen_logps = all_logps[:bs]
     rejected_logps = all_logps[bs:]
     return chosen_logps, rejected_logps, None
+
+
+def _compute_logps_olmo(
+    model: nn.Module, batch: dict[str, list | torch.Tensor], prefix: str, packing: bool, average_log_prob: bool
+) -> torch.Tensor:
+    """Compute log probabilities for a batch prefix (chosen or rejected).
+
+    Args:
+        model: The model to run (OLMo-core style model).
+        batch: Dictionary containing chosen and rejected inputs.
+        prefix: Either 'chosen' or 'rejected'.
+        packing: Whether to use padding-free packing.
+        average_log_prob: Whether to average the log probabilities.
+
+    Returns:
+        Log probabilities tensor.
+    """
+    item_batch = process_batch(batch, prefix)
+    if packing:
+        logits = model(item_batch["input_ids"], position_ids=item_batch["position_ids"]).to(torch.float32)
+        logps = pf_get_batch_logps(
+            logits, item_batch["labels"], item_batch["cu_seq_lens_k"], average_log_prob=average_log_prob
+        )
+    else:
+        logits = model(item_batch["input_ids"]).to(torch.float32)
+        logps = _get_batch_logps(logits, item_batch["labels"], average_log_prob=average_log_prob)
+    del item_batch, logits
+    torch.cuda.empty_cache()
+    return logps
 
 
 def separate_forward_olmo(
@@ -1034,33 +1062,8 @@ def separate_forward_olmo(
         Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
     """
     del output_router_logits
-    chosen_batch = process_batch(batch, "chosen")
-    chosen_logits = model(chosen_batch["input_ids"]).to(torch.float32)
-
-    if packing:
-        chosen_logps = pf_get_batch_logps(
-            chosen_logits, chosen_batch["labels"], chosen_batch["cu_seq_lens_k"], average_log_prob=average_log_prob
-        )
-    else:
-        chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
-    del chosen_batch, chosen_logits
-    torch.cuda.empty_cache()
-
-    rejected_batch = process_batch(batch, "rejected")
-    rejected_logits = model(rejected_batch["input_ids"]).to(torch.float32)
-
-    if packing:
-        rejected_logps = pf_get_batch_logps(
-            rejected_logits,
-            rejected_batch["labels"],
-            rejected_batch["cu_seq_lens_k"],
-            average_log_prob=average_log_prob,
-        )
-    else:
-        rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
-    del rejected_batch, rejected_logits
-    torch.cuda.empty_cache()
-
+    chosen_logps = _compute_logps_olmo(model, batch, "chosen", packing, average_log_prob)
+    rejected_logps = _compute_logps_olmo(model, batch, "rejected", packing, average_log_prob)
     return chosen_logps, rejected_logps, None
 
 
