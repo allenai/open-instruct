@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Added `vllm_dtype` parameter to `create_vllm_engines`, which is needed for the hybrid model (https://github.com/allenai/open-instruct/pull/1426)
+
 ### Changed
 
 Updated vllm version to 0.14.1 (https://github.com/allenai/open-instruct/pull/1433).
