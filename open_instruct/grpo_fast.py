@@ -1925,6 +1925,7 @@ def run_training(
             model_dims,
             actor_manager,
         )
+        logger.info(f"[Main Thread] ✅ Training step {training_step} returned, tokens={num_step_tokens}")
         num_total_tokens += num_step_tokens
 
         # Checkpoint after one_training_step (or even if it was skipped)
@@ -1934,6 +1935,7 @@ def run_training(
             and training_step % args.checkpoint_state_freq == 0
             and args.checkpoint_state_dir is not None
         ):
+            logger.info(f"[Main Thread] 💾 Starting checkpoint save for step {training_step}")
             utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
             with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
                 # Save comprehensive client state including dataloader state
@@ -1959,9 +1961,10 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
-        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
+        logger.info(f"[Main Thread] 🔄 Triggering weight sync for step {training_step}")
         weight_sync_trigger_event.set()
 
+        logger.info(f"[Main Thread] 📊 Running maybe_evaluate for step {training_step}")
         maybe_evaluate(
             args,
             training_step,
@@ -1973,6 +1976,7 @@ def run_training(
             model_dims,
             actor_manager,
         )
+        logger.info(f"[Main Thread] ✅ maybe_evaluate completed for step {training_step}")
 
         maybe_update_beaker_description(
             current_step=training_step,
@@ -1980,6 +1984,7 @@ def run_training(
             start_time=training_start_time,
             wandb_url=wandb_url,
         )
+        logger.info(f"[Main Thread] 🔁 Finished step {training_step}, looping to next step")
 
     if resume_training_step > args.num_training_steps:
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
