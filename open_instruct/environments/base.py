@@ -5,8 +5,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-import ray
-
 from open_instruct.tools.utils import ToolCall
 
 
@@ -56,11 +54,7 @@ def register_env(name: str):
 
 
 class RLEnvironment(ABC):
-    """Abstract base class for RL environments (run as Ray actors via make_env_actor)."""
-
-    use_tool_calls: bool = True
-    response_role: str = "tool"
-    max_steps: int = 50
+    """Abstract base class for RL environments (use as Ray actors via ray.remote)."""
 
     async def setup(self) -> None:
         """Called once at start of training for resource initialization."""
@@ -87,48 +81,6 @@ class RLEnvironment(ABC):
     async def shutdown(self) -> None:
         """Called once at end of training for resource cleanup."""
         pass
-
-
-def make_env_actor(env_class: type[RLEnvironment]) -> type:
-    """Wrap an RLEnvironment class in a Ray actor."""
-
-    @ray.remote
-    class EnvironmentActor:
-        def __init__(self, **kwargs):
-            self._env = env_class(**kwargs)
-
-        async def setup(self) -> None:
-            await self._env.setup()
-
-        async def reset(self, task_id: str | None = None) -> StepResult:
-            return await self._env.reset(task_id)
-
-        async def step(self, tool_call: ToolCall) -> StepResult:
-            return await self._env.step(tool_call)
-
-        def get_metrics(self) -> dict[str, float]:
-            return self._env.get_metrics()
-
-        async def close(self) -> None:
-            await self._env.close()
-
-        async def shutdown(self) -> None:
-            await self._env.shutdown()
-
-        @property
-        def use_tool_calls(self) -> bool:
-            return self._env.use_tool_calls
-
-        @property
-        def response_role(self) -> str:
-            return self._env.response_role
-
-        @property
-        def max_steps(self) -> int:
-            return self._env.max_steps
-
-    EnvironmentActor.__name__ = f"{env_class.__name__}Actor"
-    return EnvironmentActor
 
 
 def get_env_class(env_name: str | None = None, env_class: str | None = None) -> type[RLEnvironment]:

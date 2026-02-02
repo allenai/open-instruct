@@ -6,7 +6,7 @@ from typing import Any
 
 import ray
 
-from .base import RLEnvironment, get_env_class, make_env_actor
+from .base import RLEnvironment, get_env_class
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class EnvironmentPool:
             return
 
         self._env_class = get_env_class(env_name=self.env_name, env_class=self.env_class_path)
-        actor_class = make_env_actor(self._env_class)
+        actor_class = ray.remote(self._env_class)
 
         logger.info(f"Creating {self.pool_size} environment actors")
         self._actors = [actor_class.remote(**self.env_kwargs) for _ in range(self.pool_size)]
