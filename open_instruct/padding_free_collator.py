@@ -145,7 +145,7 @@ def concatenated_inputs(
 def get_batch_logps(
     logits: torch.Tensor, labels: torch.Tensor, cu_seq_lens: torch.Tensor, average_log_prob: bool = False
 ) -> torch.Tensor:
-    assert logits.shape[:-1] == labels.shape
+    assert logits.shape[:-1] == labels.shape, f"logits.shape={logits.shape}, labels.shape={labels.shape}"
 
     # - we are going to get crossings at labels / logits
     #   cont batch boundaries, but we assume that the
