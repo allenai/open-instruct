@@ -6,6 +6,22 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+try:
+    from e2b_code_interpreter import Sandbox as E2BSandbox
+
+    HAS_E2B = True
+except ImportError:
+    E2BSandbox = None
+    HAS_E2B = False
+
+try:
+    from llm_in_sandbox import DockerRuntime
+
+    HAS_LLM_IN_SANDBOX = True
+except ImportError:
+    DockerRuntime = None
+    HAS_LLM_IN_SANDBOX = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -111,13 +127,11 @@ class E2BBackend(SandboxBackend):
 
     def start(self) -> None:
         """Initialize the E2B sandbox."""
-        try:
-            from e2b_code_interpreter import Sandbox
-        except ImportError as e:
-            raise ImportError("e2b_code_interpreter not installed. Run: pip install e2b-code-interpreter") from e
+        if not HAS_E2B:
+            raise ImportError("e2b_code_interpreter not installed. Run: pip install e2b-code-interpreter")
 
         logger.info(f"Starting E2B sandbox (template={self._template}, timeout={self._timeout})")
-        self._sandbox = Sandbox(template=self._template, timeout=self._timeout)
+        self._sandbox = E2BSandbox(template=self._template, timeout=self._timeout)
         logger.info(f"E2B sandbox started: {self._sandbox.id}")
 
     def run_code(self, code: str, language: str = "python") -> ExecutionResult:
@@ -187,10 +201,8 @@ class DockerBackend(SandboxBackend):
 
     def start(self) -> None:
         """Start the Docker container."""
-        try:
-            from llm_in_sandbox import DockerRuntime
-        except ImportError as e:
-            raise ImportError("llm_in_sandbox not installed. Run: pip install llm-in-sandbox") from e
+        if not HAS_LLM_IN_SANDBOX:
+            raise ImportError("llm_in_sandbox not installed. Run: pip install llm-in-sandbox")
 
         logger.info(f"Starting Docker container (image={self._image})")
         self._runtime = DockerRuntime(docker_image=self._image)

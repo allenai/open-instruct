@@ -5,6 +5,14 @@ from typing import Any
 
 from .base import ResetResult, RLEnvironment, StepResult, ToolCall, register_env
 
+try:
+    from appworld import AppWorld
+
+    HAS_APPWORLD = True
+except ImportError:
+    AppWorld = None
+    HAS_APPWORLD = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,12 +55,10 @@ class AppWorldEnv(RLEnvironment):
 
     async def reset(self, task_id: str | None = None) -> ResetResult:
         """Initialize AppWorld for a task."""
-        try:
-            from appworld import AppWorld
-        except ImportError as e:
+        if not HAS_APPWORLD:
             raise ImportError(
                 "appworld not installed. Run:\n  pip install appworld\n  appworld install\n  appworld download data"
-            ) from e
+            )
 
         if self._world is not None:
             self._world.close()
