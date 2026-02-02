@@ -44,6 +44,43 @@ class RequestInfo:
 
 
 @dataclass
+class EnvConfig:
+    """Configuration for environment-based samples."""
+
+    env_name: str | None = None
+    """Name of registered environment (e.g., 'sandbox', 'openenv')."""
+
+    env_class: str | None = None
+    """Full class path for unregistered environment."""
+
+    task_id: str | None = None
+    """Task identifier passed to env.reset()."""
+
+    max_steps: int = 50
+    """Maximum steps before forcing done=True."""
+
+
+@dataclass
+class EnvState:
+    """State from environment rollout, used for verification."""
+
+    rewards: list[float] = field(default_factory=list)
+    step_count: int = 0
+    done: bool = False
+    info: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def final_reward(self) -> float:
+        """Get the final reward (last reward in list, or 0.0 if empty)."""
+        return self.rewards[-1] if self.rewards else 0.0
+
+    @property
+    def total_reward(self) -> float:
+        """Get the sum of all rewards."""
+        return sum(self.rewards)
+
+
+@dataclass
 class GenerationResult:
     """Container for generation results returned via Ray queues."""
 
@@ -58,6 +95,8 @@ class GenerationResult:
     logprobs: list[list[float]] | None = None
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None
+    env_states: list[EnvState] | None = None
+    """Per-sample environment states (if using environment rollouts)."""
 
 
 @dataclass
@@ -76,6 +115,8 @@ class PromptRequest:
     is_eval: bool = False
     active_tools: list[str] | None = None
     """List of tool names that are active for this sample. If None, all tools are active."""
+    env_config: EnvConfig | None = None
+    """Environment configuration for this sample. If set, uses environment instead of tools."""
 
 
 @dataclass
