@@ -158,6 +158,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # This class runs in vLLM worker processes; imports are inside methods.
 "open_instruct/vllm_utils_workerwrap.py" = ["PLC0415"]
+# Lazy imports for optional dependencies and circular import avoidance
+"open_instruct/environments/*.py" = ["PLC0415", "B027"]
+"open_instruct/ground_truth_utils.py" = ["PLC0415"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["open_instruct", "mason"]
