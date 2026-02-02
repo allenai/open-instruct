@@ -12,6 +12,9 @@ jobs:
     name: Run unit tests
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
     steps:
 
       - name: Checkout code
@@ -23,6 +26,93 @@ jobs:
       - name: Set up Python
         run: uv sync --frozen
       - name: Run unit tests
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: uv run --frozen pytest
+
+  gpu-tests:
+    name: Run GPU tests
+    runs-on: 8-Core-XL-Runner-Ubuntu-Latest
+    timeout-minutes: 45
+    concurrency:
+      group: gpu-tests-${{ github.head_ref || github.run_id }}
+      cancel-in-progress: true
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+    steps:
+
+      - name: Checkout code (for scripts)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/test
+
+      - name: Detect fork PR and parse GPU_TESTS override
+        id: check
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          ./scripts/test/detect_gpu_tests_skip.sh \
+            "${{ github.event_name }}" \
+            "${{ github.event.pull_request.head.repo.full_name }}" \
+            "${{ github.repository }}" \
+            "$PR_BODY"
+
+      - name: Verify GPU_TESTS override experiment
+        if: env.SKIP_REASON == 'override'
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+        run: |
+          echo "$BEAKER_TOKEN" | beaker account login --token-stdin
+          ./scripts/test/verify_gpu_tests_override.sh "${{ env.GPU_TESTS_EXP_ID }}"
+
+      - name: Checkout code
+        if: env.RUN_GPU_TESTS == 'true'
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        if: env.RUN_GPU_TESTS == 'true'
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.6"
+
+      - name: Set up Python
+        if: env.RUN_GPU_TESTS == 'true'
+        run: uv sync --frozen
+
+      - name: Setup Beaker
+        if: env.RUN_GPU_TESTS == 'true'
+        uses: allenai/setup-beaker@v2
+        with:
+          token: ${{ secrets.BEAKER_TOKEN }}
+          workspace: ai2/open-instruct-dev
+
+      - name: Set up Docker Buildx
+        if: env.RUN_GPU_TESTS == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: env.RUN_GPU_TESTS == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        if: env.RUN_GPU_TESTS == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: open-instruct-gpu-tests:latest
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            GIT_BRANCH=${{ github.head_ref || github.ref_name }}
+          cache-from: type=registry,ref=ghcr.io/allenai/open-instruct:buildcache
+          cache-to: type=inline
+
+      - name: Upload image to Beaker and run tests
+        if: env.RUN_GPU_TESTS == 'true'
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+        run: ./scripts/test/run_gpu_tests_on_beaker.sh "${{ github.sha }}"

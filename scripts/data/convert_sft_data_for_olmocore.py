@@ -67,10 +67,36 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 import numpy as np
 from tqdm import tqdm
+
+
+def save_checkpoint(output_dir: str, checkpoint_data: dict[str, Any]) -> None:
+    """Save checkpoint to disk atomically."""
+    checkpoint_path = os.path.join(output_dir, "_checkpoint.json")
+    tmp_path = checkpoint_path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(checkpoint_data, f)
+    os.rename(tmp_path, checkpoint_path)  # Atomic on POSIX
+
+
+def load_checkpoint(output_dir: str) -> Optional[dict[str, Any]]:
+    """Load checkpoint from disk if it exists."""
+    checkpoint_path = os.path.join(output_dir, "_checkpoint.json")
+    if os.path.exists(checkpoint_path):
+        with open(checkpoint_path) as f:
+            return json.load(f)
+    return None
+
+
+def remove_checkpoint(output_dir: str) -> None:
+    """Remove checkpoint file after successful completion."""
+    checkpoint_path = os.path.join(output_dir, "_checkpoint.json")
+    if os.path.exists(checkpoint_path):
+        os.remove(checkpoint_path)
+        print(f"Removed checkpoint file: {checkpoint_path}")
 
 from open_instruct.dataset_transformation import (
     ATTENTION_MASK_KEY,
@@ -139,6 +165,15 @@ class ConvertSFTDataArguments:
     """Only write the tokenizer config to the output directory"""
     tokenizer_config_only: bool = field(default=False)
 
+    """Resume from checkpoint if available"""
+    resume: bool = field(default=False)
+
+    """Checkpoint save interval (number of samples)"""
+    checkpoint_interval: int = field(default=100_000)
+
+    """Shuffle seed for reproducible dataset ordering"""
+    shuffle_seed: int = field(default=42)
+
 
 def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
@@ -201,7 +236,8 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         drop_dataset_source=False,
     )
 
-    train_dataset = train_dataset.shuffle()
+    # Use fixed seed for reproducible shuffling (required for resume)
+    train_dataset = train_dataset.shuffle(seed=args.shuffle_seed)
 
     if args.visualize:
         print("Visualizing first example...")
@@ -213,28 +249,67 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         print(f"Selecting {args.num_examples} examples for debugging")
         train_dataset = train_dataset.select(range(args.num_examples))
 
-    print("Collecting tokens from dataset...")
-    token_ids = []
-    labels_mask = []
-    sample: Mapping[str, Any]
-    num_samples_skipped = 0
-    document_boundaries = []
-    current_position = 0
+    # Initialize state (centralized to avoid duplication)
+    state = {
+        "samples_processed": 0,
+        "token_ids": [],
+        "labels_mask": [],
+        "document_boundaries": [],
+        "current_position": 0,
+        "num_samples_skipped": 0,
+        "per_dataset_counts": {},
+        "per_dataset_tokens": {},
+        "per_dataset_trainable_tokens": {},
+        "per_dataset_filtered": {},
+    }
 
-    # Track per-dataset statistics using dataset_source field
-    per_dataset_counts = {}
-    per_dataset_tokens = {}
-    per_dataset_trainable_tokens = {}
-    per_dataset_filtered = {}
+    # Check for existing checkpoint to resume from
+    checkpoint = load_checkpoint(output_dir) if args.resume else None
+    if checkpoint:
+        state.update(checkpoint)
+        # JSON converts tuples to lists, convert back
+        state["document_boundaries"] = [tuple(b) for b in state["document_boundaries"]]
+        print(f"=== RESUMING from checkpoint ===")
+        print(f"  Samples already processed: {state['samples_processed']:,}")
+        print(f"  Tokens collected: {len(state['token_ids']):,}")
+        print(f"  Remaining samples: {len(train_dataset) - state['samples_processed']:,}")
+        print(f"================================")
+    elif args.resume:
+        print("No checkpoint found, starting from beginning...")
+
+    # Extract state into local variables for convenience
+    start_idx = state["samples_processed"]
+    token_ids = state["token_ids"]
+    labels_mask = state["labels_mask"]
+    document_boundaries = state["document_boundaries"]
+    current_position = state["current_position"]
+    num_samples_skipped = state["num_samples_skipped"]
+    per_dataset_counts = state["per_dataset_counts"]
+    per_dataset_tokens = state["per_dataset_tokens"]
+    per_dataset_trainable_tokens = state["per_dataset_trainable_tokens"]
+    per_dataset_filtered = state["per_dataset_filtered"]
+
+    print("Collecting tokens from dataset...")
+    sample: Mapping[str, Any]
+    total_samples = len(train_dataset)
+
+    # Skip to resume point efficiently using dataset.select()
+    if start_idx > 0:
+        train_dataset_iter = train_dataset.select(range(start_idx, total_samples))
+    else:
+        train_dataset_iter = train_dataset
 
     for idx, sample in enumerate(
         tqdm(  # type: ignore
-            train_dataset,
+            train_dataset_iter,
             desc="Collecting tokens",
             file=sys.stdout,
             bar_format="{l_bar}{bar}{r_bar}\n",  # better printing in beaker
             mininterval=10.0,
-        )
+            initial=start_idx,  # Start progress bar from resume point
+            total=total_samples,
+        ),
+        start=start_idx,  # Enumerate from resume point
     ):
         sample_length = len(sample[INPUT_IDS_KEY])
         sample_tokens = sample[INPUT_IDS_KEY]
@@ -269,6 +344,22 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         assert all(
             mask == 1 for mask in sample[ATTENTION_MASK_KEY]
         ), f"Expected all attention mask values to be 1, but found: {sample[ATTENTION_MASK_KEY]}"
+
+        # Save checkpoint periodically
+        if (idx + 1) % args.checkpoint_interval == 0 and idx > start_idx:
+            save_checkpoint(output_dir, {
+                "samples_processed": idx + 1,
+                "token_ids": token_ids,
+                "labels_mask": labels_mask,
+                "document_boundaries": document_boundaries,
+                "current_position": current_position,
+                "num_samples_skipped": num_samples_skipped,
+                "per_dataset_counts": per_dataset_counts,
+                "per_dataset_tokens": per_dataset_tokens,
+                "per_dataset_trainable_tokens": per_dataset_trainable_tokens,
+                "per_dataset_filtered": per_dataset_filtered,
+            })
+            print(f"\nCheckpoint saved at sample {idx + 1:,} ({len(token_ids):,} tokens)")
 
     train_dataset = remove_dataset_source_field(train_dataset)
 
@@ -353,6 +444,9 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         print(f"Written {filename} ({len(chunk_data) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
 
     print("Data conversion completed successfully!")
+
+    # Remove checkpoint file on successful completion
+    remove_checkpoint(output_dir)
 
     # Write dataset statistics
     write_dataset_statistics(

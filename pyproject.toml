@@ -11,12 +11,13 @@ dependencies = [
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
     "datasets>=4.0.0",
     "debugpy>=1.8.13",
-    "deepspeed<0.17.3",  # version 17.3 and up break our training code right now
+    "deepspeed>=0.18.3",
     "hf-transfer>=0.1.8",
     "litellm>=1.72.0,<1.75.2",  # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
+    "multiprocess<0.70.18",  # avoid AttributeError in ResourceTracker.__del__
     "nltk>=3.9.1",
-    "numpy<2",
+    "numpy>=2",
     "ai2-olmo-core==2.3.0",
     "nvitop>=1.4.2",
     "packaging>=24.2",
@@ -24,14 +25,17 @@ dependencies = [
     "ray[default]>=2.49.2",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.8.0,<2.9",
+    "torch>=2.9.0,<2.10",
     "transformers>=4.57.0",
-    "vllm==0.11.0",
-    "wandb==0.18.1",
+    "vllm==0.14.1; platform_system != 'Darwin'",
+    "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
-    "flash-attn>=2.8.3; platform_system != 'Darwin'",
+    "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     "liger-kernel>=0.5.4; platform_system != 'Darwin'",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "mcp>=1.9.0",
 ]
 
 [build-system]
@@ -50,12 +54,18 @@ flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 # pytorch related setups
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
+  { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [[tool.uv.index]]
@@ -65,20 +75,26 @@ explicit = true
 
 [project.optional-dependencies]
 code = [
-    "fastapi>=0.100.0",
-    "uvicorn>=0.20.0",
     "pydantic>=2.0.0",
     "requests>=2.28.0",
+]
+dr-tulu = [
+    "dr_agent",
 ]
 
 [tool.uv]
 preview = true
 python-preference = "only-managed"
 link-mode = "hardlink"
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "sys_platform == 'darwin'",
+]
 
 [dependency-groups]
 dev = [
-    "beaker-py>=2.5.0",
+    "beaker-py>=2.5.3",
     "mkdocs-material>=9.6.8",
     "pytest>=8.3.4",
     "ruff>=0.11.13",
@@ -91,22 +107,20 @@ dev = [
 
 [tool.pytest.ini_options]
 addopts = "--ignore=oe-eval-internal/"
+filterwarnings = [
+    "ignore:.*sentry_sdk.Hub.*:DeprecationWarning",
+    "ignore:builtin type SwigPy.*:DeprecationWarning",
+]
 
 
 [tool.black]
 line-length = 119
 target-version = ['py310']
 
-[tool.isort]
-known_first_party = ["open_instruct"]
-profile = "black"
-src_paths = ["open_instruct"]
-
 [tool.ruff]
 target-version = "py310"
 line-length = 119
-# do both . and open_instruct to make sure known-first-party below works
-src = [".", "open_instruct"]
+src = ["open_instruct"]
 exclude = ["wandb"]
 
 [tool.ruff.format]
@@ -128,7 +142,7 @@ docstring-code-format = false
 # SIM = flake8-simplify
 # UP = pyupgrade
 # B = flake8-bugbear
-select = ["F", "E", "W", "I", "SIM", "UP", "B"]
+select = ["F", "E", "W", "I", "SIM", "UP", "B", "PLC0415"]
 ignore = [
     "B905", # zip() without explicit strict= parameter
     "C408", # dict() calls (stylistic)
@@ -136,12 +150,22 @@ ignore = [
     "E501", # Line too long (handled by line-length setting)
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# This class runs in vLLM worker processes; imports are inside methods.
+"open_instruct/vllm_utils_workerwrap.py" = ["PLC0415"]
+
 [tool.ruff.lint.isort]
-known-first-party = ["open-instruct"]
+known-first-party = ["open_instruct", "mason"]
 # case insensitive to match isort --profile black
 case-sensitive = false
 # Disable split-on-trailing-comma to work with skip-magic-trailing-comma
 split-on-trailing-comma = false
+
+# Ignore unresolved imports because some packages (e.g. vllm) are not available on macOS
+# Ignore possibly-missing-attribute for torch.distributed which has incomplete type stubs
+[tool.ty.rules]
+unresolved-import = "ignore"
+possibly-missing-attribute = "ignore"
 
 [tool.ty.src]
 include = [
@@ -150,14 +174,19 @@ include = [
     "open_instruct/code_utils/api.py",
     "open_instruct/context_window_checker.py",
     "open_instruct/dataset_processor.py",
+    "open_instruct/dataset_transformation.py",
     "open_instruct/data_loader.py",
     "open_instruct/data_types.py",
+    "open_instruct/dpo_config.py",
+    "open_instruct/dpo_utils.py",
+    "open_instruct/grpo_utils.py",
     "open_instruct/logger_utils.py",
     "open_instruct/mix_data.py",
     "open_instruct/mix_data_preferences.py",
     "open_instruct/padding_free_collator.py",
     "open_instruct/rejection_sampling/prompt_templates.py",
-    "open_instruct/search_utils/",
-    "open_instruct/tool_utils/tools.py",
+    "open_instruct/rl_utils.py",
+    "open_instruct/tools/tools.py",
+    "open_instruct/tools/generic_mcp.py",
 ]
 exclude = ["scripts/", "decontamination/", "human_eval/"]

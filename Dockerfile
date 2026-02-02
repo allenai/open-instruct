@@ -1,8 +1,8 @@
-FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
+FROM nvidia/cuda:12.9.0-devel-ubuntu22.04
 
 ARG DEBIAN_FRONTEND="noninteractive"
-ENV TZ="America/Los_Angeles"
-ENV LANG=en_US.UTF-8
+ENV TZ="America/Los_Angeles" \
+    LANG=en_US.UTF-8
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -29,8 +29,8 @@ RUN wget https://www.mellanox.com/downloads/MFT/mft-${MFT_VER}-x86_64-deb.tgz &&
     mft-${MFT_VER}-x86_64-deb/install.sh --without-kernel && \
     rm mft-${MFT_VER}-x86_64-deb.tgz
 
-ENV DOFED_VER=2.10.0
-ENV OS_VER=ubuntu2204
+ENV DOFED_VER=2.10.0 \
+    OS_VER=ubuntu2204
 RUN wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOFED_VER}/host/doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb && \
     dpkg -i doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb && \
     apt-get update && apt-get -y install --no-install-recommends doca-ofed-userspace && \
@@ -62,33 +62,26 @@ COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
 WORKDIR /stage/
 
-ENV UV_CACHE_DIR=/root/.cache/uv
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
-ENV UV_COMPILE_BYTECODE=0
+ENV UV_CACHE_DIR=/root/.cache/uv \
+    HF_HUB_ENABLE_HF_TRANSFER=1 \
+    UV_COMPILE_BYTECODE=0
 
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-cache
+    uv run --frozen python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
 
-RUN uv run --no-sync -m nltk.downloader punkt punkt_tab
-
-# Copy all application code at the end
+# Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts
 COPY mason.py mason.py
-# Copy oe-eval-internal if it exists (wildcard pattern won't fail if missing)
-COPY oe-eval-interna[l] oe-eval-internal/
 COPY open_instruct open_instruct
+COPY oe-eval-interna[l] oe-eval-internal/
 
-# Add build arguments for git information
-ARG GIT_COMMIT=""
-ARG GIT_BRANCH=""
+ARG GIT_COMMIT="" \
+    GIT_BRANCH=""
 
-# Set them as environment variables
-ENV GIT_COMMIT=${GIT_COMMIT}
-ENV GIT_BRANCH=${GIT_BRANCH}
-
-# Set up the environment
-ENV PATH=/stage/.venv/bin:$PATH
+ENV GIT_COMMIT=${GIT_COMMIT} \
+    GIT_BRANCH=${GIT_BRANCH} \
+    PATH=/stage/.venv/bin:$PATH

@@ -440,7 +440,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
-        maybe_update_beaker_description(wandb_url=wandb_tracker.run.get_url())
+        maybe_update_beaker_description(wandb_url=wandb_tracker.run.url)
     else:
         wandb_tracker = None  # for later eval launching
 
@@ -529,11 +529,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 trust_remote_code=tc.trust_remote_code,
                 quantization_config=bnb_config,
                 device_map=device_map,
-                torch_dtype=torch.bfloat16,
+                dtype=torch.bfloat16,
                 attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
             )
         elif args.use_liger_kernel:
-            from liger_kernel.transformers import AutoLigerKernelForCausalLM
+            from liger_kernel.transformers import AutoLigerKernelForCausalLM  # noqa: PLC0415
 
             logger.info("Attempting to apply liger-kernel. fused_linear_cross_entropy=True")
 
@@ -557,7 +557,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 config=config,
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
-                torch_dtype=torch.bfloat16,
+                dtype=torch.bfloat16,
                 attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
             )
     else:
@@ -582,6 +582,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.use_lora:
         if args.use_qlora:
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+        elif args.gradient_checkpointing:
+            # Enable gradient checkpointing for LoRA (non-QLoRA) too
+            model.gradient_checkpointing_enable()
 
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(
@@ -619,7 +622,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
     ]
     if args.use_qlora:
-        from bitsandbytes.optim import AdamW
+        from bitsandbytes.optim import AdamW  # noqa: PLC0415
 
         optimizer = AdamW(
             optimizer_grouped_parameters,
@@ -889,7 +892,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         current_step=completed_steps,
                         total_steps=args.max_train_steps,
                         start_time=start_time,
-                        wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
+                        wandb_url=wandb_tracker.run.url if wandb_tracker is not None else None,
                     )
                     total_loss = 0
                     total_aux_loss = 0
@@ -943,12 +946,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
-            wandb_url=wandb_tracker.run.get_url() if wandb_tracker is not None else None,
+            wandb_url=wandb_tracker.run.url if wandb_tracker is not None else None,
             oe_eval_tasks=args.oe_eval_tasks,
             gs_bucket_path=args.gs_bucket_path,
         )
-    if args.push_to_hub:
-        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+    if args.push_to_hub and accelerator.is_main_process:
+        push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     accelerator.wait_for_everyone()
     if args.with_tracking:
         accelerator.end_training()

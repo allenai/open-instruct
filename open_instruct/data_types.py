@@ -1,8 +1,12 @@
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
+
+
+class ShutdownSentinel:
+    """Sentinel value to signal thread shutdown via queue."""
 
 
 @dataclass
@@ -16,6 +20,15 @@ class TokenStatistics:
 
 
 @dataclass
+class ToolCallStats:
+    """Statistics for a single tool call."""
+
+    tool_name: str
+    success: bool
+    runtime: float
+
+
+@dataclass
 class RequestInfo:
     """Container for tool usage information used in queue payloads."""
 
@@ -25,6 +38,9 @@ class RequestInfo:
     tool_outputs: list[str]
     tool_runtimes: list[float]
     tool_calleds: list[bool]
+    tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
+    excess_tool_calls: list[dict[str, int]] = field(default_factory=list)
+    """Per-sample dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
 
 
 @dataclass
@@ -35,7 +51,7 @@ class GenerationResult:
     finish_reasons: list[str]
     masks: list[list[int]]
     request_info: RequestInfo
-    dataset_index: int | None
+    index: int | None
     prompt_id: str | None
     token_statistics: TokenStatistics | None = None
     start_time: float | None = None
@@ -55,9 +71,11 @@ class PromptRequest:
 
     prompt: list[int]
     generation_config: Any
-    dataset_index: int
+    index: int
     prompt_id: str
     is_eval: bool = False
+    active_tools: list[str] | None = None
+    """List of tool names that are active for this sample. If None, all tools are active."""
 
 
 @dataclass

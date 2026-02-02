@@ -13,19 +13,22 @@
 # limitations under the License.
 # Copied from https://github.com/huggingface/alignment-handbook/blob/main/tests/test_data.py
 import json
+import os
 import pathlib
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 import ray
 import responses
+import torch
 from dateutil import parser
 from parameterized import parameterized
 
-from open_instruct import grpo_fast, utils
+from open_instruct import data_types, launch_utils, utils
 from open_instruct.finetune import FlatArguments
 
 
@@ -124,7 +127,7 @@ class GetDatasetsTest(unittest.TestCase):
         self.assertTrue(parser.parse("0001-01-01T00:00:00Z"))
 
 
-def _setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_description):
+def setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_description):
     """Shared mock setup for beaker tests."""
     mock_is_beaker_job.return_value = True
 
@@ -163,7 +166,7 @@ class TestBeakerDescription(unittest.TestCase):
         env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
         mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
 
-        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+        mock_client, mock_spec, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Beaker-Mason job."
         )
 
@@ -221,7 +224,7 @@ class TestBeakerDescription(unittest.TestCase):
         env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "def456", "GIT_BRANCH": "dev"}
         mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
 
-        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+        mock_client, mock_spec, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Initial job description"
         )
 
@@ -256,7 +259,7 @@ class TestBeakerDescription(unittest.TestCase):
             "https://wandb.ai/ai2-llm/open_instruct_internal/runs/n53oxnzb "
             "[5.0% complete (step 1/20), eta 0m]"
         )
-        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+        mock_client, mock_spec, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, previous_run_description
         )
 
@@ -378,8 +381,8 @@ class TestDownloadFromGsBucket(unittest.TestCase):
             def mock_live_subprocess_output(cmd):
                 captured_cmd["cmd"] = cmd
 
-            with mock.patch.object(utils, "live_subprocess_output", side_effect=mock_live_subprocess_output):
-                utils.download_from_gs_bucket(src_paths=src_paths, dest_path=str(dest_path))
+            with mock.patch.object(launch_utils, "live_subprocess_output", side_effect=mock_live_subprocess_output):
+                launch_utils.download_from_gs_bucket(src_paths=src_paths, dest_path=str(dest_path))
 
             expected_cmd = [
                 "gsutil",
@@ -539,7 +542,7 @@ class TestModelDims(unittest.TestCase):
 
     @parameterized.expand(_load_mbu_test_cases())
     def test_mbu_reproduction(self, name, case_data):
-        metrics = grpo_fast.calculate_utilization_metrics(
+        metrics = utils.calculate_utilization_metrics(
             model_dims=MODEL_DIMS[case_data["model_name"]],
             prompt_lengths=case_data["prompt_lengths"],
             response_lengths=case_data["response_lengths"],
@@ -580,7 +583,7 @@ class TestModelDims(unittest.TestCase):
         prompt_lengths = [prompt_len] * num_prompts
         response_lengths = [int(response_len)] * (num_prompts * samples_per_prompt)
 
-        metrics = grpo_fast.calculate_utilization_metrics(
+        metrics = utils.calculate_utilization_metrics(
             model_dims=MODEL_DIMS[model_name],
             prompt_lengths=prompt_lengths,
             response_lengths=response_lengths,
@@ -606,30 +609,102 @@ class TestModelDims(unittest.TestCase):
         )
         self.assertLessEqual(metrics["learner_mfu"], 100)
 
-    def test_model_dims_match_vllm_config(self):
-        expected_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
 
-        mock_hf_text_config = mock.Mock()
-        mock_hf_text_config.intermediate_size = 18944
-        mock_hf_text_config.sliding_window = None
-        mock_hf_text_config.num_attention_heads = 28
-        mock_hf_text_config.num_key_value_heads = 4
+class TestModelDimsFromHFConfig(unittest.TestCase):
+    def test_from_hf_config_with_sliding_window(self):
+        config = SimpleNamespace(
+            hidden_size=2048,
+            intermediate_size=8192,
+            sliding_window=4096,
+            layer_types=["sliding_attention", "attention"],
+            num_attention_heads=16,
+            num_hidden_layers=24,
+            vocab_size=32000,
+            num_key_value_heads=8,
+            head_dim=128,
+        )
 
-        mock_model_config = mock.Mock()
-        mock_model_config.get_hidden_size.return_value = 3584
-        mock_model_config.get_num_layers.return_value = 28
-        mock_model_config.get_vocab_size.return_value = 152064
-        mock_model_config.get_head_size.return_value = 128
-        mock_model_config.hf_text_config = mock_hf_text_config
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config) as mock_from_pretrained,
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+            mock.patch("torch.cuda.is_available", return_value=True),
+        ):
+            model_dims = utils.ModelDims.from_hf_config("test/model")
 
-        mock_vllm_config = mock.Mock()
-        mock_vllm_config.model_config = mock_model_config
-        mock_vllm_config.parallel_config = mock.Mock()
+        mock_from_pretrained.assert_called_once_with("test/model", trust_remote_code=True)
+        self.assertEqual(
+            model_dims,
+            utils.ModelDims(
+                num_layers=24,
+                hidden_size=2048,
+                intermediate_size=8192,
+                vocab_size=32000,
+                num_attn_heads=16,
+                head_dim=128,
+                num_kv_heads=8,
+                sliding_window=4096,
+                num_sliding_window_layers=1,
+                device_name="h100",
+            ),
+        )
 
-        with mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"):
-            vllm_dims = utils.ModelDims.from_vllm_config(mock_vllm_config)
+    def test_from_hf_config_defaults(self):
+        config = SimpleNamespace(hidden_size=1024, num_attention_heads=8, num_hidden_layers=12, vocab_size=64000)
 
-        self.assertEqual(vllm_dims, expected_dims)
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+            mock.patch("torch.cuda.is_available", return_value=True),
+        ):
+            model_dims = utils.ModelDims.from_hf_config("test/defaults")
+        self.assertEqual(
+            model_dims,
+            utils.ModelDims(
+                num_layers=12,
+                hidden_size=1024,
+                intermediate_size=4096,
+                vocab_size=64000,
+                num_attn_heads=8,
+                head_dim=128,
+                num_kv_heads=8,
+                sliding_window=None,
+                num_sliding_window_layers=0,
+                device_name="h100",
+            ),
+        )
+
+    def test_from_hf_config_sliding_window_no_layer_types(self):
+        config = SimpleNamespace(
+            hidden_size=2048,
+            intermediate_size=8192,
+            sliding_window=4096,
+            num_attention_heads=16,
+            num_hidden_layers=24,
+            vocab_size=32000,
+            num_key_value_heads=8,
+            head_dim=128,
+        )
+
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
+            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
+            mock.patch("torch.cuda.is_available", return_value=True),
+        ):
+            model_dims = utils.ModelDims.from_hf_config("test/model")
+
+        self.assertEqual(model_dims.sliding_window, 4096)
+        self.assertEqual(model_dims.num_sliding_window_layers, 24)
+
+    def test_from_hf_config_cpu_only(self):
+        config = SimpleNamespace(hidden_size=1024, num_attention_heads=8, num_hidden_layers=12, vocab_size=64000)
+
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
+            mock.patch("torch.cuda.is_available", return_value=False),
+        ):
+            model_dims = utils.ModelDims.from_hf_config("test/cpu")
+
+        self.assertIsNone(model_dims.device_name)
 
 
 # useful for checking if public datasets are still available
@@ -655,26 +730,9 @@ class TestModelDims(unittest.TestCase):
 #         _ = get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["messages"])
 
 
-class TestGetDenominator(unittest.TestCase):
-    @parameterized.expand([("token", "token"), ("0.5", 0.5), (0.5, 0.5), (1, 1.0)])
-    def test_valid_inputs(self, input_val, expected):
-        self.assertEqual(utils.get_denominator(input_val), expected)
-
-    @parameterized.expand(
-        [
-            ("invalid", "could not convert string to float"),
-            ("-1", "loss_denominator must be greater than 0"),
-            (0, "loss_denominator must be greater than 0"),
-            ("0", "loss_denominator must be greater than 0"),
-        ]
-    )
-    def test_invalid_inputs(self, input_val, error_msg):
-        with self.assertRaisesRegex(ValueError, error_msg):
-            utils.get_denominator(input_val)
-
-
 class TestRayGetWithProgress(unittest.TestCase):
     def setUp(self):
+        os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
         ray.init(num_cpus=2, num_gpus=0)
 
     def tearDown(self):
@@ -691,3 +749,189 @@ class TestRayGetWithProgress(unittest.TestCase):
 
         with pytest.raises(TimeoutError, match=desc):
             utils.ray_get_with_progress(refs, desc=desc, enable=False, timeout=0.1)
+
+
+class TestUlyssesSPSplitter(unittest.TestCase):
+    """Test the UlyssesSPSplitter for sequence parallelism splitting."""
+
+    def _create_mock_splitter(self, sp_rank: int, sp_world_size: int, pad_token_id: int = 0):
+        """Create a UlyssesSPSplitter with mocked process group."""
+        mock_group = mock.MagicMock()
+        return utils.UlyssesSPSplitter(
+            sp_rank=sp_rank,
+            sp_group=mock_group,
+            sp_world_size=sp_world_size,
+            device=torch.device("cpu"),
+            pad_token_id=pad_token_id,
+        )
+
+    def _create_test_batch(self, seq_lengths: list[int]) -> data_types.CollatedBatchData:
+        """Create a CollatedBatchData with tensors of given sequence lengths."""
+        query_responses = [torch.arange(length).unsqueeze(0) for length in seq_lengths]
+        attention_masks = [torch.ones(1, length, dtype=torch.long) for length in seq_lengths]
+        position_ids = [torch.arange(length).unsqueeze(0) for length in seq_lengths]
+        advantages = [torch.ones(1, length) * (i + 1) for i, length in enumerate(seq_lengths)]
+        response_masks = [torch.ones(1, length, dtype=torch.long) for length in seq_lengths]
+        vllm_logprobs = [torch.zeros(1, length) - 0.5 for length in seq_lengths]
+
+        return data_types.CollatedBatchData(
+            query_responses=query_responses,
+            attention_masks=attention_masks,
+            position_ids=position_ids,
+            advantages=advantages,
+            response_masks=response_masks,
+            vllm_logprobs=vllm_logprobs,
+        )
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_basic_split_rank0(self, mock_all_gather):
+        """Test that rank 0 gets the first chunk of the sequence."""
+        sp_world_size = 2
+        splitter = self._create_mock_splitter(sp_rank=0, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([8])  # 8 tokens, splits into 4 per rank
+
+        # Mock all_gather to return the local max length
+        def fill_seqlens(seqlens, local_seqlen, group):
+            for s in seqlens:
+                s.copy_(local_seqlen)
+
+        mock_all_gather.side_effect = fill_seqlens
+
+        result = splitter.split_collated_batch(batch)
+
+        # Rank 0 should get first half: tokens 0-3
+        self.assertEqual(result.query_responses[0].shape[-1], 4)
+        torch.testing.assert_close(result.query_responses[0], torch.tensor([[0, 1, 2, 3]]))
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_basic_split_rank1(self, mock_all_gather):
+        """Test that rank 1 gets the second chunk of the sequence."""
+        sp_world_size = 2
+        splitter = self._create_mock_splitter(sp_rank=1, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([8])
+
+        def fill_seqlens(seqlens, local_seqlen, group):
+            for s in seqlens:
+                s.copy_(local_seqlen)
+
+        mock_all_gather.side_effect = fill_seqlens
+
+        result = splitter.split_collated_batch(batch)
+
+        # Rank 1 should get second half: tokens 4-7
+        self.assertEqual(result.query_responses[0].shape[-1], 4)
+        torch.testing.assert_close(result.query_responses[0], torch.tensor([[4, 5, 6, 7]]))
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_padding_to_divisible_length(self, mock_all_gather):
+        """Test that sequences are padded to be divisible by sp_world_size."""
+        sp_world_size = 4
+        splitter = self._create_mock_splitter(sp_rank=0, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([6])  # 6 is not divisible by 4, should pad to 8
+
+        def fill_seqlens(seqlens, local_seqlen, group):
+            for s in seqlens:
+                s.copy_(local_seqlen)
+
+        mock_all_gather.side_effect = fill_seqlens
+
+        result = splitter.split_collated_batch(batch)
+
+        # After padding to 8, rank 0 gets tokens 0-1
+        self.assertEqual(result.query_responses[0].shape[-1], 2)
+        torch.testing.assert_close(result.query_responses[0], torch.tensor([[0, 1]]))
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_pad_values_for_different_fields(self, mock_all_gather):
+        """Test that different fields use correct padding values."""
+        sp_world_size = 2
+        pad_token_id = 99
+        splitter = self._create_mock_splitter(sp_rank=1, sp_world_size=sp_world_size, pad_token_id=pad_token_id)
+        batch = self._create_test_batch([3])  # Will pad to 4
+
+        def fill_seqlens(seqlens, local_seqlen, group):
+            for s in seqlens:
+                s.copy_(local_seqlen)
+
+        mock_all_gather.side_effect = fill_seqlens
+
+        result = splitter.split_collated_batch(batch)
+
+        # Rank 1 gets second chunk (indices 2-3), where index 3 is padded
+        # query_responses should pad with pad_token_id (99)
+        self.assertEqual(result.query_responses[0][0, -1].item(), pad_token_id)
+        # vllm_logprobs should pad with INVALID_LOGPROB (1.0)
+        self.assertEqual(result.vllm_logprobs[0][0, -1].item(), utils.INVALID_LOGPROB)
+        # attention_masks should pad with 0
+        self.assertEqual(result.attention_masks[0][0, -1].item(), 0)
+        # response_masks should pad with 0
+        self.assertEqual(result.response_masks[0][0, -1].item(), 0)
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_multiple_sequences_in_batch(self, mock_all_gather):
+        """Test splitting with multiple sequences of different lengths."""
+        sp_world_size = 2
+        splitter = self._create_mock_splitter(sp_rank=0, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([4, 6])  # Two sequences, different lengths
+
+        def fill_seqlens(seqlens, local_seqlen, group):
+            for s in seqlens:
+                s.copy_(local_seqlen)
+
+        mock_all_gather.side_effect = fill_seqlens
+
+        result = splitter.split_collated_batch(batch)
+
+        # Both sequences should be in result, both padded to max_seqlen=6 (rounded to 6)
+        self.assertEqual(len(result.query_responses), 2)
+        # First sequence (original length 4): rank 0 gets first 3 tokens
+        self.assertEqual(result.query_responses[0].shape[-1], 3)
+        # Second sequence (original length 6): rank 0 gets first 3 tokens
+        self.assertEqual(result.query_responses[1].shape[-1], 3)
+        torch.testing.assert_close(result.query_responses[1], torch.tensor([[0, 1, 2]]))
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_all_fields_are_split(self, mock_all_gather):
+        """Test that all fields in CollatedBatchData are properly split."""
+        sp_world_size = 2
+        splitter = self._create_mock_splitter(sp_rank=0, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([8])
+
+        def fill_seqlens(seqlens, local_seqlen, group):
+            for s in seqlens:
+                s.copy_(local_seqlen)
+
+        mock_all_gather.side_effect = fill_seqlens
+
+        result = splitter.split_collated_batch(batch)
+
+        # Verify all fields have same chunk length
+        chunk_len = 4
+        self.assertEqual(result.query_responses[0].shape[-1], chunk_len)
+        self.assertEqual(result.attention_masks[0].shape[-1], chunk_len)
+        self.assertEqual(result.position_ids[0].shape[-1], chunk_len)
+        self.assertEqual(result.advantages[0].shape[-1], chunk_len)
+        self.assertEqual(result.response_masks[0].shape[-1], chunk_len)
+        self.assertEqual(result.vllm_logprobs[0].shape[-1], chunk_len)
+
+    @mock.patch("open_instruct.utils.dist.all_gather")
+    def test_global_max_seqlen_respected(self, mock_all_gather):
+        """Test that global max sequence length from all_gather is respected."""
+        sp_world_size = 2
+        splitter = self._create_mock_splitter(sp_rank=0, sp_world_size=sp_world_size, pad_token_id=99)
+        batch = self._create_test_batch([4])  # Local max is 4
+
+        # Simulate another rank having a longer sequence (length 8)
+        def fill_with_global_max(seqlens, local_seqlen, group):
+            seqlens[0].copy_(local_seqlen)  # This rank: 4
+            seqlens[1].fill_(8)  # Other rank: 8
+
+        mock_all_gather.side_effect = fill_with_global_max
+
+        result = splitter.split_collated_batch(batch)
+
+        # Should pad to global max (8), so each rank gets 4 tokens
+        # Rank 0 gets first 4 tokens, with original data [0,1,2,3] + padding handled
+        self.assertEqual(result.query_responses[0].shape[-1], 4)
+        # Original sequence was [0,1,2,3], which fits exactly in rank 0's chunk
+        torch.testing.assert_close(result.query_responses[0], torch.tensor([[0, 1, 2, 3]]))

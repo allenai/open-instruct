@@ -17,6 +17,7 @@ uv run python mason.py \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --budget ai2/oe-adapt \
+        --no_auto_dataset_cache \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
@@ -45,10 +46,11 @@ uv run python mason.py \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
         --total_episodes 10_000 \
-        --deepspeed_stage 2 \
+        --deepspeed_stage 3 \
         --num_learners_per_node 8 \
-        --vllm_num_engines 8 \
-        --vllm_tensor_parallel_size 1 \
+        --sequence_parallel_size 2 \
+        --vllm_num_engines 4 \
+        --vllm_tensor_parallel_size 2 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
         --code_api_url \$CODE_API_URL/test_program \
@@ -60,7 +62,8 @@ uv run python mason.py \
         --vllm_enable_prefix_caching \
         --oe_eval_max_length 32768 \
         --oe_eval_tasks "codex_humanevalplus:0-shot-chat-v1::tulu-thinker,mbppplus:0-shot-chat::tulu-thinker,livecodebench_codegeneration::tulu-thinker" \
-        --dataset_skip_cache True \
+		--checkpoint_state_freq 2 \
+        --checkpoint_state_dir /tmp/checkpoint_test \
         --active_sampling \
         --async_steps 4 \
 	--push_to_hub False

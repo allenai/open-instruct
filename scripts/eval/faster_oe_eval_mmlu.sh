@@ -1,3 +1,4 @@
+#!/bin/bash
 all_mmlu_tasks=(
     "mmlu_abstract_algebra"
     "mmlu_anatomy"
