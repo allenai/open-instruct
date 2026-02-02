@@ -13,6 +13,7 @@ uv run python mason.py \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
+    --env 'TORCH_LOGS=graph_breaks,recompiles' \
     --gpus 1 -- torchrun --nproc_per_node=1 open_instruct/dpo.py \
     --model_name_or_path allenai/OLMo-2-0425-1B \
     --tokenizer_name allenai/OLMo-2-0425-1B \
@@ -31,4 +32,5 @@ uv run python mason.py \
     --seed 123 \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \
-    --with_tracking
+    --with_tracking \
+    --compile_model
