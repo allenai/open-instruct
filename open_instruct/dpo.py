@@ -12,6 +12,7 @@ from functools import partial
 
 import bitsandbytes.optim
 import torch
+import torch._dynamo
 import torch.distributed as dist
 import transformers
 from olmo_core import train
@@ -118,7 +119,8 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     )
 
     if args.compile_model:
-        logger.info("Applying torch.compile to model blocks...")
+        logger.info("Applying torch.compile to model blocks with dynamic shapes...")
+        torch._dynamo.config.assume_static_by_default = False
         model.apply_compile()
 
     return model, model_config
