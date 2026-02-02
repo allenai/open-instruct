@@ -100,6 +100,52 @@ class ToolsConfig:
 
 
 @dataclass
+class EnvConfig:
+    """Configuration for RL environments used during generation."""
+
+    env_name: str | None = None
+    """Name of registered environment (e.g., 'sandbox', 'openenv')."""
+
+    env_class: str | None = None
+    """Full class path for custom environment (e.g., 'mymodule.MyEnv')."""
+
+    env_base_url: str | None = None
+    """Base URL for OpenEnv servers (e.g., 'http://localhost:8765')."""
+
+    env_backend: str | None = None
+    """Backend for sandbox environments ('e2b' or 'docker')."""
+
+    env_pool_size: int = 64
+    """Number of environment actors to create."""
+
+    env_max_steps: int = 50
+    """Maximum steps per episode before forcing done=True."""
+
+    env_timeout: int = 60
+    """Timeout in seconds for environment operations."""
+
+    @property
+    def enabled(self) -> bool:
+        """Return True if environment is configured."""
+        return self.env_name is not None or self.env_class is not None
+
+    def to_env_config_dict(self) -> dict:
+        """Convert to dict format expected by PromptRequest.env_config."""
+        config = {
+            "env_name": self.env_name,
+            "env_class": self.env_class,
+            "max_steps": self.env_max_steps,
+            "pool_size": self.env_pool_size,
+            "timeout": self.env_timeout,
+        }
+        if self.env_base_url:
+            config["base_url"] = self.env_base_url
+        if self.env_backend:
+            config["backend"] = self.env_backend
+        return {k: v for k, v in config.items() if v is not None}
+
+
+@dataclass
 class ToolOutput:
     output: str
     called: bool

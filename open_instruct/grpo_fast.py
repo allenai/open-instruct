@@ -105,7 +105,7 @@ from open_instruct.model_utils import (
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.tools.parsers import create_tool_parser
 from open_instruct.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
-from open_instruct.tools.utils import BaseToolConfig, ParsedToolConfig, ToolsConfig
+from open_instruct.tools.utils import BaseToolConfig, EnvConfig, ParsedToolConfig, ToolsConfig
 from open_instruct.utils import (
     INVALID_LOGPROB,
     ArgumentParserPlus,
@@ -2104,6 +2104,7 @@ def main(
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: ToolsConfig,
+    env_config: EnvConfig | None = None,
 ):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
@@ -2288,9 +2289,10 @@ if __name__ == "__main__":
             data_loader_lib.StreamingDataLoaderConfig,
             data_loader_lib.VLLMConfig,
             ToolsConfig,
+            EnvConfig,
         )
     )
-    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config = (
+    args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config, env_config = (
         parser.parse_args_into_dataclasses()
     )
     assert isinstance(args, grpo_utils.ExperimentConfig)
@@ -2299,5 +2301,6 @@ if __name__ == "__main__":
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
     assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
     assert isinstance(tools_config, ToolsConfig)
+    assert isinstance(env_config, EnvConfig)
 
-    main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config)
+    main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config, env_config)

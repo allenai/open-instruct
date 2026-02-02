@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = "==3.12.*"
 dependencies = [
     "accelerate>=1.10.1",
+    "aiohttp>=3.9.0",
     "antlr4-python3-runtime==4.11",
     "backoff>=2.2.1",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
@@ -36,6 +37,7 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
     "mcp>=1.9.0",
+    "e2b-code-interpreter>=1.0.0",
 ]
 
 [build-system]
@@ -80,6 +82,9 @@ code = [
 ]
 dr-tulu = [
     "dr_agent",
+]
+appworld = [
+    "appworld @ git+https://github.com/stonybrooknlp/appworld.git",
 ]
 
 [tool.uv]
