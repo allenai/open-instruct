@@ -53,4 +53,5 @@ uv run python mason.py \
     --beta 5 \
     --activation_memory_budget 0.5 \
     --with_tracking \
+    --push_to_hub false \
     --compile_model
