@@ -1394,6 +1394,7 @@ def weight_sync_thread(
     args: grpo_utils.ExperimentConfig,
     stop_event: threading.Event,
     weight_sync_trigger_event: threading.Event,
+    weight_sync_done_event: threading.Event,
     policy_group: ModelGroup,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
@@ -1401,6 +1402,7 @@ def weight_sync_thread(
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
+    weight_sync_done_event.set()  # Initially done (no sync in progress)
     if resume_training_step > 1:
         weight_sync_trigger_event.set()
 
@@ -1411,6 +1413,7 @@ def weight_sync_thread(
 
         # Clear the event for next iteration
         weight_sync_trigger_event.clear()
+        weight_sync_done_event.clear()  # Mark sync as in progress
 
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
@@ -1433,6 +1436,9 @@ def weight_sync_thread(
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+
+        # Mark weight sync as complete so health check can proceed
+        weight_sync_done_event.set()
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -1827,11 +1833,13 @@ def run_training(
 
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
+    weight_sync_done_event = threading.Event()
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
         stop_event,
         weight_sync_trigger_event,
+        weight_sync_done_event,
         policy_group,
         actor_manager,
         weight_sync_metrics_Q,
@@ -1847,6 +1855,10 @@ def run_training(
 
     def health_check_fn():
         [f.result() for f in [weight_sync_thread_future] if f.done()]
+        # Wait for any in-progress weight sync to complete before checking vLLM engines.
+        # Without this, vLLM engines may be blocked by weight broadcast and wont respond.
+        if not weight_sync_done_event.wait(timeout=120.0):
+            raise RuntimeError("Weight sync timed out after 120s - vLLM engines may be stuck")
         ray_get_with_progress(
             [engine.check_background_threads.remote() for engine in vllm_engines],
             desc="Checking vLLM engine health",
