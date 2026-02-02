@@ -53,7 +53,7 @@ else
     done
 fi
 
-echo "Starting Wordle environment training (1 GPU, 5 episodes)..."
+echo "Starting Wordle environment training (1 GPU, 24 episodes = 3 training steps)..."
 
 cd "$REPO_ROOT"
 uv run python open_instruct/grpo_fast.py \
@@ -68,7 +68,7 @@ uv run python open_instruct/grpo_fast.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --temperature 0.7 \
     --learning_rate 3e-7 \
-    --total_episodes 5 \
+    --total_episodes 24 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
