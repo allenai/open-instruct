@@ -3,11 +3,11 @@
 # Define arrays for model names and paths
 PY="/opt/anaconda3/envs/python310/bin/python"
 MODEL_NAMES=(
-    "Router-SFT-NewCode-Pretrained-Experts"
+    "NewCode-SFTedExperts-RT"
 )
 
 MODEL_PATHS=(
-    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/router-sft-newcode-pretrained/step1212-hf"
+    "/weka/oe-training-default/sanjaya/flexolmo/checkpoints/OLMo2-7b-flex-base-merged-4x7B-sft-experts-olmo3code-RT/step9537-hf"
 )
 
 # Check that arrays have the same length
