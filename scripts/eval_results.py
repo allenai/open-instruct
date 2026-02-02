@@ -80,20 +80,20 @@ def extract_letter_answer(text: str) -> str | None:
 
 
 def eval_aime(results: list[dict]) -> dict:
-    """Evaluate AIME results using math-verify with majority voting."""
+    """Evaluate AIME results using math-verify with average accuracy across samples."""
     if not MATH_VERIFY_AVAILABLE:
         print("Skipping AIME eval: math-verify not installed")
         return {"error": "math-verify not installed"}
     
-    correct = 0
-    total = 0
+    total_problems = 0
+    sum_accuracy = 0.0  # Sum of per-problem accuracies
     details = []
     
     # Track by year
     by_year = {}
     
     for sample in results:
-        total += 1
+        total_problems += 1
         ground_truth = sample.get("answer", sample.get("solution", ""))
         source = sample.get("source", "")
         
@@ -105,75 +105,84 @@ def eval_aime(results: list[dict]) -> dict:
             year = "2025"
         
         if year not in by_year:
-            by_year[year] = {"correct": 0, "total": 0}
+            by_year[year] = {"sum_accuracy": 0.0, "total": 0}
         by_year[year]["total"] += 1
         
-        # Handle multi-sample (majority voting)
+        # Handle multi-sample (average accuracy)
         if "generated_responses" in sample:
             responses = sample["generated_responses"]
-            extracted_answers = []
+            num_correct = 0
+            num_samples = len(responses)
+            sample_results = []
+            
             for resp in responses:
                 ans = extract_boxed(resp)
-                if ans:
-                    extracted_answers.append(ans)
+                is_correct = False
+                
+                if ans is not None:
+                    try:
+                        pred_parsed = parse(ans)
+                        gt_parsed = parse(str(ground_truth))
+                        is_correct = verify(pred_parsed, gt_parsed)
+                    except Exception:
+                        # Fallback to string comparison
+                        is_correct = str(ans).strip() == str(ground_truth).strip()
+                
+                if is_correct:
+                    num_correct += 1
+                sample_results.append({"answer": ans, "correct": is_correct})
             
-            # Majority vote
-            if extracted_answers:
-                counter = Counter(extracted_answers)
-                predicted, count = counter.most_common(1)[0]
-            else:
-                predicted = None
-                count = 0
+            problem_accuracy = num_correct / num_samples if num_samples > 0 else 0.0
         else:
+            # Single sample
             resp = sample.get("generated_response", "")
-            predicted = extract_boxed(resp)
-            count = 1
+            ans = extract_boxed(resp)
+            is_correct = False
+            
+            if ans is not None:
+                try:
+                    pred_parsed = parse(ans)
+                    gt_parsed = parse(str(ground_truth))
+                    is_correct = verify(pred_parsed, gt_parsed)
+                except Exception:
+                    is_correct = str(ans).strip() == str(ground_truth).strip()
+            
+            problem_accuracy = 1.0 if is_correct else 0.0
+            num_correct = 1 if is_correct else 0
+            num_samples = 1
+            sample_results = [{"answer": ans, "correct": is_correct}]
         
-        # Verify using math-verify
-        is_correct = False
-        if predicted is not None:
-            try:
-                pred_parsed = parse(predicted)
-                gt_parsed = parse(str(ground_truth))
-                is_correct = verify(pred_parsed, gt_parsed)
-            except Exception as e:
-                # Fallback to string comparison
-                is_correct = str(predicted).strip() == str(ground_truth).strip()
-        
-        if is_correct:
-            correct += 1
-            by_year[year]["correct"] += 1
+        sum_accuracy += problem_accuracy
+        by_year[year]["sum_accuracy"] += problem_accuracy
         
         details.append({
-            "id": sample.get("id", total - 1),
+            "id": sample.get("id", total_problems - 1),
             "year": year,
             "ground_truth": ground_truth,
-            "predicted": predicted,
-            "vote_count": count if "generated_responses" in sample else None,
-            "correct": is_correct,
+            "num_correct": num_correct,
+            "num_samples": num_samples,
+            "problem_accuracy": problem_accuracy,
         })
     
-    accuracy = correct / total if total > 0 else 0
+    avg_accuracy = sum_accuracy / total_problems if total_problems > 0 else 0
     
     # Calculate per-year accuracy
     year_results = {}
-    for year, counts in sorted(by_year.items()):
-        year_acc = counts["correct"] / counts["total"] if counts["total"] > 0 else 0
+    for year, data in sorted(by_year.items()):
+        year_acc = data["sum_accuracy"] / data["total"] if data["total"] > 0 else 0
         year_results[year] = {
             "accuracy": year_acc,
-            "correct": counts["correct"],
-            "total": counts["total"],
+            "total": data["total"],
         }
     
-    print(f"\nAIME Results:")
-    print(f"  Overall Accuracy: {accuracy:.2%} ({correct}/{total})")
+    print(f"\nAIME Results (Average Accuracy):")
+    print(f"  Overall: {avg_accuracy:.2%} ({total_problems} problems)")
     for year, yr in sorted(year_results.items()):
-        print(f"  AIME {year}: {yr['accuracy']:.2%} ({yr['correct']}/{yr['total']})")
+        print(f"  AIME {year}: {yr['accuracy']:.2%} ({yr['total']} problems)")
     
     return {
-        "accuracy": accuracy,
-        "correct": correct,
-        "total": total,
+        "accuracy": avg_accuracy,
+        "total_problems": total_problems,
         "by_year": year_results,
         "details": details,
     }
