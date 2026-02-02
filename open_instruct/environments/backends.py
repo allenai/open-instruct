@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -200,12 +201,16 @@ class DockerBackend(SandboxBackend):
         if self._runtime is None:
             raise RuntimeError("Container not started. Call start() first.")
 
-        self._runtime.run(f"cat > /tmp/code.py << 'CODEEOF'\n{code}\nCODEEOF")
+        filename = f"/tmp/code_{uuid.uuid4().hex}.py"
+        self._runtime.run(f"cat > {filename} << 'CODEEOF'\n{code}\nCODEEOF")
 
-        if language == "python":
-            output, exit_code = self._runtime.run("python /tmp/code.py")
-        else:
-            output, exit_code = self._runtime.run(code)
+        try:
+            if language == "python":
+                output, exit_code = self._runtime.run(f"python {filename}")
+            else:
+                output, exit_code = self._runtime.run(code)
+        finally:
+            self._runtime.run(f"rm -f {filename}")
 
         return ExecutionResult(stdout=output, stderr="", exit_code=0 if str(exit_code) == "0" else 1)
 
