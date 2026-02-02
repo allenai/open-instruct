@@ -42,12 +42,12 @@ async def test_env_pool():
 
     try:
         env = await pool.acquire()
-        ray.get(env.reset.remote())
+        await env.reset.remote()
 
         for _ in range(3):
-            ray.get(env.step.remote(ToolCall(name="increment", args={})))
+            await env.step.remote(ToolCall(name="increment", args={}))
 
-        result = ray.get(env.step.remote(ToolCall(name="submit", args={})))
+        result = await env.step.remote(ToolCall(name="submit", args={}))
         assert result.done and result.reward == 1.0
 
         pool.release(env)
