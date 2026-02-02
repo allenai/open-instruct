@@ -78,38 +78,6 @@ def create_wordle_samples(num_samples: int = 100) -> list[dict]:
     return samples
 
 
-def create_appworld_samples(num_samples: int = 50) -> list[dict]:
-    """Create samples for AppWorld environment."""
-    tasks = [
-        ("Send an email to john@example.com about the meeting", "email_task_1"),
-        ("Schedule a reminder for tomorrow at 9am", "reminder_task_1"),
-        ("Create a new note titled 'Shopping List'", "note_task_1"),
-        ("Check the weather forecast for New York", "weather_task_1"),
-        ("Set an alarm for 7:30 AM", "alarm_task_1"),
-        ("Search for nearby coffee shops", "search_task_1"),
-        ("Add milk to the shopping list", "list_task_1"),
-        ("Call the nearest pizza restaurant", "call_task_1"),
-        ("Book a table for 2 at 7pm", "booking_task_1"),
-        ("Play some relaxing music", "music_task_1"),
-    ]
-    samples = []
-    for i in range(num_samples):
-        task_desc, task_id = tasks[i % len(tasks)]
-        samples.append({
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are an AI assistant that helps users with tasks on their phone. Use the available tools to complete the user's request.",
-                },
-                {"role": "user", "content": task_desc},
-            ],
-            "ground_truth": task_id,
-            "dataset": "env_last",
-            "env_config": {"task_id": task_id},
-        })
-    return samples
-
-
 def save_jsonl(samples: list[dict], path: Path):
     """Save samples as JSONL file."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,7 +104,6 @@ def main():
         ("rlenv-counter", create_counter_samples, 100),
         ("rlenv-guess-number", create_guess_number_samples, 100),
         ("rlenv-wordle", create_wordle_samples, 100),
-        ("rlenv-appworld", create_appworld_samples, 50),
     ]
 
     data_dir = Path(__file__).parent.parent.parent / "data" / "envs"
