@@ -278,7 +278,11 @@ class TestPerfCallbackMFU(unittest.TestCase):
             mock_time[0] += 1.0
             return mock_time[0]
 
-        mfu_values = []
+        # This value is arbitrary since we mock time. The important thing is that
+        # MFU is consistent across different padding levels, proving that padding
+        # tokens are excluded from the calculation.
+        expected_mfu = 0.013518
+
         for max_length in [real_tokens, real_tokens + 10, real_tokens + 50, real_tokens + 100]:
             collator = dpo_utils.DataCollatorForSeq2SeqDPO(
                 tokenizer=tokenizer, model=None, padding="longest", max_length=max_length
@@ -297,11 +301,10 @@ class TestPerfCallbackMFU(unittest.TestCase):
             with patch("time.perf_counter", mock_perf_counter):
                 metrics = mock_training_run(callback, loader, num_steps=1)
 
-            mfu_values.append(metrics["perf/mfu"])
             logger.info(f"max_length={max_length}, MFU={metrics['perf/mfu']:.6f}%")
-
-        for i, mfu in enumerate(mfu_values):
-            self.assertEqual(mfu, mfu_values[0], f"MFU at index {i} ({mfu}) differs from first ({mfu_values[0]})")
+            self.assertAlmostEqual(
+                metrics["perf/mfu"], expected_mfu, places=4, msg=f"MFU mismatch at max_length={max_length}"
+            )
 
 
 if __name__ == "__main__":
