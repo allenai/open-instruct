@@ -506,7 +506,9 @@ class PolicyTrainerRayProcess(RayProcess):
         Returns:
             Tuple of (metrics_list, array_metrics) from training.
         """
+        logger.info(f"[Worker rank={self.rank}] step() called, waiting for data from dataloader")
         batch_data = next(self.dataloader)
+        logger.info(f"[Worker rank={self.rank}] step() got batch data")
         data_BT = batch_data["batch"]
         if len(data_BT) == 0:
             logger.warning("[Training] Empty batch received, skipping training step")
@@ -1470,6 +1472,7 @@ def one_training_step(
 ) -> int:
     """Train the model for one step. Returns the number of tokens processed."""
     update_ref_policy_future = []
+    logger.info(f"[Main Thread] 🚀 Starting training step {training_step}, dispatching to {args.world_size} workers")
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
         results, _ = ray_get_with_progress(
             [policy_group.models[i].step.remote() for i in range(args.world_size)],
