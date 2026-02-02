@@ -160,7 +160,7 @@ class TrainingConfig:
     """Pipeline parallelism degree. Default 1 (disabled)."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
-    compile_model: bool = False
+    compile_model: bool = True
     """Whether to apply torch.compile to model blocks."""
     shard_degree: int | None = None
     """FSDP shard degree. None means auto-detect."""
