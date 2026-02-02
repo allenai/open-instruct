@@ -76,6 +76,10 @@ class RLEnvironment(ABC):
     response_role: str = "tool"
     max_steps: int = 50
 
+    async def setup(self) -> None:
+        """Called once at start of training for resource initialization."""
+        pass
+
     @abstractmethod
     async def reset(self, task_id: str | None = None) -> ResetResult:
         """Initialize episode, return observation and tools."""
@@ -91,7 +95,11 @@ class RLEnvironment(ABC):
         return {}
 
     async def close(self) -> None:
-        """Cleanup resources."""
+        """Cleanup resources for a single episode."""
+        pass
+
+    async def shutdown(self) -> None:
+        """Called once at end of training for resource cleanup."""
         pass
 
 
@@ -102,6 +110,9 @@ def make_env_actor(env_class: type[RLEnvironment]) -> type:
     class EnvironmentActor:
         def __init__(self, **kwargs):
             self._env = env_class(**kwargs)
+
+        async def setup(self) -> None:
+            await self._env.setup()
 
         async def reset(self, task_id: str | None = None) -> ResetResult:
             return await self._env.reset(task_id)
@@ -114,6 +125,9 @@ def make_env_actor(env_class: type[RLEnvironment]) -> type:
 
         async def close(self) -> None:
             await self._env.close()
+
+        async def shutdown(self) -> None:
+            await self._env.shutdown()
 
         @property
         def use_tool_calls(self) -> bool:

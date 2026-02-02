@@ -25,7 +25,7 @@ class EnvironmentPool:
         self._initialized = False
 
     async def initialize(self) -> None:
-        """Create all environment actors."""
+        """Create all environment actors and call setup() on each."""
         if self._initialized:
             return
 
@@ -34,6 +34,13 @@ class EnvironmentPool:
 
         logger.info(f"Creating {self.pool_size} environment actors")
         self._actors = [actor_class.remote(**self.env_kwargs) for _ in range(self.pool_size)]
+
+        logger.info("Running setup() on all environment actors...")
+        setup_tasks = [actor.setup.remote() for actor in self._actors]
+        try:
+            await asyncio.to_thread(ray.get, setup_tasks)
+        except Exception as e:
+            logger.warning(f"Error during environment setup: {e}")
 
         self._available = asyncio.Queue()
         for actor in self._actors:
@@ -54,16 +61,16 @@ class EnvironmentPool:
             self._available.put_nowait(actor)
 
     async def shutdown(self) -> None:
-        """Shutdown all environment actors."""
+        """Call shutdown() on all actors and terminate them."""
         if not self._initialized:
             return
 
         logger.info("Shutting down environment pool...")
-        close_tasks = [actor.close.remote() for actor in self._actors]
+        shutdown_tasks = [actor.shutdown.remote() for actor in self._actors]
         try:
-            await asyncio.to_thread(ray.get, close_tasks)
+            await asyncio.to_thread(ray.get, shutdown_tasks)
         except Exception as e:
-            logger.warning(f"Error closing environment actors: {e}")
+            logger.warning(f"Error during environment shutdown: {e}")
 
         for actor in self._actors:
             ray.kill(actor)
