@@ -257,8 +257,11 @@ class ToolStatistics:
 
 @dataclass
 class ToolCall:
+    """Parsed tool call from model output."""
+
     name: str
     args: dict[str, Any]
+    id: str | None = None
 
 
 @dataclass
