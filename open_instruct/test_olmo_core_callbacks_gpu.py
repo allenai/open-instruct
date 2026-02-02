@@ -10,7 +10,7 @@ import datasets
 import parameterized
 from transformers import AutoTokenizer
 
-from open_instruct import data_loader, dpo_utils
+from open_instruct import data_loader, dpo_utils, utils
 
 
 class MockCallback:
@@ -232,7 +232,12 @@ class TestPerfCallbackMFU(unittest.TestCase):
     """Test that PerfCallback MFU calculation uses correct token counts."""
 
     def test_mfu_with_different_padding(self, batch_size: int = 2, real_tokens: int = 5):
-        """Verify that different padding amounts don't affect MFU."""
+        """Verify that different padding amounts don't affect MFU.
+
+        Uses a real ModelDims with the actual MFU calculation. The test verifies
+        that padding tokens are excluded from the token count, so MFU remains
+        consistent regardless of padding amount.
+        """
         dataset = datasets.Dataset.from_dict(
             {
                 "chosen_input_ids": [list(range(real_tokens)) for _ in range(batch_size * 10)],
@@ -247,11 +252,19 @@ class TestPerfCallbackMFU(unittest.TestCase):
 
         tokenizer = AutoTokenizer.from_pretrained("allenai/OLMo-2-0425-1B")
 
-        mock_model_dims = MagicMock()
-        mock_model_dims.approximate_learner_utilization.return_value = {"mfu": 50.0}
+        model_dims = utils.ModelDims(
+            num_layers=16,
+            hidden_size=2048,
+            intermediate_size=8192,
+            vocab_size=100278,
+            num_attn_heads=16,
+            head_dim=128,
+            num_kv_heads=16,
+            device_name="h100",
+        )
 
         callback = PerfCallback(
-            model_dims=mock_model_dims,
+            model_dims=model_dims,
             per_device_train_batch_size=batch_size,
             gradient_accumulation_steps=1,
             num_training_gpus=1,
@@ -263,6 +276,7 @@ class TestPerfCallbackMFU(unittest.TestCase):
             mock_time[0] += 1.0
             return mock_time[0]
 
+        mfu_values = []
         for max_length in [real_tokens, real_tokens + 10, real_tokens + 50, real_tokens + 100]:
             collator = dpo_utils.DataCollatorForSeq2SeqDPO(
                 tokenizer=tokenizer, model=None, padding="longest", max_length=max_length
@@ -281,7 +295,10 @@ class TestPerfCallbackMFU(unittest.TestCase):
             with patch("time.perf_counter", mock_perf_counter):
                 metrics = mock_training_run(callback, loader, num_steps=1)
 
-            self.assertEqual(metrics["perf/mfu"], 50.0, f"MFU mismatch at max_length={max_length}")
+            mfu_values.append(metrics["perf/mfu"])
+
+        for i, mfu in enumerate(mfu_values):
+            self.assertEqual(mfu, mfu_values[0], f"MFU at index {i} ({mfu}) differs from first ({mfu_values[0]})")
 
 
 if __name__ == "__main__":
