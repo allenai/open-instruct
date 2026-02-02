@@ -31,5 +31,4 @@ uv run python mason.py \
     --seed 123 \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \
-    --with_tracking \
-    --packing
+    --with_tracking
