@@ -109,19 +109,6 @@ class DPOTrainModule(TrainModule):
             output_router_logits=self.args.load_balancing_loss,
         )
 
-        logger.info(f"[PACKING_DEBUG] packing={self.args.packing}")
-        logger.info(f"[PACKING_DEBUG] batch indices: {batch.get('index', 'N/A')}")
-        logger.info(f"[PACKING_DEBUG] chosen_input_ids shape: {batch['chosen_input_ids'].shape}")
-        logger.info(f"[PACKING_DEBUG] rejected_input_ids shape: {batch['rejected_input_ids'].shape}")
-        logger.info(f"[PACKING_DEBUG] chosen_labels shape: {batch['chosen_labels'].shape}")
-        logger.info(f"[PACKING_DEBUG] rejected_labels shape: {batch['rejected_labels'].shape}")
-        logger.info(f"[PACKING_DEBUG] chosen_labels non-masked count: {(batch['chosen_labels'] != -100).sum().item()}")
-        logger.info(
-            f"[PACKING_DEBUG] rejected_labels non-masked count: {(batch['rejected_labels'] != -100).sum().item()}"
-        )
-        logger.info(f"[PACKING_DEBUG] policy_chosen_logps: {policy_chosen_logps.tolist()}")
-        logger.info(f"[PACKING_DEBUG] policy_rejected_logps: {policy_rejected_logps.tolist()}")
-
         losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
             self.args,
             batch,
