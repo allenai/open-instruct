@@ -42,6 +42,6 @@ uv run python mason.py \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
-    --gradient_checkpointing \
+    --activation_memory_budget 0.5 \
     --with_tracking \
     --compile_model
