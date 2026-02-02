@@ -530,19 +530,23 @@ class PolicyTrainerRayProcess(RayProcess):
             logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
+        logger.info(f"[Worker rank={self.rank}] Starting training: {num_samples} samples, {num_mini_batches} mini-batches, {accumulation_steps} accum steps")
 
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
+            logger.info(f"[Worker rank={self.rank}] Computing ref policy logprobs...")
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
                     self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
                 )
+            logger.info(f"[Worker rank={self.rank}] Ref policy logprobs done")
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
         # from the generator (note that async mode means these are a bit diff!)
         old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(len(data_BT.query_responses))]
         if num_mini_batches > 1:
+            logger.info(f"[Worker rank={self.rank}] Computing old logprobs for {num_mini_batches} mini-batches...")
             with Timer("Old logprobs Calculation", noop=self.rank != 0):
                 local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
@@ -572,6 +576,7 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         total_valid_tokens = token_counts_per_sample.sum().item()
         device = token_counts_per_sample.device
+        logger.info(f"[Worker rank={self.rank}] Starting loss calculation loop: {num_samples} samples, {self.args.num_epochs} epochs")
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B: dict[str, torch.Tensor] = {
@@ -585,6 +590,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 "token_count": token_counts_per_sample,
             }
             for epoch_idx in range(self.args.num_epochs):
+                logger.info(f"[Worker rank={self.rank}] Starting epoch {epoch_idx + 1}/{self.args.num_epochs}")
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
                 if self.args.loss_denominator == "token":
@@ -716,9 +722,17 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
+                    if i == 0 and epoch_idx == 0:
+                        logger.info(f"[Worker rank={self.rank}] First backward pass starting...")
                     self.model.backward(loss)
+                    if i == 0 and epoch_idx == 0:
+                        logger.info(f"[Worker rank={self.rank}] First backward pass done")
                     if (local_step + 1) % accumulation_steps == 0:
+                        if local_step == 0:
+                            logger.info(f"[Worker rank={self.rank}] First optimizer step starting...")
                         self.model.step()
+                        if local_step == 0:
+                            logger.info(f"[Worker rank={self.rank}] First optimizer step done")
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
