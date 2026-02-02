@@ -41,6 +41,8 @@ class RequestInfo:
     tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
     excess_tool_calls: list[dict[str, int]] = field(default_factory=list)
     """Per-sample dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
+    env_states: list[dict | None] = field(default_factory=list)
+    """Per-sample environment state dicts (rewards, step_count, done) for verification."""
 
 
 @dataclass
@@ -58,8 +60,6 @@ class GenerationResult:
     logprobs: list[list[float]] | None = None
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None
-    env_state: dict | None = None
-    """Environment state dict (rewards, step_count, done) for verification."""
 
 
 @dataclass

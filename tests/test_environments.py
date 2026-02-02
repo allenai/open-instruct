@@ -2,17 +2,9 @@
 
 import asyncio
 
-import pytest
-
-from open_instruct.environments import (
-    ENV_REGISTRY,
-    EnvironmentState,
-    ResetResult,
-    StepResult,
-    ToolCall,
-    get_env_class,
-)
+from open_instruct.environments import ENV_REGISTRY, EnvironmentState, ResetResult, ToolCall, get_env_class
 from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
+from open_instruct.ground_truth_utils import LastRewardEnvVerifier, SumRewardEnvVerifier
 
 
 def run_async(coro):
@@ -89,17 +81,13 @@ class TestVerifiers:
     """Test environment verifiers."""
 
     def test_last_reward_verifier(self):
-        from open_instruct.ground_truth_utils import LastRewardEnvVerifier
-
         verifier = LastRewardEnvVerifier()
-        state = EnvironmentState(rewards=[0.1, 0.5, 1.0])
-        result = verifier([], "", state)
+        env_state = {"rewards": [0.1, 0.5, 1.0], "step_count": 3, "done": True}
+        result = verifier([], "", None, env_state=env_state)
         assert result.score == 1.0
 
     def test_sum_reward_verifier(self):
-        from open_instruct.ground_truth_utils import SumRewardEnvVerifier
-
         verifier = SumRewardEnvVerifier()
-        state = EnvironmentState(rewards=[1.0, 2.0, 3.0])
-        result = verifier([], "", state)
+        env_state = {"rewards": [1.0, 2.0, 3.0], "step_count": 3, "done": True}
+        result = verifier([], "", None, env_state=env_state)
         assert result.score == 6.0
