@@ -142,8 +142,8 @@ class TrainingConfig:
     """The scheduler type to use for learning rate adjustment."""
     max_train_steps: int | None = None
     """If set, overrides the number of training steps. Otherwise, num_epochs is used."""
-    gradient_checkpointing: bool = False
-    """Turn on gradient checkpointing. Saves memory but slows training."""
+    activation_memory_budget: float = 1.0
+    """Memory budget for activation checkpointing (0.0-1.0). 1.0 disables checkpointing (default), values < 1.0 enable budget-mode checkpointing. See: https://pytorch.org/blog/activation-checkpointing-techniques/."""
     use_8bit_optimizer: bool = False
     """Use 8bit optimizer from bitsandbytes."""
     dpo_use_paged_optimizer: bool = False
@@ -158,6 +158,10 @@ class TrainingConfig:
     """Pipeline parallelism degree. Default 1 (disabled)."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
+    shard_degree: int | None = None
+    """FSDP shard degree. None means auto-detect."""
+    num_replicas: int | None = None
+    """Number of FSDP replicas. None means auto-detect."""
 
 
 @dataclass
