@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -296,6 +297,7 @@ class TestPerfCallbackMFU(unittest.TestCase):
                 metrics = mock_training_run(callback, loader, num_steps=1)
 
             mfu_values.append(metrics["perf/mfu"])
+            logging.info(f"max_length={max_length}, MFU={metrics['perf/mfu']:.6f}%")
 
         for i, mfu in enumerate(mfu_values):
             self.assertEqual(mfu, mfu_values[0], f"MFU at index {i} ({mfu}) differs from first ({mfu_values[0]})")
