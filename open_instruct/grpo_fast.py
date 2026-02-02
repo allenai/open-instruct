@@ -1916,11 +1916,12 @@ def run_training(
         
         # Wait for any in-progress weight sync to complete before checking vLLM engines
         # Without this, vLLM engines may be blocked by weight broadcast and won't respond
-        logger.info("[Health Check] Waiting for weight sync to complete...")
+        weight_sync_wait_start = time.perf_counter()
         if not weight_sync_done_event.wait(timeout=120.0):
             logger.error("[Health Check] Weight sync did not complete within 120s!")
             raise RuntimeError("Weight sync timed out - vLLM engines may be stuck")
-        logger.info("[Health Check] Weight sync complete, checking vLLM engines...")
+        weight_sync_wait_time = time.perf_counter() - weight_sync_wait_start
+        logger.info(f"[Health Check] Weight sync complete (waited {weight_sync_wait_time:.3f}s), checking vLLM engines...")
         
         logger.info(f"[Health Check] Checking {len(vllm_engines)} vLLM engine(s) health...")
         try:
