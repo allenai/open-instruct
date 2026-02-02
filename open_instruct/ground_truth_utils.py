@@ -922,6 +922,69 @@ class CodeVerifier(VerifierFunction):
         return CodeVerifierConfig
 
 
+class LastRewardEnvVerifier(VerifierFunction):
+    """
+    Verifier for RL environments that uses the final reward from the last step.
+
+    The label should be an EnvironmentState object (from open_instruct.environments).
+    Returns the final_reward property (last reward in the rewards list, or 0.0 if empty).
+
+    Use verifier_source="env_last" in dataset to activate this verifier.
+    Best for sparse reward environments (e.g., Wordle - only reward at end).
+    """
+
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
+        super().__init__("env_last", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
+    ) -> VerificationResult:
+        # Import here to avoid circular imports
+        from open_instruct.environments import EnvironmentState
+
+        if isinstance(label, EnvironmentState):
+            return VerificationResult(score=label.final_reward)
+        elif isinstance(label, dict) and "rewards" in label:
+            # Handle dict representation
+            rewards = label.get("rewards", [])
+            final_reward = rewards[-1] if rewards else 0.0
+            return VerificationResult(score=final_reward)
+        else:
+            logger.warning(f"LastRewardEnvVerifier received unexpected label type: {type(label)}")
+            return VerificationResult(score=0.0)
+
+
+class SumRewardEnvVerifier(VerifierFunction):
+    """
+    Verifier for RL environments that sums all rewards across the rollout.
+
+    The label should be an EnvironmentState object (from open_instruct.environments).
+    Returns the sum of all rewards in the rewards list.
+
+    Use verifier_source="env_sum" in dataset to activate this verifier.
+    Best for dense reward environments (e.g., per-step rewards).
+    """
+
+    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
+        super().__init__("env_sum", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
+    ) -> VerificationResult:
+        # Import here to avoid circular imports
+        from open_instruct.environments import EnvironmentState
+
+        if isinstance(label, EnvironmentState):
+            return VerificationResult(score=label.total_reward)
+        elif isinstance(label, dict) and "rewards" in label:
+            # Handle dict representation
+            rewards = label.get("rewards", [])
+            return VerificationResult(score=sum(rewards))
+        else:
+            logger.warning(f"SumRewardEnvVerifier received unexpected label type: {type(label)}")
+            return VerificationResult(score=0.0)
+
+
 def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFunction]:
     """
     Build all verifiers with the given configs.
