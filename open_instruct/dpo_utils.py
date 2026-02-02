@@ -996,11 +996,14 @@ def concatenated_forward_olmo(
         bs = batch["chosen_input_ids"].shape[0]
     else:
         concatenated_batch, bs = pf_concatenated_inputs(batch)
+        cu_seq_lens = concatenated_batch["concatenated_cu_seq_lens_k"]
+        doc_lens = (cu_seq_lens[1:] - cu_seq_lens[:-1]).tolist()
+        max_doc_lens = [concatenated_batch["concatenated_max_length_k"]]
         logits = model(
             concatenated_batch["concatenated_input_ids"],
             position_ids=concatenated_batch["concatenated_position_ids"],
-            cu_doc_lens_k=concatenated_batch["concatenated_cu_seq_lens_k"],
-            max_doc_len_k=concatenated_batch["concatenated_max_length_k"],
+            doc_lens=doc_lens,
+            max_doc_lens=max_doc_lens,
         ).to(torch.float32)
         all_logps = pf_get_batch_logps(
             logits,
@@ -1030,11 +1033,14 @@ def _compute_logps_olmo(
     """
     item_batch = process_batch(batch, prefix)
     if packing:
+        cu_seq_lens = item_batch["cu_seq_lens_k"]
+        doc_lens = (cu_seq_lens[1:] - cu_seq_lens[:-1]).tolist()
+        max_doc_lens = [item_batch["max_length_k"]]
         logits = model(
             item_batch["input_ids"],
             position_ids=item_batch["position_ids"],
-            cu_doc_lens_k=item_batch["cu_seq_lens_k"],
-            max_doc_len_k=item_batch["max_length_k"],
+            doc_lens=doc_lens,
+            max_doc_lens=max_doc_lens,
         ).to(torch.float32)
         logps = pf_get_batch_logps(
             logits, item_batch["labels"], item_batch["cu_seq_lens_k"], average_log_prob=average_log_prob
