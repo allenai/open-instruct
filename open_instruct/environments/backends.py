@@ -207,7 +207,7 @@ class DockerBackend(SandboxBackend):
         else:
             output, exit_code = self._runtime.run(code)
 
-        return ExecutionResult(stdout=output, stderr="", exit_code=0 if exit_code == "0" else 1)
+        return ExecutionResult(stdout=output, stderr="", exit_code=0 if str(exit_code) == "0" else 1)
 
     def run_command(self, command: str) -> ExecutionResult:
         """Execute a shell command in the Docker container."""
@@ -215,7 +215,7 @@ class DockerBackend(SandboxBackend):
             raise RuntimeError("Container not started. Call start() first.")
 
         output, exit_code = self._runtime.run(command)
-        return ExecutionResult(stdout=output, stderr="", exit_code=0 if exit_code == "0" else 1)
+        return ExecutionResult(stdout=output, stderr="", exit_code=0 if str(exit_code) == "0" else 1)
 
     def write_file(self, path: str, content: str | bytes) -> None:
         """Write a file to the Docker container."""
