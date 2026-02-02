@@ -129,6 +129,7 @@ from open_instruct.utils import (
 logger = logger_utils.setup_logger(__name__)
 
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
+WEIGHT_SYNC_TIMEOUT_S = 120.0  # Timeout for waiting on weight sync during health check
 
 
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
@@ -1857,8 +1858,8 @@ def run_training(
         [f.result() for f in [weight_sync_thread_future] if f.done()]
         # Wait for any in-progress weight sync to complete before checking vLLM engines.
         # Without this, vLLM engines may be blocked by weight broadcast and wont respond.
-        if not weight_sync_done_event.wait(timeout=120.0):
-            raise RuntimeError("Weight sync timed out after 120s - vLLM engines may be stuck")
+        if not weight_sync_done_event.wait(timeout=WEIGHT_SYNC_TIMEOUT_S):
+            raise RuntimeError(f"Weight sync timed out after {WEIGHT_SYNC_TIMEOUT_S}s - vLLM engines may be stuck")
         ray_get_with_progress(
             [engine.check_background_threads.remote() for engine in vllm_engines],
             desc="Checking vLLM engine health",
