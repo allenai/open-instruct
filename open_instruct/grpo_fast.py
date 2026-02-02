@@ -602,10 +602,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     }
 
                 for i in range(num_samples):
+                    if i == 0:
+                        logger.info(f"[Worker rank={self.rank}] Entering loss loop: num_samples={num_samples}, accum_steps={accumulation_steps}")
                     response_mask_BT = data_BT.response_masks[i][:, 1:]
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
+                    if i < 3 or i == num_samples - 1:
+                        logger.info(f"[Worker rank={self.rank}] Sample {i}/{num_samples}: calling forward_for_logprobs on policy model...")
                     local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
                         self.model,
                         data_BT.query_responses[i],
@@ -615,6 +619,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
                     )
+                    if i < 3 or i == num_samples - 1:
+                        logger.info(f"[Worker rank={self.rank}] Sample {i}/{num_samples}: forward_for_logprobs done")
                     local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
                     vllm_logprobs_BT = data_BT.vllm_logprobs[i][:, 1:]
                     vllm_logprobs_BT = torch.masked_fill(vllm_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
@@ -722,17 +728,15 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
-                    if i == 0 and epoch_idx == 0:
-                        logger.info(f"[Worker rank={self.rank}] First backward pass starting...")
+                    if i < 3 or i == num_samples - 1:
+                        logger.info(f"[Worker rank={self.rank}] Sample {i}/{num_samples}: backward starting...")
                     self.model.backward(loss)
-                    if i == 0 and epoch_idx == 0:
-                        logger.info(f"[Worker rank={self.rank}] First backward pass done")
+                    if i < 3 or i == num_samples - 1:
+                        logger.info(f"[Worker rank={self.rank}] Sample {i}/{num_samples}: backward done")
                     if (local_step + 1) % accumulation_steps == 0:
-                        if local_step == 0:
-                            logger.info(f"[Worker rank={self.rank}] First optimizer step starting...")
+                        logger.info(f"[Worker rank={self.rank}] local_step={local_step}: optimizer step starting...")
                         self.model.step()
-                        if local_step == 0:
-                            logger.info(f"[Worker rank={self.rank}] First optimizer step done")
+                        logger.info(f"[Worker rank={self.rank}] local_step={local_step}: optimizer step done")
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
