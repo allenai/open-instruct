@@ -21,7 +21,7 @@ from typing import Any
 import ray
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-from vllm.entrypoints.openai.tool_parsers import ToolParser as VllmNativeToolParser
+from vllm.tool_parsers import ToolParser as VllmNativeToolParser
 
 from open_instruct.logger_utils import setup_logger
 from open_instruct.tools.utils import ToolCall
@@ -197,7 +197,7 @@ class VllmParserConfig:
     """Configuration for a vLLM tool parser."""
 
     import_path: str
-    """Import path for the parser class (e.g., 'vllm.entrypoints.openai.tool_parsers.hermes_tool_parser:Hermes2ProToolParser')."""
+    """Import path for the parser class (e.g., 'vllm.tool_parsers.hermes_tool_parser:Hermes2ProToolParser')."""
     output_template: str
     """Template for formatting each tool output, uses {} as placeholder."""
     output_postfix: str
@@ -212,19 +212,19 @@ class VllmParserConfig:
 VLLM_PARSERS: dict[str, VllmParserConfig] = {
     # Hermes-style (also works for Qwen2.5/3)
     "vllm_hermes": VllmParserConfig(
-        import_path="vllm.entrypoints.openai.tool_parsers.hermes_tool_parser:Hermes2ProToolParser",
+        import_path="vllm.tool_parsers.hermes_tool_parser:Hermes2ProToolParser",
         output_template="<|im_start|>tool\n<tool_response>\n{}\n</tool_response>\n<|im_end|>\n",
         output_postfix="<|im_start|>assistant\n",
     ),
     # Llama 3.x JSON style
     "vllm_llama3_json": VllmParserConfig(
-        import_path="vllm.entrypoints.openai.tool_parsers.llama_tool_parser:Llama3JsonToolParser",
+        import_path="vllm.tool_parsers.llama_tool_parser:Llama3JsonToolParser",
         output_template="<|start_header_id|>ipython<|end_header_id|>\n\n{}<|eot_id|>",
         output_postfix="<|start_header_id|>assistant<|end_header_id|>\n\n",
     ),
     # Olmo 3
     "vllm_olmo3": VllmParserConfig(
-        import_path="vllm.entrypoints.openai.tool_parsers.olmo3_tool_parser:Olmo3PythonicToolParser",
+        import_path="vllm.tool_parsers.olmo3_tool_parser:Olmo3PythonicToolParser",
         output_template="<|im_start|>environment\n{}<|im_end|>\n",
         output_postfix="<|im_start|>assistant\n",
     ),

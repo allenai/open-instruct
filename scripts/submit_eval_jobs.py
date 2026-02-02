@@ -136,8 +136,8 @@ parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max le
 parser.add_argument(
     "--oe_eval_task_suite",
     type=str,
-    default="NEXT_MODEL_DEV",
-    help="Task suite for OE eval: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN, SAFETY_EVAL, SAFETY_EVAL_REASONING (default: NEXT_MODEL_DEV)",
+    default="OLMO_3",
+    help="Task suite for OE eval: OLMO_3, OLMO_3_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN, SAFETY_EVAL, SAFETY_EVAL_REASONING (default: OLMO_3)",
 )
 parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE eval on Beaker.")
 # NOTE: evaluate on weka is expected to be on by default. If not, the evals will run on the google augusta cluster.

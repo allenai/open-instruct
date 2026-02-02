@@ -58,7 +58,7 @@ jobs:
           printf 'Changed files:\n%s\n' "$CHANGED_FILES"
 
           declare -A CHANGE_PATTERNS=(
-            [dpo_changed]="open_instruct/(dpo_tune_cache|dpo_utils)\.py"
+            [dpo_changed]="open_instruct/(dpo|dpo_tune_cache|dpo_utils)\.py"
             [finetune_changed]="open_instruct/finetune\.py"
             [grpo_changed]="(^|/)Dockerfile$|(^|/)mason\.py$|^open_instruct/"
           )
@@ -144,7 +144,7 @@ jobs:
 
           EXPERIMENT_DEFINITIONS=(
             "grpo|scripts/train/debug/grpo_integration_test.sh|always"
-            "dpo|scripts/train/debug/dpo_integration_test.sh|${DPO_CHANGED}"
+            "dpo|scripts/train/debug/dpo/single_gpu.sh|${DPO_CHANGED}"
             "sft|scripts/train/debug/sft_integration_test.sh|${FINETUNE_CHANGED}"
           )
 
@@ -223,7 +223,13 @@ jobs:
             (
               echo "Waiting for ${EXP_NAME} to succeed: https://beaker.org/ex/${EXP_ID}"
               if beaker experiment await "$EXP_ID" 0 finalized --index --timeout 20m --interval 30s; then
-                echo "  [${EXP_NAME}] ✅ succeeded"
+                EXIT_CODE=$(beaker experiment get "$EXP_ID" --format json | jq -r '.[0].jobs[0].status.exitCode')
+                if [ "$EXIT_CODE" = "0" ]; then
+                  echo "  [${EXP_NAME}] ✅ succeeded"
+                else
+                  echo "  [${EXP_NAME}] ❌ failed with exit code ${EXIT_CODE}"
+                  echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
+                fi
               else
                 echo "  [${EXP_NAME}] ❌ did not reach finalized status within timeout"
                 echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
