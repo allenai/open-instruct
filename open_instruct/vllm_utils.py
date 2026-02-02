@@ -72,6 +72,7 @@ NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
+VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelDims:
@@ -435,7 +436,9 @@ def init_process_group(
 async def _check_health(port: int) -> None:
     async with (
         aiohttp.ClientSession() as session,
-        session.get(f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=30.0)) as response,
+        session.get(
+            f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=VLLM_HEALTH_CHECK_TIMEOUT_S)
+        ) as response,
     ):
         if response.status != 200:
             raise RuntimeError(f"vLLM server health check failed with status {response.status}")
