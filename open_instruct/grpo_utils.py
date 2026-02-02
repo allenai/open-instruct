@@ -308,8 +308,13 @@ def compute_logprobs(
     batch_size: int | None = None,
 ) -> list[torch.Tensor]:
     """Compute log probabilities for all samples in batch."""
+    import logging
+    logger = logging.getLogger(__name__)
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    
     logprobs_BT: list[torch.Tensor] = []
     num_samples = len(data_BT.query_responses)
+    logger.info(f"[compute_logprobs rank={rank}] Starting with {num_samples} samples")
 
     if batch_size is None:
         batch_size = 1
@@ -319,11 +324,13 @@ def compute_logprobs(
         for start_idx in range(0, num_samples, batch_size):
             end_idx = min(start_idx + batch_size, num_samples)
             batch_indices = list(range(start_idx, end_idx))
+            logger.info(f"[compute_logprobs rank={rank}] Processing batch {start_idx}/{num_samples}")
 
             batch_query_responses = torch.cat([data_BT.query_responses[i] for i in batch_indices], dim=0)
             batch_attention_masks = torch.cat([data_BT.attention_masks[i] for i in batch_indices], dim=0)
             batch_position_ids = torch.cat([data_BT.position_ids[i] for i in batch_indices], dim=0)
 
+            logger.info(f"[compute_logprobs rank={rank}] Calling forward_for_logprobs for batch {start_idx}...")
             batch_logprobs, _ = forward_for_logprobs(
                 model,
                 batch_query_responses,
@@ -333,6 +340,7 @@ def compute_logprobs(
                 temperature,
                 False,
             )
+            logger.info(f"[compute_logprobs rank={rank}] forward_for_logprobs done for batch {start_idx}")
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]
             split_logprobs = torch.split(batch_logprobs, sample_sizes, dim=0)

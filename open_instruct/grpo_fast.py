@@ -534,7 +534,12 @@ class PolicyTrainerRayProcess(RayProcess):
 
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
-            logger.info(f"[Worker rank={self.rank}] Computing ref policy logprobs...")
+            logger.info(f"[Worker rank={self.rank}] Computing ref policy logprobs for {num_samples} samples...")
+            # Add barrier before ref policy forward to ensure all workers are synced
+            logger.info(f"[Worker rank={self.rank}] Entering ref policy barrier...")
+            if torch.distributed.is_initialized():
+                torch.distributed.barrier()
+            logger.info(f"[Worker rank={self.rank}] Passed ref policy barrier, starting forward...")
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
                     self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
