@@ -523,11 +523,35 @@ class PolicyTrainerRayProcess(RayProcess):
             to_device_inplace(getattr(data_BT, f.name), self.device)
         data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
         num_samples = len(data_BT)
+        
+        # CRITICAL: Synchronize sample count across all workers to prevent NCCL deadlock
+        # Different workers may have different sample counts, which would cause them to run
+        # different numbers of forward/backward passes, deadlocking on all-reduce operations
+        if torch.distributed.is_initialized():
+            num_samples_tensor = torch.tensor([num_samples], device=self.device, dtype=torch.int64)
+            torch.distributed.all_reduce(num_samples_tensor, op=torch.distributed.ReduceOp.MIN)
+            min_samples = int(num_samples_tensor.item())
+            if min_samples != num_samples:
+                logger.warning(f"[Worker rank={self.rank}] Sample count mismatch: local={num_samples}, min_across_workers={min_samples}. Truncating to min.")
+                data_BT = data_BT[:min_samples]
+                num_samples = min_samples
+        
         accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
         leftover = num_samples % accumulation_steps
         if leftover > 0:
             data_BT = data_BT[:-leftover]
             logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
+        
+        # Final sync after dropping to ensure all workers have identical iteration counts
+        num_samples = len(data_BT)
+        if torch.distributed.is_initialized():
+            num_samples_tensor = torch.tensor([num_samples], device=self.device, dtype=torch.int64)
+            torch.distributed.all_reduce(num_samples_tensor, op=torch.distributed.ReduceOp.MIN)
+            min_samples = int(num_samples_tensor.item())
+            if min_samples != num_samples:
+                logger.warning(f"[Worker rank={self.rank}] Post-drop sample mismatch: local={num_samples}, min={min_samples}. Truncating.")
+                data_BT = data_BT[:min_samples]
+                num_samples = min_samples
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
         logger.info(f"[Worker rank={self.rank}] Starting training: {num_samples} samples, {num_mini_batches} mini-batches, {accumulation_steps} accum steps")
