@@ -183,6 +183,7 @@ include = [
     "open_instruct/logger_utils.py",
     "open_instruct/mix_data.py",
     "open_instruct/mix_data_preferences.py",
+    "open_instruct/olmo_core_train_modules.py",
     "open_instruct/padding_free_collator.py",
     "open_instruct/rejection_sampling/prompt_templates.py",
     "open_instruct/rl_utils.py",
