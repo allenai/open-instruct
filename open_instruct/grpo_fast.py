@@ -466,7 +466,9 @@ class PolicyTrainerRayProcess(RayProcess):
             return accumulation_counts
 
         counts_tensor = torch.stack(local_counts)
+        logger.info(f"[Worker rank={self.rank}] calculate_token_counts: tensor shape={counts_tensor.shape}, calling all_reduce...")
         dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
+        logger.info(f"[Worker rank={self.rank}] calculate_token_counts: all_reduce done")
 
         for i, count in enumerate(counts_tensor):
             group_idx = i // accumulation_steps
@@ -506,7 +508,9 @@ class PolicyTrainerRayProcess(RayProcess):
         Returns:
             Tuple of (metrics_list, array_metrics) from training.
         """
+        logger.info(f"[Worker rank={self.rank}] step() called, waiting for data from dataloader")
         batch_data = next(self.dataloader)
+        logger.info(f"[Worker rank={self.rank}] step() got batch data")
         data_BT = batch_data["batch"]
         if len(data_BT) == 0:
             logger.warning("[Training] Empty batch received, skipping training step")
@@ -521,26 +525,58 @@ class PolicyTrainerRayProcess(RayProcess):
             to_device_inplace(getattr(data_BT, f.name), self.device)
         data_BT.response_masks = [mask.bool() for mask in data_BT.response_masks]
         num_samples = len(data_BT)
-        accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
+        
+        # CRITICAL: Synchronize sample count across all workers to prevent NCCL deadlock
+        # Different workers may have different sample counts, which would cause them to run
+        # different numbers of forward/backward passes, deadlocking on all-reduce operations
+        if torch.distributed.is_initialized():
+            logger.info(f"[Worker rank={self.rank}] Sample sync: local num_samples={num_samples}, calling all_reduce(MIN)...")
+            num_samples_tensor = torch.tensor([num_samples], device=self.device, dtype=torch.int64)
+            torch.distributed.all_reduce(num_samples_tensor, op=torch.distributed.ReduceOp.MIN)
+            min_samples = int(num_samples_tensor.item())
+            logger.info(f"[Worker rank={self.rank}] Sample sync: all_reduce done, min_samples={min_samples}")
+            if min_samples != num_samples:
+                logger.warning(f"[Worker rank={self.rank}] Sample count mismatch: local={num_samples}, min_across_workers={min_samples}. Truncating to min.")
+                data_BT = data_BT[:min_samples]
+                num_samples = min_samples
+        
+        # Calculate accumulation steps based on synchronized sample count
+        # Use a value that evenly divides num_samples to avoid additional dropping
+        target_accum = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
+        
+        # Find the largest accumulation_steps <= target that evenly divides num_samples
+        # This minimizes wasted samples while staying close to the desired batch size
+        accumulation_steps = target_accum
+        for candidate in range(target_accum, 0, -1):
+            if num_samples % candidate == 0:
+                accumulation_steps = candidate
+                break
+        
         leftover = num_samples % accumulation_steps
         if leftover > 0:
+            # This should rarely happen now since we search for a divisor
             data_BT = data_BT[:-leftover]
             logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
+            num_samples = len(data_BT)
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
+        logger.info(f"[Worker rank={self.rank}] Starting training: {num_samples} samples, {num_mini_batches} mini-batches, {accumulation_steps} accum steps")
 
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
+            logger.info(f"[Worker rank={self.rank}] Computing ref policy logprobs for {num_samples} samples...")
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
                     self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
                 )
+            logger.info(f"[Worker rank={self.rank}] Ref policy logprobs done")
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
         # from the generator (note that async mode means these are a bit diff!)
         old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(len(data_BT.query_responses))]
         if num_mini_batches > 1:
+            logger.info(f"[Worker rank={self.rank}] Computing old logprobs for {num_mini_batches} mini-batches...")
             with Timer("Old logprobs Calculation", noop=self.rank != 0):
                 local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
@@ -570,6 +606,7 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         total_valid_tokens = token_counts_per_sample.sum().item()
         device = token_counts_per_sample.device
+        logger.info(f"[Worker rank={self.rank}] Starting loss calculation loop: {num_samples} samples, {self.args.num_epochs} epochs")
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B: dict[str, torch.Tensor] = {
@@ -583,10 +620,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 "token_count": token_counts_per_sample,
             }
             for epoch_idx in range(self.args.num_epochs):
+                logger.info(f"[Worker rank={self.rank}] Starting epoch {epoch_idx + 1}/{self.args.num_epochs}")
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
                 if self.args.loss_denominator == "token":
+                    logger.info(f"[Worker rank={self.rank}] Calling calculate_token_counts (has all_reduce)...")
                     accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
+                    logger.info(f"[Worker rank={self.rank}] calculate_token_counts done")
                 else:
                     accumulation_token_counts = {
                         int(group_idx * accumulation_steps): float(self.args.loss_denominator)
@@ -594,10 +634,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     }
 
                 for i in range(num_samples):
+                    if i == 0:
+                        logger.info(f"[Worker rank={self.rank}] Entering loss loop: num_samples={num_samples}, accum_steps={accumulation_steps}")
                     response_mask_BT = data_BT.response_masks[i][:, 1:]
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
+                    if i < 3 or i == num_samples - 1:
+                        logger.info(f"[Worker rank={self.rank}] Sample {i}/{num_samples}: calling forward_for_logprobs on policy model...")
                     local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
                         self.model,
                         data_BT.query_responses[i],
@@ -607,6 +651,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
                     )
+                    if i < 3 or i == num_samples - 1:
+                        logger.info(f"[Worker rank={self.rank}] Sample {i}/{num_samples}: forward_for_logprobs done")
                     local_logprobs_BT = torch.masked_fill(local_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
                     vllm_logprobs_BT = data_BT.vllm_logprobs[i][:, 1:]
                     vllm_logprobs_BT = torch.masked_fill(vllm_logprobs_BT, ~response_mask_BT, INVALID_LOGPROB)
@@ -714,9 +760,15 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
+                    if i < 3 or i == num_samples - 1:
+                        logger.info(f"[Worker rank={self.rank}] Sample {i}/{num_samples}: backward starting...")
                     self.model.backward(loss)
+                    if i < 3 or i == num_samples - 1:
+                        logger.info(f"[Worker rank={self.rank}] Sample {i}/{num_samples}: backward done")
                     if (local_step + 1) % accumulation_steps == 0:
+                        logger.info(f"[Worker rank={self.rank}] local_step={local_step}: optimizer step starting...")
                         self.model.step()
+                        logger.info(f"[Worker rank={self.rank}] local_step={local_step}: optimizer step done")
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
@@ -1394,6 +1446,7 @@ def weight_sync_thread(
     args: grpo_utils.ExperimentConfig,
     stop_event: threading.Event,
     weight_sync_trigger_event: threading.Event,
+    weight_sync_done_event: threading.Event,
     policy_group: ModelGroup,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
@@ -1401,6 +1454,7 @@ def weight_sync_thread(
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
+    weight_sync_done_event.set()  # Initially done (no sync in progress)
     if resume_training_step > 1:
         weight_sync_trigger_event.set()
 
@@ -1411,6 +1465,7 @@ def weight_sync_thread(
 
         # Clear the event for next iteration
         weight_sync_trigger_event.clear()
+        weight_sync_done_event.clear()  # Mark sync as in progress
 
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
@@ -1433,6 +1488,9 @@ def weight_sync_thread(
             # Allow actors to resume
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
+
+        # Mark weight sync as complete so health check can proceed
+        weight_sync_done_event.set()
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -1470,6 +1528,7 @@ def one_training_step(
 ) -> int:
     """Train the model for one step. Returns the number of tokens processed."""
     update_ref_policy_future = []
+    logger.info(f"[Main Thread] 🚀 Starting training step {training_step}, dispatching to {args.world_size} workers")
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
         results, _ = ray_get_with_progress(
             [policy_group.models[i].step.remote() for i in range(args.world_size)],
@@ -1827,11 +1886,13 @@ def run_training(
 
     logger.info("======== ✅ weight sync thread starts =========")
     weight_sync_trigger_event = threading.Event()
+    weight_sync_done_event = threading.Event()
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
         stop_event,
         weight_sync_trigger_event,
+        weight_sync_done_event,
         policy_group,
         actor_manager,
         weight_sync_metrics_Q,
@@ -1846,12 +1907,34 @@ def run_training(
     logger.info("======== ✅ Dataloaders already initialized in actors =========")
 
     def health_check_fn():
-        [f.result() for f in [weight_sync_thread_future] if f.done()]
-        ray_get_with_progress(
-            [engine.check_background_threads.remote() for engine in vllm_engines],
-            desc="Checking vLLM engine health",
-            enable=False,
-        )
+        logger.info("[Health Check] Checking weight_sync_thread_future...")
+        for f in [weight_sync_thread_future]:
+            if f.done():
+                logger.info("[Health Check] weight_sync_thread_future is done, getting result...")
+                f.result()
+                logger.info("[Health Check] weight_sync_thread_future result obtained")
+        
+        # Wait for any in-progress weight sync to complete before checking vLLM engines
+        # Without this, vLLM engines may be blocked by weight broadcast and won't respond
+        weight_sync_wait_start = time.perf_counter()
+        if not weight_sync_done_event.wait(timeout=120.0):
+            logger.error("[Health Check] Weight sync did not complete within 120s!")
+            raise RuntimeError("Weight sync timed out - vLLM engines may be stuck")
+        weight_sync_wait_time = time.perf_counter() - weight_sync_wait_start
+        logger.info(f"[Health Check] Weight sync complete (waited {weight_sync_wait_time:.3f}s), checking vLLM engines...")
+        
+        logger.info(f"[Health Check] Checking {len(vllm_engines)} vLLM engine(s) health...")
+        try:
+            ray_get_with_progress(
+                [engine.check_background_threads.remote() for engine in vllm_engines],
+                desc="Checking vLLM engine health",
+                enable=False,
+                timeout=60.0,  # 60 second timeout to prevent infinite hang
+            )
+            logger.info("[Health Check] vLLM engine health check done")
+        except TimeoutError:
+            logger.error("[Health Check] vLLM engine health check TIMED OUT after 60s!")
+            raise RuntimeError("vLLM engine health check timed out - one or more engines may be stuck")
 
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
@@ -1880,20 +1963,25 @@ def run_training(
         wandb_url=wandb_url,
     )
     for training_step in range(resume_training_step, args.num_training_steps + 1):
+        logger.info(f"[Main Thread] 🔄 Starting loop iteration for training_step={training_step}")
         start_time = time.perf_counter()
 
         # Check if any of the threads have raised an exception.
+        logger.info(f"[Main Thread] Running health check for step {training_step}")
         health_check_start = time.perf_counter()
         health_check_fn()
         health_check_time = time.perf_counter() - health_check_start
+        logger.info(f"[Main Thread] Health check done for step {training_step}, took {health_check_time:.3f}s")
 
         if (
             training_step % args.local_eval_every == 0
             and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
+            logger.info(f"[Main Thread] Queueing eval prompts for step {training_step}")
             for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(eval_example, 0, prompt_Q, generation_configs["eval"], is_eval=True)
+            logger.info(f"[Main Thread] Done queueing eval prompts for step {training_step}")
 
         episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
@@ -1905,6 +1993,7 @@ def run_training(
 
         data_thread_metrics["time/health_check"] = health_check_time
 
+        logger.info(f"[Main Thread] Calling one_training_step for step {training_step}")
         num_step_tokens = one_training_step(
             args,
             streaming_config,
@@ -1922,6 +2011,7 @@ def run_training(
             model_dims,
             actor_manager,
         )
+        logger.info(f"[Main Thread] ✅ Training step {training_step} returned, tokens={num_step_tokens}")
         num_total_tokens += num_step_tokens
 
         # Checkpoint after one_training_step (or even if it was skipped)
@@ -1931,6 +2021,7 @@ def run_training(
             and training_step % args.checkpoint_state_freq == 0
             and args.checkpoint_state_dir is not None
         ):
+            logger.info(f"[Main Thread] 💾 Starting checkpoint save for step {training_step}")
             utils.warn_if_low_disk_space(args.checkpoint_state_dir, send_slack_alerts=args.send_slack_alerts)
             with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
                 # Save comprehensive client state including dataloader state
@@ -1956,9 +2047,10 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
-        logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
+        logger.info(f"[Main Thread] 🔄 Triggering weight sync for step {training_step}")
         weight_sync_trigger_event.set()
 
+        logger.info(f"[Main Thread] 📊 Running maybe_evaluate for step {training_step}")
         maybe_evaluate(
             args,
             training_step,
@@ -1970,6 +2062,7 @@ def run_training(
             model_dims,
             actor_manager,
         )
+        logger.info(f"[Main Thread] ✅ maybe_evaluate completed for step {training_step}")
 
         maybe_update_beaker_description(
             current_step=training_step,
@@ -1977,6 +2070,7 @@ def run_training(
             start_time=training_start_time,
             wandb_url=wandb_url,
         )
+        logger.info(f"[Main Thread] 🔁 Finished step {training_step}, looping to next step")
 
     if resume_training_step > args.num_training_steps:
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")

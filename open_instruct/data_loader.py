@@ -500,7 +500,9 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
         for step in range(self.training_step, self.num_training_steps):
+            logger.info(f"[StreamingDataLoader rank={self.dp_rank}] Requesting step={step} from DataPreparationActor")
             batch_data = ray.get(self.data_prep_actor.get_data.remote(rank=self.dp_rank, step=step))
+            logger.info(f"[StreamingDataLoader rank={self.dp_rank}] Got data for step={step}")
             self.training_step = step + 1
             yield batch_data
 
