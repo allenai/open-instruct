@@ -41,7 +41,6 @@ uv run python mason.py \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
-    --gradient_checkpointing \
     --with_tracking \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false
