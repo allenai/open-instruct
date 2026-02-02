@@ -51,6 +51,8 @@ from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_
 
 logger = logger_utils.setup_logger(__name__)
 
+PAD_VALUES: dict[str, int] = {"labels": -100, "attention_mask": 0}
+
 
 def config_to_json_serializable(obj: object) -> object:
     """Convert config object to JSON-serializable format."""
@@ -158,6 +160,8 @@ class TrainingConfig:
     """Pipeline parallelism degree. Default 1 (disabled)."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
+    compile_model: bool = True
+    """Whether to apply torch.compile to model blocks."""
     shard_degree: int | None = None
     """FSDP shard degree. None means auto-detect."""
     num_replicas: int | None = None
@@ -1049,26 +1053,11 @@ def separate_forward_olmo(
     return chosen_logps, rejected_logps, None
 
 
-def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float, dim: int = -1) -> torch.Tensor:
-    """Pad a tensor to a specified length along a given dimension.
-
-    Args:
-        tensor: The input tensor to pad.
-        length: The target length for the specified dimension.
-        pad_value: The value to use for padding.
-        dim: The dimension along which to pad.
-
-    Returns:
-        The padded tensor, or the original tensor if already at least the target length.
-    """
-    if tensor.size(dim) >= length:
+def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float) -> torch.Tensor:
+    """Right-pad a tensor to a specified length along the last dimension."""
+    if tensor.size(-1) >= length:
         return tensor
-    else:
-        pad_size = list(tensor.shape)
-        pad_size[dim] = length - tensor.size(dim)
-        return torch.cat(
-            [tensor, pad_value * torch.ones(*pad_size, dtype=tensor.dtype, device=tensor.device)], dim=dim
-        )
+    return torch.nn.functional.pad(tensor, (0, length - tensor.size(-1)), value=pad_value)
 
 
 @dataclass
@@ -1079,7 +1068,6 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
     """
 
     def __call__(self, features, return_tensors=None):
-        # call the original collator on chosen and rejected separately, then combine
         def filter_batch(match_string, features):
             filtered = []
             for f in features:
@@ -1106,15 +1094,13 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
         if "index" in features[0]:
             result["index"] = torch.tensor([f["index"] for f in features])
         max_len = max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
-        chosen_padded = torch.nn.functional.pad(
-            result["chosen_input_ids"],
-            (0, max_len - result["chosen_input_ids"].shape[1]),
-            value=self.tokenizer.pad_token_id,
+        for prefix in ["chosen_", "rejected_"]:
+            for key in ["input_ids", "attention_mask", "labels"]:
+                full_key = f"{prefix}{key}"
+                pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
+                result[full_key] = pad_to_length(result[full_key], max_len, pad_value)
+        result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
+        result["attention_mask"] = torch.cat(
+            [result["chosen_attention_mask"], result["rejected_attention_mask"]], dim=0
         )
-        rejected_padded = torch.nn.functional.pad(
-            result["rejected_input_ids"],
-            (0, max_len - result["rejected_input_ids"].shape[1]),
-            value=self.tokenizer.pad_token_id,
-        )
-        result["input_ids"] = torch.cat([chosen_padded, rejected_padded], dim=0)
         return result
