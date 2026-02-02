@@ -466,7 +466,9 @@ class PolicyTrainerRayProcess(RayProcess):
             return accumulation_counts
 
         counts_tensor = torch.stack(local_counts)
+        logger.info(f"[Worker rank={self.rank}] calculate_token_counts: tensor shape={counts_tensor.shape}, calling all_reduce...")
         dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
+        logger.info(f"[Worker rank={self.rank}] calculate_token_counts: all_reduce done")
 
         for i, count in enumerate(counts_tensor):
             group_idx = i // accumulation_steps
@@ -528,9 +530,11 @@ class PolicyTrainerRayProcess(RayProcess):
         # Different workers may have different sample counts, which would cause them to run
         # different numbers of forward/backward passes, deadlocking on all-reduce operations
         if torch.distributed.is_initialized():
+            logger.info(f"[Worker rank={self.rank}] Sample sync: local num_samples={num_samples}, calling all_reduce(MIN)...")
             num_samples_tensor = torch.tensor([num_samples], device=self.device, dtype=torch.int64)
             torch.distributed.all_reduce(num_samples_tensor, op=torch.distributed.ReduceOp.MIN)
             min_samples = int(num_samples_tensor.item())
+            logger.info(f"[Worker rank={self.rank}] Sample sync: all_reduce done, min_samples={min_samples}")
             if min_samples != num_samples:
                 logger.warning(f"[Worker rank={self.rank}] Sample count mismatch: local={num_samples}, min_across_workers={min_samples}. Truncating to min.")
                 data_BT = data_BT[:min_samples]
@@ -620,7 +624,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
                 if self.args.loss_denominator == "token":
+                    logger.info(f"[Worker rank={self.rank}] Calling calculate_token_counts (has all_reduce)...")
                     accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
+                    logger.info(f"[Worker rank={self.rank}] calculate_token_counts done")
                 else:
                     accumulation_token_counts = {
                         int(group_idx * accumulation_steps): float(self.args.loss_denominator)
