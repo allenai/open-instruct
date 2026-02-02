@@ -134,7 +134,7 @@ class VerifierFunction(ABC):
         prediction: str,
         label: Any,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Evaluate the given prediction against the ground truth (or constraint).
@@ -144,7 +144,7 @@ class VerifierFunction(ABC):
             prediction: The model output.
             label: The ground truth answer or evaluation constraint.
             query: The original query.
-            env_state: Environment rollout state (rewards, step_count, done) for env verifiers.
+            rollout_state: Rollout state dict (rewards, step_count, done) for env verifiers.
 
         Returns:
             VerificationResult
@@ -156,14 +156,14 @@ class VerifierFunction(ABC):
         prediction: str,
         label: Any,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Asynchronous version of __call__. By default, runs synchronous __call__ in a thread pool.
         """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, lambda: self.__call__(tokenized_prediction, prediction, label, query, env_state)
+            None, lambda: self.__call__(tokenized_prediction, prediction, label, query, rollout_state)
         )
 
     def __repr__(self) -> str:
@@ -198,7 +198,7 @@ class GSM8KVerifier(VerifierFunction):
         prediction: str,
         label: str,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         response = re.sub(r"(\d),(\d)", r"\1\2", prediction)
         numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
@@ -224,7 +224,7 @@ class MathVerifier(VerifierFunction):
         prediction: str,
         label: str,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         raw_answer = prediction
         all_answers = []
@@ -278,7 +278,7 @@ class StrictMathVerifier(VerifierFunction):
         prediction: str,
         label: str,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         raw_answer = prediction
         all_answers = []
@@ -312,7 +312,7 @@ class IFEvalVerifier(VerifierFunction):
         prediction: str,
         label: str | dict,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         instruction_dict = instructions_registry.INSTRUCTION_DICT
         constraint_dict = ast.literal_eval(label)
@@ -358,7 +358,7 @@ class IFEvalVerifierOld(VerifierFunction):
         prediction: str,
         label: str | dict,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         constraint = label
         answer = remove_thinking_section(prediction)
@@ -424,7 +424,7 @@ class FlanVerifier(VerifierFunction):
         prediction: str,
         label: str,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         answer_string = prediction.split("The answer is: ")[-1].strip()
         score = float(normalize_answer(answer_string) == normalize_answer(label))
@@ -447,7 +447,7 @@ class StringMatcherVerifier(VerifierFunction):
         prediction: str,
         label: str,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         if "<answer>" not in prediction or "</answer>" not in prediction:
             return VerificationResult(score=0.0)
@@ -475,7 +475,7 @@ class F1Verifier(VerifierFunction):
         prediction: str,
         label: str | list[str],
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         prediction = remove_thinking_section(prediction)
         labels: list[str] = label if isinstance(label, list) else [label]
@@ -499,7 +499,7 @@ class PuzzleMatcherVerifier(VerifierFunction):
         prediction: str,
         label: str,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         # remove answer tags from the prediction
         prediction = remove_thinking_section(prediction)
@@ -524,7 +524,7 @@ class ReSearchVerifierF1(VerifierFunction):
         prediction: str,
         label: str,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         try:
             label = json.loads(label)
@@ -569,7 +569,7 @@ class R1SearchVerifier(VerifierFunction):
         prediction: str,
         label: str | list[str],
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         # 1. Parse JSON label safely
         parsed_labels: list | str
@@ -623,7 +623,7 @@ class MaxLenVerifier(VerifierFunction):
         prediction: str,
         label: str,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         desired_length = float(label)
         # return absolute difference between the length of the prediction and the max length
@@ -658,7 +658,7 @@ class UpToMaxLenVerifier(VerifierFunction):
         prediction: str,
         label: str,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         desired_length = float(label)
         length_diff = len(tokenized_prediction) - desired_length
@@ -805,7 +805,12 @@ class LMJudgeVerifier(VerifierFunction):
         return VerificationResult(score=0.0, cost=0.0, reasoning="Unknown error after all retries.")
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str, env_state: dict | None = None
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Evaluates the prediction based on an LLM's judgement.
@@ -907,7 +912,7 @@ class CodeVerifier(VerifierFunction):
         prediction: str,
         label: Any,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Asynchronously verify code execution against test cases.
@@ -974,7 +979,7 @@ class CodeVerifier(VerifierFunction):
         prediction: str,
         label: Any,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
         """
         Synchronously verify code execution against test cases.
@@ -1005,7 +1010,7 @@ class LastRewardEnvVerifier(VerifierFunction):
     """
     Verifier for RL environments that uses the final reward from the last step.
 
-    Uses env_state from rollout metadata (not the label from dataset).
+    Uses rollout_state from rollout metadata (not the label from dataset).
     Returns the final reward (last in rewards list, or 0.0 if empty).
 
     Use verifier_source="env_last" in dataset to activate this verifier.
@@ -1021,13 +1026,13 @@ class LastRewardEnvVerifier(VerifierFunction):
         prediction: str,
         label: Any,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
-        if env_state is None:
-            logger.warning("LastRewardEnvVerifier received no env_state")
+        if rollout_state is None:
+            logger.warning("LastRewardEnvVerifier received no rollout_state")
             return VerificationResult(score=0.0)
 
-        rewards = env_state.get("rewards", [])
+        rewards = rollout_state.get("rewards", [])
         final_reward = rewards[-1] if rewards else 0.0
         return VerificationResult(score=final_reward)
 
@@ -1036,7 +1041,7 @@ class SumRewardEnvVerifier(VerifierFunction):
     """
     Verifier for RL environments that sums all rewards across the rollout.
 
-    Uses env_state from rollout metadata (not the label from dataset).
+    Uses rollout_state from rollout metadata (not the label from dataset).
     Returns the sum of all rewards in the rewards list.
 
     Use verifier_source="env_sum" in dataset to activate this verifier.
@@ -1052,13 +1057,13 @@ class SumRewardEnvVerifier(VerifierFunction):
         prediction: str,
         label: Any,
         query: str | None = None,
-        env_state: dict | None = None,
+        rollout_state: dict | None = None,
     ) -> VerificationResult:
-        if env_state is None:
-            logger.warning("SumRewardEnvVerifier received no env_state")
+        if rollout_state is None:
+            logger.warning("SumRewardEnvVerifier received no rollout_state")
             return VerificationResult(score=0.0)
 
-        rewards = env_state.get("rewards", [])
+        rewards = rollout_state.get("rewards", [])
         return VerificationResult(score=sum(rewards))
 
 
@@ -1129,18 +1134,18 @@ async def apply_verifiable_reward(
     datasets: list[str],
     reward_mult: int = 10,
     queries: list[str] | None = None,
-    env_states: list[dict | None] | None = None,
+    rollout_states: list[dict | None] | None = None,
 ):
     if queries is None:
         queries = [None] * len(responses)
-    if env_states is None:
-        env_states = [None] * len(responses)
+    if rollout_states is None:
+        rollout_states = [None] * len(responses)
 
     async_tasks = []
     task_metadata = []
 
-    for i, (tok_prediction, prediction, ground_truth, dataset, query, env_state) in enumerate(
-        zip(responses, decoded_responses, ground_truths, datasets, queries, env_states)
+    for i, (tok_prediction, prediction, ground_truth, dataset, query, rollout_state) in enumerate(
+        zip(responses, decoded_responses, ground_truths, datasets, queries, rollout_states)
     ):
         ground_truth_list = [ground_truth] if isinstance(ground_truth, str) else ground_truth
         dataset_list = [dataset] if isinstance(dataset, str) else dataset
@@ -1153,7 +1158,11 @@ async def apply_verifiable_reward(
                 continue
 
             task = reward_func.async_call(
-                tokenized_prediction=tok_prediction, prediction=prediction, label=gt, query=query, env_state=env_state
+                tokenized_prediction=tok_prediction,
+                prediction=prediction,
+                label=gt,
+                query=query,
+                rollout_state=rollout_state,
             )
             async_tasks.append(task)
             task_metadata.append(
@@ -1221,7 +1230,7 @@ class RewardConfig:
             tool_errors = infos.tool_errors
             tool_outputs = infos.tool_outputs
             tool_calleds = infos.tool_calleds
-            env_states = getattr(infos, "env_states", None) or [None] * len(decoded_responses)
+            rollout_states = getattr(infos, "rollout_states", None) or [None] * len(decoded_responses)
             good_outputs = [
                 len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
                 for i in range(len(tool_outputs))
@@ -1247,7 +1256,7 @@ class RewardConfig:
                     datasets,
                     reward_mult=self.verification_reward,
                     queries=queries,
-                    env_states=env_states,
+                    rollout_states=rollout_states,
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")

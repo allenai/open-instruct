@@ -41,8 +41,8 @@ class RequestInfo:
     tool_call_stats: list[list[ToolCallStats]] = field(default_factory=list)
     excess_tool_calls: list[dict[str, int]] = field(default_factory=list)
     """Per-sample dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
-    env_states: list[dict | None] = field(default_factory=list)
-    """Per-sample environment state dicts (rewards, step_count, done) for verification."""
+    rollout_states: list[dict | None] = field(default_factory=list)
+    """Per-sample rollout state dicts (rewards, step_count, done) for verification."""
 
 
 @dataclass

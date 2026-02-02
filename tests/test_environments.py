@@ -82,12 +82,12 @@ class TestVerifiers:
 
     def test_last_reward_verifier(self):
         verifier = LastRewardEnvVerifier()
-        env_state = {"rewards": [0.1, 0.5, 1.0], "step_count": 3, "done": True}
-        result = verifier([], "", None, env_state=env_state)
+        rollout_state = {"rewards": [0.1, 0.5, 1.0], "step_count": 3, "done": True}
+        result = verifier([], "", None, rollout_state=rollout_state)
         assert result.score == 1.0
 
     def test_sum_reward_verifier(self):
         verifier = SumRewardEnvVerifier()
-        env_state = {"rewards": [1.0, 2.0, 3.0], "step_count": 3, "done": True}
-        result = verifier([], "", None, env_state=env_state)
+        rollout_state = {"rewards": [1.0, 2.0, 3.0], "step_count": 3, "done": True}
+        result = verifier([], "", None, rollout_state=rollout_state)
         assert result.score == 6.0

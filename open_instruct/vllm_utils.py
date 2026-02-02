@@ -319,7 +319,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_calleds = [getattr(out, "tool_called", False) for out in final_output.outputs]
         tool_call_stats = [out.tool_call_stats for out in final_output.outputs]
         excess_tool_calls = [getattr(out, "excess_tool_calls", {}) for out in final_output.outputs]
-        env_states = [getattr(out, "env_state", None) for out in final_output.outputs]
+        rollout_states = [getattr(out, "env_state", None) for out in final_output.outputs]
     else:
         # Use default values when tools are not used
         masks = [[1] * len(resp) for resp in response_ids]
@@ -331,7 +331,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_calleds = [False] * len(response_ids)
         tool_call_stats = [[] for _ in response_ids]
         excess_tool_calls = [{} for _ in response_ids]
-        env_states = [None] * len(response_ids)
+        rollout_states = [None] * len(response_ids)
 
     result = GenerationResult(
         responses=response_ids,
@@ -346,7 +346,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
             tool_calleds=tool_calleds,
             tool_call_stats=tool_call_stats,
             excess_tool_calls=excess_tool_calls,
-            env_states=env_states,
+            rollout_states=rollout_states,
         ),
         index=metadata["index"],
         prompt_id=metadata["prompt_id"],
