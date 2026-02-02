@@ -1899,12 +1899,19 @@ def run_training(
     logger.info("======== ✅ Dataloaders already initialized in actors =========")
 
     def health_check_fn():
-        [f.result() for f in [weight_sync_thread_future] if f.done()]
+        logger.info("[Health Check] Checking weight_sync_thread_future...")
+        for f in [weight_sync_thread_future]:
+            if f.done():
+                logger.info("[Health Check] weight_sync_thread_future is done, getting result...")
+                f.result()
+                logger.info("[Health Check] weight_sync_thread_future result obtained")
+        logger.info("[Health Check] Checking vLLM engine health...")
         ray_get_with_progress(
             [engine.check_background_threads.remote() for engine in vllm_engines],
             desc="Checking vLLM engine health",
             enable=False,
         )
+        logger.info("[Health Check] vLLM engine health check done")
 
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
