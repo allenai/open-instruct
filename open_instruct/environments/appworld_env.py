@@ -91,10 +91,10 @@ class AppWorldEnv(RLEnvironment):
         """
         try:
             from appworld import AppWorld
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "appworld not installed. Run:\n  pip install appworld\n  appworld install\n  appworld download data"
-            )
+            ) from e
 
         # Close previous world if exists
         if self._world is not None:

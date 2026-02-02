@@ -129,8 +129,8 @@ class E2BBackend(SandboxBackend):
         """Initialize the E2B sandbox."""
         try:
             from e2b_code_interpreter import Sandbox
-        except ImportError:
-            raise ImportError("e2b_code_interpreter not installed. Run: pip install e2b-code-interpreter")
+        except ImportError as e:
+            raise ImportError("e2b_code_interpreter not installed. Run: pip install e2b-code-interpreter") from e
 
         logger.info(f"Starting E2B sandbox (template={self._template}, timeout={self._timeout})")
         self._sandbox = Sandbox(template=self._template, timeout=self._timeout)
@@ -205,8 +205,8 @@ class DockerBackend(SandboxBackend):
         """Start the Docker container."""
         try:
             from llm_in_sandbox import DockerRuntime
-        except ImportError:
-            raise ImportError("llm_in_sandbox not installed. Run: pip install llm-in-sandbox")
+        except ImportError as e:
+            raise ImportError("llm_in_sandbox not installed. Run: pip install llm-in-sandbox") from e
 
         logger.info(f"Starting Docker container (image={self._image})")
         self._runtime = DockerRuntime(docker_image=self._image)

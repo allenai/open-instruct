@@ -1,6 +1,7 @@
 """Pool of Ray environment actors with acquire/release semantics."""
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
@@ -62,10 +63,8 @@ class EnvironmentPool:
 
         logger.info("Shutting down environment pool...")
         close_tasks = [actor.close.remote() for actor in self._actors]
-        try:
+        with contextlib.suppress(Exception):
             await asyncio.gather(*[asyncio.to_thread(ray.get, task) for task in close_tasks], return_exceptions=True)
-        except Exception:
-            pass
 
         for actor in self._actors:
             ray.kill(actor)
