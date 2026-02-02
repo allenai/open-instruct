@@ -28,7 +28,7 @@
 - If you are given a Beaker URL (beaker\.allen\.ai.*) use the Beaker CLI tool to interact with it.
 
 # Coding conventions
-- Always use `logger = logger_utils.setup_logger(__name__)` for logging.
+- Never use `import logging` or `logging.info()` directly. Always use `logger = logger_utils.setup_logger(__name__)` and `logger.info()`.
 - Imports always go at the top of the file, never inline.
 - Use `from package import module` instead of `import package.module`.
 
