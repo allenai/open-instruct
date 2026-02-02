@@ -14,6 +14,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from open_instruct import dpo_utils, model_utils
+from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 
 @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
@@ -80,7 +81,7 @@ class OlmoStyleModel(torch.nn.Module):
         self.embed = torch.nn.Embedding(vocab_size, 64)
         self.linear = torch.nn.Linear(64, vocab_size)
 
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, input_ids: torch.Tensor, position_ids: torch.Tensor | None = None) -> torch.Tensor:
         return self.linear(self.embed(input_ids))
 
 
@@ -153,6 +154,118 @@ class TestForwardFunctionsOlmo(unittest.TestCase):
         hf_chosen, hf_rejected, _ = dpo_utils.concatenated_forward(self.hf_model, hf_batch)
 
         self.assertFalse(torch.allclose(olmo_chosen, hf_chosen))
+
+
+@unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
+class TestPackingProducesSameLogps(unittest.TestCase):
+    """Test that packing=True and packing=False produce identical log probabilities.
+
+    This is critical for ensuring the reference cache can be shared between packing modes.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.vocab_size = 1000
+        cls.model = OlmoStyleModel(vocab_size=cls.vocab_size).cuda().to(torch.float32)
+
+    def _make_raw_samples(self, num_samples: int = 2, seq_lens: list[int] | None = None):
+        """Create raw samples like what would come from the dataset (before collation)."""
+        if seq_lens is None:
+            seq_lens = [10, 15]
+        samples = []
+        for i in range(num_samples):
+            seq_len = seq_lens[i % len(seq_lens)]
+            chosen_ids = torch.randint(1, self.vocab_size, (seq_len,)).cuda()
+            rejected_ids = torch.randint(1, self.vocab_size, (seq_len,)).cuda()
+            chosen_labels = chosen_ids.clone()
+            chosen_labels[:2] = -100
+            rejected_labels = rejected_ids.clone()
+            rejected_labels[:2] = -100
+            samples.append(
+                {
+                    "chosen_input_ids": chosen_ids,
+                    "chosen_labels": chosen_labels,
+                    "rejected_input_ids": rejected_ids,
+                    "rejected_labels": rejected_labels,
+                    "index": i,
+                }
+            )
+        return samples
+
+    def test_packing_produces_same_logps_single_sample(self):
+        """Test that packing produces identical logps for a single sample."""
+        torch.manual_seed(42)
+        samples = self._make_raw_samples(num_samples=1, seq_lens=[10])
+
+        packing_collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
+        packing_batch = packing_collator(samples)
+
+        non_packing_batch = {
+            "chosen_input_ids": samples[0]["chosen_input_ids"].unsqueeze(0),
+            "chosen_labels": samples[0]["chosen_labels"].unsqueeze(0),
+            "rejected_input_ids": samples[0]["rejected_input_ids"].unsqueeze(0),
+            "rejected_labels": samples[0]["rejected_labels"].unsqueeze(0),
+        }
+
+        with torch.no_grad():
+            packing_chosen, packing_rejected, _ = dpo_utils.concatenated_forward_olmo(
+                self.model, packing_batch, packing=True
+            )
+            non_packing_chosen, non_packing_rejected, _ = dpo_utils.concatenated_forward_olmo(
+                self.model, non_packing_batch, packing=False
+            )
+
+        self.assertTrue(
+            torch.allclose(packing_chosen, non_packing_chosen, rtol=1e-4, atol=1e-4),
+            f"Chosen logps differ: packing={packing_chosen}, non_packing={non_packing_chosen}",
+        )
+        self.assertTrue(
+            torch.allclose(packing_rejected, non_packing_rejected, rtol=1e-4, atol=1e-4),
+            f"Rejected logps differ: packing={packing_rejected}, non_packing={non_packing_rejected}",
+        )
+
+    def test_packing_produces_same_logps_multiple_samples(self):
+        """Test that packing produces identical logps for multiple samples with different lengths."""
+        torch.manual_seed(42)
+        samples = self._make_raw_samples(num_samples=3, seq_lens=[8, 12, 10])
+
+        packing_collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
+        packing_batch = packing_collator(samples)
+
+        max_len = max(s["chosen_input_ids"].shape[0] for s in samples)
+
+        def pad_tensor(t, length, pad_value=0):
+            if t.shape[0] >= length:
+                return t[:length]
+            padding = torch.full((length - t.shape[0],), pad_value, dtype=t.dtype, device=t.device)
+            return torch.cat([t, padding])
+
+        non_packing_batch = {
+            "chosen_input_ids": torch.stack([pad_tensor(s["chosen_input_ids"], max_len) for s in samples]),
+            "chosen_labels": torch.stack([pad_tensor(s["chosen_labels"], max_len, -100) for s in samples]),
+            "rejected_input_ids": torch.stack([pad_tensor(s["rejected_input_ids"], max_len) for s in samples]),
+            "rejected_labels": torch.stack([pad_tensor(s["rejected_labels"], max_len, -100) for s in samples]),
+        }
+
+        with torch.no_grad():
+            packing_chosen, packing_rejected, _ = dpo_utils.concatenated_forward_olmo(
+                self.model, packing_batch, packing=True
+            )
+            non_packing_chosen, non_packing_rejected, _ = dpo_utils.concatenated_forward_olmo(
+                self.model, non_packing_batch, packing=False
+            )
+
+        self.assertEqual(packing_chosen.shape, non_packing_chosen.shape)
+        self.assertEqual(packing_rejected.shape, non_packing_rejected.shape)
+
+        self.assertTrue(
+            torch.allclose(packing_chosen, non_packing_chosen, rtol=1e-4, atol=1e-4),
+            f"Chosen logps differ:\npacking={packing_chosen}\nnon_packing={non_packing_chosen}\ndiff={packing_chosen - non_packing_chosen}",
+        )
+        self.assertTrue(
+            torch.allclose(packing_rejected, non_packing_rejected, rtol=1e-4, atol=1e-4),
+            f"Rejected logps differ:\npacking={packing_rejected}\nnon_packing={non_packing_rejected}\ndiff={packing_rejected - non_packing_rejected}",
+        )
 
 
 if __name__ == "__main__":

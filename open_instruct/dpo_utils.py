@@ -471,7 +471,6 @@ def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) ->
             "max_train_samples": args.max_train_samples,
             "model_name_or_path": args.model_name_or_path,
             "model_revision": args.model_revision,
-            "packing": args.packing,
             "use_lora": args.use_lora,
             "use_qlora": args.use_qlora,
         },
