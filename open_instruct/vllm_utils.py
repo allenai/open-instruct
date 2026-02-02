@@ -1078,6 +1078,7 @@ def create_vllm_engines(
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
+    vllm_dtype: str = "bfloat16",
 ) -> list[ray.actor.ActorHandle]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     vllm_engines = []
@@ -1139,7 +1140,7 @@ def create_vllm_engines(
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
-                dtype="bfloat16",
+                dtype=vllm_dtype,
                 seed=seed + i,
                 distributed_executor_backend=distributed_executor_backend,
                 enable_prefix_caching=enable_prefix_caching,
