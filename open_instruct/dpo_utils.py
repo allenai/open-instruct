@@ -163,6 +163,8 @@ class TrainingConfig:
     """Exit after building the reference logprobs cache (for benchmarking)."""
     compile_model: bool = False
     """Whether to apply torch.compile to model blocks."""
+    pad_to_max_length: bool = False
+    """Pad all sequences to max_seq_length. Useful with torch.compile to avoid recompilation."""
     shard_degree: int | None = None
     """FSDP shard degree. None means auto-detect."""
     num_replicas: int | None = None
