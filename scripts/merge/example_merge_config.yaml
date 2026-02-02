@@ -1,0 +1,35 @@
+# Example merge configuration for merging SFT checkpoints
+#
+# Usage:
+#   mergekit-yaml scripts/merge/example_merge_config.yaml /path/to/output
+#
+# Or with the automated script:
+#   ./scripts/merge/merge_and_eval.sh scripts/merge/example_merge_config.yaml /path/to/output my-merged-model
+#
+
+# Models to merge - edit these paths to match your checkpoints
+# The last 2-3 checkpoints are typically the best for merging
+models:
+  - model: /weka/oe-adapt-default/nathanl/checkpoints/TEST_HYBRIC_SFT_LARGER_LR1e-5/step46412-hf
+    parameters:
+      weight: 1.0
+  # Add more models here:
+  # - model: /weka/oe-adapt-default/nathanl/checkpoints/ANOTHER_MODEL/step46412-hf
+  #   parameters:
+  #     weight: 1.0
+  # - model: /weka/oe-adapt-default/nathanl/checkpoints/THIRD_MODEL/step46412-hf
+  #   parameters:
+  #     weight: 1.0
+
+# Merge method options:
+# - linear: Simple weighted average (most common)
+# - slerp: Spherical linear interpolation (for 2 models only)
+# - ties: Task Interpolation with Expert Specialization
+# - dare_ties: DARE + TIES method
+merge_method: linear
+
+# Output precision
+# - bfloat16: Recommended for most cases
+# - float16: Alternative if bfloat16 not supported
+# - float32: Full precision (larger file size)
+dtype: bfloat16
