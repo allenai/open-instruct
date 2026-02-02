@@ -997,7 +997,7 @@ def concatenated_forward_olmo(
     else:
         concatenated_batch, bs = pf_concatenated_inputs(batch)
         cu_seq_lens = concatenated_batch["concatenated_cu_seq_lens_k"]
-        doc_lens = (cu_seq_lens[1:] - cu_seq_lens[:-1]).tolist()
+        doc_lens = cu_seq_lens[1:] - cu_seq_lens[:-1]
         max_doc_lens = [concatenated_batch["concatenated_max_length_k"]]
         logits = model(
             concatenated_batch["concatenated_input_ids"],
@@ -1034,7 +1034,7 @@ def _compute_logps_olmo(
     item_batch = process_batch(batch, prefix)
     if packing:
         cu_seq_lens = item_batch["cu_seq_lens_k"]
-        doc_lens = (cu_seq_lens[1:] - cu_seq_lens[:-1]).tolist()
+        doc_lens = cu_seq_lens[1:] - cu_seq_lens[:-1]
         max_doc_lens = [item_batch["max_length_k"]]
         logits = model(
             item_batch["input_ids"],
