@@ -17,7 +17,7 @@ from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
 
 def run_async(coro):
     """Run async function in sync test."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 class TestDataClasses:
@@ -55,33 +55,34 @@ class TestCounterEnv:
     """Test CounterEnv."""
 
     def test_full_episode(self):
-        env = CounterEnv(target=3)
+        async def _test():
+            env = CounterEnv(target=3)
+            result = await env.reset()
+            assert isinstance(result, ResetResult)
+            assert len(result.tools) == 3
 
-        # Reset
-        result = run_async(env.reset())
-        assert isinstance(result, ResetResult)
-        assert len(result.tools) == 3
+            for _ in range(3):
+                await env.step(ToolCall(name="increment", args={}))
 
-        # Reach target
-        for _ in range(3):
-            run_async(env.step(ToolCall(name="increment", args={})))
+            step = await env.step(ToolCall(name="submit", args={}))
+            assert step.done
+            assert step.reward == 1.0
 
-        # Submit
-        step = run_async(env.step(ToolCall(name="submit", args={})))
-        assert step.done
-        assert step.reward == 1.0
+        run_async(_test())
 
 
 class TestGuessNumberEnv:
     """Test GuessNumberEnv."""
 
     def test_correct_guess(self):
-        env = GuessNumberEnv()
-        run_async(env.reset(task_id="5"))
+        async def _test():
+            env = GuessNumberEnv()
+            await env.reset(task_id="5")
+            result = await env.step(ToolCall(name="guess", args={"number": 5}))
+            assert result.done
+            assert result.reward == 1.0
 
-        result = run_async(env.step(ToolCall(name="guess", args={"number": 5})))
-        assert result.done
-        assert result.reward == 1.0
+        run_async(_test())
 
 
 class TestVerifiers:

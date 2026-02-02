@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-async def test_basic_envs():
+async def _test_basic_envs():
     """Test environments without Ray."""
     from open_instruct.environments import ToolCall
     from open_instruct.environments.examples import CounterEnv
@@ -30,7 +30,7 @@ async def test_basic_envs():
     logger.info("Basic env test passed")
 
 
-async def test_env_pool():
+async def _test_env_pool():
     """Test EnvironmentPool with Ray actors."""
     if not ray.is_initialized():
         ray.init(ignore_reinit_error=True)
@@ -56,11 +56,21 @@ async def test_env_pool():
         await pool.shutdown()
 
 
+def test_basic_envs():
+    """Pytest-compatible wrapper for basic env test."""
+    asyncio.run(_test_basic_envs())
+
+
+def test_env_pool():
+    """Pytest-compatible wrapper for env pool test."""
+    asyncio.run(_test_env_pool())
+
+
 async def main():
     logger.info("Running environment tests...")
 
-    await test_basic_envs()
-    await test_env_pool()
+    await _test_basic_envs()
+    await _test_env_pool()
 
     logger.info("All tests passed!")
     return True
