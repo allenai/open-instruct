@@ -1055,7 +1055,7 @@ def separate_forward_olmo(
 
 
 def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float) -> torch.Tensor:
-    """Pad a tensor to a specified length along the last dimension."""
+    """Right-pad a tensor to a specified length along the last dimension."""
     if tensor.size(-1) >= length:
         return tensor
     return torch.nn.functional.pad(tensor, (0, length - tensor.size(-1)), value=pad_value)
