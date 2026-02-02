@@ -174,7 +174,7 @@ class TestComputeReferenceCacheHash(unittest.TestCase):
 
         self.assertNotEqual(hash1, hash2)
 
-    def test_different_packing_different_hash(self):
+    def test_packing_does_not_affect_hash(self):
         tc = TokenizerConfig(tokenizer_name_or_path="allenai/OLMo-2-1124-7B")
 
         args1 = make_test_args(packing=False)
@@ -183,7 +183,7 @@ class TestComputeReferenceCacheHash(unittest.TestCase):
         hash1 = dpo_utils.compute_reference_cache_hash(args1, tc)
         hash2 = dpo_utils.compute_reference_cache_hash(args2, tc)
 
-        self.assertNotEqual(hash1, hash2)
+        self.assertEqual(hash1, hash2)
 
 
 if __name__ == "__main__":

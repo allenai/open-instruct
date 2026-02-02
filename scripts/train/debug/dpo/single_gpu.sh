@@ -26,6 +26,7 @@ uv run python mason.py \
     --weight_decay 0.0 \
     --num_epochs 3 \
     --output_dir output/dpo_olmo_core_debug/ \
+    --packing \
     --logging_steps 1 \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --chat_template_name olmo \

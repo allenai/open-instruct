@@ -255,26 +255,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         return to_device(self._collator(examples), self._device)
 
     def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int:
-        """Return the total number of tokens in the batch across all ranks.
-
-        Counts tokens from all keys containing 'input_ids' that are torch tensors.
-
-        Args:
-            batch: A batch dictionary containing input tensors.
-
-        Returns:
-            Total number of tokens across all ranks.
-
-        Raises:
-            ValueError: If no input_ids tensors are found in the batch.
-        """
-        num_tokens = 0
-        for key, value in batch.items():
-            if "input_ids" in key and isinstance(value, torch.Tensor):
-                num_tokens += value.numel()
-        if num_tokens == 0:
-            raise ValueError("Batch contains no input_ids tensors. Cannot compute token count.")
-        return num_tokens * self.dp_world_size
+        """Return the total number of tokens in the batch across all ranks."""
+        return batch["input_ids"].numel() * self.dp_world_size
 
 
 @dataclass

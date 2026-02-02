@@ -92,6 +92,7 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
             result["rejected_" + k] = rejected_features[k]
         if "index" in features[0]:
             result["index"] = torch.tensor([f["index"] for f in features])
+        result["input_ids"] = torch.cat([chosen_features["input_ids"], rejected_features["input_ids"]], dim=1)
         return result
 
 
