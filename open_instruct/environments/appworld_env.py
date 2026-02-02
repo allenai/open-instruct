@@ -1,9 +1,4 @@
-"""
-AppWorld environment for interactive coding agent tasks.
-
-Uses the AppWorld library directly (no Docker/E2B required).
-See: https://github.com/stonybrooknlp/appworld
-"""
+"""AppWorld environment for interactive coding agent tasks."""
 
 import logging
 from typing import Any
@@ -16,31 +11,13 @@ logger = logging.getLogger(__name__)
 @register_env("appworld")
 class AppWorldEnv(RLEnvironment):
     """
-    AppWorld environment for function calling and interactive coding tasks.
+    AppWorld environment using raw code execution.
 
-    AppWorld provides 9 day-to-day apps (Amazon, Spotify, etc) with 457 APIs.
-    The agent writes code to complete tasks on behalf of a simulated user.
-
-    This environment uses raw code execution (not tool calls) - the model
-    generates Python code that calls APIs via `apis.{app}.{api}(**params)`.
-
-    Usage:
-        env = AppWorldEnv(experiment_name="my_experiment")
-        result = await env.reset(task_id="some_task_id")
-        # result.observation contains task instruction
-        # result.tools contains API documentation
-
-        step = await env.step(ToolCall(name="execute", args={"code": "apis.spotify.login(...)"}))
-        # step.observation contains execution output
-        # step.done is True when agent calls apis.supervisor.complete_task()
-
-    Requirements:
-        pip install appworld
-        appworld install
-        appworld download data
+    The model generates Python code that calls APIs via `apis.{app}.{api}(**params)`.
+    See: https://github.com/stonybrooknlp/appworld
     """
 
-    use_tool_calls: bool = True  # We use a single "execute" tool
+    use_tool_calls: bool = True
     response_role: str = "tool"
     max_steps: int = 50
 
@@ -54,17 +31,6 @@ class AppWorldEnv(RLEnvironment):
         ground_truth_mode: str = "none",
         **kwargs: Any,
     ):
-        """
-        Initialize AppWorld environment.
-
-        Args:
-            experiment_name: Name for experiment outputs (saved to experiments/outputs/{name}/)
-            max_interactions: Max code executions per task
-            max_api_calls_per_interaction: Max API calls per execution
-            raise_on_failure: Whether to raise on API errors (False = return error message)
-            random_seed: Random seed for reproducibility
-            ground_truth_mode: "none", "full" (only for train/dev)
-        """
         self._experiment_name = experiment_name
         self._max_interactions = max_interactions
         self._max_api_calls_per_interaction = max_api_calls_per_interaction
@@ -80,15 +46,7 @@ class AppWorldEnv(RLEnvironment):
         self._evaluation_result: dict | None = None
 
     async def reset(self, task_id: str | None = None) -> ResetResult:
-        """
-        Initialize AppWorld for a task.
-
-        Args:
-            task_id: AppWorld task ID (from train/dev/test_normal/test_challenge)
-
-        Returns:
-            ResetResult with task instruction and execute tool schema
-        """
+        """Initialize AppWorld for a task."""
         try:
             from appworld import AppWorld
         except ImportError as e:
@@ -96,7 +54,6 @@ class AppWorldEnv(RLEnvironment):
                 "appworld not installed. Run:\n  pip install appworld\n  appworld install\n  appworld download data"
             ) from e
 
-        # Close previous world if exists
         if self._world is not None:
             self._world.close()
 
@@ -108,7 +65,6 @@ class AppWorldEnv(RLEnvironment):
         self._completed = False
         self._evaluation_result = None
 
-        # Initialize AppWorld
         self._world = AppWorld(
             task_id=task_id,
             experiment_name=self._experiment_name,
@@ -120,7 +76,6 @@ class AppWorldEnv(RLEnvironment):
             **self._extra_kwargs,
         )
 
-        # Build observation from task info
         task = self._world.task
         observation = f"""Task: {task.instruction}
 
@@ -133,7 +88,6 @@ You can execute Python code using the `execute` tool. Use `apis.{{app_name}}.{{a
 Use `apis.api_docs.show_api_doc(app_name, api_name)` to look up API documentation.
 Use `apis.supervisor.complete_task()` when done (with `answer=` if the task requires an answer)."""
 
-        # Single tool: execute code
         tools = [
             {
                 "type": "function",
@@ -156,15 +110,7 @@ Use `apis.supervisor.complete_task()` when done (with `answer=` if the task requ
         )
 
     async def step(self, tool_call: ToolCall) -> StepResult:
-        """
-        Execute code in AppWorld.
-
-        Args:
-            tool_call: Should be execute(code="...") with Python code
-
-        Returns:
-            StepResult with execution output and completion status
-        """
+        """Execute code in AppWorld."""
         if self._world is None:
             raise RuntimeError("Environment not reset. Call reset() first.")
 
@@ -179,23 +125,19 @@ Use `apis.supervisor.complete_task()` when done (with `answer=` if the task requ
         if not code.strip():
             return StepResult(observation="Error: Empty code provided.", reward=0.0, done=False)
 
-        # Execute code in AppWorld
         try:
             output = self._world.execute(code)
         except Exception as e:
             output = f"Execution error: {e}"
 
-        # Check if task is completed
         done = self._world.task_completed()
         reward = 0.0
 
         if done:
             self._completed = True
-            # Evaluate and get reward
             try:
                 evaluation = self._world.evaluate()
                 self._evaluation_result = evaluation.to_dict()
-                # Reward = 1.0 if all tests pass, else fraction of passed tests
                 passes = len(self._evaluation_result.get("passes", []))
                 fails = len(self._evaluation_result.get("fails", []))
                 total = passes + fails

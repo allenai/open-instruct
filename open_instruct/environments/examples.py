@@ -1,8 +1,4 @@
-"""
-Example environments for testing and demonstration.
-
-These are simple environments that don't require external dependencies.
-"""
+"""Example environments for testing and demonstration."""
 
 import random
 
@@ -11,32 +7,19 @@ from .base import ResetResult, RLEnvironment, StepResult, ToolCall, register_env
 
 @register_env("counter")
 class CounterEnv(RLEnvironment):
-    """
-    Simple counter environment for testing.
-
-    The agent must increment a counter to reach a target value.
-    Rewards: +1 for reaching target, -0.1 for each step, -0.5 for wrong action.
-    """
+    """Simple counter environment. Increment to reach target, then submit."""
 
     max_steps = 20
 
     def __init__(self, target: int = 5, **kwargs):
-        """
-        Initialize counter environment.
-
-        Args:
-            target: Target value to reach (default: 5)
-        """
         self._target = target
         self._current = 0
         self._step_count = 0
 
     async def reset(self, task_id: str | None = None) -> ResetResult:
-        """Reset the counter to 0."""
         self._current = 0
         self._step_count = 0
 
-        # Use task_id to set custom target if provided
         if task_id and task_id.isdigit():
             self._target = int(task_id)
 
@@ -72,13 +55,12 @@ class CounterEnv(RLEnvironment):
         )
 
     async def step(self, tool_call: ToolCall) -> StepResult:
-        """Execute an action on the counter."""
         self._step_count += 1
 
         if tool_call.name == "increment":
             self._current += 1
             obs = f"Counter is now {self._current}."
-            reward = -0.1  # Small step penalty
+            reward = -0.1
             done = False
         elif tool_call.name == "decrement":
             self._current -= 1
@@ -103,7 +85,6 @@ class CounterEnv(RLEnvironment):
         )
 
     def get_metrics(self) -> dict[str, float]:
-        """Return counter metrics."""
         return {
             "step_count": float(self._step_count),
             "final_value": float(self._current),
@@ -113,30 +94,17 @@ class CounterEnv(RLEnvironment):
 
 @register_env("guess_number")
 class GuessNumberEnv(RLEnvironment):
-    """
-    Number guessing game environment.
-
-    The agent must guess a secret number between 1 and 100.
-    Feedback: "too low", "too high", or "correct!"
-    """
+    """Number guessing game. Guess a secret number between min and max."""
 
     max_steps = 10
 
     def __init__(self, min_val: int = 1, max_val: int = 100, **kwargs):
-        """
-        Initialize guessing game.
-
-        Args:
-            min_val: Minimum value (default: 1)
-            max_val: Maximum value (default: 100)
-        """
         self._min_val = min_val
         self._max_val = max_val
         self._secret = 0
         self._guesses = 0
 
     async def reset(self, task_id: str | None = None) -> ResetResult:
-        """Reset with a new secret number."""
         if task_id and task_id.isdigit():
             self._secret = int(task_id)
         else:
@@ -163,7 +131,6 @@ class GuessNumberEnv(RLEnvironment):
         )
 
     async def step(self, tool_call: ToolCall) -> StepResult:
-        """Check the guess."""
         self._guesses += 1
 
         if tool_call.name != "guess":
@@ -194,5 +161,4 @@ class GuessNumberEnv(RLEnvironment):
             return StepResult(observation=f"{guess} is too high.", reward=0.0, done=False)
 
     def get_metrics(self) -> dict[str, float]:
-        """Return game metrics."""
         return {"guesses": float(self._guesses)}

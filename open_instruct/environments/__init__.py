@@ -1,6 +1,5 @@
 """RL Environments for open-instruct."""
 
-# Import to register environments
 from . import appworld_env, examples, openenv_client, sandbox  # noqa: F401
 from .backends import DockerBackend, E2BBackend, ExecutionResult, SandboxBackend, create_backend
 from .base import (

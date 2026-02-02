@@ -1,5 +1,6 @@
 """Base classes for RL environments."""
 
+import importlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -21,7 +22,7 @@ class ResetResult:
     """Result from environment reset."""
 
     observation: str
-    tools: list[dict]  # OpenAI-format tool schemas
+    tools: list[dict]
     info: dict[str, Any] = field(default_factory=dict)
 
 
@@ -86,11 +87,11 @@ class RLEnvironment(ABC):
         pass
 
     def get_metrics(self) -> dict[str, float]:
-        """Return custom metrics (override in subclass)."""
+        """Return custom metrics."""
         return {}
 
     async def close(self) -> None:
-        """Cleanup resources (override in subclass)."""
+        """Cleanup resources."""
         pass
 
 
@@ -138,8 +139,6 @@ def get_env_class(env_name: str | None = None, env_class: str | None = None) -> 
         return ENV_REGISTRY[env_name]
 
     if env_class is not None:
-        import importlib
-
         module_path, class_name = env_class.rsplit(".", 1)
         module = importlib.import_module(module_path)
         cls = getattr(module, class_name)

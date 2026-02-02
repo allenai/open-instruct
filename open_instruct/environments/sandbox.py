@@ -1,9 +1,4 @@
-"""
-General-purpose sandbox environment.
-
-Provides code and command execution via pluggable backends (E2B or Docker).
-Supports file I/O and submission of final answers.
-"""
+"""General-purpose sandbox environment with pluggable backends."""
 
 import logging
 from typing import Any
@@ -17,28 +12,9 @@ logger = logging.getLogger(__name__)
 @register_env("sandbox")
 class SandboxEnv(RLEnvironment):
     """
-    General sandbox environment with pluggable backend.
+    Sandbox environment providing execute, run_code, and submit tools.
 
-    Provides three tools:
-    - execute: Run bash commands
-    - run_code: Execute Python code
-    - submit: Submit final answer and end episode
-
-    Backend can be:
-    - "e2b": E2B cloud sandbox (default, no Docker needed)
-    - "docker": Local Docker via llm-in-sandbox
-
-    Usage:
-        # Create actor
-        env = SandboxEnv.remote(
-            backend="e2b",
-            task_prompt="Analyze data and create visualization",
-            input_files={"/sandbox/data.csv": "name,value\\nA,10\\nB,20"}
-        )
-
-        # Run episode
-        result = await env.reset.remote(task_id="task_123")
-        step = await env.step.remote(ToolCall(name="run_code", args={"code": "print(1+1)"}))
+    Backend can be "e2b" (cloud, no Docker needed) or "docker" (local).
     """
 
     response_role = "tool"
@@ -51,15 +27,6 @@ class SandboxEnv(RLEnvironment):
         input_files: dict[str, str] | None = None,
         **backend_kwargs: Any,
     ):
-        """
-        Initialize sandbox environment.
-
-        Args:
-            backend: Backend type - "e2b" (default) or "docker"
-            task_prompt: Task description shown to model
-            input_files: Dict of path -> content to write on reset
-            **backend_kwargs: Backend-specific arguments (template, timeout, image, etc.)
-        """
         self._backend_type = backend
         self._backend_kwargs = backend_kwargs
         self._task_prompt = task_prompt
@@ -69,34 +36,19 @@ class SandboxEnv(RLEnvironment):
         self._submitted_answer: str | None = None
 
     async def reset(self, task_id: str | None = None) -> ResetResult:
-        """
-        Initialize the sandbox for a new episode.
-
-        Starts the backend, writes input files, and returns tools.
-
-        Args:
-            task_id: Optional task identifier (for logging/tracking)
-
-        Returns:
-            ResetResult with initial observation and available tools
-        """
-        # Close any existing backend
+        """Initialize the sandbox for a new episode."""
         if self._backend is not None:
             self._backend.close()
 
-        # Create and start new backend
         self._backend = create_backend(self._backend_type, **self._backend_kwargs)
         self._backend.start()
 
-        # Reset state
         self._step_count = 0
         self._submitted_answer = None
 
-        # Write input files
         for path, content in self._input_files.items():
             self._backend.write_file(path, content)
 
-        # Build observation
         observation = f"Sandbox ready. Task: {self._task_prompt}"
         if task_id:
             observation = f"[Task: {task_id}] {observation}"
@@ -145,31 +97,21 @@ class SandboxEnv(RLEnvironment):
         )
 
     async def step(self, tool_call: ToolCall) -> StepResult:
-        """
-        Execute an action in the sandbox.
-
-        Args:
-            tool_call: Parsed tool call (execute, run_code, or submit)
-
-        Returns:
-            StepResult with observation, reward, and done flag
-        """
+        """Execute an action in the sandbox."""
         if self._backend is None:
             raise RuntimeError("Environment not reset. Call reset() first.")
 
         self._step_count += 1
 
-        # Handle submission
         if tool_call.name == "submit":
             self._submitted_answer = tool_call.args.get("answer", "")
             return StepResult(
                 observation=f"Submitted: {self._submitted_answer}",
-                reward=0.0,  # Reward determined by verifier
+                reward=0.0,
                 done=True,
                 info={"answer": self._submitted_answer},
             )
 
-        # Execute based on tool type
         if tool_call.name == "run_code":
             code = tool_call.args.get("code", "")
             result = self._backend.run_code(code)
@@ -183,24 +125,20 @@ class SandboxEnv(RLEnvironment):
                 done=False,
             )
 
-        # Build observation
         output = result.stdout
         if result.stderr:
             output += f"\nSTDERR: {result.stderr}"
         if not output.strip():
             output = "(no output)"
 
-        # Small penalty for errors
         reward = 0.0 if result.exit_code == 0 else -0.05
 
         return StepResult(observation=output, reward=reward, done=False, info={"exit_code": result.exit_code})
 
     def get_metrics(self) -> dict[str, float]:
-        """Return sandbox-specific metrics."""
         return {"step_count": float(self._step_count), "submitted": 1.0 if self._submitted_answer is not None else 0.0}
 
     async def close(self) -> None:
-        """Cleanup the sandbox backend."""
         if self._backend is not None:
             self._backend.close()
             self._backend = None

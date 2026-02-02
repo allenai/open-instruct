@@ -1,23 +1,6 @@
-"""
-Sandbox backend abstraction for code/command execution.
+"""Sandbox backend abstraction for code/command execution."""
 
-Provides pluggable backends:
-- E2BBackend: Cloud-based execution via E2B (no local Docker needed)
-- DockerBackend: Local Docker execution via llm-in-sandbox
-
-Usage:
-    backend = E2BBackend(template="base", timeout=300)
-    backend.start()
-
-    result = backend.run_code("print('hello')")
-    result = backend.run_command("ls -la")
-
-    backend.write_file("/data/input.txt", "content")
-    content = backend.read_file("/data/input.txt")
-
-    backend.close()
-"""
-
+import base64
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -217,13 +200,11 @@ class DockerBackend(SandboxBackend):
         if self._runtime is None:
             raise RuntimeError("Container not started. Call start() first.")
 
-        # Write code to temp file and execute
         self._runtime.run(f"cat > /tmp/code.py << 'CODEEOF'\n{code}\nCODEEOF")
 
         if language == "python":
             output, exit_code = self._runtime.run("python /tmp/code.py")
         else:
-            # For other languages, just execute as shell
             output, exit_code = self._runtime.run(code)
 
         return ExecutionResult(stdout=output, stderr="", exit_code=0 if exit_code == "0" else 1)
@@ -242,12 +223,9 @@ class DockerBackend(SandboxBackend):
             raise RuntimeError("Container not started. Call start() first.")
 
         if isinstance(content, bytes):
-            import base64
-
             encoded_content = base64.b64encode(content).decode("ascii")
             self._runtime.run(f"echo '{encoded_content}' | base64 -d > {path}")
         else:
-            # Escape content for heredoc
             self._runtime.run(f"cat > {path} << 'FILEEOF'\n{content}\nFILEEOF")
 
     def read_file(self, path: str) -> str | bytes:
