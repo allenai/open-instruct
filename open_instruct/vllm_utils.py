@@ -922,7 +922,7 @@ async def _process_env_request(
     try:
         # Reset environment
         task_id = env_config.get("task_id")
-        reset_result = ray.get(env_actor.reset.remote(task_id=task_id))
+        reset_result = await env_actor.reset.remote(task_id=task_id)
         env_tools = reset_result.tools
         env_tool_names = {t["function"]["name"] for t in env_tools if "function" in t}
 
@@ -986,7 +986,7 @@ async def _process_env_request(
                     env_tool_call = EnvToolCall(
                         name=tool_call.name, args=tool_call.args, id=getattr(tool_call, "id", None)
                     )
-                    step_result = ray.get(env_actor.step.remote(env_tool_call))
+                    step_result = await env_actor.step.remote(env_tool_call)
 
                     env_state["rewards"].append(step_result.reward)
                     env_state["done"] = step_result.done
