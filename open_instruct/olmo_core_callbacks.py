@@ -141,7 +141,8 @@ class PerfCallback(Callback):
         self._mfu_sum = 0.0
         self._last_step = 0
 
-    def pre_step(self) -> None:
+    def pre_step(self, batch: dict[str, Any]) -> None:
+        del batch
         self._step_start_time = time.perf_counter()
 
     def post_step(self) -> None:
