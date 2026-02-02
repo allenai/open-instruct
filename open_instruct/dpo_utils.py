@@ -464,6 +464,7 @@ def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) ->
     dataset_config_hash = args.config_hash or compute_config_hash(dcs, tc)
     config_str = json.dumps(
         {
+            "cache_version": 2,
             "concatenated_forward": args.concatenated_forward,
             "dataset_config_hash": dataset_config_hash,
             "loss_type": args.loss_type,
