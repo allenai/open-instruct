@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Create datasets for RL environments."""
+"""Create and upload datasets for RL environments to HuggingFace."""
 
+import argparse
 import json
 from pathlib import Path
 
+from datasets import Dataset
 
-def create_counter_dataset(output_path: Path, num_samples: int = 100):
-    """Create a dataset for CounterEnv with varying target values."""
+
+def create_counter_samples(num_samples: int = 100) -> list[dict]:
+    """Create samples for CounterEnv with varying target values."""
     samples = []
-
     for i in range(num_samples):
         target = (i % 10) + 1  # Targets 1-10
-        sample = {
+        samples.append({
             "messages": [
                 {
                     "role": "system",
@@ -25,24 +27,16 @@ def create_counter_dataset(output_path: Path, num_samples: int = 100):
             "ground_truth": str(target),
             "dataset": "env_last",
             "env_config": {"task_id": str(target)},
-        }
-        samples.append(sample)
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
-        for sample in samples:
-            f.write(json.dumps(sample) + "\n")
-
-    print(f"Created {len(samples)} samples at {output_path}")
+        })
+    return samples
 
 
-def create_guess_number_dataset(output_path: Path, num_samples: int = 100):
-    """Create a dataset for GuessNumberEnv with specific secret numbers."""
+def create_guess_number_samples(num_samples: int = 100) -> list[dict]:
+    """Create samples for GuessNumberEnv with specific secret numbers."""
     samples = []
-
     for i in range(num_samples):
         secret = (i % 100) + 1  # Secrets 1-100
-        sample = {
+        samples.append({
             "messages": [
                 {
                     "role": "system",
@@ -53,77 +47,23 @@ def create_guess_number_dataset(output_path: Path, num_samples: int = 100):
             "ground_truth": str(secret),
             "dataset": "env_last",
             "env_config": {"task_id": str(secret)},
-        }
-        samples.append(sample)
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
-        for sample in samples:
-            f.write(json.dumps(sample) + "\n")
-
-    print(f"Created {len(samples)} samples at {output_path}")
+        })
+    return samples
 
 
-def create_wordle_dataset(output_path: Path, num_samples: int = 100):
-    """Create a dataset for Wordle environment via OpenEnv."""
-    # Common 5-letter words for Wordle
+def create_wordle_samples(num_samples: int = 100) -> list[dict]:
+    """Create samples for Wordle environment via OpenEnv."""
     words = [
-        "apple",
-        "beach",
-        "chair",
-        "dance",
-        "eagle",
-        "flame",
-        "grape",
-        "house",
-        "image",
-        "juice",
-        "knife",
-        "lemon",
-        "music",
-        "night",
-        "ocean",
-        "piano",
-        "queen",
-        "river",
-        "stone",
-        "tiger",
-        "ultra",
-        "video",
-        "water",
-        "xerox",
-        "youth",
-        "zebra",
-        "alarm",
-        "brain",
-        "crane",
-        "dream",
-        "earth",
-        "flash",
-        "ghost",
-        "heart",
-        "irony",
-        "jelly",
-        "karma",
-        "light",
-        "money",
-        "noise",
-        "olive",
-        "peace",
-        "quiet",
-        "radio",
-        "smile",
-        "toast",
-        "unity",
-        "voice",
-        "world",
-        "young",
+        "apple", "beach", "chair", "dance", "eagle", "flame", "grape", "house", "image", "juice",
+        "knife", "lemon", "music", "night", "ocean", "piano", "queen", "river", "stone", "tiger",
+        "ultra", "video", "water", "xerox", "youth", "zebra", "alarm", "brain", "crane", "dream",
+        "earth", "flash", "ghost", "heart", "irony", "jelly", "karma", "light", "money", "noise",
+        "olive", "peace", "quiet", "radio", "smile", "toast", "unity", "voice", "world", "young",
     ]
-
     samples = []
     for i in range(num_samples):
         word = words[i % len(words)]
-        sample = {
+        samples.append({
             "messages": [
                 {
                     "role": "system",
@@ -134,20 +74,12 @@ def create_wordle_dataset(output_path: Path, num_samples: int = 100):
             "ground_truth": word,
             "dataset": "env_last",
             "env_config": {"task_id": word},
-        }
-        samples.append(sample)
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
-        for sample in samples:
-            f.write(json.dumps(sample) + "\n")
-
-    print(f"Created {len(samples)} samples at {output_path}")
+        })
+    return samples
 
 
-def create_appworld_dataset(output_path: Path, num_samples: int = 50):
-    """Create a dataset for AppWorld environment."""
-    # AppWorld task descriptions (simplified examples)
+def create_appworld_samples(num_samples: int = 50) -> list[dict]:
+    """Create samples for AppWorld environment."""
     tasks = [
         ("Send an email to john@example.com about the meeting", "email_task_1"),
         ("Schedule a reminder for tomorrow at 9am", "reminder_task_1"),
@@ -160,11 +92,10 @@ def create_appworld_dataset(output_path: Path, num_samples: int = 50):
         ("Book a table for 2 at 7pm", "booking_task_1"),
         ("Play some relaxing music", "music_task_1"),
     ]
-
     samples = []
     for i in range(num_samples):
         task_desc, task_id = tasks[i % len(tasks)]
-        sample = {
+        samples.append({
             "messages": [
                 {
                     "role": "system",
@@ -175,26 +106,60 @@ def create_appworld_dataset(output_path: Path, num_samples: int = 50):
             "ground_truth": task_id,
             "dataset": "env_last",
             "env_config": {"task_id": task_id},
-        }
-        samples.append(sample)
+        })
+    return samples
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
+
+def save_jsonl(samples: list[dict], path: Path):
+    """Save samples as JSONL file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
         for sample in samples:
             f.write(json.dumps(sample) + "\n")
+    print(f"Saved {len(samples)} samples to {path}")
 
-    print(f"Created {len(samples)} samples at {output_path}")
+
+def upload_to_huggingface(samples: list[dict], repo_id: str):
+    """Upload dataset to HuggingFace Hub."""
+    dataset = Dataset.from_list(samples)
+    dataset.push_to_hub(repo_id, private=False)
+    print(f"Uploaded to https://huggingface.co/datasets/{repo_id}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Create and upload RL environment datasets")
+    parser.add_argument("--namespace", default="hamishivi", help="HuggingFace namespace")
+    parser.add_argument("--local-only", action="store_true", help="Only create local files, don't upload")
+    args = parser.parse_args()
+
+    datasets = [
+        ("rlenv-counter", create_counter_samples, 100),
+        ("rlenv-guess-number", create_guess_number_samples, 100),
+        ("rlenv-wordle", create_wordle_samples, 100),
+        ("rlenv-appworld", create_appworld_samples, 50),
+    ]
+
+    data_dir = Path(__file__).parent.parent.parent / "data" / "envs"
+
+    for name, create_fn, num_samples in datasets:
+        samples = create_fn(num_samples)
+
+        # Save locally
+        local_name = name.replace("-", "_")
+        save_jsonl(samples, data_dir / f"{local_name}_train.jsonl")
+
+        # Upload to HuggingFace
+        if not args.local_only:
+            repo_id = f"{args.namespace}/{name}"
+            upload_to_huggingface(samples, repo_id)
+
+    print("\nTo use with training:")
+    if args.local_only:
+        print(f"  --dataset_mixer_list {data_dir}/rlenv_counter_train.jsonl 1.0")
+    else:
+        print(f"  --dataset_mixer_list {args.namespace}/rlenv-counter 1.0")
+    print("  --dataset_mixer_list_splits train")
 
 
 if __name__ == "__main__":
-    data_dir = Path(__file__).parent.parent.parent / "data" / "envs"
-
-    create_counter_dataset(data_dir / "counter_train.jsonl", num_samples=100)
-    create_guess_number_dataset(data_dir / "guess_number_train.jsonl", num_samples=100)
-    create_wordle_dataset(data_dir / "wordle_train.jsonl", num_samples=100)
-    create_appworld_dataset(data_dir / "appworld_train.jsonl", num_samples=50)
-
-    print(f"\nDatasets created in {data_dir}")
-    print("\nTo use with training:")
-    print("  --dataset_mixer_list path/to/counter_train.jsonl 1.0")
-    print("  --dataset_mixer_list_splits train")
+    main()

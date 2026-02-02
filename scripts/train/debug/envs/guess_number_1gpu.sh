@@ -17,7 +17,7 @@ echo "Starting GuessNumberEnv training (1 GPU, 5 episodes)..."
 
 cd "$REPO_ROOT"
 uv run python open_instruct/grpo_fast.py \
-    --dataset_mixer_list "$REPO_ROOT/data/envs/guess_number_train.jsonl" 1.0 \
+    --dataset_mixer_list hamishivi/rlenv-guess-number 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 512 \
     --response_length 256 \
