@@ -1435,7 +1435,6 @@ def weight_sync_thread(
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
 
-
         # Calculate distribution statistics
         sync_time_stats = {
             "time/weight_sync": timer.duration,
