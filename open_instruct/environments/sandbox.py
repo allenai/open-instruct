@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from .backends import SandboxBackend, create_backend
-from .base import ResetResult, RLEnvironment, StepResult, ToolCall, register_env
+from .base import RLEnvironment, StepResult, ToolCall, register_env
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class SandboxEnv(RLEnvironment):
         self._step_count = 0
         self._submitted_answer: str | None = None
 
-    async def reset(self, task_id: str | None = None) -> ResetResult:
+    async def reset(self, task_id: str | None = None) -> StepResult:
         """Initialize the sandbox for a new episode."""
         if self._backend is not None:
             self._backend.close()
@@ -53,7 +53,7 @@ class SandboxEnv(RLEnvironment):
         if task_id:
             observation = f"[Task: {task_id}] {observation}"
 
-        return ResetResult(
+        return StepResult(
             observation=observation,
             tools=[
                 {

@@ -940,7 +940,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         env_actor = await env_pool.acquire()
 
         reset_result = await env_actor.reset.remote(task_id=env_config.get("task_id"))
-        env_tool_names = {t["function"]["name"] for t in reset_result.tools if "function" in t}
+        env_tool_names = {t["function"]["name"] for t in (reset_result.tools or []) if "function" in t}
 
         if reset_result.observation:
             obs_tokens = actor.llm_engine.tokenizer.encode(f"\n{reset_result.observation}\n", add_special_tokens=False)

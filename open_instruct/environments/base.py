@@ -11,22 +11,15 @@ from open_instruct.tools.utils import ToolCall
 
 
 @dataclass
-class ResetResult:
-    """Result from environment reset."""
-
-    observation: str
-    tools: list[dict]
-    info: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
 class StepResult:
-    """Result from environment step."""
+    """Result from environment reset or step."""
 
     observation: str
-    reward: float
-    done: bool
+    reward: float = 0.0
+    done: bool = False
     info: dict[str, Any] = field(default_factory=dict)
+    tools: list[dict] | None = None
+    """Tool schemas (only returned from reset)."""
 
 
 @dataclass
@@ -74,7 +67,7 @@ class RLEnvironment(ABC):
         pass
 
     @abstractmethod
-    async def reset(self, task_id: str | None = None) -> ResetResult:
+    async def reset(self, task_id: str | None = None) -> StepResult:
         """Initialize episode, return observation and tools."""
         pass
 
@@ -107,7 +100,7 @@ def make_env_actor(env_class: type[RLEnvironment]) -> type:
         async def setup(self) -> None:
             await self._env.setup()
 
-        async def reset(self, task_id: str | None = None) -> ResetResult:
+        async def reset(self, task_id: str | None = None) -> StepResult:
             return await self._env.reset(task_id)
 
         async def step(self, tool_call: ToolCall) -> StepResult:

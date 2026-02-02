@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from .base import ResetResult, RLEnvironment, StepResult, ToolCall, register_env
+from .base import RLEnvironment, StepResult, ToolCall, register_env
 
 try:
     from appworld import AppWorld
@@ -53,7 +53,7 @@ class AppWorldEnv(RLEnvironment):
         self._completed = False
         self._evaluation_result: dict | None = None
 
-    async def reset(self, task_id: str | None = None) -> ResetResult:
+    async def reset(self, task_id: str | None = None) -> StepResult:
         """Initialize AppWorld for a task."""
         if not HAS_APPWORLD:
             raise ImportError(
@@ -109,7 +109,7 @@ Use `apis.supervisor.complete_task()` when done (with `answer=` if the task requ
             }
         ]
 
-        return ResetResult(
+        return StepResult(
             observation=observation,
             tools=tools,
             info={"task_id": task_id, "supervisor": task.supervisor, "apps": list(task.app_descriptions.keys())},

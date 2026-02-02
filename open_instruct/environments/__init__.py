@@ -5,7 +5,6 @@ from .backends import DockerBackend, E2BBackend, ExecutionResult, SandboxBackend
 from .base import (
     ENV_REGISTRY,
     EnvironmentState,
-    ResetResult,
     RLEnvironment,
     StepResult,
     ToolCall,
@@ -17,7 +16,6 @@ from .pool import EnvironmentPool
 
 __all__ = [
     "RLEnvironment",
-    "ResetResult",
     "StepResult",
     "ToolCall",
     "EnvironmentState",

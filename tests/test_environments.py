@@ -2,7 +2,7 @@
 
 import asyncio
 
-from open_instruct.environments import ENV_REGISTRY, EnvironmentState, ResetResult, ToolCall, get_env_class
+from open_instruct.environments import ENV_REGISTRY, EnvironmentState, StepResult, ToolCall, get_env_class
 from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
 from open_instruct.ground_truth_utils import LastRewardEnvVerifier, SumRewardEnvVerifier
 
@@ -50,7 +50,8 @@ class TestCounterEnv:
         async def _test():
             env = CounterEnv(target=3)
             result = await env.reset()
-            assert isinstance(result, ResetResult)
+            assert isinstance(result, StepResult)
+            assert result.tools is not None
             assert len(result.tools) == 3
 
             for _ in range(3):

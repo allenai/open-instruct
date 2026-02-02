@@ -2,7 +2,7 @@
 
 import random
 
-from .base import ResetResult, RLEnvironment, StepResult, ToolCall, register_env
+from .base import RLEnvironment, StepResult, ToolCall, register_env
 
 
 @register_env("counter")
@@ -16,14 +16,14 @@ class CounterEnv(RLEnvironment):
         self._current = 0
         self._step_count = 0
 
-    async def reset(self, task_id: str | None = None) -> ResetResult:
+    async def reset(self, task_id: str | None = None) -> StepResult:
         self._current = 0
         self._step_count = 0
 
         if task_id and task_id.isdigit():
             self._target = int(task_id)
 
-        return ResetResult(
+        return StepResult(
             observation=f"Counter is at {self._current}. Reach {self._target} to win.",
             tools=[
                 {
@@ -104,14 +104,14 @@ class GuessNumberEnv(RLEnvironment):
         self._secret = 0
         self._guesses = 0
 
-    async def reset(self, task_id: str | None = None) -> ResetResult:
+    async def reset(self, task_id: str | None = None) -> StepResult:
         if task_id and task_id.isdigit():
             self._secret = int(task_id)
         else:
             self._secret = random.randint(self._min_val, self._max_val)
         self._guesses = 0
 
-        return ResetResult(
+        return StepResult(
             observation=f"Guess a number between {self._min_val} and {self._max_val}.",
             tools=[
                 {

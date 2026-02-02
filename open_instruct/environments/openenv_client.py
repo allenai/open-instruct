@@ -5,7 +5,7 @@ from typing import Any
 
 import aiohttp
 
-from .base import ResetResult, RLEnvironment, StepResult, ToolCall, register_env
+from .base import RLEnvironment, StepResult, ToolCall, register_env
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +40,13 @@ class OpenEnvClient(RLEnvironment):
             response.raise_for_status()
             return await response.json()
 
-    async def reset(self, task_id: str | None = None) -> ResetResult:
+    async def reset(self, task_id: str | None = None) -> StepResult:
         """Reset the environment on the remote server."""
         self._step_count = 0
         data = await self._request("POST", "/reset", json={"task_id": task_id})
         self._current_tools = data.get("tools", [])
 
-        return ResetResult(
+        return StepResult(
             observation=data.get("observation", ""), tools=self._current_tools, info=data.get("info", {})
         )
 
@@ -104,7 +104,7 @@ class OpenEnvREPLClient(RLEnvironment):
             response.raise_for_status()
             return await response.json()
 
-    async def reset(self, task_id: str | None = None) -> ResetResult:
+    async def reset(self, task_id: str | None = None) -> StepResult:
         """Reset the REPL environment."""
         self._step_count = 0
         data = await self._request(
@@ -123,7 +123,7 @@ class OpenEnvREPLClient(RLEnvironment):
             context_preview = observation.get("context_preview", "")
             observation = f"Context: {context_preview}...\nTask: {self._task_prompt}"
 
-        return ResetResult(
+        return StepResult(
             observation=observation,
             tools=[
                 {
