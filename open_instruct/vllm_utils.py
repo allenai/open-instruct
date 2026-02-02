@@ -61,7 +61,8 @@ from vllm.v1.core import kv_cache_utils
 from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
-from open_instruct.environments import EnvironmentPool, ToolCall as EnvToolCall
+from open_instruct.environments import EnvironmentPool
+from open_instruct.environments import ToolCall as EnvToolCall
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.tools.utils import ToolOutput
@@ -882,7 +883,11 @@ async def _get_or_create_env_pool(actor: LLMRayActor, env_config: dict) -> Envir
     if pool_key not in actor.env_pools:
         pool_size = env_config.get("pool_size", 64)
         # Extract env kwargs (everything except control params)
-        env_kwargs = {k: v for k, v in env_config.items() if k not in ("env_name", "env_class", "task_id", "max_steps", "pool_size")}
+        env_kwargs = {
+            k: v
+            for k, v in env_config.items()
+            if k not in ("env_name", "env_class", "task_id", "max_steps", "pool_size")
+        }
         pool = EnvironmentPool(pool_size=pool_size, env_name=env_name, env_class=env_class, **env_kwargs)
         await pool.initialize()
         actor.env_pools[pool_key] = pool
@@ -978,7 +983,9 @@ async def _process_env_request(
                 start_time = time.perf_counter()
 
                 try:
-                    env_tool_call = EnvToolCall(name=tool_call.name, args=tool_call.args, id=getattr(tool_call, "id", None))
+                    env_tool_call = EnvToolCall(
+                        name=tool_call.name, args=tool_call.args, id=getattr(tool_call, "id", None)
+                    )
                     step_result = ray.get(env_actor.step.remote(env_tool_call))
 
                     env_state["rewards"].append(step_result.reward)
@@ -1059,16 +1066,18 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     if env_config is not None:
         complete_output = await _process_env_request(actor, sub_request_id, sampling_params, env_config)
         actor.active_tasks.pop(sub_request_id, None)
-        actor.completion_queue.put({
-            "base_request_id": base_request_id,
-            "expected_n": request_metadata["original_sampling_params"].n,
-            "request_output": RequestOutput(
-                request_id=sub_request_id,
-                prompt_token_ids=request_metadata["prompt_token_ids"],
-                outputs=[complete_output],
-            ),
-            "use_tools": True,
-        })
+        actor.completion_queue.put(
+            {
+                "base_request_id": base_request_id,
+                "expected_n": request_metadata["original_sampling_params"].n,
+                "request_output": RequestOutput(
+                    request_id=sub_request_id,
+                    prompt_token_ids=request_metadata["prompt_token_ids"],
+                    outputs=[complete_output],
+                ),
+                "use_tools": True,
+            }
+        )
         return
 
     # Standard tool-based processing

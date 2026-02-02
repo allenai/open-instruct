@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 from .backends import SandboxBackend, create_backend
-from .base import RLEnvironment, ResetResult, StepResult, ToolCall, register_env
+from .base import ResetResult, RLEnvironment, StepResult, ToolCall, register_env
 
 logger = logging.getLogger(__name__)
 
@@ -193,19 +193,11 @@ class SandboxEnv(RLEnvironment):
         # Small penalty for errors
         reward = 0.0 if result.exit_code == 0 else -0.05
 
-        return StepResult(
-            observation=output,
-            reward=reward,
-            done=False,
-            info={"exit_code": result.exit_code},
-        )
+        return StepResult(observation=output, reward=reward, done=False, info={"exit_code": result.exit_code})
 
     def get_metrics(self) -> dict[str, float]:
         """Return sandbox-specific metrics."""
-        return {
-            "step_count": float(self._step_count),
-            "submitted": 1.0 if self._submitted_answer is not None else 0.0,
-        }
+        return {"step_count": float(self._step_count), "submitted": 1.0 if self._submitted_answer is not None else 0.0}
 
     async def close(self) -> None:
         """Cleanup the sandbox backend."""

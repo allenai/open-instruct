@@ -10,7 +10,7 @@ from typing import Any
 
 import aiohttp
 
-from .base import RLEnvironment, ResetResult, StepResult, ToolCall, register_env
+from .base import ResetResult, RLEnvironment, StepResult, ToolCall, register_env
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +39,7 @@ class OpenEnvClient(RLEnvironment):
     response_role = "tool"
     max_steps = 50
 
-    def __init__(
-        self,
-        base_url: str,
-        timeout: int = 30,
-        headers: dict[str, str] | None = None,
-    ):
+    def __init__(self, base_url: str, timeout: int = 30, headers: dict[str, str] | None = None):
         """
         Initialize OpenEnv client.
 
@@ -64,8 +59,7 @@ class OpenEnvClient(RLEnvironment):
         """Get or create the HTTP session."""
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=self._timeout),
-                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=self._timeout), headers=self._headers
             )
         return self._session
 
@@ -96,9 +90,7 @@ class OpenEnvClient(RLEnvironment):
         self._current_tools = data.get("tools", [])
 
         return ResetResult(
-            observation=data.get("observation", ""),
-            tools=self._current_tools,
-            info=data.get("info", {}),
+            observation=data.get("observation", ""), tools=self._current_tools, info=data.get("info", {})
         )
 
     async def step(self, tool_call: ToolCall) -> StepResult:
@@ -114,13 +106,7 @@ class OpenEnvClient(RLEnvironment):
         self._step_count += 1
 
         data = await self._request(
-            "POST",
-            "/step",
-            json={
-                "tool_name": tool_call.name,
-                "tool_args": tool_call.args,
-                "tool_id": tool_call.id,
-            },
+            "POST", "/step", json={"tool_name": tool_call.name, "tool_args": tool_call.args, "tool_id": tool_call.id}
         )
 
         return StepResult(
@@ -132,9 +118,7 @@ class OpenEnvClient(RLEnvironment):
 
     def get_metrics(self) -> dict[str, float]:
         """Return client metrics."""
-        return {
-            "step_count": float(self._step_count),
-        }
+        return {"step_count": float(self._step_count)}
 
     async def close(self) -> None:
         """Close the HTTP session."""
@@ -161,12 +145,7 @@ class OpenEnvREPLClient(RLEnvironment):
     max_steps = 30
 
     def __init__(
-        self,
-        base_url: str,
-        context: str = "",
-        task_prompt: str = "",
-        timeout: int = 60,
-        max_iterations: int = 30,
+        self, base_url: str, context: str = "", task_prompt: str = "", timeout: int = 60, max_iterations: int = 30
     ):
         """
         Initialize REPL client.
@@ -189,9 +168,7 @@ class OpenEnvREPLClient(RLEnvironment):
     async def _ensure_session(self) -> aiohttp.ClientSession:
         """Get or create the HTTP session."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=self._timeout),
-            )
+            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self._timeout))
         return self._session
 
     async def _request(self, method: str, endpoint: str, **kwargs) -> dict[str, Any]:
@@ -265,11 +242,7 @@ class OpenEnvREPLClient(RLEnvironment):
 
         code = tool_call.args.get("code", "")
 
-        data = await self._request(
-            "POST",
-            "/step",
-            json={"code": code},
-        )
+        data = await self._request("POST", "/step", json={"code": code})
 
         # Extract observation from REPL result
         observation = data.get("observation", "")
@@ -288,9 +261,7 @@ class OpenEnvREPLClient(RLEnvironment):
 
     def get_metrics(self) -> dict[str, float]:
         """Return REPL metrics."""
-        return {
-            "step_count": float(self._step_count),
-        }
+        return {"step_count": float(self._step_count)}
 
     async def close(self) -> None:
         """Close the HTTP session."""

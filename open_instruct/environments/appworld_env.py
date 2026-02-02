@@ -8,7 +8,7 @@ See: https://github.com/stonybrooknlp/appworld
 import logging
 from typing import Any
 
-from .base import RLEnvironment, ResetResult, StepResult, ToolCall, register_env
+from .base import ResetResult, RLEnvironment, StepResult, ToolCall, register_env
 
 logger = logging.getLogger(__name__)
 
@@ -93,10 +93,7 @@ class AppWorldEnv(RLEnvironment):
             from appworld import AppWorld
         except ImportError:
             raise ImportError(
-                "appworld not installed. Run:\n"
-                "  pip install appworld\n"
-                "  appworld install\n"
-                "  appworld download data"
+                "appworld not installed. Run:\n  pip install appworld\n  appworld install\n  appworld download data"
             )
 
         # Close previous world if exists
@@ -127,10 +124,10 @@ class AppWorldEnv(RLEnvironment):
         task = self._world.task
         observation = f"""Task: {task.instruction}
 
-Supervisor: {task.supervisor['first_name']} {task.supervisor['last_name']}
-Email: {task.supervisor['email']}
+Supervisor: {task.supervisor["first_name"]} {task.supervisor["last_name"]}
+Email: {task.supervisor["email"]}
 
-Available Apps: {', '.join(task.app_descriptions.keys())}
+Available Apps: {", ".join(task.app_descriptions.keys())}
 
 You can execute Python code using the `execute` tool. Use `apis.{{app_name}}.{{api_name}}(**params)` to call APIs.
 Use `apis.api_docs.show_api_doc(app_name, api_name)` to look up API documentation.
@@ -145,12 +142,7 @@ Use `apis.supervisor.complete_task()` when done (with `answer=` if the task requ
                     "description": "Execute Python code in the AppWorld environment. Use apis.{app}.{api}(**params) to call APIs.",
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "code": {
-                                "type": "string",
-                                "description": "Python code to execute",
-                            }
-                        },
+                        "properties": {"code": {"type": "string", "description": "Python code to execute"}},
                         "required": ["code"],
                     },
                 },
@@ -160,11 +152,7 @@ Use `apis.supervisor.complete_task()` when done (with `answer=` if the task requ
         return ResetResult(
             observation=observation,
             tools=tools,
-            info={
-                "task_id": task_id,
-                "supervisor": task.supervisor,
-                "apps": list(task.app_descriptions.keys()),
-            },
+            info={"task_id": task_id, "supervisor": task.supervisor, "apps": list(task.app_descriptions.keys())},
         )
 
     async def step(self, tool_call: ToolCall) -> StepResult:
@@ -184,18 +172,12 @@ Use `apis.supervisor.complete_task()` when done (with `answer=` if the task requ
 
         if tool_call.name != "execute":
             return StepResult(
-                observation=f"Unknown tool: {tool_call.name}. Use 'execute' with Python code.",
-                reward=0.0,
-                done=False,
+                observation=f"Unknown tool: {tool_call.name}. Use 'execute' with Python code.", reward=0.0, done=False
             )
 
         code = tool_call.args.get("code", "")
         if not code.strip():
-            return StepResult(
-                observation="Error: Empty code provided.",
-                reward=0.0,
-                done=False,
-            )
+            return StepResult(observation="Error: Empty code provided.", reward=0.0, done=False)
 
         # Execute code in AppWorld
         try:
@@ -226,18 +208,12 @@ Use `apis.supervisor.complete_task()` when done (with `answer=` if the task requ
             observation=output if output else "(no output)",
             reward=reward,
             done=done,
-            info={
-                "step_count": self._step_count,
-                "completed": done,
-            },
+            info={"step_count": self._step_count, "completed": done},
         )
 
     def get_metrics(self) -> dict[str, float]:
         """Return AppWorld-specific metrics."""
-        metrics = {
-            "step_count": float(self._step_count),
-            "completed": 1.0 if self._completed else 0.0,
-        }
+        metrics = {"step_count": float(self._step_count), "completed": 1.0 if self._completed else 0.0}
 
         if self._evaluation_result:
             passes = len(self._evaluation_result.get("passes", []))

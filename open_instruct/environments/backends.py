@@ -154,11 +154,7 @@ class E2BBackend(SandboxBackend):
             raise RuntimeError("Sandbox not started. Call start() first.")
 
         result = self._sandbox.commands.run(command)
-        return ExecutionResult(
-            stdout=result.stdout or "",
-            stderr=result.stderr or "",
-            exit_code=result.exit_code,
-        )
+        return ExecutionResult(stdout=result.stdout or "", stderr=result.stderr or "", exit_code=result.exit_code)
 
     def write_file(self, path: str, content: str | bytes) -> None:
         """Write a file to the E2B sandbox."""
@@ -231,11 +227,7 @@ class DockerBackend(SandboxBackend):
             # For other languages, just execute as shell
             output, exit_code = self._runtime.run(code)
 
-        return ExecutionResult(
-            stdout=output,
-            stderr="",
-            exit_code=0 if exit_code == "0" else 1,
-        )
+        return ExecutionResult(stdout=output, stderr="", exit_code=0 if exit_code == "0" else 1)
 
     def run_command(self, command: str) -> ExecutionResult:
         """Execute a shell command in the Docker container."""
@@ -243,11 +235,7 @@ class DockerBackend(SandboxBackend):
             raise RuntimeError("Container not started. Call start() first.")
 
         output, exit_code = self._runtime.run(command)
-        return ExecutionResult(
-            stdout=output,
-            stderr="",
-            exit_code=0 if exit_code == "0" else 1,
-        )
+        return ExecutionResult(stdout=output, stderr="", exit_code=0 if exit_code == "0" else 1)
 
     def write_file(self, path: str, content: str | bytes) -> None:
         """Write a file to the Docker container."""

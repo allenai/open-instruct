@@ -6,7 +6,7 @@ These are simple environments that don't require external dependencies.
 
 import random
 
-from .base import RLEnvironment, ResetResult, StepResult, ToolCall, register_env
+from .base import ResetResult, RLEnvironment, StepResult, ToolCall, register_env
 
 
 @register_env("counter")
@@ -99,10 +99,7 @@ class CounterEnv(RLEnvironment):
             done = False
 
         return StepResult(
-            observation=obs,
-            reward=reward,
-            done=done,
-            info={"current": self._current, "target": self._target},
+            observation=obs, reward=reward, done=done, info={"current": self._current, "target": self._target}
         )
 
     def get_metrics(self) -> dict[str, float]:
@@ -171,9 +168,7 @@ class GuessNumberEnv(RLEnvironment):
 
         if tool_call.name != "guess":
             return StepResult(
-                observation=f"Unknown action: {tool_call.name}. Use 'guess' with a number.",
-                reward=-0.1,
-                done=False,
+                observation=f"Unknown action: {tool_call.name}. Use 'guess' with a number.", reward=-0.1, done=False
             )
 
         guess = tool_call.args.get("number", 0)
@@ -183,9 +178,7 @@ class GuessNumberEnv(RLEnvironment):
                 guess = int(guess)
             except (ValueError, TypeError):
                 return StepResult(
-                    observation=f"Invalid guess: {guess}. Please provide an integer.",
-                    reward=-0.1,
-                    done=False,
+                    observation=f"Invalid guess: {guess}. Please provide an integer.", reward=-0.1, done=False
                 )
 
         if guess == self._secret:
@@ -196,20 +189,10 @@ class GuessNumberEnv(RLEnvironment):
                 info={"guesses": self._guesses},
             )
         elif guess < self._secret:
-            return StepResult(
-                observation=f"{guess} is too low.",
-                reward=0.0,
-                done=False,
-            )
+            return StepResult(observation=f"{guess} is too low.", reward=0.0, done=False)
         else:
-            return StepResult(
-                observation=f"{guess} is too high.",
-                reward=0.0,
-                done=False,
-            )
+            return StepResult(observation=f"{guess} is too high.", reward=0.0, done=False)
 
     def get_metrics(self) -> dict[str, float]:
         """Return game metrics."""
-        return {
-            "guesses": float(self._guesses),
-        }
+        return {"guesses": float(self._guesses)}
