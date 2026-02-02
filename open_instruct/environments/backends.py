@@ -218,7 +218,6 @@ class DockerBackend(SandboxBackend):
             raise RuntimeError("Container not started. Call start() first.")
 
         # Write code to temp file and execute
-        escaped_code = code.replace("'", "'\\''")
         self._runtime.run(f"cat > /tmp/code.py << 'CODEEOF'\n{code}\nCODEEOF")
 
         if language == "python":
