@@ -112,6 +112,8 @@ class DPOTrainModule(TrainModule):
             self.record_metric("train/loss", loss.detach(), ReduceType.mean)
             self.record_metric("train/logps_chosen", policy_chosen_logps.mean().detach(), ReduceType.mean)
             self.record_metric("train/logps_rejected", policy_rejected_logps.mean().detach(), ReduceType.mean)
+            token_count = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
+            self.record_metric("train/token_count", token_count, ReduceType.sum)
 
             if self.args.loss_type.computes_reward_metrics:
                 accuracy = (chosen_rewards > rejected_rewards).float().mean()
