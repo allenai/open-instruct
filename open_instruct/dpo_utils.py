@@ -997,7 +997,10 @@ def concatenated_forward_olmo(
     else:
         concatenated_batch, bs = pf_concatenated_inputs(batch)
         logits = model(
-            concatenated_batch["concatenated_input_ids"], position_ids=concatenated_batch["concatenated_position_ids"]
+            concatenated_batch["concatenated_input_ids"],
+            position_ids=concatenated_batch["concatenated_position_ids"],
+            cu_doc_lens_k=concatenated_batch["concatenated_cu_seq_lens_k"],
+            max_doc_len_k=concatenated_batch["concatenated_max_length_k"],
         ).to(torch.float32)
         all_logps = pf_get_batch_logps(
             logits,
@@ -1027,7 +1030,12 @@ def _compute_logps_olmo(
     """
     item_batch = process_batch(batch, prefix)
     if packing:
-        logits = model(item_batch["input_ids"], position_ids=item_batch["position_ids"]).to(torch.float32)
+        logits = model(
+            item_batch["input_ids"],
+            position_ids=item_batch["position_ids"],
+            cu_doc_lens_k=item_batch["cu_seq_lens_k"],
+            max_doc_len_k=item_batch["max_length_k"],
+        ).to(torch.float32)
         logps = pf_get_batch_logps(
             logits, item_batch["labels"], item_batch["cu_seq_lens_k"], average_log_prob=average_log_prob
         )
