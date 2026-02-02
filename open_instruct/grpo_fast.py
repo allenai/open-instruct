@@ -1897,20 +1897,25 @@ def run_training(
         wandb_url=wandb_url,
     )
     for training_step in range(resume_training_step, args.num_training_steps + 1):
+        logger.info(f"[Main Thread] 🔄 Starting loop iteration for training_step={training_step}")
         start_time = time.perf_counter()
 
         # Check if any of the threads have raised an exception.
+        logger.info(f"[Main Thread] Running health check for step {training_step}")
         health_check_start = time.perf_counter()
         health_check_fn()
         health_check_time = time.perf_counter() - health_check_start
+        logger.info(f"[Main Thread] Health check done for step {training_step}, took {health_check_time:.3f}s")
 
         if (
             training_step % args.local_eval_every == 0
             and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
+            logger.info(f"[Main Thread] Queueing eval prompts for step {training_step}")
             for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(eval_example, 0, prompt_Q, generation_configs["eval"], is_eval=True)
+            logger.info(f"[Main Thread] Done queueing eval prompts for step {training_step}")
 
         episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
@@ -1922,6 +1927,7 @@ def run_training(
 
         data_thread_metrics["time/health_check"] = health_check_time
 
+        logger.info(f"[Main Thread] Calling one_training_step for step {training_step}")
         num_step_tokens = one_training_step(
             args,
             streaming_config,
