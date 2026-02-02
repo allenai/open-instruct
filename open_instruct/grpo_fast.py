@@ -1905,13 +1905,18 @@ def run_training(
                 logger.info("[Health Check] weight_sync_thread_future is done, getting result...")
                 f.result()
                 logger.info("[Health Check] weight_sync_thread_future result obtained")
-        logger.info("[Health Check] Checking vLLM engine health...")
-        ray_get_with_progress(
-            [engine.check_background_threads.remote() for engine in vllm_engines],
-            desc="Checking vLLM engine health",
-            enable=False,
-        )
-        logger.info("[Health Check] vLLM engine health check done")
+        logger.info(f"[Health Check] Checking {len(vllm_engines)} vLLM engine(s) health...")
+        try:
+            ray_get_with_progress(
+                [engine.check_background_threads.remote() for engine in vllm_engines],
+                desc="Checking vLLM engine health",
+                enable=False,
+                timeout=60.0,  # 60 second timeout to prevent infinite hang
+            )
+            logger.info("[Health Check] vLLM engine health check done")
+        except TimeoutError:
+            logger.error("[Health Check] vLLM engine health check TIMED OUT after 60s!")
+            raise RuntimeError("vLLM engine health check timed out - one or more engines may be stuck")
 
     if checkpoint_state and "num_total_tokens" in checkpoint_state:
         num_total_tokens = checkpoint_state["num_total_tokens"]
