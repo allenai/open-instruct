@@ -536,22 +536,24 @@ class PolicyTrainerRayProcess(RayProcess):
                 data_BT = data_BT[:min_samples]
                 num_samples = min_samples
         
-        accumulation_steps = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
+        # Calculate accumulation steps based on synchronized sample count
+        # Use a value that evenly divides num_samples to avoid additional dropping
+        target_accum = max(math.ceil(num_samples / self.num_mini_batches - 0.5), 1)
+        
+        # Find the largest accumulation_steps <= target that evenly divides num_samples
+        # This minimizes wasted samples while staying close to the desired batch size
+        accumulation_steps = target_accum
+        for candidate in range(target_accum, 0, -1):
+            if num_samples % candidate == 0:
+                accumulation_steps = candidate
+                break
+        
         leftover = num_samples % accumulation_steps
         if leftover > 0:
+            # This should rarely happen now since we search for a divisor
             data_BT = data_BT[:-leftover]
             logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
-        
-        # Final sync after dropping to ensure all workers have identical iteration counts
-        num_samples = len(data_BT)
-        if torch.distributed.is_initialized():
-            num_samples_tensor = torch.tensor([num_samples], device=self.device, dtype=torch.int64)
-            torch.distributed.all_reduce(num_samples_tensor, op=torch.distributed.ReduceOp.MIN)
-            min_samples = int(num_samples_tensor.item())
-            if min_samples != num_samples:
-                logger.warning(f"[Worker rank={self.rank}] Post-drop sample mismatch: local={num_samples}, min={min_samples}. Truncating.")
-                data_BT = data_BT[:min_samples]
-                num_samples = min_samples
+            num_samples = len(data_BT)
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
         logger.info(f"[Worker rank={self.rank}] Starting training: {num_samples} samples, {num_mini_batches} mini-batches, {accumulation_steps} accum steps")
