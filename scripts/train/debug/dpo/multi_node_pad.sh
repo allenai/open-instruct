@@ -45,5 +45,6 @@ uv run python mason.py \
     --activation_memory_budget 0.5 \
     --with_tracking \
     --push_to_hub false \
+    --try_launch_beaker_eval_jobs false \
     --compile_model \
     --pad_to_max_length

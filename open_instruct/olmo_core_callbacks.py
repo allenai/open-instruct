@@ -129,14 +129,20 @@ class PerfCallback(Callback):
 
     _start_time: float = field(default=0.0, repr=False)
     _interval_start_time: float = field(default=0.0, repr=False)
+    _step_start_time: float = field(default=0.0, repr=False)
     _total_tokens_processed: int = field(default=0, repr=False)
+    _mfu_sum: float = field(default=0.0, repr=False)
     _last_step: int = field(default=0, repr=False)
 
     def pre_train(self) -> None:
         self._start_time = time.perf_counter()
         self._interval_start_time = self._start_time
         self._total_tokens_processed = 0
+        self._mfu_sum = 0.0
         self._last_step = 0
+
+    def pre_step(self) -> None:
+        self._step_start_time = time.perf_counter()
 
     def post_step(self) -> None:
         if self.step % self.trainer.metrics_collect_interval != 0:
@@ -153,9 +159,9 @@ class PerfCallback(Callback):
         training_time = interval_end - self._interval_start_time
         total_time_elapsed = interval_end - self._start_time
 
-        step_tokens_per_second = total_tokens_step / training_time if training_time > 0 else 0
+        tokens_per_second = total_tokens_step / training_time if training_time > 0 else 0
         self._total_tokens_processed += total_tokens_step
-        total_tokens_per_second = self._total_tokens_processed / total_time_elapsed
+        tokens_per_second_avg = self._total_tokens_processed / total_time_elapsed
 
         logging_steps = self.trainer.metrics_collect_interval
         num_sequences = (
@@ -174,9 +180,16 @@ class PerfCallback(Callback):
             num_training_gpus=self.num_training_gpus,
         )
 
+        self._mfu_sum += mfu_result["mfu"]
+        mfu_avg = self._mfu_sum / (self.step // logging_steps)
+
+        seconds_per_step = interval_end - self._step_start_time
+
         self.trainer.record_metric("perf/mfu", mfu_result["mfu"], reduce_type=None)
-        self.trainer.record_metric("perf/tokens_per_second_step", step_tokens_per_second, reduce_type=None)
-        self.trainer.record_metric("perf/tokens_per_second_total", total_tokens_per_second, reduce_type=None)
+        self.trainer.record_metric("perf/mfu_avg", mfu_avg, reduce_type=None)
+        self.trainer.record_metric("perf/seconds_per_step", seconds_per_step, reduce_type=None)
+        self.trainer.record_metric("perf/tokens_per_second", tokens_per_second, reduce_type=None)
+        self.trainer.record_metric("perf/tokens_per_second_avg", tokens_per_second_avg, reduce_type=None)
 
         self._interval_start_time = interval_end
         self._last_step = self.step
