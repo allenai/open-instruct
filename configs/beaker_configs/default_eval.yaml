@@ -1,6 +1,6 @@
 version: v2
 description: open-instruct-eval-default
-budget: ai2/oe-adapt
+budget: ai2/oceo
 retry:
   allowedTaskRetries: 2
 tasks:
