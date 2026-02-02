@@ -243,10 +243,13 @@ class DockerBackend(SandboxBackend):
             raise RuntimeError("Container not started. Call start() first.")
 
         if isinstance(content, bytes):
-            content = content.decode("utf-8")
+            import base64
 
-        # Escape content for heredoc
-        self._runtime.run(f"cat > {path} << 'FILEEOF'\n{content}\nFILEEOF")
+            encoded_content = base64.b64encode(content).decode("ascii")
+            self._runtime.run(f"echo '{encoded_content}' | base64 -d > {path}")
+        else:
+            # Escape content for heredoc
+            self._runtime.run(f"cat > {path} << 'FILEEOF'\n{content}\nFILEEOF")
 
     def read_file(self, path: str) -> str | bytes:
         """Read a file from the Docker container."""
