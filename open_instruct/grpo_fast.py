@@ -1238,6 +1238,7 @@ def create_model_and_optimizer(
     data_prep_actor_state: dict | None = None,
     tool_actors: list[ray.actor.ActorHandle] | None = None,
     tools_config: ToolsConfig | None = None,
+    base_env_config: dict | None = None,
 ) -> tuple[
     ModelGroup, list[vllm_utils.LLMRayActor], int, int, ray.actor.ActorHandle, utils.ModelDims, ray.actor.ActorHandle
 ]:
@@ -1280,6 +1281,7 @@ def create_model_and_optimizer(
         run_name=args.run_name,
         model_name=model_config.model_name_or_path,
         initial_state=data_prep_actor_state,
+        base_env_config=base_env_config,
     )
 
     # Create policy group and start model loading BEFORE vLLM engines (matches main branch order).
@@ -1810,6 +1812,7 @@ def run_training(
     actor_manager: ActorManager,
     model_dims: utils.ModelDims,
     checkpoint_state=None,
+    base_env_config: dict | None = None,
 ):
     if resume_training_step > 1:
         logger.info(f"[Main Thread] Resuming training from step {resume_training_step}")
@@ -1893,7 +1896,14 @@ def run_training(
             and (args.eval_on_step_0 or training_step > 1)
         ):
             for eval_example in iter(eval_data_loader):
-                add_prompt_to_generator(eval_example, 0, prompt_Q, generation_configs["eval"], is_eval=True)
+                add_prompt_to_generator(
+                    eval_example,
+                    0,
+                    prompt_Q,
+                    generation_configs["eval"],
+                    is_eval=True,
+                    base_env_config=base_env_config,
+                )
 
         episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
@@ -2106,6 +2116,7 @@ def main(
                 # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
                 data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
+    base_env_config = env_config.to_env_config_dict() if env_config and env_config.enabled else None
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(
             args,
@@ -2126,6 +2137,7 @@ def main(
             data_prep_actor_state,
             tool_actors,
             tools_config,
+            base_env_config,
         )
     )
 
@@ -2162,6 +2174,7 @@ def main(
             actor_manager,
             model_dims,
             checkpoint_state,
+            base_env_config,
         )
 
         if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):

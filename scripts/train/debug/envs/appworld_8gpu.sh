@@ -34,7 +34,7 @@ echo "Starting AppWorld training (8 GPU, 5 episodes)..."
 
 cd "$REPO_ROOT"
 uv run python open_instruct/grpo_fast.py \
-    --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
+    --dataset_mixer_list "$REPO_ROOT/data/envs/appworld_train.jsonl" 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 1024 \
     --response_length 2048 \

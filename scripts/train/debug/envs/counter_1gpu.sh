@@ -17,7 +17,7 @@ echo "Starting CounterEnv training (1 GPU, 5 episodes)..."
 
 cd "$REPO_ROOT"
 uv run python open_instruct/grpo_fast.py \
-    --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
+    --dataset_mixer_list "$REPO_ROOT/data/envs/counter_train.jsonl" 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 512 \
     --response_length 256 \

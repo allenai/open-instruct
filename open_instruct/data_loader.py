@@ -35,6 +35,7 @@ from transformers import PreTrainedTokenizer
 
 from open_instruct import data_types, utils
 from open_instruct.dataset_transformation import (
+    ENV_CONFIG_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
@@ -527,9 +528,24 @@ class BatchStatistics:
 
 
 def add_prompt_to_generator(
-    example: dict[str, Any], epoch_number: int, param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
+    example: dict[str, Any],
+    epoch_number: int,
+    param_prompt_Q: ray_queue.Queue,
+    generation_config,
+    is_eval: bool,
+    base_env_config: dict | None = None,
 ) -> None:
     index = example["index"]
+
+    # Merge base env_config with per-sample env_config
+    env_config = None
+    if base_env_config is not None:
+        env_config = dict(base_env_config)
+        # Per-sample env_config overrides base config
+        sample_env_config = example.get(ENV_CONFIG_KEY)
+        if sample_env_config:
+            env_config.update(sample_env_config)
+
     param_prompt_Q.put(
         data_types.PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
@@ -538,6 +554,7 @@ def add_prompt_to_generator(
             prompt_id=f"{epoch_number}_{index}",
             is_eval=is_eval,
             active_tools=example.get(TOOLS_COLUMN_KEY),
+            env_config=env_config,
         )
     )
 
@@ -561,6 +578,7 @@ def accumulate_inference_batches(
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
+    base_env_config: dict | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -638,7 +656,14 @@ def accumulate_inference_batches(
             assert iter_dataloader is not None
             assert param_prompt_Q is not None
             example = next(iter_dataloader)
-            add_prompt_to_generator(example, iter_dataloader._epoch, param_prompt_Q, generation_config, is_eval=False)
+            add_prompt_to_generator(
+                example,
+                iter_dataloader._epoch,
+                param_prompt_Q,
+                generation_config,
+                is_eval=False,
+                base_env_config=base_env_config,
+            )
 
         for i in range(len(result.finish_reasons)):
             if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
@@ -925,6 +950,7 @@ class DataPreparationActor:
         run_name: str,
         model_name: str | None,
         initial_state: dict | None = None,
+        base_env_config: dict | None = None,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
@@ -943,6 +969,7 @@ class DataPreparationActor:
         self.tool_names = tool_names
         self.run_name = run_name
         self.model_name = model_name
+        self.base_env_config = base_env_config
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
@@ -988,6 +1015,7 @@ class DataPreparationActor:
                 self.param_prompt_Q,
                 self.generation_config,
                 is_eval=False,
+                base_env_config=self.base_env_config,
             )
 
         for step in range(self.training_step, self.num_training_steps):
@@ -1014,6 +1042,7 @@ class DataPreparationActor:
                 training_step=step,
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
+                base_env_config=self.base_env_config,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
