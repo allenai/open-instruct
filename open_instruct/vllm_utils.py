@@ -72,6 +72,7 @@ NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
+VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelDims:
@@ -435,7 +436,9 @@ def init_process_group(
 async def _check_health(port: int) -> None:
     async with (
         aiohttp.ClientSession() as session,
-        session.get(f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=30.0)) as response,
+        session.get(
+            f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=VLLM_HEALTH_CHECK_TIMEOUT_S)
+        ) as response,
     ):
         if response.status != 200:
             raise RuntimeError(f"vLLM server health check failed with status {response.status}")
@@ -475,10 +478,16 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         )
 
 
-def _create_server_args(model_path: str) -> argparse.Namespace:
+FALLBACK_CHAT_TEMPLATE = "{% for message in messages %}{{ message['content'] }}{% endfor %}"
+
+
+def _create_server_args(model_path: str, has_chat_template: bool) -> argparse.Namespace:
     parser = FlexibleArgumentParser()
     parser = make_arg_parser(parser)
-    args = parser.parse_args(["--model", model_path])
+    cli_args = ["--model", model_path]
+    if not has_chat_template:
+        cli_args.extend(["--chat-template", FALLBACK_CHAT_TEMPLATE])
+    args = parser.parse_args(cli_args)
     args.disable_fastapi_docs = True
     return args
 
@@ -683,7 +692,10 @@ class LLMRayActor:
 
             engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
-            args = _create_server_args(engine_client.vllm_config.model_config.model)
+            tokenizer = engine_client.tokenizer
+            inner_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
+            has_chat_template = getattr(inner_tokenizer, "chat_template", None) is not None
+            args = _create_server_args(engine_client.vllm_config.model_config.model, has_chat_template)
             app = build_app(args)
             await init_app_state(engine_client, app.state, args)
 
