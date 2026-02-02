@@ -29,6 +29,8 @@
 
 # Coding conventions
 - Always use `logger = logger_utils.setup_logger(__name__)` for logging.
+- Imports always go at the top of the file, never inline.
+- Use `from package import module` instead of `import package.module`.
 
 # Documentation
 To verify that documentation changes don't alter the generated output:

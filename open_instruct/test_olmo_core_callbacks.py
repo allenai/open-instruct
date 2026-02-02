@@ -6,7 +6,11 @@ import time
 import unittest
 from unittest.mock import MagicMock, Mock, patch
 
+import datasets
 import parameterized
+from transformers import AutoTokenizer
+
+from open_instruct import data_loader, dpo_utils
 
 
 class MockCallback:
@@ -57,7 +61,7 @@ mock_callback.Callback = MockCallback
 sys.modules["olmo_core.train.callbacks.comet"].CometCallback = type("CometCallback", (), {"priority": 100})
 sys.modules["olmo_core.train.callbacks.wandb"].WandBCallback = type("WandBCallback", (), {"priority": 100})
 
-from open_instruct.olmo_core_callbacks import BeakerCallbackV2  # noqa: E402
+from open_instruct.olmo_core_callbacks import BeakerCallbackV2, PerfCallback  # noqa: E402
 
 for _key in _MOCKED_MODULES:
     if _original_modules[_key] is None:
@@ -188,6 +192,96 @@ class TestBeakerCallbackPostTrain(unittest.TestCase):
                 mock_update.assert_called_once()
             else:
                 mock_update.assert_not_called()
+
+
+def mock_training_run(callback, loader: data_loader.HFDataLoader, num_steps: int = 10):
+    """Mock a training run with the given callback and data_loader.
+
+    Returns:
+        dict: The metrics recorded during training.
+    """
+    recorded_metrics = {}
+
+    def mock_record_metric(name, value, reduce_type=None):
+        recorded_metrics[name] = value
+
+    trainer_mock = Mock()
+    trainer_mock.metrics_collect_interval = 1
+    trainer_mock.record_metric = mock_record_metric
+    trainer_mock.data_loader = loader
+
+    callback._trainer = trainer_mock
+    callback.pre_train()
+
+    for step, batch in enumerate(loader):
+        if step >= num_steps:
+            break
+
+        token_count = loader.global_num_tokens_in_batch(batch)
+        trainer_mock.get_metric = Mock(return_value=Mock(item=lambda tc=token_count: tc))
+
+        callback._step = step + 1
+        callback._last_step = step
+        time.sleep(0.01)
+        callback.post_step()
+
+    return recorded_metrics
+
+
+class TestPerfCallbackMFU(unittest.TestCase):
+    """Test that PerfCallback MFU calculation uses correct token counts."""
+
+    def test_mfu_with_different_padding(self, batch_size: int = 2, real_tokens: int = 5):
+        """Verify that different padding amounts don't affect MFU."""
+        dataset = datasets.Dataset.from_dict(
+            {
+                "chosen_input_ids": [list(range(real_tokens)) for _ in range(batch_size * 10)],
+                "chosen_attention_mask": [[1] * real_tokens for _ in range(batch_size * 10)],
+                "chosen_labels": [list(range(real_tokens)) for _ in range(batch_size * 10)],
+                "rejected_input_ids": [list(range(real_tokens)) for _ in range(batch_size * 10)],
+                "rejected_attention_mask": [[1] * real_tokens for _ in range(batch_size * 10)],
+                "rejected_labels": [list(range(real_tokens)) for _ in range(batch_size * 10)],
+                "index": list(range(batch_size * 10)),
+            }
+        )
+
+        tokenizer = AutoTokenizer.from_pretrained("allenai/OLMo-2-0425-1B")
+
+        mock_model_dims = MagicMock()
+        mock_model_dims.approximate_learner_utilization.return_value = {"mfu": 50.0}
+
+        callback = PerfCallback(
+            model_dims=mock_model_dims,
+            per_device_train_batch_size=batch_size,
+            gradient_accumulation_steps=1,
+            num_training_gpus=1,
+        )
+
+        mock_time = [0.0]
+
+        def mock_perf_counter():
+            mock_time[0] += 1.0
+            return mock_time[0]
+
+        for max_length in [real_tokens, real_tokens + 10, real_tokens + 50, real_tokens + 100]:
+            collator = dpo_utils.DataCollatorForSeq2SeqDPO(
+                tokenizer=tokenizer, model=None, padding="longest", max_length=max_length
+            )
+            loader = data_loader.HFDataLoader(
+                dataset=dataset,
+                batch_size=batch_size,
+                seed=42,
+                dp_rank=0,
+                dp_world_size=1,
+                work_dir=tempfile.gettempdir(),
+                collator=collator,
+            )
+
+            mock_time[0] = 0.0
+            with patch("time.perf_counter", mock_perf_counter):
+                metrics = mock_training_run(callback, loader, num_steps=1)
+
+            self.assertEqual(metrics["perf/mfu"], 50.0, f"MFU mismatch at max_length={max_length}")
 
 
 if __name__ == "__main__":

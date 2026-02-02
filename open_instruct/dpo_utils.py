@@ -1110,4 +1110,7 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             result[full_key] = pad_to_length(result[full_key], target_len, pad_value)
 
         result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
+        result["attention_mask"] = torch.cat(
+            [result["chosen_attention_mask"], result["rejected_attention_mask"]], dim=0
+        )
         return result
