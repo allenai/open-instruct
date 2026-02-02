@@ -882,7 +882,6 @@ async def _get_or_create_env_pool(actor: LLMRayActor, env_config: dict) -> Envir
 
     if pool_key not in actor.env_pools:
         pool_size = env_config.get("pool_size", 64)
-        # Extract env kwargs (everything except control params)
         env_kwargs = {
             k: v
             for k, v in env_config.items()
@@ -894,164 +893,188 @@ async def _get_or_create_env_pool(actor: LLMRayActor, env_config: dict) -> Envir
     return actor.env_pools[pool_key]
 
 
+@dataclasses.dataclass
+class _EnvRolloutState:
+    """Mutable state for environment rollout."""
+
+    response_tokens: list[int] = dataclasses.field(default_factory=list)
+    response_logprobs: list[float] = dataclasses.field(default_factory=list)
+    response_masks: list[int] = dataclasses.field(default_factory=list)
+    current_prompt: list[int] = dataclasses.field(default_factory=list)
+    cumulative_logprob: float = 0.0
+    tool_call_stats: list[ToolCallStats] = dataclasses.field(default_factory=list)
+    env_state: dict = dataclasses.field(
+        default_factory=lambda: {"rewards": [], "step_count": 0, "done": False, "info": {}}
+    )
+    last_output: Any = None
+
+
+def _append_tokens_to_state(state: _EnvRolloutState, tokens: list[int], logprobs: list[float], masks: list[int]):
+    """Append tokens to rollout state."""
+    state.response_tokens.extend(tokens)
+    state.response_logprobs.extend(logprobs)
+    state.response_masks.extend(masks)
+    state.current_prompt.extend(tokens)
+
+
+async def _execute_env_step(
+    state: _EnvRolloutState,
+    tool_call,
+    env_actor,
+    actor: LLMRayActor,
+    sampling_params: SamplingConfig,
+    max_model_len: int,
+):
+    """Execute a single environment step and update state."""
+    state.env_state["step_count"] += 1
+    start_time = time.perf_counter()
+
+    try:
+        env_tool_call = EnvToolCall(name=tool_call.name, args=tool_call.args, id=getattr(tool_call, "id", None))
+        step_result = await env_actor.step.remote(env_tool_call)
+
+        state.env_state["rewards"].append(step_result.reward)
+        state.env_state["done"] = step_result.done
+        state.env_state["info"].update(step_result.info)
+
+        if step_result.observation:
+            obs_tokens, obs_logprobs, obs_masks, _ = process_tool_tokens(
+                tool_outputs=[step_result.observation],
+                tool_parser=actor.tool_parser,
+                tokenizer=actor.llm_engine.tokenizer,
+                current_prompt_len=len(state.current_prompt),
+                current_response_len=len(state.response_masks),
+                max_model_len=max_model_len,
+                max_tokens=sampling_params.max_tokens,
+                mask_tool_use=actor.mask_tool_use,
+            )
+            _append_tokens_to_state(state, obs_tokens, obs_logprobs, obs_masks)
+
+        state.tool_call_stats.append(ToolCallStats(tool_call.name, True, time.perf_counter() - start_time))
+    except Exception as e:
+        logger.warning(f"Environment step failed: {e}")
+        state.tool_call_stats.append(ToolCallStats(tool_call.name, False, time.perf_counter() - start_time))
+        error_tokens = actor.llm_engine.tokenizer.encode(f"\nError: {e}\n", add_special_tokens=False)
+        _append_tokens_to_state(state, error_tokens, [0.0] * len(error_tokens), [0] * len(error_tokens))
+
+
+async def _generate_and_process_model_output(
+    state: _EnvRolloutState,
+    actor: LLMRayActor,
+    sampling_params: SamplingConfig,
+    base_request_id: str,
+    current_max_tokens: int,
+):
+    """Generate model output and update state. Returns the output."""
+    current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+    api_response = await actor.client.completions.create(
+        model=actor.model_name,
+        prompt=state.current_prompt,
+        extra_body={
+            "return_token_ids": True,
+            "cache_salt": base_request_id,
+            "include_stop_str_in_output": True,
+            "skip_special_tokens": False,
+        },
+        **dataclasses.asdict(current_sampling_params),
+    )
+
+    output = api_response.choices[0]
+    model_tokens = list(output.token_ids)
+    state.response_tokens.extend(model_tokens)
+    state.current_prompt.extend(model_tokens)
+
+    assert output.logprobs and output.logprobs.token_logprobs
+    for logprob in output.logprobs.token_logprobs:
+        state.response_logprobs.append(logprob)
+        state.cumulative_logprob += logprob
+    state.response_masks.extend([1] * len(model_tokens))
+
+    state.last_output = output
+    return output
+
+
+def _build_env_completion_output(
+    state: _EnvRolloutState, sub_request_id: str, actor: LLMRayActor
+) -> "CompletionOutput":
+    """Build final CompletionOutput from rollout state."""
+    if len(state.response_tokens) == 0:
+        eos_token_id = actor.llm_engine.tokenizer.eos_token_id
+        state.response_tokens.append(eos_token_id)
+        state.response_masks.append(1)
+        state.response_logprobs.append(float("nan"))
+
+    finish_reason = state.last_output.finish_reason if state.last_output else "stop"
+
+    return CompletionOutput(
+        index=split_request_id(sub_request_id)["request_index"],
+        token_ids=state.response_tokens,
+        cumulative_logprob=state.cumulative_logprob,
+        logprobs=state.response_logprobs,
+        finish_reason=finish_reason,
+        mask=state.response_masks,
+        num_calls=state.env_state["step_count"],
+        timeout=False,
+        tool_error="",
+        tool_output="",
+        tool_runtime=sum(s.runtime for s in state.tool_call_stats),
+        tool_called=state.env_state["step_count"] > 0,
+        tool_call_stats=state.tool_call_stats,
+        excess_tool_calls={},
+        env_state=state.env_state,
+    )
+
+
 async def _process_env_request(
     actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig, env_config: dict
 ) -> "CompletionOutput":
     """Process a request using an RL environment for rollout."""
-    response_tokens = []
-    response_logprobs = []
-    response_masks = []
-    cumulative_logprob = 0.0
-    tool_call_stats: list[ToolCallStats] = []
-
     base_request_id = split_request_id(sub_request_id)["base_id"]
     request_metadata = actor.request_metadata[base_request_id]
-    original_prompt = request_metadata["prompt_token_ids"]
-    current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
-    current_max_tokens = sampling_params.max_tokens
 
-    # Get or create environment pool
+    state = _EnvRolloutState(current_prompt=list(request_metadata["prompt_token_ids"]))
+
     pool = await _get_or_create_env_pool(actor, env_config)
     env_actor = await pool.acquire()
 
-    # Track environment state
-    env_state = {"rewards": [], "step_count": 0, "done": False, "info": {}}
-    output = None
-
     try:
-        # Reset environment
-        task_id = env_config.get("task_id")
-        reset_result = await env_actor.reset.remote(task_id=task_id)
-        env_tools = reset_result.tools
-        env_tool_names = {t["function"]["name"] for t in env_tools if "function" in t}
+        reset_result = await env_actor.reset.remote(task_id=env_config.get("task_id"))
+        env_tool_names = {t["function"]["name"] for t in reset_result.tools if "function" in t}
 
-        # Add initial observation to prompt if present
         if reset_result.observation:
             obs_tokens = actor.llm_engine.tokenizer.encode(f"\n{reset_result.observation}\n", add_special_tokens=False)
-            current_prompt.extend(obs_tokens)
-            response_tokens.extend(obs_tokens)
-            response_logprobs.extend([0.0] * len(obs_tokens))
-            response_masks.extend([0] * len(obs_tokens))
+            _append_tokens_to_state(state, obs_tokens, [0.0] * len(obs_tokens), [0] * len(obs_tokens))
 
         max_steps = env_config.get("max_steps", 50)
+        current_max_tokens = sampling_params.max_tokens
 
-        while env_state["step_count"] < max_steps and not env_state["done"]:
-            # Generate model output
-            current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
-            api_response = await actor.client.completions.create(
-                model=actor.model_name,
-                prompt=current_prompt,
-                extra_body={
-                    "return_token_ids": True,
-                    "cache_salt": base_request_id,
-                    "include_stop_str_in_output": True,
-                    "skip_special_tokens": False,
-                },
-                **dataclasses.asdict(current_sampling_params),
+        while state.env_state["step_count"] < max_steps and not state.env_state["done"]:
+            output = await _generate_and_process_model_output(
+                state, actor, sampling_params, base_request_id, current_max_tokens
             )
 
-            output = api_response.choices[0]
-            model_tokens = list(output.token_ids)
-            response_tokens.extend(model_tokens)
-            current_prompt.extend(model_tokens)
-
-            assert output.logprobs and output.logprobs.token_logprobs
-            for logprob in output.logprobs.token_logprobs:
-                response_logprobs.append(logprob)
-                cumulative_logprob += logprob
-            response_masks.extend([1] * len(model_tokens))
-
-            # Check for tool calls
             if actor.tool_parser is None:
-                env_state["done"] = True
+                state.env_state["done"] = True
                 break
 
-            tool_calls = actor.tool_parser.get_tool_calls(output.text)
-            tool_calls = [tc for tc in tool_calls if tc.name in env_tool_names]
-
+            tool_calls = [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in env_tool_names]
             if not tool_calls:
-                env_state["done"] = True
+                state.env_state["done"] = True
                 break
 
-            # Execute tool calls as environment steps
             for tool_call in tool_calls:
-                if env_state["done"]:
+                if state.env_state["done"]:
                     break
+                await _execute_env_step(state, tool_call, env_actor, actor, sampling_params, max_model_len)
 
-                env_state["step_count"] += 1
-                start_time = time.perf_counter()
-
-                try:
-                    env_tool_call = EnvToolCall(
-                        name=tool_call.name, args=tool_call.args, id=getattr(tool_call, "id", None)
-                    )
-                    step_result = await env_actor.step.remote(env_tool_call)
-
-                    env_state["rewards"].append(step_result.reward)
-                    env_state["done"] = step_result.done
-                    env_state["info"].update(step_result.info)
-
-                    # Add observation to prompt
-                    if step_result.observation:
-                        obs_tokens, obs_logprobs, obs_masks, _ = process_tool_tokens(
-                            tool_outputs=[step_result.observation],
-                            tool_parser=actor.tool_parser,
-                            tokenizer=actor.llm_engine.tokenizer,
-                            current_prompt_len=len(current_prompt),
-                            current_response_len=len(response_masks),
-                            max_model_len=max_model_len,
-                            max_tokens=sampling_params.max_tokens,
-                            mask_tool_use=actor.mask_tool_use,
-                        )
-                        response_tokens.extend(obs_tokens)
-                        response_logprobs.extend(obs_logprobs)
-                        response_masks.extend(obs_masks)
-                        current_prompt.extend(obs_tokens)
-
-                    tool_call_stats.append(ToolCallStats(tool_call.name, True, time.perf_counter() - start_time))
-                except Exception as e:
-                    logger.warning(f"Environment step failed: {e}")
-                    tool_call_stats.append(ToolCallStats(tool_call.name, False, time.perf_counter() - start_time))
-                    error_tokens = actor.llm_engine.tokenizer.encode(f"\nError: {e}\n", add_special_tokens=False)
-                    response_tokens.extend(error_tokens)
-                    response_logprobs.extend([0.0] * len(error_tokens))
-                    response_masks.extend([0] * len(error_tokens))
-                    current_prompt.extend(error_tokens)
-
-            current_max_tokens = sampling_params.max_tokens - len(response_masks)
+            current_max_tokens = sampling_params.max_tokens - len(state.response_masks)
             if current_max_tokens <= 0:
                 break
-
     finally:
         pool.release(env_actor)
 
-    # Handle empty response
-    if len(response_tokens) == 0:
-        eos_token_id = actor.llm_engine.tokenizer.eos_token_id
-        response_tokens.append(eos_token_id)
-        response_masks.append(1)
-        response_logprobs.append(float("nan"))
-
-    finish_reason = output.finish_reason if output else "stop"
-
-    return CompletionOutput(
-        index=split_request_id(sub_request_id)["request_index"],
-        token_ids=response_tokens,
-        cumulative_logprob=cumulative_logprob,
-        logprobs=response_logprobs,
-        finish_reason=finish_reason,
-        mask=response_masks,
-        num_calls=env_state["step_count"],
-        timeout=False,
-        tool_error="",
-        tool_output="",
-        tool_runtime=sum(s.runtime for s in tool_call_stats),
-        tool_called=env_state["step_count"] > 0,
-        tool_call_stats=tool_call_stats,
-        excess_tool_calls={},
-        env_state=env_state,
-    )
+    return _build_env_completion_output(state, sub_request_id, actor)
 
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
