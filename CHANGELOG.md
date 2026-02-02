@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Generic RL environment support with AppWorld, OpenEnv, and sandbox environments (https://github.com/allenai/open-instruct/pull/1453).
 - FSDP shard_degree and num_replicas configuration for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1446).
 - Budget mode gradient checkpointing support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1444).
 - PerfCallback for MFU metrics in OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1442).
