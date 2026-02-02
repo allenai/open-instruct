@@ -104,7 +104,7 @@ def concatenated_inputs(
     for k in batch:
         if k.startswith("chosen_"):
             chosen_features[k.replace("chosen_", "")] = batch[k]
-        else:
+        elif k.startswith("rejected_"):
             rejected_features[k.replace("rejected_", "")] = batch[k]
 
     # - need to return chosen
