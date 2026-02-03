@@ -439,6 +439,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     scheduler = _setup_scheduler(args, num_training_steps)
 
     max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
+    # Reset world mesh to avoid conflict with the mesh created for HSDP sharding above.
+    # TransformerTrainModule.__init__ creates a new mesh, which fails if one already exists.
     dist_parallel._WORLD_MESH = None
     train_module = DPOTrainModule(
         model=model,

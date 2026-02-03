@@ -75,6 +75,9 @@ class DPOTrainModule(TransformerTrainModule):
             self._forward_fn = dpo_utils.separate_forward_olmo
 
     def pre_train(self):
+        # Override to skip batch size validation from TransformerTrainModule.
+        # DPO processes 2x sequences per batch (chosen + rejected), so the parent's
+        # validation (global_batch_size % rank_microbatch_size == 0) would fail.
         pass
 
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
