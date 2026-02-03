@@ -43,7 +43,6 @@ class DPOTrainModule(TransformerTrainModule):
         rank_microbatch_size: int,
         max_sequence_length: int,
         dpo_config: dpo_utils.ExperimentConfig,
-        reference_cache: model_utils.TensorCache,
         dp_config: TransformerDataParallelConfig | None = None,
         max_grad_norm: float | None = None,
         scheduler: Scheduler | None = None,
@@ -65,7 +64,7 @@ class DPOTrainModule(TransformerTrainModule):
         )
 
         self.dpo_config = dpo_config
-        self.reference_cache = reference_cache
+        self.reference_cache: model_utils.TensorCache | None = None
 
         if dpo_config.packing:
             self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)

@@ -15,9 +15,8 @@ import torch.distributed as dist
 import transformers
 from olmo_core import train
 from olmo_core.config import DType
-from olmo_core.distributed import parallel as dist_parallel
 from olmo_core.distributed import utils as distributed_utils
-from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
+from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
@@ -124,33 +123,19 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     return model, model_config
 
 
-def _apply_parallelism(
-    model,
-    device: torch.device,
-    tensor_parallel_degree: int = 1,
-    context_parallel_degree: int = 1,
-    pipeline_parallel_degree: int = 1,
-    shard_degree: int | None = None,
-    num_replicas: int | None = None,
-):
-    """Apply parallelism strategies to model (HSDP, TP, CP, PP).
+def _build_dp_config(
+    shard_degree: int | None = None, num_replicas: int | None = None
+) -> TransformerDataParallelConfig:
+    """Build data parallel config for HSDP.
 
     Args:
-        model: The model to apply parallelism to.
-        device: The device to use.
-        tensor_parallel_degree: Tensor parallelism degree (default 1, disabled).
-        context_parallel_degree: Context parallelism degree (default 1, disabled).
-        pipeline_parallel_degree: Pipeline parallelism degree (default 1, disabled).
         shard_degree: FSDP shard degree (None = auto-detect).
         num_replicas: Number of FSDP replicas (None = auto-detect).
 
     Returns:
-        The model with parallelism applied.
+        TransformerDataParallelConfig for HSDP.
     """
-    if tensor_parallel_degree > 1 and context_parallel_degree > 1:
-        raise ValueError("Cannot use both tensor parallelism and context parallelism simultaneously.")
-
-    dp_config = TransformerDataParallelConfig(
+    return TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
         num_replicas=num_replicas,
         shard_degree=shard_degree,
@@ -158,35 +143,6 @@ def _apply_parallelism(
         reduce_dtype=DType.float32,
         wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
     )
-
-    tp_config = tensor_parallel_degree if tensor_parallel_degree > 1 else None
-    cp_config = context_parallel_degree if context_parallel_degree > 1 else None
-    pp_config = pipeline_parallel_degree if pipeline_parallel_degree > 1 else None
-
-    world_mesh = build_world_mesh(dp=dp_config, tp=tp_config, cp=cp_config, pp=pp_config, device_type=device.type)
-    dp_mesh = get_dp_model_mesh(world_mesh)
-
-    if tensor_parallel_degree > 1:
-        logger.info(f"Applying tensor parallelism with degree={tensor_parallel_degree}")
-        tp_mesh = world_mesh["tp"]
-        model.apply_tp(tp_mesh)
-
-    if context_parallel_degree > 1:
-        logger.info(f"Applying context parallelism with degree={context_parallel_degree}")
-
-    if pipeline_parallel_degree > 1:
-        logger.info(f"Applying pipeline parallelism with degree={pipeline_parallel_degree}")
-        pp_mesh = world_mesh["pp"]
-        model.apply_pp(pp_mesh)
-
-    logger.info(f"Applying HSDP with dp_mesh: {dp_mesh}")
-    model.apply_fsdp(
-        dp_mesh=dp_mesh,
-        param_dtype=torch.bfloat16,
-        reduce_dtype=torch.float32,
-        wrapping_strategy=dp_config.wrapping_strategy,
-    )
-    return model
 
 
 def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
@@ -201,7 +157,7 @@ def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
     return scheduler
 
 
-def _setup_callbacks(args: dpo_utils.ExperimentConfig, model, dp_world_size: int):
+def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
@@ -410,21 +366,27 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         disable_adapter_context=None,
     )
 
-    model = _apply_parallelism(
-        model,
-        device,
-        args.tensor_parallel_degree,
-        args.context_parallel_degree,
-        args.pipeline_parallel_degree,
-        args.shard_degree,
-        args.num_replicas,
+    data_loader.reshuffle(epoch=0)
+    num_training_steps = len(data_loader) * args.num_epochs
+    optim_config = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay, fused=args.fused_optimizer)
+    scheduler = _setup_scheduler(args, num_training_steps)
+    max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
+    dp_config = _build_dp_config(shard_degree=args.shard_degree, num_replicas=args.num_replicas)
+
+    train_module = DPOTrainModule(
+        model=model,
+        optim=optim_config,
+        rank_microbatch_size=args.per_device_train_batch_size * args.max_seq_length,
+        max_sequence_length=args.max_seq_length,
+        dpo_config=args,
+        dp_config=dp_config,
+        max_grad_norm=max_grad_norm,
+        scheduler=scheduler,
+        device=device,
     )
+
     logger.info("Caching reference logprobs...")
-    reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
-    cache_mem_bytes = sum(t.numel() * t.element_size() for t in reference_cache.tensors.values())
-    cache_mem_gib = cache_mem_bytes / (1024**3)
-    cache_mem_pct = 100 * cache_mem_bytes / torch.cuda.get_device_properties(device).total_memory
-    logger.info(f"Reference logprobs cached, using {cache_mem_gib:.2f} GiB of GPU RAM ({cache_mem_pct:.1f}%).")
+    train_module.reference_cache = dpo_utils.build_reference_logprobs_cache(model=train_module.model, **cache_kwargs)
 
     if args.cache_logprobs_only:
         logger.info("--cache_logprobs_only set, exiting after cache build.")
@@ -432,30 +394,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             dist.barrier()
             dist.destroy_process_group()
         return
-    data_loader.reshuffle(epoch=0)
 
-    num_training_steps = len(data_loader) * args.num_epochs
-    optim_config = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay, fused=args.fused_optimizer)
-    scheduler = _setup_scheduler(args, num_training_steps)
-
-    max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
-    # Reset world mesh to avoid conflict with the mesh created for HSDP sharding above.
-    # TransformerTrainModule.__init__ creates a new mesh, which fails if one already exists.
-    dist_parallel._WORLD_MESH = None
-    train_module = DPOTrainModule(
-        model=model,
-        optim=optim_config,
-        rank_microbatch_size=args.per_device_train_batch_size * args.max_seq_length,
-        max_sequence_length=args.max_seq_length,
-        dpo_config=args,
-        reference_cache=reference_cache,
-        dp_config=None,
-        max_grad_norm=max_grad_norm,
-        scheduler=scheduler,
-        device=device,
-    )
-
-    trainer_callbacks = _setup_callbacks(args, model, dp_world_size)
+    trainer_callbacks = _setup_callbacks(args, dp_world_size)
 
     trainer = train.TrainerConfig(
         save_folder=args.output_dir,
@@ -469,7 +409,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     trainer.fit()
     logger.info("Training complete.")
 
-    _handle_post_training(args, model, model_config, tokenizer, trainer_callbacks, beaker_config, is_main_process)
+    _handle_post_training(
+        args, train_module.model, model_config, tokenizer, trainer_callbacks, beaker_config, is_main_process
+    )
 
     train.teardown_training_environment()
 
