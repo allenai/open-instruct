@@ -15,6 +15,7 @@ import torch.distributed as dist
 import transformers
 from olmo_core import train
 from olmo_core.config import DType
+from olmo_core.distributed import parallel as dist_parallel
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
 from olmo_core.nn.attention.backend import has_flash_attn_3
@@ -438,6 +439,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     scheduler = _setup_scheduler(args, num_training_steps)
 
     max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
+    dist_parallel._WORLD_MESH = None
     train_module = DPOTrainModule(
         model=model,
         optim=optim_config,
