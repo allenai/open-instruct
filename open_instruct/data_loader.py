@@ -539,10 +539,10 @@ def add_prompt_to_generator(
 
     # Merge base env_config with per-sample env_config
     env_config = None
-    if base_env_config is not None:
-        env_config = dict(base_env_config)
+    sample_env_config = example.get(ENV_CONFIG_KEY)
+    if base_env_config is not None or sample_env_config is not None:
+        env_config = dict(base_env_config) if base_env_config else {}
         # Per-sample env_config overrides base config
-        sample_env_config = example.get(ENV_CONFIG_KEY)
         if sample_env_config:
             env_config.update(sample_env_config)
 
