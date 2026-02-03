@@ -32,4 +32,4 @@ There are kind of two issues that lead to all the floating chat templates: one, 
 
 -  [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev) is the primary chat template for tokenizing both instruct and think models that have tool use abilities.
 - for Instruct, copy that chat template back after training (can be done before or after conversion to HuggingFace format, but confirm it is correct before evaluation and continued training).
-- for Think, copy [this](https://huggingface.co/allenai/dolma2-tokenizer-special-tokens-reasoner-hybrid) chat template back after training since we want the <think>. Consider releasing with [this](https://huggingface.co/allenai/dolma2-tokenizer-special-tokens-v5-lc-reasoner) chat template that is  + "You are Olmo".
+- for Think, copy [this](https://huggingface.co/allenai/dolma2-tokenizer-special-tokens-reasoner-hybrid) chat template back after training since we want the <think>. Consider releasing with [this](https://huggingface.co/allenai/dolma2-tokenizer-special-tokens-v5-lc-reasoner) chat template that also includes the "You are Olmo" identity.
