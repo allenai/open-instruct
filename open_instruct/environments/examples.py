@@ -11,10 +11,43 @@ class CounterEnv(RLEnvironment):
 
     max_steps = 20
 
+    # Tool definitions shared between get_tool_definitions() and reset()
+    _tool_definitions = [
+        {
+            "type": "function",
+            "function": {
+                "name": "increment",
+                "description": "Increment the counter by 1",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "decrement",
+                "description": "Decrement the counter by 1",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "submit",
+                "description": "Submit current value as answer",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        },
+    ]
+
     def __init__(self, target: int = 5, **kwargs):
         self._target = target
         self._current = 0
         self._step_count = 0
+
+    @classmethod
+    def get_tool_definitions(cls) -> list[dict]:
+        """Return tool definitions for prompt injection."""
+        return cls._tool_definitions
 
     async def reset(self, task_id: str | None = None) -> StepResult:
         self._current = 0
@@ -25,32 +58,7 @@ class CounterEnv(RLEnvironment):
 
         return StepResult(
             observation=f"Counter is at {self._current}. Reach {self._target} to win.",
-            tools=[
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "increment",
-                        "description": "Increment the counter by 1",
-                        "parameters": {"type": "object", "properties": {}, "required": []},
-                    },
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "decrement",
-                        "description": "Decrement the counter by 1",
-                        "parameters": {"type": "object", "properties": {}, "required": []},
-                    },
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "submit",
-                        "description": "Submit current value as answer",
-                        "parameters": {"type": "object", "properties": {}, "required": []},
-                    },
-                },
-            ],
+            tools=self._tool_definitions,
             info={"target": self._target},
         )
 
@@ -98,11 +106,32 @@ class GuessNumberEnv(RLEnvironment):
 
     max_steps = 10
 
+    # Tool definitions shared between get_tool_definitions() and reset()
+    _tool_definitions = [
+        {
+            "type": "function",
+            "function": {
+                "name": "guess",
+                "description": "Make a guess",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"number": {"type": "integer", "description": "Your guess"}},
+                    "required": ["number"],
+                },
+            },
+        }
+    ]
+
     def __init__(self, min_val: int = 1, max_val: int = 100, **kwargs):
         self._min_val = min_val
         self._max_val = max_val
         self._secret = 0
         self._guesses = 0
+
+    @classmethod
+    def get_tool_definitions(cls) -> list[dict]:
+        """Return tool definitions for prompt injection."""
+        return cls._tool_definitions
 
     async def reset(self, task_id: str | None = None) -> StepResult:
         if task_id and task_id.isdigit():
@@ -113,20 +142,7 @@ class GuessNumberEnv(RLEnvironment):
 
         return StepResult(
             observation=f"Guess a number between {self._min_val} and {self._max_val}.",
-            tools=[
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "guess",
-                        "description": "Make a guess",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"number": {"type": "integer", "description": "Your guess"}},
-                            "required": ["number"],
-                        },
-                    },
-                }
-            ],
+            tools=self._tool_definitions,
             info={"min": self._min_val, "max": self._max_val},
         )
 

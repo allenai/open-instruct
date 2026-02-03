@@ -89,6 +89,7 @@ from open_instruct.dataset_transformation import (
     validate_dataset_tools,
     visualize_token,
 )
+from open_instruct.environments.base import get_env_class
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
@@ -2061,6 +2062,17 @@ def main(
     if tool_stop_sequences:
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
+
+    # Add environment tool definitions if environment is configured
+    if env_config.enabled:
+        env_cls = get_env_class(env_name=env_config.env_name, env_class=env_config.env_class)
+        env_tool_defs = env_cls.get_tool_definitions()
+        if env_tool_defs:
+            tool_definitions = list(tool_definitions) + env_tool_defs
+            env_tool_names = [t["function"]["name"] for t in env_tool_defs]
+            logger.info(f"Added environment tool definitions: {env_tool_names}")
+            # Update tool_call_names to include env tools (for dataset validation)
+            tools_config.tool_call_names = list(tools_config.tool_call_names) + env_tool_names
 
     train_dataset, eval_dataset = setup_datasets(
         args,

@@ -639,6 +639,9 @@ class LLMRayActor:
         # Environment pools (lazy-initialized)
         self.env_pools: dict[str, EnvironmentPool] = {}
 
+        # Tool parser (initialized in _init_tool_parser, may remain None for env-only mode)
+        self.tool_parser: ToolParser | None = None
+
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
         self.prompt_queue = prompt_queue
@@ -657,15 +660,21 @@ class LLMRayActor:
         self._process_future = self.executor.submit(self.process_from_queue)
 
     def _init_tool_parser(self, tool_parser_type: str) -> None:
-        if not self.tool_actors:
-            return
-        _tool_definitions = ray.get([actor.get_openai_tool_definitions.remote() for actor in self.tool_actors])
-        self.tool_parser = create_tool_parser(
-            parser_type=tool_parser_type,
-            tool_actors=self.tool_actors,
-            tokenizer=self.llm_engine.tokenizer,
-            tool_definitions=_tool_definitions,
-        )
+        # Get tool definitions from tool actors if they exist
+        _tool_definitions = None
+        if self.tool_actors:
+            _tool_definitions = ray.get([actor.get_openai_tool_definitions.remote() for actor in self.tool_actors])
+
+        # Always create a tool parser if the parser type supports it.
+        # vllm parsers can work without tool definitions (for environment-only mode).
+        # Legacy/dr_tulu parsers require tool_actors, so skip them if no actors.
+        if tool_parser_type.startswith("vllm_") or self.tool_actors:
+            self.tool_parser = create_tool_parser(
+                parser_type=tool_parser_type,
+                tool_actors=self.tool_actors,
+                tokenizer=self.llm_engine.tokenizer,
+                tool_definitions=_tool_definitions,
+            )
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.

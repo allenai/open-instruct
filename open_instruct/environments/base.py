@@ -82,6 +82,19 @@ class RLEnvironment(ABC):
         """Called once at end of training for resource cleanup."""
         pass
 
+    @classmethod
+    def get_tool_definitions(cls) -> list[dict]:
+        """Return tool definitions in OpenAI format for prompt injection.
+
+        Override this method to provide tool definitions that will be included
+        in the chat template. This is called at dataset setup time, before
+        any environment instances are created.
+
+        Returns:
+            List of tool definitions in OpenAI format (same as returned by reset()).
+        """
+        return []
+
 
 def get_env_class(env_name: str | None = None, env_class: str | None = None) -> type[RLEnvironment]:
     """Get environment class by registry name or import path."""
