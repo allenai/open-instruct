@@ -50,6 +50,22 @@ from open_instruct.utils import combine_reward_metrics, repeat_each
 logger = logging.getLogger(__name__)
 
 
+def build_index_map(dataset: Dataset) -> dict[int, int]:
+    """Build a mapping from index column values to positional indices.
+
+    This allows looking up samples by their 'index' column value regardless of
+    whether the dataset has been shuffled. The 'index' column is a unique identifier
+    assigned during dataset creation.
+
+    Args:
+        dataset: HuggingFace Dataset with an 'index' column.
+
+    Returns:
+        Dictionary mapping index column values to positional indices.
+    """
+    return {idx: pos for pos, idx in enumerate(dataset["index"])}
+
+
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
     """Move all tensors in a batch dictionary to the specified device.
 
@@ -591,6 +607,10 @@ def accumulate_inference_batches(
             "replenish_prompts requires param_prompt_Q and iter_dataloader and dataset"
         )
 
+    # Build index map to look up samples by their 'index' column value.
+    # This makes lookups independent of dataset shuffling.
+    index_to_position = build_index_map(dataset)
+
     results = []
     all_queries = []
     all_ground_truths = []
@@ -645,7 +665,7 @@ def accumulate_inference_batches(
             f"Index: {result.index}, Prompt ID: {result.prompt_id}"
         )
 
-        example = dataset[result.index]
+        example = dataset[index_to_position[result.index]]
         query = example[INPUT_IDS_PROMPT_KEY]
         ground_truth = example[GROUND_TRUTHS_KEY]
         dataset_name = example[VERIFIER_SOURCE_KEY]

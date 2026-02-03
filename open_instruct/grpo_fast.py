@@ -1136,7 +1136,8 @@ def setup_datasets(
     )
 
     _validate_and_log_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
-    train_dataset = train_dataset.shuffle(seed=args.seed)
+    # NOTE: We don't shuffle train_dataset here because HFDataLoader handles shuffling for iteration.
+    # Lookups in accumulate_inference_batches use index_to_position mapping, so shuffling is safe.
 
     if len(streaming_config.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
