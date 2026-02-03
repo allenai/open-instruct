@@ -280,8 +280,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     dataset.set_format(type="pt")  # Must be after shuffle (shuffle resets format)
 
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
-    parallelism_factor = args.tensor_parallel_degree * args.context_parallel_degree * args.pipeline_parallel_degree
-    dp_world_size = world_size // parallelism_factor
+    assert args.tensor_parallel_degree == 1, "Tensor parallelism not supported in DPO; use HSDP only."
+    assert args.context_parallel_degree == 1, "Context parallelism not supported in DPO; use HSDP only."
+    assert args.pipeline_parallel_degree == 1, "Pipeline parallelism not supported in DPO; use HSDP only."
+    dp_world_size = world_size
 
     logger_utils.setup_logger(rank=dp_rank)
 

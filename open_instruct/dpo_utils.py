@@ -585,8 +585,11 @@ def build_reference_logprobs_cache(
 
     cache_mem_bytes = sum(t.numel() * t.element_size() for t in cache.tensors.values())
     cache_mem_gib = cache_mem_bytes / (1024**3)
-    cache_mem_pct = 100 * cache_mem_bytes / torch.cuda.get_device_properties(device).total_memory
-    logger.info(f"Reference logprobs cached, using {cache_mem_gib:.2f} GiB of GPU RAM ({cache_mem_pct:.1f}%).")
+    if device.type == "cuda":
+        cache_mem_pct = 100 * cache_mem_bytes / torch.cuda.get_device_properties(device).total_memory
+        logger.info(f"Reference logprobs cached, using {cache_mem_gib:.2f} GiB of GPU RAM ({cache_mem_pct:.1f}%).")
+    else:
+        logger.info(f"Reference logprobs cached, using {cache_mem_gib:.2f} GiB of RAM.")
 
     if is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
