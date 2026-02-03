@@ -7,12 +7,19 @@ import parameterized
 import torch
 
 import open_instruct.data_loader
+from open_instruct import dpo_utils
 
 
 def single_example_collator(examples: list[dict]) -> dict:
     """Collator for batch_size=1 that extracts the single example."""
     assert len(examples) == 1
     return examples[0]
+
+
+def batch_collator(examples: list[dict]) -> dict:
+    """Collator that stacks example values into lists."""
+    keys = examples[0].keys()
+    return {key: [ex[key] for ex in examples] for key in keys}
 
 
 def make_test_dataset(num_examples: int) -> datasets.Dataset:
@@ -338,15 +345,101 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset, batch_size=2, seed=42, dp_rank=0, dp_world_size=2, work_dir=tempfile.gettempdir()
         )
 
-        batch_with_input_ids = {"input_ids": torch.zeros(4, 128)}
+        batch_with_input_ids = {"input_ids": torch.zeros(4, 128), "attention_mask": torch.ones(4, 128)}
         self.assertEqual(loader.global_num_tokens_in_batch(batch_with_input_ids), 4 * 128 * 2)
 
-        batch_with_dpo = {"chosen_input_ids": torch.zeros(2, 64), "rejected_input_ids": torch.zeros(2, 64)}
-        self.assertEqual(loader.global_num_tokens_in_batch(batch_with_dpo), (2 * 64 + 2 * 64) * 2)
+    def test_global_num_tokens_in_batch_excludes_padding(self, batch_size: int = 2, real_tokens: int = 5):
+        """Verify that padding tokens are excluded from the count."""
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=make_test_dataset(batch_size * real_tokens),
+            batch_size=2,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+        )
 
-        batch_without_tokens = {"labels": torch.zeros(4, 128)}
-        with self.assertRaises(ValueError):
-            loader.global_num_tokens_in_batch(batch_without_tokens)
+        for padding_amount in [0, 5, 10, 50, 100]:
+            batch = {
+                "input_ids": dpo_utils.pad_to_length(
+                    torch.ones(batch_size, real_tokens), real_tokens + padding_amount, 0
+                ),
+                "attention_mask": dpo_utils.pad_to_length(
+                    torch.ones(batch_size, real_tokens), real_tokens + padding_amount, 0
+                ),
+            }
+            self.assertEqual(
+                loader.global_num_tokens_in_batch(batch),
+                batch_size * real_tokens,
+                f"Failed for padding_amount={padding_amount}",
+            )
+
+    @parameterized.parameterized.expand(
+        [
+            ("size_17_batch_4", 17, 4),
+            ("size_23_batch_8", 23, 8),
+            ("size_10_batch_3", 10, 3),
+            ("size_33_batch_16", 33, 16),
+        ]
+    )
+    def test_drop_last_true_drops_remainder(self, name, num_examples, batch_size):
+        dataset = make_test_dataset(num_examples)
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset,
+            batch_size=batch_size,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=batch_collator,
+            drop_last=True,
+        )
+        indices = [idx for batch in loader for idx in batch["index"]]
+        expected_count = (num_examples // batch_size) * batch_size
+        self.assertEqual(len(indices), expected_count)
+
+    @parameterized.parameterized.expand(
+        [
+            ("size_17_batch_4", 17, 4),
+            ("size_23_batch_8", 23, 8),
+            ("size_10_batch_3", 10, 3),
+            ("size_33_batch_16", 33, 16),
+        ]
+    )
+    def test_drop_last_false_covers_all_indices(self, name, num_examples, batch_size):
+        dataset = make_test_dataset(num_examples)
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=dataset,
+            batch_size=batch_size,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+            collator=batch_collator,
+            drop_last=False,
+        )
+        indices = [idx for batch in loader for idx in batch["index"]]
+        self.assertEqual(set(indices), set(range(num_examples)))
+
+    @parameterized.parameterized.expand(
+        [("dp2_size_17_batch_4", 17, 4, 2), ("dp4_size_23_batch_8", 23, 8, 4), ("dp2_size_33_batch_16", 33, 16, 2)]
+    )
+    def test_drop_last_false_multi_rank_covers_all_indices(self, name, num_examples, batch_size, dp_world_size):
+        dataset = make_test_dataset(num_examples)
+        all_indices = []
+        for dp_rank in range(dp_world_size):
+            loader = open_instruct.data_loader.HFDataLoader(
+                dataset=dataset,
+                batch_size=batch_size,
+                seed=42,
+                dp_rank=dp_rank,
+                dp_world_size=dp_world_size,
+                work_dir=tempfile.gettempdir(),
+                collator=batch_collator,
+                drop_last=False,
+            )
+            all_indices.extend(idx for batch in loader for idx in batch["index"])
+        self.assertEqual(set(all_indices), set(range(num_examples)))
 
 
 class TestStreamingDataLoaderConfigSaveTraces(unittest.TestCase):

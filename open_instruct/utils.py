@@ -58,6 +58,7 @@ import numpy as np
 import ray
 import requests
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 import wandb
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
@@ -1333,6 +1334,42 @@ def maybe_use_ai2_hf_entity() -> str | None:
         return None
 
 
+def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig | None:
+    """Set up exp_name, output_dir, HF Hub config, wandb_entity.
+
+    Modifies args in-place. Returns BeakerRuntimeConfig if on Beaker.
+    """
+    if getattr(args, "add_seed_and_date_to_exp_name", False):
+        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.exp_name)
+
+    if dist.is_initialized():
+        path_list = [args.output_dir]
+        dist.broadcast_object_list(path_list, src=0)
+        args.output_dir = path_list[0]
+
+    beaker_config = None
+    if is_beaker_job() and is_main_process:
+        beaker_config = maybe_get_beaker_config()
+
+    if getattr(args, "push_to_hub", False) and is_main_process:
+        if args.hf_repo_id is None:
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:
+            args.hf_entity = HfApi().whoami()["name"]
+        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.hf_repo_revision is None:
+            args.hf_repo_revision = args.exp_name
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
+    if getattr(args, "wandb_entity", None) is None:
+        args.wandb_entity = maybe_use_ai2_wandb_entity()
+
+    return beaker_config
+
+
 @retry_on_exception()
 def upload_metadata_to_hf(metadata_dict, filename, hf_dataset_name, hf_dataset_save_dir):
     # upload a random dict to HF. Originally for uploading metadata to HF
@@ -1744,6 +1781,7 @@ GPU_SPECS = {
     "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 2.0e12},  # 2.0 TB/s HBM2e (80GB variant)
     "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
+    "h200": {"flops": 989e12, "memory_size": 141e9, "memory_bandwidth": 4.8e12},  # 4.8 TB/s HBM3e
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
     "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7

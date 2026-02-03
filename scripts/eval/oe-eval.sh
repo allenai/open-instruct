@@ -48,7 +48,7 @@ set -ex
 # Function to print usage
 usage() {
     echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
-    echo "TASK_SUITE should be one of: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN, SAFETY_EVAL, SAFETY_EVAL_REASONING (default: NEXT_MODEL_DEV)"
+    echo "TASK_SUITE should be one of: OLMO_3, OLMO_3_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN, SAFETY_EVAL, SAFETY_EVAL_REASONING (default: OLMO_3)"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
     echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
     echo "PROCESS_OUTPUT should be a string specifying how to process the model output (e.g., 'r1_style')"
@@ -110,7 +110,7 @@ MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 
 # Set defaults for optional arguments
 MAX_LENGTH="${MAX_LENGTH:-4096}"
-TASK_SUITE="${TASK_SUITE:-NEXT_MODEL_DEV}"
+TASK_SUITE="${TASK_SUITE:-OLMO_3}"
 PRIORITY="${PRIORITY:normal}"
 EVALUATE_ON_WEKA="${EVALUATE_ON_WEKA:-false}"
 RUN_ID="${RUN_ID:-}"
@@ -199,7 +199,7 @@ TULU_3_UNSEEN=(
 )
 
 # New default task suites
-NEXT_MODEL_DEV=(
+OLMO_3=(
     # Knowledge
     "mmlu:cot::hamish_zs_reasoning_deepseek"
     "popqa::hamish_zs_reasoning_deepseek"
@@ -214,8 +214,8 @@ NEXT_MODEL_DEV=(
     # Math
     # [faster] minerva_math_500::hamish_zs_reasoning
     "minerva_math::hamish_zs_reasoning_deepseek"
-    # "gsm8k::zs_cot_latex_deepseek"
-    "omega_500:0-shot-chat_deepseek" # FULL: "omega:0-shot-chat"
+    "omega_500:0-shot-chat_deepseek" 
+    # FULL: "omega:0-shot-chat"
     "aime:zs_cot_r1::pass_at_32_2024_deepseek"
     "aime:zs_cot_r1::pass_at_32_2025_deepseek"
 
@@ -223,28 +223,19 @@ NEXT_MODEL_DEV=(
     "codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek"
     "mbppplus:0-shot-chat::tulu-thinker_deepseek"
     "livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags"
-    # [TODO not merged] codeeditorbench - requires separate server
-    # [TODO, maybe] cruxeval
 
     # Chat / IF / Vibes
     "alpaca_eval_v3::hamish_zs_reasoning_deepseek"
     "ifeval::hamish_zs_reasoning_deepseek"
     "ifeval_ood::tulu-thinker-deepseek"
-    # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
-    # [expensive, typos vibes] styled_evals::tulu
-    # [optional, typos compare] styled_math500::tulu
-    # [optional, typos compare] styled_popqa::tulu
-    # [optional, typos compare] styled_truthfulqa::tulu
 
     # Tool Use
     "bfcl_all::std" # This requires special logic on model_args and metadata, handled below
 )
 
-NEXT_MODEL_UNSEEN=(
+OLMO_3_UNSEEN=(
     "mmlu_pro:0shot_cot::tulu3"
-    # [TODO, not implemented] Humanity's Last Exam
-    # [TODO, not implemented] SuperGPQA
-    # [TODO, not implemented] BigBenchExtraHard
+
     "livecodebench_codegeneration::tulu-thinker-hidden_no_think_tags"
     "ifbench::tulu"
 )
@@ -263,11 +254,11 @@ if [[ -n "$CUSTOM_TASKS" ]]; then
 else
     # Use the specified task suite or default
     case "$TASK_SUITE" in
-        NEXT_MODEL_DEV)
-            TASKS=("${NEXT_MODEL_DEV[@]}")
+        OLMO_3)
+            TASKS=("${OLMO_3[@]}")
             ;;
-        NEXT_MODEL_UNSEEN)
-            TASKS=("${NEXT_MODEL_UNSEEN[@]}")
+        OLMO_3_UNSEEN)
+            TASKS=("${OLMO_3_UNSEEN[@]}")
             ;;
         TULU_3_DEV)
             TASKS=("${TULU_3_DEV[@]}")

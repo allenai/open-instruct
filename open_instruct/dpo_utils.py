@@ -17,26 +17,28 @@ DPO utils
 Adapted from https://github.com/eric-mitchell/direct-preference-optimization/blob/main/trainers.py
 """
 
+import contextlib
 import enum
 import functools
 import hashlib
 import json
 import os
 import pathlib
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from accelerate import Accelerator
 from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, model_utils
+from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
@@ -48,6 +50,19 @@ from open_instruct.padding_free_collator import concatenated_inputs as pf_concat
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
 logger = logger_utils.setup_logger(__name__)
+
+PAD_VALUES: dict[str, int] = {"labels": -100, "attention_mask": 0}
+
+
+def config_to_json_serializable(obj: object) -> object:
+    """Convert config object to JSON-serializable format."""
+    if isinstance(obj, dict):
+        return {k: config_to_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [config_to_json_serializable(v) for v in obj]
+    if isinstance(obj, enum.Enum):
+        return obj.value
+    return obj
 
 
 class DPOLossType(enum.StrEnum):
@@ -129,14 +144,28 @@ class TrainingConfig:
     """The scheduler type to use for learning rate adjustment."""
     max_train_steps: int | None = None
     """If set, overrides the number of training steps. Otherwise, num_epochs is used."""
-    gradient_checkpointing: bool = False
-    """Turn on gradient checkpointing. Saves memory but slows training."""
+    activation_memory_budget: float = 1.0
+    """Memory budget for activation checkpointing (0.0-1.0). 1.0 disables checkpointing (default), values < 1.0 enable budget-mode checkpointing. See: https://pytorch.org/blog/activation-checkpointing-techniques/."""
     use_8bit_optimizer: bool = False
     """Use 8bit optimizer from bitsandbytes."""
     dpo_use_paged_optimizer: bool = False
     """Use paged optimizer from bitsandbytes."""
     fused_optimizer: bool = True
     """Whether to use fused AdamW or not."""
+    tensor_parallel_degree: int = 1
+    """Tensor parallelism degree. Default 1 (disabled)."""
+    context_parallel_degree: int = 1
+    """Context parallelism degree. Default 1 (disabled)."""
+    pipeline_parallel_degree: int = 1
+    """Pipeline parallelism degree. Default 1 (disabled)."""
+    cache_logprobs_only: bool = False
+    """Exit after building the reference logprobs cache (for benchmarking)."""
+    compile_model: bool = True
+    """Whether to apply torch.compile to model blocks."""
+    shard_degree: int | None = None
+    """FSDP shard degree. None means auto-detect."""
+    num_replicas: int | None = None
+    """Number of FSDP replicas. None means auto-detect."""
 
 
 @dataclass
@@ -217,7 +246,7 @@ class CheckpointConfig:
 
     output_dir: str = "output/"
     """The output directory where the model predictions and checkpoints will be written."""
-    checkpointing_steps: int | str | None = None
+    checkpointing_steps: int | str = 500
     """Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."""
     keep_last_n_checkpoints: int = 3
     """How many checkpoints to keep in the output directory. -1 for all."""
@@ -255,6 +284,8 @@ class ModelConfig:
     """The model checkpoint for weights initialization."""
     use_flash_attn: bool = True
     """Whether to use flash attention in the model training"""
+    attn_backend: str = "auto"
+    """Attention backend for OLMo-core models. Options: flash_2, flash_3, auto."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     low_cpu_mem_usage: bool = False
@@ -352,12 +383,6 @@ class ExperimentConfig(
         default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
     )
     use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
-    checkpointing_steps: str | None = field(
-        default=None,
-        metadata={
-            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
-        },
-    )
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
@@ -461,18 +486,40 @@ def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) ->
 def build_reference_logprobs_cache(
     model: torch.nn.Module,
     dataloader: torch.utils.data.DataLoader,
-    accelerator: Accelerator,
     average_log_prob: bool,
     forward_fn: Callable,
     full_dataset_size: int,
-    reference_cache_hash: str,
+    device: torch.device,
+    cache_path: pathlib.Path,
+    is_main_process: bool,
+    model_dims: utils.ModelDims,
     use_lora: bool = False,
+    disable_adapter_context: Callable[[], contextlib.AbstractContextManager] | None = None,
 ) -> model_utils.TensorCache:
-    """Build a TensorCache with reference logprobs by computing logprobs once for all samples."""
-    cache_path = pathlib.Path(REFERENCE_LOGPROBS_CACHE_PATH) / f"{reference_cache_hash}.pt"
-    if not cache_path.exists():
+    """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
+
+    Args:
+        model: The model to compute logprobs with.
+        dataloader: DataLoader providing batches with 'index' key.
+        average_log_prob: Whether to average log probs over sequence length.
+        forward_fn: Forward function to compute logprobs.
+        full_dataset_size: Total number of samples in the dataset.
+        device: Device to place tensors on.
+        cache_path: Path to save/load cache from.
+        is_main_process: Whether this is the main process.
+        use_lora: Whether LoRA is enabled (requires disable_adapter_context).
+        disable_adapter_context: Callable returning context manager to disable LoRA adapter.
+
+    Returns:
+        TensorCache containing 'chosen_logps' and 'rejected_logps' tensors.
+    """
+    if cache_path.exists():
+        logger.info(f"Loading reference logprobs cache from {cache_path}")
+        return model_utils.TensorCache.from_disk(cache_path, device=device)
+
+    if is_main_process:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        test_file = cache_path.parent / f".write_test_{reference_cache_hash}"
+        test_file = cache_path.parent / f".write_test_{cache_path.stem}"
         try:
             test_file.touch()
             test_file.unlink()
@@ -481,27 +528,44 @@ def build_reference_logprobs_cache(
                 f"Cannot write to cache directory {cache_path.parent}: {e}. "
                 f"Set REFERENCE_LOGPROBS_CACHE_PATH to a writable location."
             ) from e
-    if cache_path.exists():
-        logger.info(f"Loading reference logprobs cache from {cache_path}")
-        return model_utils.TensorCache.from_disk(cache_path, device=accelerator.device)
+    if dist.is_initialized():
+        dist.barrier()
 
     model.eval()
-    device = accelerator.device
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
     rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
 
+    total_tokens = 0
+    total_examples = 0
+
     with torch.no_grad():
-        for batch in tqdm(
-            dataloader, disable=not accelerator.is_local_main_process, desc="Caching reference logprobs"
-        ):
-            if use_lora:
-                with accelerator.unwrap_model(model).disable_adapter():
+        pbar = tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")
+        for batch in pbar:
+            batch_start = time.perf_counter()
+            if use_lora and disable_adapter_context is not None:
+                with disable_adapter_context():
                     chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
             else:
                 chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
+
+            batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
+            total_tokens += batch_tokens
+            total_examples += len(batch["index"])
+
+            bs = len(batch["index"])
+            chosen_lengths = [batch["chosen_input_ids"].shape[1]] * bs
+            rejected_lengths = [batch["rejected_input_ids"].shape[1]] * bs
+            pbar.set_postfix(
+                {
+                    "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
+                    "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
+                    "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
+                    "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
+                }
+            )
 
     if dist.is_initialized():
         dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
@@ -519,7 +583,7 @@ def build_reference_logprobs_cache(
     model.train()
     cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
 
-    if accelerator.is_main_process:
+    if is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
 
@@ -989,26 +1053,11 @@ def separate_forward_olmo(
     return chosen_logps, rejected_logps, None
 
 
-def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float, dim: int = -1) -> torch.Tensor:
-    """Pad a tensor to a specified length along a given dimension.
-
-    Args:
-        tensor: The input tensor to pad.
-        length: The target length for the specified dimension.
-        pad_value: The value to use for padding.
-        dim: The dimension along which to pad.
-
-    Returns:
-        The padded tensor, or the original tensor if already at least the target length.
-    """
-    if tensor.size(dim) >= length:
+def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float) -> torch.Tensor:
+    """Right-pad a tensor to a specified length along the last dimension."""
+    if tensor.size(-1) >= length:
         return tensor
-    else:
-        pad_size = list(tensor.shape)
-        pad_size[dim] = length - tensor.size(dim)
-        return torch.cat(
-            [tensor, pad_value * torch.ones(*pad_size, dtype=tensor.dtype, device=tensor.device)], dim=dim
-        )
+    return torch.nn.functional.pad(tensor, (0, length - tensor.size(-1)), value=pad_value)
 
 
 @dataclass
@@ -1019,9 +1068,21 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
     """
 
     def __call__(self, features, return_tensors=None):
-        # call the original collator on chosen and rejected separately, then combine
         def filter_batch(match_string, features):
-            return [{k.replace(match_string, ""): v for k, v in f.items() if match_string in k} for f in features]
+            filtered = []
+            for f in features:
+                item = {}
+                for k, v in f.items():
+                    if match_string in k:
+                        key = k.replace(match_string, "")
+                        if isinstance(v, np.ndarray):
+                            item[key] = torch.as_tensor(v)
+                        elif isinstance(v, list):
+                            item[key] = torch.tensor(v)
+                        else:
+                            item[key] = v
+                filtered.append(item)
+            return filtered
 
         chosen_features = super().__call__(filter_batch("chosen_", features), return_tensors=return_tensors)
         rejected_features = super().__call__(filter_batch("rejected_", features), return_tensors=return_tensors)
@@ -1033,15 +1094,13 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
         if "index" in features[0]:
             result["index"] = torch.tensor([f["index"] for f in features])
         max_len = max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
-        chosen_padded = torch.nn.functional.pad(
-            result["chosen_input_ids"],
-            (0, max_len - result["chosen_input_ids"].shape[1]),
-            value=self.tokenizer.pad_token_id,
+        for prefix in ["chosen_", "rejected_"]:
+            for key in ["input_ids", "attention_mask", "labels"]:
+                full_key = f"{prefix}{key}"
+                pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
+                result[full_key] = pad_to_length(result[full_key], max_len, pad_value)
+        result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
+        result["attention_mask"] = torch.cat(
+            [result["chosen_attention_mask"], result["rejected_attention_mask"]], dim=0
         )
-        rejected_padded = torch.nn.functional.pad(
-            result["rejected_input_ids"],
-            (0, max_len - result["rejected_input_ids"].shape[1]),
-            value=self.tokenizer.pad_token_id,
-        )
-        result["input_ids"] = torch.cat([chosen_padded, rejected_padded], dim=0)
         return result
