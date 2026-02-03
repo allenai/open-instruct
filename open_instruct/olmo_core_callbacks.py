@@ -133,6 +133,10 @@ class PerfCallback(Callback):
     _total_tokens_processed: int = field(default=0, repr=False)
     _mfu_sum: float = field(default=0.0, repr=False)
     _last_step: int = field(default=0, repr=False)
+    _batch_load_start: float = field(default=0.0, repr=False)
+    _batch_load_time: float = field(default=0.0, repr=False)
+    _wall_clock_step_start: float = field(default=0.0, repr=False)
+    _prev_wall_clock_step_start: float = field(default=0.0, repr=False)
 
     def pre_train(self) -> None:
         self._start_time = time.perf_counter()
@@ -141,8 +145,14 @@ class PerfCallback(Callback):
         self._mfu_sum = 0.0
         self._last_step = 0
 
+    def pre_load_batch(self) -> None:
+        self._batch_load_start = time.perf_counter()
+        self._prev_wall_clock_step_start = self._wall_clock_step_start
+        self._wall_clock_step_start = self._batch_load_start
+
     def pre_step(self, batch: dict[str, Any]) -> None:
         del batch
+        self._batch_load_time = time.perf_counter() - self._batch_load_start
         self._step_start_time = time.perf_counter()
 
     def post_step(self) -> None:
@@ -191,6 +201,17 @@ class PerfCallback(Callback):
         self.trainer.record_metric("perf/seconds_per_step", seconds_per_step, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second", tokens_per_second, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second_avg", tokens_per_second_avg, reduce_type=None)
+        self.trainer.record_metric("perf/total_tokens", self._total_tokens_processed, reduce_type=None)
+        self.trainer.record_metric("perf/data_loading_seconds", self._batch_load_time, reduce_type=None)
+
+        if self._prev_wall_clock_step_start > 0:
+            wall_clock_per_step = self._wall_clock_step_start - self._prev_wall_clock_step_start
+            self.trainer.record_metric("perf/wall_clock_per_step", wall_clock_per_step, reduce_type=None)
+            if wall_clock_per_step > 0:
+                data_loading_pct = 100 * self._batch_load_time / wall_clock_per_step
+                self.trainer.record_metric("perf/data_loading_pct", data_loading_pct, reduce_type=None)
+                step_overhead_pct = 100 * (wall_clock_per_step - seconds_per_step) / wall_clock_per_step
+                self.trainer.record_metric("perf/step_overhead_pct", step_overhead_pct, reduce_type=None)
 
         self._interval_start_time = interval_end
         self._last_step = self.step
