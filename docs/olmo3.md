@@ -6,7 +6,7 @@ For details on reproducing OLMo 3 models, see the [OLMo 3 training scripts READM
 
 When releasing multiple models (instruct and think) and using two different codebases for post-training (allenai/olmo-core for SFT and allenai/open-instruct for DPO and RL), there are many steps needed to get exact chat templates right. The final step is getting the chat templates right for public release, which can entail different system prompts to maintain model identity.
 
-This document is a reference in best memory of the settings used for Olmo 3.
+This document is a reference for the settings used for Olmo 3, based on the best available information.
 
 **Olmo 3 Instruct Models ([7b](https://huggingface.co/allenai/Olmo-3-7B-Instruct), [32b](https://huggingface.co/allenai/Olmo-3.1-32B-Instruct)):** Tokenized AND intermediately evalled with [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev), released with:
 
