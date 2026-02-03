@@ -157,9 +157,7 @@ class PerfCallback(Callback):
     def pre_step(self, batch: dict[str, Any]) -> None:
         del batch
         self._batch_load_time = time.perf_counter() - self._batch_load_start
-        self._prev_pre_step_time = self._pre_step_time
-        self._pre_step_time = time.perf_counter()
-        self._step_start_time = self._pre_step_time
+        self._step_start_time = time.perf_counter()
 
     def post_step(self) -> None:
         if self.step % self.trainer.metrics_collect_interval != 0:
