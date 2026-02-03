@@ -42,7 +42,7 @@ class DPOTrainModule(TransformerTrainModule):
         optim: OptimConfig,
         rank_microbatch_size: int,
         max_sequence_length: int,
-        args: dpo_utils.ExperimentConfig,
+        dpo_config: dpo_utils.ExperimentConfig,
         reference_cache: model_utils.TensorCache,
         dp_config: TransformerDataParallelConfig | None = None,
         max_grad_norm: float | None = None,
@@ -64,21 +64,15 @@ class DPOTrainModule(TransformerTrainModule):
             state_dict_load_opts=state_dict_load_opts,
         )
 
-        self.args = args
+        self.dpo_config = dpo_config
         self.reference_cache = reference_cache
 
-        if args.packing:
+        if dpo_config.packing:
             self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
-        elif args.concatenated_forward:
+        elif dpo_config.concatenated_forward:
             self._forward_fn = dpo_utils.concatenated_forward_olmo
         else:
             self._forward_fn = dpo_utils.separate_forward_olmo
-
-    def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int:
-        flops_per_token = self.num_flops_per_token(batch["input_ids"].shape[1])
-        global_num_tokens = self.trainer.data_loader.global_num_tokens_in_batch(batch)
-        assert global_num_tokens is not None
-        return flops_per_token * global_num_tokens
 
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
         self.model.train()
@@ -86,22 +80,22 @@ class DPOTrainModule(TransformerTrainModule):
         policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
             self.model,
             batch,
-            average_log_prob=self.args.loss_type.is_average_loss,
-            output_router_logits=self.args.load_balancing_loss,
+            average_log_prob=self.dpo_config.loss_type.is_average_loss,
+            output_router_logits=self.dpo_config.load_balancing_loss,
         )
 
         losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
-            self.args,
+            self.dpo_config,
             batch,
             policy_chosen_logps,
             policy_rejected_logps,
-            self.reference_cache if self.args.loss_type.needs_reference_model else None,
+            self.reference_cache if self.dpo_config.loss_type.needs_reference_model else None,
         )
 
         loss = losses.mean()
 
-        if self.args.load_balancing_loss and aux_loss is not None:
-            loss = loss + self.args.load_balancing_weight * aux_loss
+        if self.dpo_config.load_balancing_loss and aux_loss is not None:
+            loss = loss + self.dpo_config.load_balancing_weight * aux_loss
 
         if not dry_run:
             self.record_metric("train/loss", loss.detach(), ReduceType.mean)
@@ -111,7 +105,7 @@ class DPOTrainModule(TransformerTrainModule):
             assert token_count is not None
             self.record_metric("train/token_count", token_count, reduce_type=None)
 
-            if self.args.loss_type.computes_reward_metrics:
+            if self.dpo_config.loss_type.computes_reward_metrics:
                 accuracy = (chosen_rewards > rejected_rewards).float().mean()
                 margin = (chosen_rewards - rejected_rewards).mean()
                 self.record_metric("train/rewards_chosen", chosen_rewards.mean().detach(), ReduceType.mean)
@@ -119,7 +113,7 @@ class DPOTrainModule(TransformerTrainModule):
                 self.record_metric("train/rewards_accuracy", accuracy.detach(), ReduceType.mean)
                 self.record_metric("train/rewards_margin", margin.detach(), ReduceType.mean)
 
-            if self.args.load_balancing_loss and aux_loss is not None:
+            if self.dpo_config.load_balancing_loss and aux_loss is not None:
                 self.record_metric("train/aux_loss", aux_loss.detach(), ReduceType.mean)
 
         loss.backward()
@@ -335,11 +329,3 @@ class GRPOTrainModule(TransformerTrainModule):
                 self.record_metric(
                     "train/entropy", (global_entropy_sum / global_total_tokens).item(), reduce_type=None
                 )
-
-    def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int:
-        data_BT: data_types.CollatedBatchData = batch["batch"]
-        seq_len = data_BT.query_responses[0].shape[1]
-        flops_per_token = self.num_flops_per_token(seq_len)
-        global_num_tokens = self.trainer.data_loader.global_num_tokens_in_batch(batch)
-        assert global_num_tokens is not None
-        return flops_per_token * global_num_tokens

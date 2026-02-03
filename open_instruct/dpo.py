@@ -443,7 +443,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         optim=optim_config,
         rank_microbatch_size=args.per_device_train_batch_size * args.max_seq_length,
         max_sequence_length=args.max_seq_length,
-        args=args,
+        dpo_config=args,
         reference_cache=reference_cache,
         dp_config=None,
         max_grad_norm=max_grad_norm,
