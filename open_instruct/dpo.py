@@ -123,28 +123,6 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     return model, model_config
 
 
-def _build_dp_config(
-    shard_degree: int | None = None, num_replicas: int | None = None
-) -> TransformerDataParallelConfig:
-    """Build data parallel config for HSDP.
-
-    Args:
-        shard_degree: FSDP shard degree (None = auto-detect).
-        num_replicas: Number of FSDP replicas (None = auto-detect).
-
-    Returns:
-        TransformerDataParallelConfig for HSDP.
-    """
-    return TransformerDataParallelConfig(
-        name=DataParallelType.hsdp,
-        num_replicas=num_replicas,
-        shard_degree=shard_degree,
-        param_dtype=DType.bfloat16,
-        reduce_dtype=DType.float32,
-        wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
-    )
-
-
 def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
     """Return scheduler."""
     warmup_steps = int(num_training_steps * args.warmup_ratio)
@@ -260,6 +238,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             "Either disable packing or disable compile_model."
         )
 
+    if args.dpo_use_paged_optimizer:
+        raise ValueError("dpo_use_paged_optimizer is not supported with OLMo-core DPO training.")
+
+    if args.use_8bit_optimizer:
+        raise ValueError("use_8bit_optimizer is not supported with OLMo-core DPO training.")
+
     tc.tokenizer_name_or_path = (
         args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
     )
@@ -371,7 +355,14 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     optim_config = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay, fused=args.fused_optimizer)
     scheduler = _setup_scheduler(args, num_training_steps)
     max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
-    dp_config = _build_dp_config(shard_degree=args.shard_degree, num_replicas=args.num_replicas)
+    dp_config = TransformerDataParallelConfig(
+        name=DataParallelType.hsdp,
+        num_replicas=args.num_replicas,
+        shard_degree=args.shard_degree,
+        param_dtype=DType.bfloat16,
+        reduce_dtype=DType.float32,
+        wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
+    )
 
     train_module = DPOTrainModule(
         model=model,
