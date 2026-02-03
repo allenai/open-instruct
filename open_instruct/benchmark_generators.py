@@ -12,6 +12,7 @@ import csv
 import dataclasses
 import gc
 import json
+import logging
 import os
 import pathlib
 import threading
@@ -21,6 +22,8 @@ from queue import Empty
 from typing import Any, cast
 
 import datasets
+
+logging.getLogger("vllm").setLevel(logging.INFO)
 import numpy as np
 import ray
 import torch
@@ -365,9 +368,11 @@ def run_benchmark(
     )
 
     # Create sampling parameters with 'n' for multiple samples per prompt
+    # Set min_tokens = max_tokens to force exact response length for benchmarking
     generation_config = vllm_utils.SamplingConfig(
         temperature=streaming_config.temperature,
         max_tokens=streaming_config.response_length,
+        min_tokens=streaming_config.response_length,
         top_p=vllm_config.vllm_top_p,
         n=streaming_config.num_samples_per_prompt_rollout,
         seed=args.seed,
@@ -447,7 +452,7 @@ def run_benchmark(
             # Collect all results for this batch (one per prompt) using non-blocking polling
             num_prompts = streaming_config.num_unique_prompts_rollout
             batch_results = []
-            batch_deadline = time.time() + 1200
+            batch_deadline = time.time() + 2400
             while len(batch_results) < num_prompts:
                 try:
                     result = inference_results_Q.get(timeout=1.0)
