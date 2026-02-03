@@ -9,6 +9,9 @@ rubric_path = "/checkpoint/comem/rulin/open-instruct/output_toy_rag_survey_analy
 rubric_path = "/checkpoint/comem/rulin/open-instruct/output_toy_rag_survey_analysis/toy_rag_survey_bs_1_rollout_8_1_sample_search_based__1__1761279009/"
 rubric_path = "/checkpoint/comem/rulin/open-instruct/output_toy_rag_survey_analysis/toy_rag_survey_bs_1_rollout_8_1_sample_search_based__1__1761283810/adaptive_rubrics_toy_rag_survey_bs_1_rollout_8_1_sample_search_based__1__1761283810.jsonl"
 
+rubric_path = "/checkpoint/comem/rulin/open-instruct/output_toy_rag_survey_analysis/toy_rag_survey_bs_1_rollout_32_adaptive_0_active__1__1761854798/adaptive_rubrics_toy_rag_survey_bs_1_rollout_32_adaptive_0_active__1__1761854798.jsonl"
+rubric_path = "/checkpoint/comem/rulin/open-instruct/output_toy_rag_survey_analysis/toy_rag_survey_bs_1_rollout_32_1_sample_search_based__1__1761854810"
+
 if "adaptive" in rubric_path:
     with open(rubric_path, "r") as f:
         data = [json.loads(line) for line in f]

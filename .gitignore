@@ -162,3 +162,9 @@ cache/
 local_scripts/
 
 log/
+outputs/
+output_analysis/
+local_scripts/
+output_toy_rag_survey_analysis/
+small_scale_analysis/
+local_scripts/

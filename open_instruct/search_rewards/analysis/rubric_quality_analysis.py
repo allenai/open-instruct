@@ -107,6 +107,25 @@ def load_rubric(rubric_id: str, num_samples: int, format: str = "v1", verbose: b
     return all_criteria
 
 
+def load_adaptive_rubrics(rubric_path: str) -> List[Dict[str, Any]]:
+    all_criteria = []
+    with open(rubric_path, "r") as f:
+        data = [json.loads(line) for line in f]
+        num_invalid_items = 0
+        total_items = 0
+        for item in data:
+            for ar in item["adaptive_rubric_scores"]:
+                try:
+                    question = ar["question"]
+                    criteria = [criterion["description"] for criterion in ar["positive_rubrics"]]
+                    all_criteria.append((question, criteria))
+                except Exception as e:
+                    num_invalid_items += 1   
+                total_items += 1
+    print(f"Total items: {total_items}, invalid items: {num_invalid_items}, fraction: {num_invalid_items / total_items}")
+    return all_criteria
+
+
 def score_factuality(
     all_criteria: List[Tuple[str, List[str]]],
     output_path: str,
@@ -285,21 +304,34 @@ def compute_scores(output_file: str) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     num_samples = 300
-    rubric_format = "v2"
-    all_rubric_ids = [
-        # "rl_rag_train_sqa_1k_clean_search_rubric_longform_rubrics",
-        # "rl_rag_train_sqa_1k_clean_dr_rubric_longform_rubrics",
-        # "rl_rag_train_sqa_1k_clean_cb_rubric_longform_rubrics"
-        "RaR-Medicine-20k-o3-mini-converted"
-    ]
-    for rubric_id in all_rubric_ids:
-        output_file = f"open_instruct/search_rewards/analysis/outputs_old4/rubric_quality_analysis_{rubric_id}_{num_samples}.jsonl"
-
-        all_criteria = load_rubric(rubric_id, num_samples, format=rubric_format, verbose=False)
-        if not check_existence(output_file, num_samples):
+    evaluate_adaptive_rubrics = True
+    
+    if evaluate_adaptive_rubrics:
+        rubric_path = "/checkpoint/comem/rulin/open-instruct/output_analysis/hamish_run/rubrics_adaptive_rubrics_2910_get_rubrics_model_onpolicy_9089__1__1761775275.jsonl"
+        all_criteria = load_adaptive_rubrics(rubric_path)
+        output_file = f"open_instruct/search_rewards/analysis/outputs_adaptive/rubric_quality_analysis_adaptive_rubrics_2910_get_rubrics_model_onpolicy_9089__1__1761775275.jsonl"
+        if not check_existence(output_file, len(all_criteria)):
             score_factuality(all_criteria, output_file)
             print(f"Saved results to {output_file}")
         else:
-            print(f"Results already exist for {rubric_id}, skipping...")
-        
+            print(f"Results already exist for adaptive rubrics, skipping...")
         compute_scores(output_file)
+    else:
+        rubric_format = "v2"
+        all_rubric_ids = [
+            # "rl_rag_train_sqa_1k_clean_search_rubric_longform_rubrics",
+            # "rl_rag_train_sqa_1k_clean_dr_rubric_longform_rubrics",
+            # "rl_rag_train_sqa_1k_clean_cb_rubric_longform_rubrics"
+            "RaR-Medicine-20k-o3-mini-converted"
+        ]
+        for rubric_id in all_rubric_ids:
+            output_file = f"open_instruct/search_rewards/analysis/outputs_old4/rubric_quality_analysis_{rubric_id}_{num_samples}.jsonl"
+
+            all_criteria = load_rubric(rubric_id, num_samples, format=rubric_format, verbose=False)
+            if not check_existence(output_file, num_samples):
+                score_factuality(all_criteria, output_file)
+                print(f"Saved results to {output_file}")
+            else:
+                print(f"Results already exist for {rubric_id}, skipping...")
+            
+            compute_scores(output_file)

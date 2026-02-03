@@ -11,8 +11,13 @@ data_info = {
     "adaptive_rubric": "/checkpoint/comem/rulin/open-instruct/output_toy_rag_survey_analysis/toy_rag_survey_bs_1_rollout_8_1_sample_search_based__1__1761283810",
 }
 
+data_info = {
+    "static_rubric": "/checkpoint/comem/rulin/open-instruct/output_toy_rag_survey_analysis/toy_rag_survey_bs_1_rollout_8_1_sample_search_based__1__1761279009",
+    "adaptive_rubric": "/checkpoint/comem/rulin/open-instruct/output_toy_rag_survey_analysis/toy_rag_survey_bs_1_rollout_8_adaptive_0_active_gpt-4.1__1__1761943011",
+}
 # Path to adaptive rubrics JSONL file
 adaptive_rubrics_path = "/checkpoint/comem/rulin/open-instruct/output_toy_rag_survey_analysis/toy_rag_survey_bs_1_rollout_8_1_sample_search_based__1__1761283810/adaptive_rubrics_toy_rag_survey_bs_1_rollout_8_1_sample_search_based__1__1761283810.jsonl"
+adaptive_rubrics_path = "/checkpoint/comem/rulin/open-instruct/output_toy_rag_survey_analysis/toy_rag_survey_bs_1_rollout_8_adaptive_0_active_gpt-4.1__1__1761943011/adaptive_rubrics_toy_rag_survey_bs_1_rollout_8_adaptive_0_active_gpt-4.1__1__1761943011.jsonl"
 
 def calculate_python_ratio(data_dir, step_range):
     """Calculate the ratio of Python responses for a given step range."""
@@ -56,10 +61,13 @@ def count_cumulative_python_negative_rubrics(data, max_step):
             continue
         
         # Collect unique negative rubrics containing "python"
-        for rubric in item["adaptive_rubric_scores"][0]["negative_rubrics"]:
-            if "python" in rubric["description"].lower() or "code" in rubric["description"].lower():
-                # Use description as unique identifier
-                unique_python_rubrics.add(rubric["description"])
+        try:
+            for rubric in item["adaptive_rubric_scores"][0]["negative_rubrics"]:
+                if "python" in rubric["description"].lower() or "code" in rubric["description"].lower():
+                    # Use description as unique identifier
+                    unique_python_rubrics.add(rubric["description"])
+        except Exception as e:
+            continue
     
     return len(unique_python_rubrics)
 
@@ -73,9 +81,12 @@ def count_python_negative_rubrics_in_bin(data, min_step, max_step):
             continue
         
         # Count negative rubrics containing "python" in this step
-        for rubric in item["adaptive_rubric_scores"][0]["negative_rubrics"]:
-            if "python" in rubric["description"].lower() or "code" in rubric["description"].lower():
-                python_rubric_count += 1
+        try:
+            for rubric in item["adaptive_rubric_scores"][0]["negative_rubrics"]:
+                if "python" in rubric["description"].lower() or "code" in rubric["description"].lower():
+                    python_rubric_count += 1
+        except Exception as e:
+            continue
     
     return python_rubric_count
 
@@ -101,7 +112,7 @@ for item in adaptive_rubrics_data:
 
 all_steps = sorted(list(all_steps))
 print(f"Available steps: {all_steps}")
-min_step = min(all_steps)
+min_step = max(0, min(all_steps))
 max_step = min(300, max(all_steps))
 print(f"Min step: {min_step}, Max step: {max_step}")
 
@@ -131,7 +142,7 @@ for max_step_threshold in step_thresholds:
 for i, step_threshold in enumerate(step_thresholds):
     # Determine the bin range
     if i == 0:
-        bin_start = min_step
+        bin_start = 0  # Start from 0 for the first bin
     else:
         bin_start = step_thresholds[i-1] + 1
     bin_end = step_threshold
@@ -154,7 +165,7 @@ python_counts_binned = []
 for i, step_threshold in enumerate(step_thresholds):
     # Determine the bin range
     if i == 0:
-        bin_start = min_step
+        bin_start = 0  # Start from 0 for the first bin
     else:
         bin_start = step_thresholds[i-1] + 1
     bin_end = step_threshold

@@ -134,7 +134,7 @@ for max_step_threshold in step_thresholds:
 for i, step_threshold in enumerate(step_thresholds):
     # Determine the bin range
     if i == 0:
-        bin_start = min_step
+        bin_start = 0  # Start from 0 for the first bin
     else:
         bin_start = step_thresholds[i-1] + 1
     bin_end = step_threshold
@@ -157,7 +157,7 @@ keyword_counts_binned = []
 for i, step_threshold in enumerate(step_thresholds):
     # Determine the bin range
     if i == 0:
-        bin_start = min_step
+        bin_start = 0  # Start from 0 for the first bin
     else:
         bin_start = step_thresholds[i-1] + 1
     bin_end = step_threshold

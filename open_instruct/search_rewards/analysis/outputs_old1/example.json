@@ -1,0 +1,8 @@
+{
+    "question": "What is the reactivity constant of cephalexin towards adenine and hydroxyl?",
+    "criteria": [
+        "State the reactivity constant value(s) of cephalexin towards adenine.",
+        "State the reactivity constant value(s) of cephalexin towards hydroxyl."
+    ],
+    "response": "{\"factual_score\": \"NA\", \"explanation\": \"The criteria do not involve any factual claim.\"} "
+}
