@@ -358,6 +358,10 @@ class Args:
     """Whether to save learning data traces"""
     save_adaptive_rubrics: bool = False
     """Whether to save adaptive rubrics generated during training"""
+    cache_adaptive_rubric_data_dir: Optional[str] = None
+    """Directory to cache adaptive rubric generation inputs/outputs for future training use. 
+    When set, saves decoded_responses, ground_truths, and generated rubrics as JSONL files.
+    Uses atomic writes with file locking for multi-thread/multi-node safety."""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
     keep_last_n_checkpoints: int = 3
@@ -2578,7 +2582,7 @@ if __name__ == "__main__":
     reward_fn_mapping = build_all_verifiers(args)
 
     if args.apply_adaptive_rubric_reward:
-        from open_instruct.search_rewards.utils.rubric_utils import _generate_instance_wise_adaptive_rubrics, update_ground_truths_with_adaptive_rubrics
+        from open_instruct.search_rewards.utils.rubric_utils import _generate_instance_wise_adaptive_rubrics, update_ground_truths_with_adaptive_rubrics, save_adaptive_rubric_cache_safe
         from open_instruct.search_rewards.longform_rubric_rewards import create_rubric_key
         from open_instruct.search_rewards.utils._direction_agreement import compute_direction_agreement, compute_direction_agreement_per_prompt
     if args.mix_partial_rollouts:
@@ -2653,6 +2657,24 @@ if __name__ == "__main__":
         if args.apply_adaptive_rubric_reward and is_training:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating adaptive rubric reward"):
                 all_adaptive_rubrics, num_subsampled_answers_list = await _generate_instance_wise_adaptive_rubrics(decoded_responses, ground_truths, args.num_samples_per_prompt_rollout, rubric_buffer=rubric_buffer, use_full_responses=args.use_full_responses_for_adaptive_rubric, answer_length_limit_in_words=args.answer_length_limit_in_words)
+                
+                # Cache adaptive rubric generation inputs/outputs for future training use
+                if args.cache_adaptive_rubric_data_dir:
+                    try:
+                        save_adaptive_rubric_cache_safe(
+                            cache_dir=args.cache_adaptive_rubric_data_dir,
+                            training_step=training_step,
+                            decoded_responses=decoded_responses,
+                            ground_truths=ground_truths,
+                            all_adaptive_rubrics=all_adaptive_rubrics,
+                            num_subsampled_answers_list=num_subsampled_answers_list,
+                            num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout,
+                            use_full_responses=args.use_full_responses_for_adaptive_rubric,
+                            answer_length_limit_in_words=args.answer_length_limit_in_words,
+                        )
+                    except Exception as e:
+                        print(f"⚠️ Warning: Failed to cache adaptive rubric data at step {training_step}: {e}")
+                        # Continue training even if caching fails
                 
                 # Store adaptive rubric scores for saving if requested
                 if args.save_adaptive_rubrics:
