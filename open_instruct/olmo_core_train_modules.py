@@ -74,6 +74,9 @@ class DPOTrainModule(TransformerTrainModule):
         else:
             self._forward_fn = dpo_utils.separate_forward_olmo
 
+    def pre_train(self):
+        pass
+
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
         self.model.train()
 
