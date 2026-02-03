@@ -10,7 +10,6 @@ import pathlib
 import shutil
 from functools import partial
 
-import bitsandbytes.optim
 import torch
 import torch.distributed as dist
 import transformers
@@ -21,7 +20,7 @@ from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, g
 from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
-from olmo_core.optim import ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
+from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import CheckpointerCallback
 from olmo_core.train.train_module.transformer import (
@@ -189,26 +188,8 @@ def _apply_parallelism(
     return model
 
 
-def _setup_optimizer_and_scheduler(args: dpo_utils.ExperimentConfig, model, num_training_steps: int):
-    """Return (optimizer, scheduler)."""
-    no_decay = ["bias", "layer_norm.weight"]
-    optimizer_grouped_parameters = [
-        {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-            "weight_decay": args.weight_decay,
-        },
-        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
-    ]
-    if args.dpo_use_paged_optimizer:
-        optim = bitsandbytes.optim.AdamW(
-            optimizer_grouped_parameters,
-            lr=args.learning_rate,
-            optim_bits=8 if args.use_8bit_optimizer else 32,
-            is_paged=True,
-        )
-    else:
-        optim = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
-
+def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
+    """Return scheduler."""
     warmup_steps = int(num_training_steps * args.warmup_ratio)
     if args.lr_scheduler_type == "cosine":
         scheduler = CosWithWarmup(warmup_steps=warmup_steps)
@@ -216,8 +197,7 @@ def _setup_optimizer_and_scheduler(args: dpo_utils.ExperimentConfig, model, num_
         scheduler = LinearWithWarmup(warmup_steps=warmup_steps, alpha_f=0.0)
     else:
         scheduler = ConstantWithWarmup(warmup_steps=warmup_steps)
-
-    return optim, scheduler
+    return scheduler
 
 
 def _setup_callbacks(args: dpo_utils.ExperimentConfig, model, dp_world_size: int):
@@ -454,17 +434,21 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     data_loader.reshuffle(epoch=0)
 
     num_training_steps = len(data_loader) * args.num_epochs
-    optim, scheduler = _setup_optimizer_and_scheduler(args, model, num_training_steps)
+    optim_config = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay, fused=args.fused_optimizer)
+    scheduler = _setup_scheduler(args, num_training_steps)
 
     max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
     train_module = DPOTrainModule(
         model=model,
-        optim=optim,
+        optim=optim_config,
+        rank_microbatch_size=args.per_device_train_batch_size * args.max_seq_length,
+        max_sequence_length=args.max_seq_length,
         args=args,
         reference_cache=reference_cache,
+        dp_config=None,
+        max_grad_norm=max_grad_norm,
         scheduler=scheduler,
         device=device,
-        max_grad_norm=max_grad_norm,
     )
 
     trainer_callbacks = _setup_callbacks(args, model, dp_world_size)

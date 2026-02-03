@@ -15,7 +15,7 @@ from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
 from olmo_core.optim.scheduler import Scheduler
 from olmo_core.train.common import ReduceType
-from olmo_core.train.train_module import EvalBatchSpec, TrainModule, TransformerTrainModule
+from olmo_core.train.train_module import TransformerTrainModule
 from olmo_core.train.train_module.transformer.config import TransformerDataParallelConfig
 from transformers import PreTrainedTokenizer
 
@@ -25,30 +25,47 @@ from open_instruct.rl_utils import masked_mean
 logger = logger_utils.setup_logger(__name__)
 
 
-class DPOTrainModule(TrainModule):
+class DPOTrainModule(TransformerTrainModule):
     """Training module for DPO with OLMo-core's Trainer.
 
-    Uses OLMo-core's scheduler.set_lr() pattern for learning rate scheduling.
+    Subclasses TransformerTrainModule to inherit:
+    - optim_step with proper gradient clipping
+    - zero_grads
+    - eval_batch and eval_batch_spec
+    - num_flops_per_token
+    - state_dict/load_state_dict via dist_cp_sd
     """
 
     def __init__(
         self,
         model: Transformer,
-        optim: torch.optim.Optimizer,
+        optim: OptimConfig,
+        rank_microbatch_size: int,
+        max_sequence_length: int,
         args: dpo_utils.ExperimentConfig,
         reference_cache: model_utils.TensorCache,
-        scheduler: Scheduler,
-        device: torch.device | None = None,
+        dp_config: TransformerDataParallelConfig | None = None,
         max_grad_norm: float | None = None,
+        scheduler: Scheduler | None = None,
+        device: torch.device | None = None,
+        state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
+        state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
     ) -> None:
-        super().__init__()
-        self.model = model
-        self.optim = optim
+        super().__init__(
+            model=model,
+            optim=optim,
+            rank_microbatch_size=rank_microbatch_size,
+            max_sequence_length=max_sequence_length,
+            dp_config=dp_config,
+            max_grad_norm=max_grad_norm,
+            scheduler=scheduler,
+            device=device,
+            state_dict_save_opts=state_dict_save_opts,
+            state_dict_load_opts=state_dict_load_opts,
+        )
+
         self.args = args
         self.reference_cache = reference_cache
-        self.scheduler = scheduler
-        self.device = device
-        self.max_grad_norm = max_grad_norm
 
         if args.packing:
             self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
@@ -57,47 +74,11 @@ class DPOTrainModule(TrainModule):
         else:
             self._forward_fn = dpo_utils.separate_forward_olmo
 
-    def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
-        state_dict: dict[str, Any] = {"model": self.model.state_dict()}
-        if optim is not False:
-            state_dict["optim"] = self.optim.state_dict()
-        return state_dict
-
-    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        self.model.load_state_dict(state_dict["model"])
-        if "optim" in state_dict:
-            self.optim.load_state_dict(state_dict["optim"])
-
-    def zero_grads(self) -> None:
-        self.optim.zero_grad()
-
-    def optim_step(self) -> None:
-        if self.max_grad_norm is not None:
-            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-            self.trainer.record_metric("total grad norm", grad_norm, reduce_type=None, namespace="optim")
-        for group_idx, group in enumerate(self.optim.param_groups):
-            new_lr = self.scheduler.set_lr(group, self.trainer)
-            self.trainer.record_metric(f"LR (group {group_idx})", new_lr, namespace="optim")
-        self.optim.step()
-
-    def num_flops_per_token(self, seq_len: int) -> int:
-        return self.model.num_flops_per_token(seq_len)
-
     def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int:
-        seq_len = batch["input_ids"].shape[1]
-        flops_per_token = self.num_flops_per_token(seq_len)
+        flops_per_token = self.num_flops_per_token(batch["input_ids"].shape[1])
         global_num_tokens = self.trainer.data_loader.global_num_tokens_in_batch(batch)
         assert global_num_tokens is not None
         return flops_per_token * global_num_tokens
-
-    @property
-    def eval_batch_spec(self) -> EvalBatchSpec:
-        return EvalBatchSpec(rank_batch_size=1)
-
-    def eval_batch(self, batch: dict[str, Any], labels: Any | None = None) -> torch.Tensor:
-        self.model.eval()
-        with torch.no_grad():
-            return self.model(**batch)
 
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
         self.model.train()
