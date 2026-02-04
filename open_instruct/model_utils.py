@@ -15,6 +15,7 @@
 
 
 import asyncio
+import fnmatch
 import itertools
 import pathlib
 import tempfile
@@ -182,6 +183,30 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
     for module in model.modules():
         if isinstance(module, torch.nn.Dropout):
             module.p = 0
+
+
+def freeze_parameters_by_pattern(model: torch.nn.Module, patterns: list[str]) -> tuple[int, int]:
+    """Freeze parameters matching any of the given fnmatch patterns.
+
+    Args:
+        model: The model whose parameters to freeze
+        patterns: List of fnmatch patterns to match parameter names
+
+    Returns:
+        Tuple of (frozen_count, trainable_count) parameter counts
+    """
+    frozen_count = 0
+    trainable_count = 0
+
+    for name, param in model.named_parameters():
+        should_freeze = any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
+        if should_freeze:
+            param.requires_grad = False
+            frozen_count += param.numel()
+        else:
+            trainable_count += param.numel()
+
+    return frozen_count, trainable_count
 
 
 def maybe_load_checkpoint(

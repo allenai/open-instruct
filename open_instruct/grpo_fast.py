@@ -94,6 +94,7 @@ from open_instruct.model_utils import (
     ModelConfig,
     disable_dropout_in_model,
     estimate_kl,
+    freeze_parameters_by_pattern,
     get_olmo3_generation_config,
     load_ref_policy,
     print_rich_single_line_metrics,
@@ -254,6 +255,15 @@ class PolicyTrainerRayProcess(RayProcess):
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         disable_dropout_in_model(self.policy)
+
+        # Freeze parameters if configured (e.g., for FlexOlmo partial training)
+        if args.freeze_parameters:
+            frozen, trainable = freeze_parameters_by_pattern(self.policy, args.freeze_patterns)
+            logger.info(
+                f"Parameter freezing enabled: {frozen:,} params frozen, {trainable:,} params trainable "
+                f"({100 * trainable / (frozen + trainable):.1f}% trainable)"
+            )
+
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)

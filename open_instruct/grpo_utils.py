@@ -187,6 +187,20 @@ class ExperimentConfig:
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
 
+    # Parameter freezing for FlexOlmo
+    freeze_parameters: bool = False
+    """Whether to freeze parameters matching the freeze_patterns."""
+    freeze_patterns: list[str] | None = field(default_factory=lambda: [
+        "model.embed_tokens.*",
+        "model.layers.*.self_attn.*",
+        "model.layers.*.post_attention_layernorm.*",
+        "model.layers.*.post_feedforward_layernorm.*",
+        "model.layers.*.mlp.experts.experts.0*",
+        "lm_head.*",
+    ])
+    """List of patterns (fnmatch-style) to match parameter names for freezing.
+    Example: ['model.layers.*.mlp.*', 'model.embed_tokens.*']"""
+
     def __post_init__(self):
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
@@ -230,6 +244,8 @@ class ExperimentConfig:
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+        if self.freeze_parameters and not self.freeze_patterns:
+            raise ValueError("`freeze_patterns` must be provided when `freeze_parameters=True`")
 
 
 def compute_grpo_loss(
