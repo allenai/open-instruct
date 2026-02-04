@@ -2,10 +2,10 @@
 #
 # Launch a single model merge job on Beaker
 #
-# Usage: ./scripts/merge/merge.sh <output_dir> <model1> <model2> [model3] ...
+# Usage: ./scripts/merge/mergekit_merge.sh <output_dir> <model1> <model2> [model3] ...
 #
 # Example:
-#   ./scripts/merge/merge.sh /weka/oe-adapt-default/nathanl/merged/my-merge \
+#   ./scripts/merge/mergekit_merge.sh /weka/oe-adapt-default/nathanl/merged/my-merge \
 #       /weka/path/to/model1 \
 #       /weka/path/to/model2
 #
@@ -69,4 +69,4 @@ uv run python mason.py \
     --gpus 0 \
     --priority normal \
     --description "Model merge: ${NUM_MODELS}-model linear" \
-    -- bash -c \"cd /stage \&\& $INSTALL_CMD \&\& echo $CONFIG_B64 \| base64 -d \> /tmp/c.yaml \&\& uv run mergekit-yaml /tmp/c.yaml $OUTPUT_DIR \&\& cp $FIRST_MODEL/tokenizer* $FIRST_MODEL/special_tokens_map.json $OUTPUT_DIR/ 2\>/dev/null\; test -f $FIRST_MODEL/chat_template.jinja \&\& cp $FIRST_MODEL/chat_template.jinja $OUTPUT_DIR/\; echo Done: $OUTPUT_DIR\"
+    -- bash -c \"cd /stage \&\& $INSTALL_CMD \&\& echo $CONFIG_B64 \| base64 -d \> /tmp/c.yaml \&\& echo '=== Merge Config ===' \&\& cat /tmp/c.yaml \&\& echo '===================' \&\& uv run mergekit-yaml /tmp/c.yaml $OUTPUT_DIR \&\& cp $FIRST_MODEL/tokenizer* $FIRST_MODEL/special_tokens_map.json $OUTPUT_DIR/ 2\>/dev/null\; test -f $FIRST_MODEL/chat_template.jinja \&\& cp $FIRST_MODEL/chat_template.jinja $OUTPUT_DIR/\; echo Done: $OUTPUT_DIR\"
