@@ -749,26 +749,33 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
+
+                    # Debug: check if loss has gradient before backward
+                    if self.args.freeze_parameters and local_step == 0 and self.rank == 0:
+                        logger.warning(f"[freeze_parameters] Loss before backward: requires_grad={loss.requires_grad}, "
+                                     f"grad_fn={loss.grad_fn is not None}, value={loss.item():.4f}")
+
                     self.model.backward(loss)
 
                     # Debug: log gradient stats for frozen vs trainable params (only on first step)
                     if self.args.freeze_parameters and local_step == 0 and self.rank == 0:
-                        trainable_grads = []
-                        frozen_grads = []
-                        for name, param in self.model.module.named_parameters():
-                            if param.grad is not None:
-                                grad_norm = param.grad.norm().item()
-                                if param.requires_grad:
-                                    trainable_grads.append((name, grad_norm))
-                                else:
-                                    frozen_grads.append((name, grad_norm))
-                        if trainable_grads:
-                            logger.warning(f"[freeze_parameters] Trainable params with grads: {len(trainable_grads)}, "
-                                         f"first 5: {trainable_grads[:5]}")
-                        else:
-                            logger.warning("[freeze_parameters] WARNING: No trainable params have gradients!")
-                        if frozen_grads:
-                            logger.warning(f"[freeze_parameters] WARNING: {len(frozen_grads)} frozen params have grads!")
+                        # Count params by requires_grad status
+                        trainable_params = [(n, p) for n, p in self.model.module.named_parameters() if p.requires_grad]
+                        frozen_params = [(n, p) for n, p in self.model.module.named_parameters() if not p.requires_grad]
+                        logger.warning(f"[freeze_parameters] requires_grad status: {len(trainable_params)} trainable, "
+                                     f"{len(frozen_params)} frozen")
+                        logger.warning(f"[freeze_parameters] First 5 trainable: {[n for n, _ in trainable_params[:5]]}")
+                        logger.warning(f"[freeze_parameters] First 5 frozen: {[n for n, _ in frozen_params[:5]]}")
+
+                        # Check gradients (note: with ZeRO-3, param.grad may be None after reduce-scatter)
+                        trainable_with_grad = [(n, p.grad.norm().item()) for n, p in trainable_params if p.grad is not None]
+                        trainable_no_grad = [n for n, p in trainable_params if p.grad is None]
+                        if trainable_with_grad:
+                            logger.warning(f"[freeze_parameters] Trainable with grads: {len(trainable_with_grad)}, "
+                                         f"first 5: {trainable_with_grad[:5]}")
+                        if trainable_no_grad:
+                            logger.warning(f"[freeze_parameters] Trainable WITHOUT grads (ZeRO-3 may have scattered): "
+                                         f"{len(trainable_no_grad)}, first 5: {trainable_no_grad[:5]}")
 
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
