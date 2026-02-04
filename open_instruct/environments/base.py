@@ -56,6 +56,13 @@ def register_env(name: str):
 class RLEnvironment(ABC):
     """Abstract base class for RL environments (use as Ray actors via ray.remote)."""
 
+    # Role for model output in conversation (used when no tool parser)
+    response_role: str = "assistant"
+
+    # Role for environment observations/feedback in conversation
+    # "user" = wrap in user turn, "tool" = wrap in tool turn
+    observation_role: str = "user"
+
     async def setup(self) -> None:
         """Called once at start of training for resource initialization."""
         pass
@@ -73,6 +80,10 @@ class RLEnvironment(ABC):
     def get_metrics(self) -> dict[str, float]:
         """Return custom metrics."""
         return {}
+
+    def get_observation_role(self) -> str:
+        """Return the role to use for environment observations in conversation."""
+        return self.observation_role
 
     async def close(self) -> None:
         """Cleanup resources for a single episode."""

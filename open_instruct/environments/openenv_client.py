@@ -83,6 +83,7 @@ class OpenEnvTextClient(RLEnvironment):
     """
 
     response_role = "assistant"  # Text mode: model output goes to assistant role
+    observation_role = "user"  # Environment feedback wrapped in user role
     max_steps = 50
 
     def __init__(self, base_url: str, timeout: int = 30, headers: dict[str, str] | None = None):

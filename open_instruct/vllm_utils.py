@@ -17,6 +17,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import dataclasses
 import os
 import queue
@@ -91,6 +92,21 @@ def clean_text_for_env(text: str) -> str:
     # Remove thinking tags and their content
     cleaned = _THINKING_PATTERN.sub("", text)
     return cleaned.strip()
+
+
+def format_observation_for_chat(observation: str, role: str) -> str:
+    """Format environment observation with proper chat template role.
+
+    Args:
+        observation: The environment's response/feedback
+        role: The role to use ("user" or "tool")
+
+    Returns:
+        Formatted string with chat template markers
+    """
+    # Format: close assistant turn, add role turn with observation, start new assistant turn
+    # Using Qwen/ChatML format: <|im_start|>role\ncontent<|im_end|>
+    return f"<|im_end|>\n<|im_start|>{role}\n{observation}<|im_end|>\n<|im_start|>assistant\n"
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelDims:
@@ -960,9 +976,13 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     env_tool_names: set[str] = set()
 
     if env_config is not None:
-        state.env_state = {"rewards": [], "step_count": 0, "done": False, "info": {}}
+        state.env_state = {"rewards": [], "step_count": 0, "done": False, "info": {}, "observation_role": "user"}
         env_pool = await _get_or_create_env_pool(actor, env_config)
         env_actor = await env_pool.acquire()
+
+        # Get observation role from environment (defaults to "user")
+        with contextlib.suppress(Exception):
+            state.env_state["observation_role"] = await env_actor.get_observation_role.remote()
 
         reset_result = await env_actor.reset.remote(task_id=env_config.get("task_id"))
         env_tool_names = {t["function"]["name"] for t in (reset_result.tools or []) if "function" in t}
@@ -1033,11 +1053,11 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                         state.env_state["info"].update(step_result.info)
                         state.env_state["step_count"] += 1
 
-                        # Add observation to conversation
+                        # Add observation to conversation wrapped in appropriate role
                         if step_result.observation:
-                            obs_tokens = actor.llm_engine.tokenizer.encode(
-                                f"\n{step_result.observation}\n", add_special_tokens=False
-                            )
+                            obs_role = state.env_state.get("observation_role", "user")
+                            obs_formatted = format_observation_for_chat(step_result.observation, obs_role)
+                            obs_tokens = actor.llm_engine.tokenizer.encode(obs_formatted, add_special_tokens=False)
                             state.current_prompt.extend(obs_tokens)
                             state.response_tokens.extend(obs_tokens)
                             state.response_logprobs.extend([float("nan")] * len(obs_tokens))
@@ -1069,10 +1089,11 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                         state.env_state["info"].update(step_result.info)
                         state.env_state["step_count"] += 1
 
+                        # Add observation to conversation wrapped in appropriate role
                         if step_result.observation:
-                            obs_tokens = actor.llm_engine.tokenizer.encode(
-                                f"\n{step_result.observation}\n", add_special_tokens=False
-                            )
+                            obs_role = state.env_state.get("observation_role", "user")
+                            obs_formatted = format_observation_for_chat(step_result.observation, obs_role)
+                            obs_tokens = actor.llm_engine.tokenizer.encode(obs_formatted, add_special_tokens=False)
                             state.current_prompt.extend(obs_tokens)
                             state.response_tokens.extend(obs_tokens)
                             state.response_logprobs.extend([float("nan")] * len(obs_tokens))
