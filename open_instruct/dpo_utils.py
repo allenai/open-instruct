@@ -1002,7 +1002,8 @@ def concatenated_forward_olmo(
     else:
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
-    logits = model(concatenated_batch["concatenated_input_ids"]).to(torch.float32)
+    input_ids = concatenated_batch["concatenated_input_ids"].contiguous()
+    logits = model(input_ids).to(torch.float32)
 
     if not packing:
         all_logps = _get_batch_logps(
@@ -1043,14 +1044,14 @@ def separate_forward_olmo(
     """
     del output_router_logits
     chosen_batch = process_batch(batch, "chosen")
-    chosen_logits = model(chosen_batch["input_ids"]).to(torch.float32)
+    chosen_logits = model(chosen_batch["input_ids"].contiguous()).to(torch.float32)
 
     chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
     del chosen_batch, chosen_logits
     torch.cuda.empty_cache()
 
     rejected_batch = process_batch(batch, "rejected")
-    rejected_logits = model(rejected_batch["input_ids"]).to(torch.float32)
+    rejected_logits = model(rejected_batch["input_ids"].contiguous()).to(torch.float32)
 
     rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
     del rejected_batch, rejected_logits
