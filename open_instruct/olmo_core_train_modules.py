@@ -74,12 +74,13 @@ class DPOTrainModule(TransformerTrainModule):
         self.dpo_config = dpo_config
         self.reference_cache: model_utils.TensorCache | None = None
 
+        tp = dpo_config.tensor_parallel_degree
         if dpo_config.packing:
-            self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
+            self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True, tp_degree=tp)
         elif dpo_config.concatenated_forward:
-            self._forward_fn = dpo_utils.concatenated_forward_olmo
+            self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, tp_degree=tp)
         else:
-            self._forward_fn = dpo_utils.separate_forward_olmo
+            self._forward_fn = partial(dpo_utils.separate_forward_olmo, tp_degree=tp)
 
     def pre_train(self):
         # Override to skip batch size validation from TransformerTrainModule.

@@ -974,12 +974,27 @@ def separate_forward(
     return chosen_logps, rejected_logps, aux_loss
 
 
+def _pad_seq_for_tp(input_ids: torch.Tensor, tp_degree: int) -> tuple[torch.Tensor, int]:
+    """Pad input_ids seq dimension to be divisible by tp_degree for sequence-parallel TP.
+
+    OLMo-core uses sequence parallelism with TP (Shard(1) placement). When the sequence
+    length isn't evenly divisible by the TP degree, DTensor redistribution produces
+    non-contiguous tensors that cause view errors in F.linear.
+    """
+    seq_len = input_ids.shape[1]
+    if tp_degree <= 1 or seq_len % tp_degree == 0:
+        return input_ids, seq_len
+    padded_len = ((seq_len + tp_degree - 1) // tp_degree) * tp_degree
+    return torch.nn.functional.pad(input_ids, (0, padded_len - seq_len), value=0), seq_len
+
+
 def concatenated_forward_olmo(
     model: nn.Module,
     batch: dict[str, list | torch.Tensor],
     average_log_prob: bool = False,
     packing: bool = False,
     output_router_logits: bool = False,
+    tp_degree: int = 1,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
@@ -992,6 +1007,7 @@ def concatenated_forward_olmo(
         average_log_prob: Whether to average the log probabilities.
         packing: Whether to use padding-free packing.
         output_router_logits: Unused for OLMo-core models (MoE aux loss handled separately).
+        tp_degree: Tensor parallelism degree for sequence padding.
 
     Returns:
         Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
@@ -1003,7 +1019,9 @@ def concatenated_forward_olmo(
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
     input_ids = concatenated_batch["concatenated_input_ids"].contiguous()
+    input_ids, orig_seq_len = _pad_seq_for_tp(input_ids, tp_degree)
     logits = model(input_ids).to(torch.float32)
+    logits = logits[:, :orig_seq_len, :]
 
     if not packing:
         all_logps = _get_batch_logps(
@@ -1027,6 +1045,7 @@ def separate_forward_olmo(
     batch: dict[str, list | torch.Tensor],
     average_log_prob: bool = False,
     output_router_logits: bool = False,
+    tp_degree: int = 1,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Run the model on chosen and rejected inputs separately.
 
@@ -1038,20 +1057,25 @@ def separate_forward_olmo(
         batch: Dictionary containing chosen and rejected inputs.
         average_log_prob: Whether to average the log probabilities.
         output_router_logits: Unused for OLMo-core models (MoE aux loss handled separately).
+        tp_degree: Tensor parallelism degree for sequence padding.
 
     Returns:
         Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
     """
     del output_router_logits
     chosen_batch = process_batch(batch, "chosen")
-    chosen_logits = model(chosen_batch["input_ids"].contiguous()).to(torch.float32)
+    chosen_ids = chosen_batch["input_ids"].contiguous()
+    chosen_ids, chosen_orig_len = _pad_seq_for_tp(chosen_ids, tp_degree)
+    chosen_logits = model(chosen_ids).to(torch.float32)[:, :chosen_orig_len, :]
 
     chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
     del chosen_batch, chosen_logits
     torch.cuda.empty_cache()
 
     rejected_batch = process_batch(batch, "rejected")
-    rejected_logits = model(rejected_batch["input_ids"].contiguous()).to(torch.float32)
+    rejected_ids = rejected_batch["input_ids"].contiguous()
+    rejected_ids, rejected_orig_len = _pad_seq_for_tp(rejected_ids, tp_degree)
+    rejected_logits = model(rejected_ids).to(torch.float32)[:, :rejected_orig_len, :]
 
     rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
     del rejected_batch, rejected_logits

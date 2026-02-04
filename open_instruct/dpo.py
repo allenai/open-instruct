@@ -325,9 +325,13 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         fs_local_rank=global_rank,
     )
 
-    forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
+    tp = args.tensor_parallel_degree
+    forward_fn = partial(
+        dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo,
+        tp_degree=tp,
+    )
     if args.packing:
-        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
+        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True, tp_degree=tp)
     average_log_prob = args.loss_type.is_average_loss
 
     cache_kwargs = dict(
