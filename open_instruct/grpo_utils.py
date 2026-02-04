@@ -195,7 +195,7 @@ class ExperimentConfig:
         "model.layers.*.self_attn.*",
         "model.layers.*.post_attention_layernorm.*",
         "model.layers.*.post_feedforward_layernorm.*",
-        "model.layers.*.mlp.experts.experts.0*",
+        "model.layers.*.mlp.experts.*",  # Freeze all expert weights (but not router/gate)
         "lm_head.*",
     ])
     """List of patterns (fnmatch-style) to match parameter names for freezing.
