@@ -49,4 +49,5 @@ uv run python mason.py \
     --tensor_parallel_degree 2 \
     --shard_degree 4 \
     --num_replicas 2 \
+    --compile_model false \
     --try_auto_save_to_beaker false
