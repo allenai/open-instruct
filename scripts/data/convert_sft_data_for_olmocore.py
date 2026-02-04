@@ -120,12 +120,69 @@ from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
     LABELS_KEY,
     TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE,
+    TRANSFORM_FNS,
     TokenizerConfig,
     get_cached_dataset_tulu_with_statistics,
     remove_dataset_source_field,
     visualize_token,
 )
 from open_instruct.utils import ArgumentParserPlus, is_beaker_job
+
+
+def apply_transformations_to_dataset(
+    dataset: Any,
+    tc: TokenizerConfig,
+    dataset_name: str,
+    transform_fn_names: list[str],
+    transform_fn_args: list[dict[str, Any]],
+    target_columns: list[str],
+) -> Any:
+    """Apply transformations to a dataset (used for split datasets)."""
+    import hashlib
+    import json
+    import multiprocessing
+    import os
+
+    num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
+
+    # Add dataset source field
+    dataset = dataset.map(
+        lambda example: {**example, DATASET_ORIGIN_KEY: dataset_name},
+        num_proc=num_proc,
+        desc=f"Adding dataset source field for {dataset_name}",
+    )
+
+    # Apply each transformation
+    for fn_name, fn_args in zip(transform_fn_names, transform_fn_args):
+        fn, fn_type = TRANSFORM_FNS[fn_name]
+        fn_kwargs = {"tokenizer": tc.tokenizer}
+        fn_kwargs.update(fn_args)
+
+        # Keep target columns plus dataset_origin
+        cols_to_keep = target_columns.copy()
+        if DATASET_ORIGIN_KEY not in cols_to_keep and DATASET_ORIGIN_KEY in dataset.column_names:
+            cols_to_keep.append(DATASET_ORIGIN_KEY)
+
+        if fn_type == "map":
+            dataset = dataset.map(
+                fn,
+                fn_kwargs=fn_kwargs,
+                remove_columns=[col for col in dataset.column_names if col not in cols_to_keep],
+                num_proc=num_proc,
+            )
+        elif fn_type == "filter":
+            dataset = dataset.filter(
+                fn,
+                fn_kwargs=fn_kwargs,
+                num_proc=num_proc,
+            )
+        else:
+            raise ValueError(f"Unknown transform function type: {fn_type}")
+
+    if len(dataset) == 0:
+        raise ValueError("No examples left after transformation")
+
+    return dataset
 
 
 @dataclass
@@ -287,18 +344,12 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
             split_dataset = raw_dataset.filter(lambda x: x[args.dataset_split_field] == split_value)
             print(f"Filtered dataset size: {len(split_dataset):,} examples")
 
-            # Save filtered dataset to temporary location for processing
-            # We'll use the HuggingFace datasets library to save and load
-            temp_dataset_path = os.path.join(args.dataset_local_cache_dir, f"temp_split_{sanitized_split_name}")
-            os.makedirs(temp_dataset_path, exist_ok=True)
-            split_dataset.save_to_disk(temp_dataset_path)
-
             # Now tokenize this split using the same pipeline as before
             process_single_split(
                 args=args,
                 tc=tc,
                 split_output_dir=split_output_dir,
-                split_dataset_path=temp_dataset_path,
+                pre_filtered_dataset=split_dataset,
                 split_name=split_value,
             )
 
@@ -308,14 +359,14 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         return
 
     # Original single-dataset processing
-    process_single_split(args=args, tc=tc, split_output_dir=output_dir, split_dataset_path=None, split_name=None)
+    process_single_split(args=args, tc=tc, split_output_dir=output_dir, pre_filtered_dataset=None, split_name=None)
 
 
 def process_single_split(
     args: ConvertSFTDataArguments,
     tc: TokenizerConfig,
     split_output_dir: str,
-    split_dataset_path: str | None,
+    pre_filtered_dataset: Any | None,
     split_name: str | None,
 ):
     """Process a single dataset split (or the entire dataset if no splitting)."""
@@ -327,28 +378,45 @@ def process_single_split(
         ("sft_tulu_filter_v1", {}),  # remove examples that don't have any labels
     ]
 
-    # Use temporary split dataset path if provided, otherwise use original dataset_mixer_list
-    if split_dataset_path is not None:
-        # For split datasets, we point to the temporary saved dataset
-        dataset_mixer_list = [split_dataset_path, "1.0"]
-        dataset_mixer_list_splits = ["train"]  # saved dataset always uses 'train' split
+    # If we have a pre-filtered dataset, apply transformations directly
+    if pre_filtered_dataset is not None:
+        print("Applying transformations to pre-filtered dataset...")
+        initial_size = len(pre_filtered_dataset)
+        train_dataset = apply_transformations_to_dataset(
+            dataset=pre_filtered_dataset,
+            tc=tc,
+            dataset_name=args.dataset_mixer_list[0],
+            transform_fn_names=[func for func, _ in transform_functions_and_args],
+            transform_fn_args=[args for _, args in transform_functions_and_args],
+            target_columns=args.dataset_target_columns,
+        )
+        final_size = len(train_dataset)
+        # Create minimal statistics for split dataset
+        dataset_statistics = {
+            "per_dataset_stats": [{
+                "dataset_name": f"{args.dataset_mixer_list[0]} ({split_name})",
+                "dataset_split": args.dataset_mixer_list_splits[0],
+                "initial_instances": initial_size,
+                "final_instances": final_size,
+                "instances_filtered": initial_size - final_size,
+                "frac_or_num_samples": 1.0,
+            }]
+        }
     else:
-        dataset_mixer_list = args.dataset_mixer_list
-        dataset_mixer_list_splits = args.dataset_mixer_list_splits
-
-    train_dataset, dataset_statistics = get_cached_dataset_tulu_with_statistics(
-        dataset_mixer_list=dataset_mixer_list,
-        dataset_mixer_list_splits=dataset_mixer_list_splits,
-        tc=tc,
-        dataset_transform_fn=[func for func, _ in transform_functions_and_args],
-        transform_fn_args=[args for _, args in transform_functions_and_args],
-        target_columns=args.dataset_target_columns,
-        dataset_cache_mode=args.dataset_cache_mode,
-        dataset_config_hash=args.dataset_config_hash,
-        dataset_local_cache_dir=args.dataset_local_cache_dir,
-        dataset_skip_cache=args.dataset_skip_cache,
-        drop_dataset_source=False,
-    )
+        # Original loading path for non-split datasets
+        train_dataset, dataset_statistics = get_cached_dataset_tulu_with_statistics(
+            dataset_mixer_list=args.dataset_mixer_list,
+            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            tc=tc,
+            dataset_transform_fn=[func for func, _ in transform_functions_and_args],
+            transform_fn_args=[args for _, args in transform_functions_and_args],
+            target_columns=args.dataset_target_columns,
+            dataset_cache_mode=args.dataset_cache_mode,
+            dataset_config_hash=args.dataset_config_hash,
+            dataset_local_cache_dir=args.dataset_local_cache_dir,
+            dataset_skip_cache=args.dataset_skip_cache,
+            drop_dataset_source=False,
+        )
 
     # Use fixed seed for reproducible shuffling (required for resume)
     train_dataset = train_dataset.shuffle(seed=args.shuffle_seed)
