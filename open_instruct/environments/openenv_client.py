@@ -108,17 +108,18 @@ class OpenEnvTextClient(RLEnvironment):
             return await response.json()
 
     async def reset(self, task_id: str | None = None) -> StepResult:
-        """Reset the environment on the remote server."""
+        """Reset the environment on the remote server.
+
+        Note: We return an empty observation because text-based environments
+        like TextArena return verbose instructions that confuse the model.
+        The dataset prompt should already contain the necessary instructions.
+        """
         self._step_count = 0
-        data = await self._request("POST", "/reset", json={"task_id": task_id})
+        await self._request("POST", "/reset", json={"task_id": task_id})
 
-        # Extract observation - handle both dict and string formats
-        observation = data.get("observation", "")
-        if isinstance(observation, dict):
-            # TextArena returns observation as dict with prompt/messages
-            observation = observation.get("prompt", str(observation))
-
-        return StepResult(observation=observation, tools=[], info=data.get("info", {}))
+        # Return empty observation - the dataset prompt already has instructions
+        # and TextArena's verbose instructions confuse small models
+        return StepResult(observation="", tools=[], info={})
 
     async def step(self, tool_call: ToolCall) -> StepResult:
         """Execute a text action on the remote server.
@@ -139,7 +140,10 @@ class OpenEnvTextClient(RLEnvironment):
             messages = observation.get("messages", [])
             if messages:
                 # Get the last message content
-                observation = messages[-1].get("content", str(observation))
+                content = messages[-1].get("content", str(observation))
+                # Extract just the feedback portion for cleaner context
+                # TextArena includes full history, but we only need the latest feedback
+                observation = self._extract_feedback(content)
             else:
                 observation = observation.get("prompt", str(observation))
 
@@ -149,6 +153,34 @@ class OpenEnvTextClient(RLEnvironment):
             done=bool(data.get("done", False)),
             info=data.get("info", {}),
         )
+
+    def _extract_feedback(self, content: str) -> str:
+        """Extract just the feedback portion from TextArena's verbose response.
+
+        TextArena returns full game history, but we only want the latest feedback
+        to keep context clean and avoid confusing the model.
+        """
+        # Look for the feedback section which starts with "Feedback:" or after "[GAME] You submitted"
+        lines = content.split("\n")
+
+        # Find the last "[GAME] You submitted" line and extract feedback after it
+        feedback_start = -1
+        for i, line in enumerate(lines):
+            if "[GAME] You submitted" in line or "Feedback:" in line:
+                feedback_start = i
+
+        if feedback_start >= 0:
+            # Return from feedback start to end, but keep it concise
+            feedback_lines = lines[feedback_start:]
+            return "\n".join(feedback_lines).strip()
+
+        # For invalid moves or other responses, look for error messages
+        for line in lines:
+            if "invalid move" in line.lower() or "error" in line.lower():
+                return line.strip()
+
+        # Fallback: return last few lines if no pattern matched
+        return "\n".join(lines[-4:]).strip() if lines else content
 
     def get_metrics(self) -> dict[str, float]:
         return {"step_count": float(self._step_count)}

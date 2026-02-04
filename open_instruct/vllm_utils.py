@@ -20,6 +20,7 @@ import asyncio
 import dataclasses
 import os
 import queue
+import re
 import socket
 import sys
 import threading
@@ -75,6 +76,21 @@ DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
+
+
+# Pattern to match thinking tags like <think>...</think> or </think>
+_THINKING_PATTERN = re.compile(r"<think>.*?</think>|</think>", re.DOTALL)
+
+
+def clean_text_for_env(text: str) -> str:
+    """Clean model output for text-based environments.
+
+    Removes chain-of-thought content enclosed in <think>...</think> tags,
+    which some models output even when told not to think.
+    """
+    # Remove thinking tags and their content
+    cleaned = _THINKING_PATTERN.sub("", text)
+    return cleaned.strip()
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelDims:
@@ -1006,8 +1022,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     try:
                         state.num_calls += 1
                         start_time = time.perf_counter()
-                        # Send raw text as a "message" tool call for text-based envs
-                        env_tool_call = EnvToolCall(name="message", args={"message": output.text}, id=None)
+                        # Send cleaned text as a "message" tool call for text-based envs
+                        # Strip thinking tags that models sometimes output despite /nothink
+                        cleaned_text = clean_text_for_env(output.text)
+                        env_tool_call = EnvToolCall(name="message", args={"message": cleaned_text}, id=None)
                         step_result = await env_actor.step.remote(env_tool_call)
 
                         state.env_state["rewards"].append(step_result.reward)
@@ -1036,12 +1054,14 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
             tool_calls = [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in all_allowed_tools]
             if not tool_calls:
-                # Text-based environment: send raw output as message
+                # Text-based environment: send cleaned output as message
                 if env_actor is not None and not env_tool_names and state.env_state is not None:
                     try:
                         state.num_calls += 1
                         start_time = time.perf_counter()
-                        env_tool_call = EnvToolCall(name="message", args={"message": output.text}, id=None)
+                        # Strip thinking tags that models sometimes output despite /nothink
+                        cleaned_text = clean_text_for_env(output.text)
+                        env_tool_call = EnvToolCall(name="message", args={"message": cleaned_text}, id=None)
                         step_result = await env_actor.step.remote(env_tool_call)
 
                         state.env_state["rewards"].append(step_result.reward)
