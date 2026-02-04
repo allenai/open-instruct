@@ -258,11 +258,21 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Freeze parameters if configured (e.g., for FlexOlmo partial training)
         if args.freeze_parameters:
+            # Log first few parameter names for debugging pattern matching
+            param_names = [name for name, _ in self.policy.named_parameters()]
+            logger.info(f"Model has {len(param_names)} parameters. First 10 names: {param_names[:10]}")
+            logger.info(f"Freeze patterns: {args.freeze_patterns}")
+
             frozen, trainable = freeze_parameters_by_pattern(self.policy, args.freeze_patterns)
-            logger.info(
-                f"Parameter freezing enabled: {frozen:,} params frozen, {trainable:,} params trainable "
-                f"({100 * trainable / (frozen + trainable):.1f}% trainable)"
-            )
+            total = frozen + trainable
+            if total > 0:
+                pct_trainable = 100 * trainable / total
+                logger.info(
+                    f"Parameter freezing enabled: {frozen:,} params frozen, {trainable:,} params trainable "
+                    f"({pct_trainable:.1f}% trainable)"
+                )
+            else:
+                logger.warning("No parameters found in model - freeze_parameters has no effect")
 
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
