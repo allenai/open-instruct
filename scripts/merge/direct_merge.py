@@ -5,14 +5,13 @@ This bypasses mergekit's architecture detection, which is useful for
 new model architectures that mergekit doesn't support yet.
 
 Usage:
-    python scripts/merge/linear_merge.py \
+    python scripts/merge/direct_merge.py \
         --models /path/model1 /path/model2 /path/model3 \
         --output_dir /path/to/output \
         --weights 1.0 1.0 1.0
 """
 
 import argparse
-import json
 import os
 import shutil
 from pathlib import Path
@@ -90,7 +89,7 @@ def merge_models(
                 if merged is None:
                     merged = tensor * weights[i]
                 else:
-                    merged = merged + tensor * weights[i]
+                    merged += tensor * weights[i]
             merged_tensors[name] = merged
 
         # Save merged tensors
@@ -124,7 +123,7 @@ def merge_models(
     for f in tokenizer_files:
         src = os.path.join(model_paths[0], f)
         dst = os.path.join(output_dir, f)
-        if os.path.exists(src) and not os.path.exists(dst):
+        if os.path.exists(src):
             shutil.copy(src, dst)
             print(f"Copied {f}")
 
