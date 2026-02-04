@@ -1020,8 +1020,10 @@ def concatenated_forward_olmo(
 
     input_ids = concatenated_batch["concatenated_input_ids"].contiguous()
     input_ids, orig_seq_len = _pad_seq_for_tp(input_ids, tp_degree)
-    logits = model(input_ids).to(torch.float32)
-    logits = logits[:, :orig_seq_len, :]
+    logits = model(input_ids)
+    if hasattr(logits, "full_tensor"):
+        logits = logits.full_tensor()
+    logits = logits.to(torch.float32)[:, :orig_seq_len, :]
 
     if not packing:
         all_logps = _get_batch_logps(
@@ -1066,7 +1068,10 @@ def separate_forward_olmo(
     chosen_batch = process_batch(batch, "chosen")
     chosen_ids = chosen_batch["input_ids"].contiguous()
     chosen_ids, chosen_orig_len = _pad_seq_for_tp(chosen_ids, tp_degree)
-    chosen_logits = model(chosen_ids).to(torch.float32)[:, :chosen_orig_len, :]
+    chosen_logits = model(chosen_ids)
+    if hasattr(chosen_logits, "full_tensor"):
+        chosen_logits = chosen_logits.full_tensor()
+    chosen_logits = chosen_logits.to(torch.float32)[:, :chosen_orig_len, :]
 
     chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
     del chosen_batch, chosen_logits
@@ -1075,7 +1080,10 @@ def separate_forward_olmo(
     rejected_batch = process_batch(batch, "rejected")
     rejected_ids = rejected_batch["input_ids"].contiguous()
     rejected_ids, rejected_orig_len = _pad_seq_for_tp(rejected_ids, tp_degree)
-    rejected_logits = model(rejected_ids).to(torch.float32)[:, :rejected_orig_len, :]
+    rejected_logits = model(rejected_ids)
+    if hasattr(rejected_logits, "full_tensor"):
+        rejected_logits = rejected_logits.full_tensor()
+    rejected_logits = rejected_logits.to(torch.float32)[:, :rejected_orig_len, :]
 
     rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
     del rejected_batch, rejected_logits
