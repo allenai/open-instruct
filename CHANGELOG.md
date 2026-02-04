@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Model merging scripts for Beaker: `mergekit_merge.sh` (mergekit) and `direct_merge.sh` (direct safetensors averaging for hybrid models) (https://github.com/allenai/open-instruct/pull/1459).
 - OLMo 3 tokenizer settings documentation covering chat template decisions for Instruct and Think models (https://github.com/allenai/open-instruct/pull/1455).
 - torch.compile support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1445).
 - Adds a GRPOTrainModule as part of the Olmo-core migration (https://github.com/allenai/open-instruct/pull/1412/)
