@@ -28,6 +28,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
+from strenum import StrEnum
 
 import numpy as np
 import torch
@@ -65,7 +66,7 @@ def config_to_json_serializable(obj: object) -> object:
     return obj
 
 
-class DPOLossType(enum.StrEnum):
+class DPOLossType(StrEnum):
     dpo = "dpo"
     dpo_norm = "dpo_norm"
     simpo = "simpo"
