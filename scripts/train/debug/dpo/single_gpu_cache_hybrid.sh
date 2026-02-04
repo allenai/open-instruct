@@ -13,6 +13,7 @@ uv run python mason.py \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
+    --env 'TORCH_LOGS=graph_breaks,recompiles' \
     --gpus 1 -- torchrun --nproc_per_node=1 open_instruct/dpo_tune_cache.py \
     --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h-long-context-drope/step23842-hf \
     --tokenizer_name /weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h-long-context-drope/step23842-hf \
