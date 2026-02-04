@@ -23,10 +23,7 @@ from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMo
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import CheckpointerCallback
-from olmo_core.train.train_module.transformer import (
-    TransformerDataParallelConfig,
-    TransformerDataParallelWrappingStrategy,
-)
+from olmo_core.train.train_module.transformer import config as transformer_config
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
@@ -280,10 +277,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     dataset.set_format(type="pt")  # Must be after shuffle (shuffle resets format)
 
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
-    assert args.tensor_parallel_degree == 1, "Tensor parallelism not supported in DPO; use HSDP only."
-    assert args.context_parallel_degree == 1, "Context parallelism not supported in DPO; use HSDP only."
-    assert args.pipeline_parallel_degree == 1, "Pipeline parallelism not supported in DPO; use HSDP only."
-    dp_world_size = world_size
+    parallelism_factor = args.tensor_parallel_degree * args.context_parallel_degree
+    dp_world_size = world_size // parallelism_factor
 
     logger_utils.setup_logger(rank=dp_rank)
 
@@ -352,13 +347,17 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     optim_config = AdamWConfig(lr=args.learning_rate, weight_decay=args.weight_decay, fused=args.fused_optimizer)
     scheduler = _setup_scheduler(args, num_training_steps)
     max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
-    dp_config = TransformerDataParallelConfig(
+    dp_config = transformer_config.TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
         num_replicas=args.num_replicas,
         shard_degree=args.shard_degree,
         param_dtype=DType.bfloat16,
         reduce_dtype=DType.float32,
-        wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
+        wrapping_strategy=transformer_config.TransformerDataParallelWrappingStrategy.blocks,
+    )
+    tp_config = transformer_config.TransformerTensorParallelConfig(degree=args.tensor_parallel_degree)
+    cp_config = transformer_config.TransformerContextParallelConfig.llama3(
+        degree=args.context_parallel_degree, head_stride=4
     )
 
     train_module = DPOTrainModule(
@@ -368,6 +367,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         max_sequence_length=args.max_seq_length,
         dpo_config=args,
         dp_config=dp_config,
+        tp_config=tp_config,
+        cp_config=cp_config,
         max_grad_norm=max_grad_norm,
         scheduler=scheduler,
         device=device,

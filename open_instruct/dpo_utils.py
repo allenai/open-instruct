@@ -156,8 +156,6 @@ class TrainingConfig:
     """Tensor parallelism degree. Default 1 (disabled)."""
     context_parallel_degree: int = 1
     """Context parallelism degree. Default 1 (disabled)."""
-    pipeline_parallel_degree: int = 1
-    """Pipeline parallelism degree. Default 1 (disabled)."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
     compile_model: bool = True

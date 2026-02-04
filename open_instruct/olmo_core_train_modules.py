@@ -16,7 +16,7 @@ from olmo_core.optim import OptimConfig
 from olmo_core.optim.scheduler import Scheduler
 from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import TransformerTrainModule
-from olmo_core.train.train_module.transformer.config import TransformerDataParallelConfig
+from olmo_core.train.train_module.transformer import config as transformer_config
 from transformers import PreTrainedTokenizer
 
 from open_instruct import data_types, dpo_utils, grpo_utils, logger_utils, model_utils, utils
@@ -43,7 +43,9 @@ class DPOTrainModule(TransformerTrainModule):
         rank_microbatch_size: int,
         max_sequence_length: int,
         dpo_config: dpo_utils.ExperimentConfig,
-        dp_config: TransformerDataParallelConfig | None = None,
+        dp_config: transformer_config.TransformerDataParallelConfig | None = None,
+        tp_config: transformer_config.TransformerTensorParallelConfig | None = None,
+        cp_config: transformer_config.TransformerContextParallelConfig | None = None,
         max_grad_norm: float | None = None,
         scheduler: Scheduler | None = None,
         device: torch.device | None = None,
@@ -56,6 +58,8 @@ class DPOTrainModule(TransformerTrainModule):
             rank_microbatch_size=rank_microbatch_size,
             max_sequence_length=max_sequence_length,
             dp_config=dp_config,
+            tp_config=tp_config,
+            cp_config=cp_config,
             max_grad_norm=max_grad_norm,
             scheduler=scheduler,
             device=device,
@@ -148,7 +152,7 @@ class GRPOTrainModule(TransformerTrainModule):
         grpo_config: grpo_utils.ExperimentConfig,
         tokenizer: PreTrainedTokenizer,
         ref_policy: Transformer | None = None,
-        dp_config: TransformerDataParallelConfig | None = None,
+        dp_config: transformer_config.TransformerDataParallelConfig | None = None,
         max_grad_norm: float | None = None,
         scheduler: Scheduler | None = None,
         device: torch.device | None = None,
