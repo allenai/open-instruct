@@ -326,6 +326,14 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 logger.warning("[freeze_parameters] No parameters found in model - freeze_parameters has no effect")
 
+            # Debug: List ALL trainable parameters BEFORE optimizer creation
+            trainable_params = [(n, p.numel()) for n, p in self.policy.named_parameters() if p.requires_grad]
+            logger.warning(f"[freeze_parameters] Trainable params BEFORE optimizer ({len(trainable_params)} total):")
+            for name, numel in trainable_params[:20]:  # First 20
+                logger.warning(f"  - {name}: {numel:,} params")
+            if len(trainable_params) > 20:
+                logger.warning(f"  ... and {len(trainable_params) - 20} more")
+
         # Note: When freezing parameters, keep embed_tokens trainable so gradient checkpointing
         # sees inputs with requires_grad=True. Otherwise use_reentrant=False would be needed,
         # but that conflicts with DeepSpeed ZeRO-3.
@@ -335,19 +343,37 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             # Only include trainable parameters (those with requires_grad=True)
             optim_params = [p for p in self.policy.parameters() if p.requires_grad]
+
+        # Debug: Log optim_params structure before creating optimizer
+        if args.freeze_parameters and self.rank == 0:
+            if isinstance(optim_params, list) and len(optim_params) > 0:
+                if isinstance(optim_params[0], dict):
+                    # List of param group dicts (from get_optimizer_grouped_parameters)
+                    for i, group in enumerate(optim_params):
+                        params_list = list(group.get("params", []))
+                        logger.warning(f"[freeze_parameters] optim_params group {i}: {len(params_list)} params")
+                else:
+                    # Flat list of params
+                    logger.warning(f"[freeze_parameters] optim_params: flat list of {len(optim_params)} params")
+            else:
+                logger.warning(f"[freeze_parameters] optim_params is empty or not a list: {type(optim_params)}")
+
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
 
         # Log optimizer param groups for debugging freeze_parameters
         if args.freeze_parameters and self.rank == 0:
-            total_optimizer_params = 0
-            for i, group in enumerate(self.optimizer.param_groups):
-                group_params = sum(p.numel() for p in group["params"])
-                total_optimizer_params += group_params
-                logger.warning(
-                    f"[freeze_parameters] Optimizer group {i}: {len(group['params'])} tensors, "
-                    f"{group_params:,} params, lr={group.get('lr', 'default')}"
-                )
-            logger.warning(f"[freeze_parameters] Total optimizer params: {total_optimizer_params:,}")
+            try:
+                total_optimizer_params = 0
+                for i, group in enumerate(self.optimizer.param_groups):
+                    group_params = sum(p.numel() for p in group["params"])
+                    total_optimizer_params += group_params
+                    logger.warning(
+                        f"[freeze_parameters] Optimizer group {i}: {len(group['params'])} tensors, "
+                        f"{group_params:,} params, lr={group.get('lr', 'default')}"
+                    )
+                logger.warning(f"[freeze_parameters] Total optimizer params: {total_optimizer_params:,}")
+            except Exception as e:
+                logger.warning(f"[freeze_parameters] Error logging pre-DS optimizer params: {e}")
 
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
