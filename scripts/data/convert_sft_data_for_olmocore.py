@@ -309,7 +309,13 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         # Load raw dataset before tokenization
         dataset_name = args.dataset_mixer_list[0]
         dataset_split = args.dataset_mixer_list_splits[0]
+
+        # Extract the weight/sampling factor from dataset_mixer_list[1]
+        frac_or_num_samples_str = args.dataset_mixer_list[1]
+        frac_or_num_samples = float(frac_or_num_samples_str) if "." in frac_or_num_samples_str else int(frac_or_num_samples_str)
+
         print(f"Loading raw dataset {dataset_name} (split: {dataset_split}) to split by field '{args.dataset_split_field}'...")
+        print(f"Sampling factor: {frac_or_num_samples} ({'proportion' if isinstance(frac_or_num_samples, float) else 'absolute count'})")
         raw_dataset = load_dataset(dataset_name, split=dataset_split)
 
         # Check if field exists
@@ -342,7 +348,42 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
 
             # Filter dataset to this split value
             split_dataset = raw_dataset.filter(lambda x: x[args.dataset_split_field] == split_value)
-            print(f"Filtered dataset size: {len(split_dataset):,} examples")
+            original_split_size = len(split_dataset)
+            print(f"Filtered dataset size: {original_split_size:,} examples")
+
+            # Apply sampling/upsampling based on the weight from dataset_mixer_list
+            if isinstance(frac_or_num_samples, float):
+                # Float: proportion of the dataset
+                target_size = int(frac_or_num_samples * original_split_size)
+            else:
+                # Int: absolute sample count
+                target_size = frac_or_num_samples
+
+            if target_size != original_split_size:
+                print(f"Applying sampling: {original_split_size:,} -> {target_size:,} examples")
+                if target_size > original_split_size:
+                    # Upsample (with replacement)
+                    full_repeats = target_size // original_split_size
+                    extra_samples = target_size % original_split_size
+                    indices = []
+                    for _ in range(full_repeats):
+                        indices.extend(range(original_split_size))
+                    if extra_samples > 0:
+                        import numpy as np
+                        rng = np.random.RandomState(args.shuffle_seed)
+                        extra_indices = rng.choice(original_split_size, size=extra_samples, replace=False)
+                        indices.extend(extra_indices.tolist())
+                    split_dataset = split_dataset.select(indices)
+                    print(f"  Upsampled: {full_repeats} full repeats + {extra_samples} extra samples")
+                else:
+                    # Downsample
+                    import numpy as np
+                    rng = np.random.RandomState(args.shuffle_seed)
+                    indices = rng.choice(original_split_size, size=target_size, replace=False)
+                    split_dataset = split_dataset.select(sorted(indices.tolist()))
+                    print(f"  Downsampled to {target_size:,} examples")
+
+                print(f"Final split size after sampling: {len(split_dataset):,} examples")
 
             # Now tokenize this split using the same pipeline as before
             process_single_split(
