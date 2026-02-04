@@ -44,6 +44,7 @@ The main things we are looking for are:
 """
 
 import copy
+import functools
 import hashlib
 import json
 import multiprocessing
@@ -904,7 +905,9 @@ class TokenizerConfig:
                     " you should use only `--tokenizer_name_or_path` in the future as `tokenizer_name` is deprecated."
                 )
             self.tokenizer_name_or_path = self.tokenizer_name
-        return GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
+        tokenizer = GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
+        tokenizer.apply_chat_template = functools.partial(tokenizer.apply_chat_template, return_dict=False)
+        return tokenizer
 
 
 # TODO: for testing, we should load the tokenizer from the sft / dpo / rl and make sure they are all the same.
