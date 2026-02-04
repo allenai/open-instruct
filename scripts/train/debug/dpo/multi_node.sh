@@ -46,7 +46,6 @@ uv run python mason.py \
     --with_tracking \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \
-    --context_parallel_degree 2 \
-    --shard_degree 4 \
+    --shard_degree 8 \
     --num_replicas 2 \
     --try_auto_save_to_beaker false

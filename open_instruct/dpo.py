@@ -220,6 +220,16 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             "Either disable packing or disable compile_model."
         )
 
+    if args.tensor_parallel_degree > 1:
+        raise NotImplementedError(
+            "Tensor parallelism is not supported with DPO (DTensor view ops are incompatible with torch.compile)."
+        )
+
+    if args.context_parallel_degree > 1:
+        raise NotImplementedError(
+            "Context parallelism is not supported with DPO (requires batch_shard_by_document integration)."
+        )
+
     if args.dpo_use_paged_optimizer:
         raise ValueError("dpo_use_paged_optimizer is not supported with OLMo-core DPO training.")
 
