@@ -34,8 +34,8 @@ trap cleanup EXIT
 if curl -s "$WORDLE_URL/reset" -X POST -H "Content-Type: application/json" -d '{}' > /dev/null 2>&1; then
     echo "Wordle OpenEnv server is already running at $WORDLE_URL"
 else
-    echo "Starting Wordle OpenEnv server..."
-    uv run python -m openenv.servers.wordle --port "$WORDLE_PORT" > /dev/null 2>&1 &
+    echo "Starting Wordle OpenEnv server (textarena_env)..."
+    uv run python -c "from textarena_env.server.app import main; main(port=$WORDLE_PORT)" > /dev/null 2>&1 &
     WORDLE_PID=$!
 
     # Wait for server to be ready (max 30 seconds)
@@ -57,11 +57,11 @@ echo "Starting Wordle environment training (1 GPU, 24 episodes = 3 training step
 
 cd "$REPO_ROOT"
 uv run python open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/rlenv-wordle 1.0 \
+    --dataset_mixer_list hamishivi/rlenv-wordle-nothink 1.0 \
     --dataset_mixer_list_splits train \
-    --max_prompt_token_length 512 \
-    --response_length 512 \
-    --pack_length 1024 \
+    --max_prompt_token_length 2048 \
+    --response_length 2048 \
+    --pack_length 4096 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 4 \
     --num_samples_per_prompt_rollout 2 \
@@ -82,11 +82,12 @@ uv run python open_instruct/grpo_fast.py \
     --single_gpu_mode \
     --push_to_hub false \
     --save_traces \
-    --env_name openenv \
+    --env_name openenv_text \
     --env_base_url "$WORDLE_URL" \
     --env_pool_size 4 \
     --env_max_steps 6 \
-    --tool_parser_type vllm_hermes \
+    --no_filter_zero_std_samples \
+    --dataset_skip_cache \
     --output_dir output/wordle_debug
 
 echo "Training complete!"

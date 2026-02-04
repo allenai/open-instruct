@@ -1001,10 +1001,69 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
             # Check for tool calls
             if actor.tool_parser is None or not all_allowed_tools:
+                # Text-based environment: send raw output as message
+                if env_actor is not None and not env_tool_names and state.env_state is not None:
+                    try:
+                        state.num_calls += 1
+                        start_time = time.perf_counter()
+                        # Send raw text as a "message" tool call for text-based envs
+                        env_tool_call = EnvToolCall(name="message", args={"message": output.text}, id=None)
+                        step_result = await env_actor.step.remote(env_tool_call)
+
+                        state.env_state["rewards"].append(step_result.reward)
+                        state.env_state["done"] = step_result.done
+                        state.env_state["info"].update(step_result.info)
+                        state.env_state["step_count"] += 1
+
+                        # Add observation to conversation
+                        if step_result.observation:
+                            obs_tokens = actor.llm_engine.tokenizer.encode(
+                                f"\n{step_result.observation}\n", add_special_tokens=False
+                            )
+                            state.current_prompt.extend(obs_tokens)
+                            state.response_tokens.extend(obs_tokens)
+                            state.response_logprobs.extend([float("nan")] * len(obs_tokens))
+                            state.response_masks.extend([0] * len(obs_tokens))
+
+                        state.tool_call_stats.append(ToolCallStats("message", True, time.perf_counter() - start_time))
+                        if step_result.done:
+                            break
+                        continue  # Continue loop for more turns
+                    except Exception as e:
+                        logger.warning(f"Text environment step failed: {e}")
+                        state.env_state["done"] = True
                 break
 
             tool_calls = [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in all_allowed_tools]
             if not tool_calls:
+                # Text-based environment: send raw output as message
+                if env_actor is not None and not env_tool_names and state.env_state is not None:
+                    try:
+                        state.num_calls += 1
+                        start_time = time.perf_counter()
+                        env_tool_call = EnvToolCall(name="message", args={"message": output.text}, id=None)
+                        step_result = await env_actor.step.remote(env_tool_call)
+
+                        state.env_state["rewards"].append(step_result.reward)
+                        state.env_state["done"] = step_result.done
+                        state.env_state["info"].update(step_result.info)
+                        state.env_state["step_count"] += 1
+
+                        if step_result.observation:
+                            obs_tokens = actor.llm_engine.tokenizer.encode(
+                                f"\n{step_result.observation}\n", add_special_tokens=False
+                            )
+                            state.current_prompt.extend(obs_tokens)
+                            state.response_tokens.extend(obs_tokens)
+                            state.response_logprobs.extend([float("nan")] * len(obs_tokens))
+                            state.response_masks.extend([0] * len(obs_tokens))
+
+                        state.tool_call_stats.append(ToolCallStats("message", True, time.perf_counter() - start_time))
+                        if step_result.done:
+                            break
+                        continue
+                    except Exception as e:
+                        logger.warning(f"Text environment step failed: {e}")
                 if state.env_state is not None:
                     state.env_state["done"] = True
                 break

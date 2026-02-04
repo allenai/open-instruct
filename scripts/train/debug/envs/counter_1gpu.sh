@@ -17,11 +17,11 @@ echo "Starting CounterEnv training (1 GPU, 80 episodes = 5 training steps)..."
 
 cd "$REPO_ROOT"
 uv run python open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/rlenv-counter 1.0 \
+    --dataset_mixer_list hamishivi/rlenv-counter-nothink 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 512 \
-    --response_length 256 \
-    --pack_length 768 \
+    --response_length 1024 \
+    --pack_length 1536 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 4 \
     --num_samples_per_prompt_rollout 4 \
@@ -47,6 +47,7 @@ uv run python open_instruct/grpo_fast.py \
     --env_max_steps 20 \
     --tool_parser_type vllm_hermes \
     --no_filter_zero_std_samples \
+    --dataset_skip_cache \
     --output_dir output/counter_debug
 
 echo "Training complete!"

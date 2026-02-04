@@ -17,11 +17,11 @@ echo "Starting GuessNumberEnv training (1 GPU, 24 episodes = 3 training steps)..
 
 cd "$REPO_ROOT"
 uv run python open_instruct/grpo_fast.py \
-    --dataset_mixer_list hamishivi/rlenv-guess-number 1.0 \
+    --dataset_mixer_list hamishivi/rlenv-guess-number-nothink 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 512 \
-    --response_length 256 \
-    --pack_length 768 \
+    --response_length 1024 \
+    --pack_length 1536 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 4 \
     --num_samples_per_prompt_rollout 2 \
@@ -46,6 +46,7 @@ uv run python open_instruct/grpo_fast.py \
     --env_pool_size 4 \
     --env_max_steps 10 \
     --tool_parser_type vllm_hermes \
+    --no_filter_zero_std_samples \
     --output_dir output/guess_number_debug
 
 echo "Training complete!"
