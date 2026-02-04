@@ -127,19 +127,15 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
 def _apply_parallelism(
     model,
     device: torch.device,
-    tensor_parallel_degree: int = 1,
-    context_parallel_degree: int = 1,
     pipeline_parallel_degree: int = 1,
     shard_degree: int | None = None,
     num_replicas: int | None = None,
 ):
-    """Apply parallelism strategies to model (HSDP, TP, CP, PP).
+    """Apply parallelism strategies to model (HSDP, PP).
 
     Args:
         model: The model to apply parallelism to.
         device: The device to use.
-        tensor_parallel_degree: Tensor parallelism degree (default 1, disabled).
-        context_parallel_degree: Context parallelism degree (default 1, disabled).
         pipeline_parallel_degree: Pipeline parallelism degree (default 1, disabled).
         shard_degree: FSDP shard degree (None = auto-detect).
         num_replicas: Number of FSDP replicas (None = auto-detect).
@@ -147,9 +143,6 @@ def _apply_parallelism(
     Returns:
         The model with parallelism applied.
     """
-    if tensor_parallel_degree > 1 and context_parallel_degree > 1:
-        raise ValueError("Cannot use both tensor parallelism and context parallelism simultaneously.")
-
     dp_config = TransformerDataParallelConfig(
         name=DataParallelType.hsdp,
         num_replicas=num_replicas,
@@ -159,20 +152,10 @@ def _apply_parallelism(
         wrapping_strategy=TransformerDataParallelWrappingStrategy.blocks,
     )
 
-    tp_config = tensor_parallel_degree if tensor_parallel_degree > 1 else None
-    cp_config = context_parallel_degree if context_parallel_degree > 1 else None
     pp_config = pipeline_parallel_degree if pipeline_parallel_degree > 1 else None
 
-    world_mesh = build_world_mesh(dp=dp_config, tp=tp_config, cp=cp_config, pp=pp_config, device_type=device.type)
+    world_mesh = build_world_mesh(dp=dp_config, pp=pp_config, device_type=device.type)
     dp_mesh = get_dp_model_mesh(world_mesh)
-
-    if tensor_parallel_degree > 1:
-        logger.info(f"Applying tensor parallelism with degree={tensor_parallel_degree}")
-        tp_mesh = world_mesh["tp"]
-        model.apply_tp(tp_mesh)
-
-    if context_parallel_degree > 1:
-        logger.info(f"Applying context parallelism with degree={context_parallel_degree}")
 
     if pipeline_parallel_degree > 1:
         logger.info(f"Applying pipeline parallelism with degree={pipeline_parallel_degree}")
@@ -340,8 +323,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     dataset.set_format(type="pt")  # Must be after shuffle (shuffle resets format)
 
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
-    parallelism_factor = args.tensor_parallel_degree * args.context_parallel_degree * args.pipeline_parallel_degree
-    dp_world_size = world_size // parallelism_factor
+    dp_world_size = world_size // args.pipeline_parallel_degree
 
     logger_utils.setup_logger(rank=dp_rank)
 
@@ -405,15 +387,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         disable_adapter_context=None,
     )
 
-    model = _apply_parallelism(
-        model,
-        device,
-        args.tensor_parallel_degree,
-        args.context_parallel_degree,
-        args.pipeline_parallel_degree,
-        args.shard_degree,
-        args.num_replicas,
-    )
+    model = _apply_parallelism(model, device, args.pipeline_parallel_degree, args.shard_degree, args.num_replicas)
     logger.info("Caching reference logprobs...")
     reference_cache = dpo_utils.build_reference_logprobs_cache(model=model, **cache_kwargs)
     cache_mem_bytes = sum(t.numel() * t.element_size() for t in reference_cache.tensors.values())
