@@ -38,6 +38,9 @@ The main things we are looking for are:
     * Sometimes we also launch on places that don't have a shared cache (e.g., GCP), so we would
     download individual datasets 32 times, and wait for concatenation and tokenization (actually
     twice because the `with accelerator.main_process_first()` function assumes a shared cache)
+
+
+## TODO: We should just simplify the tokenization setups. We have multiple "rlvr_tokenize", etc. This came from a previous version of version handling that prioritised backwards compatibility, but I think in practice we should just directly edit these functions + invalidate caches.
 """
 
 import copy
@@ -47,7 +50,7 @@ import multiprocessing
 import os
 from dataclasses import asdict, dataclass, field
 from functools import cached_property
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -64,50 +67,31 @@ from transformers import (
     LlamaTokenizerFast,
     PreTrainedTokenizer,
 )
-from transformers.utils.hub import _CACHED_NO_EXIST, TRANSFORMERS_CACHE, extract_commit_hash, try_to_load_from_cache
+from transformers.utils.hub import extract_commit_hash
 
+from open_instruct import launch_utils, logger_utils
 from open_instruct.utils import hf_whoami, max_num_processes
+
+logger = logger_utils.setup_logger(__name__)
 
 
 # ----------------------------------------------------------------------------
 # Utilities
-def custom_cached_file(model_name_or_path: str, filename: str, revision: str = None, repo_type: str = "model"):
-    """@vwxyzjn: HF's `cached_file` no longer works for `repo_type="dataset"`."""
-    # local_file = os.path.join(model_name_or_path, filename)
-
-    if os.path.isdir(model_name_or_path):
-        resolved_file = os.path.join(model_name_or_path, filename)
-        if os.path.isfile(resolved_file):
-            return resolved_file
-        else:
-            return None
-    else:
-        resolved_file = try_to_load_from_cache(
-            model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type
-        )
-        # special return value from try_to_load_from_cache
-        if resolved_file == _CACHED_NO_EXIST:
-            return None
-        return resolved_file
-
-
 def get_commit_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
-) -> str:
-    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+) -> str | None:
+    file = launch_utils.custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     commit_hash = extract_commit_hash(file, None)
     return commit_hash
 
 
 def get_file_hash(
-    model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
+    model_name_or_path: str, revision: str | None, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
-    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+    file = launch_utils.custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     if isinstance(file, str):
         with open(file, "rb") as f:
             return hashlib.sha256(f.read()).hexdigest()
-    elif file is _CACHED_NO_EXIST:
-        return f"{filename} not found"
     elif file is None:
         return f"{filename} not found"
     else:
@@ -115,9 +99,15 @@ def get_file_hash(
 
 
 def get_files_hash_if_exists(
-    model_name_or_path: str, revision: str, filenames: List[str], repo_type: str = "model"
-) -> List[str]:
+    model_name_or_path: str, revision: str | None, filenames: list[str], repo_type: str = "model"
+) -> list[str]:
     return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
+
+
+def _preserve_column(column_name: str, dataset, target_columns: list) -> list:
+    if column_name in dataset.column_names and column_name not in target_columns:
+        target_columns = target_columns + [column_name]
+    return target_columns
 
 
 # Performance tuning. Some rough numbers:
@@ -160,9 +150,11 @@ def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrai
 # ----------------------------------------------------------------------------
 # Tokenization
 # Chat templates
-# flake8: noqa
 # note we added `{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}`
 # because we want the template to not output eos_token if `add_generation_prompt=True`
+#
+# For Olmo 3 tokenizer settings and chat template decisions, see:
+# docs/olmo3.md (https://allenai.github.io/open-instruct/olmo3/#tokenizer-settings)
 CHAT_TEMPLATES = {
     "simple_concat_with_space": (
         "{% for message in messages %}"
@@ -537,13 +529,13 @@ CHAT_TEMPLATES = {
     ),
     "olmo_thinker_code_rlzero": (
         "Solve the following code problem step by step. "
-        f"The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem."
+        "The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem."
         "\n\n"
         "{% for message in messages %}"
         "{{ '\n\n' if not loop.first else '' }}"
         "{{ message['content'] + '\n' }}"
         "{% if loop.last and add_generation_prompt %}"
-        f"\nRemember to put your solution inside the ```\npython\nCODE\n``` tags"
+        "\nRemember to put your solution inside the ```\npython\nCODE\n``` tags"
         "{% endif %}"
         "{% endfor %}"
     ),
@@ -641,7 +633,6 @@ CHAT_TEMPLATES = {
         "{% endfor %}"
     ),
 }
-# flake8: noqa
 
 
 def get_tokenizer_simple_v1(tc: "TokenizerConfig"):
@@ -664,7 +655,7 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     # only add if the pad token is not present already.
-    if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
+    if isinstance(tokenizer, (LlamaTokenizer, LlamaTokenizerFast)):
         num_added_tokens = tokenizer.add_special_tokens(
             {"bos_token": "<s>", "eos_token": "</s>", "unk_token": "<unk>", "pad_token": "<pad>"}
         )
@@ -700,7 +691,7 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
                 tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
             ).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
+            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -726,7 +717,7 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     # only add if the pad token is not present already, or if the current one is set to eos_token_id.
     if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
-        if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
+        if isinstance(tokenizer, (LlamaTokenizer, LlamaTokenizerFast)):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens in [0, 1], (
                 "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
@@ -764,7 +755,7 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
                 tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
             ).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
+            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
     elif tc.chat_template_name in CHAT_TEMPLATES:
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
@@ -805,7 +796,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     # only add if the pad token is not present already, or if the current one is set to eos_token_id.
     if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
-        if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
+        if isinstance(tokenizer, (LlamaTokenizer, LlamaTokenizerFast)):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens in [0, 1], (
                 "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
@@ -814,7 +805,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
                 tokenizer.bos_token = tokenizer.eos_token
-                if "olmo" not in tc.chat_template_name:
+                if tc.chat_template_name is None or "olmo" not in tc.chat_template_name:
                     assert tc.add_bos, (
                         "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence "
                         "if using an older chat template."
@@ -847,7 +838,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
                 tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
             ).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
+            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -877,20 +868,20 @@ RAW_PROMPT_KEY = "prompt"
 
 @dataclass
 class TokenizerConfig:
-    tokenizer_name_or_path: Optional[str] = None
-    tokenizer_revision: Optional[str] = None
+    tokenizer_name_or_path: str | None = None
+    tokenizer_revision: str | None = None
     trust_remote_code: bool = False
     use_fast: bool = True
-    chat_template_name: Optional[str] = None  # default to using the tokenizer chat template
+    chat_template_name: str | None = None  # default to using the tokenizer chat template
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
     # for tracking purposes
-    tokenizer_files_hash: Optional[List[str]] = None
+    tokenizer_files_hash: list[str] | None = None
 
     # backward compatibility to make sure script runs
     use_slow_tokenizer: bool = False  # completely ignored
-    tokenizer_name: Optional[str] = None
+    tokenizer_name: str | None = None
     ground_truths_key: str = GROUND_TRUTHS_KEY
     """columns name for the ground truth"""
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
@@ -898,12 +889,14 @@ class TokenizerConfig:
 
     @cached_property
     def tokenizer(self):
+        if self.tokenizer_name_or_path is None:
+            raise ValueError("tokenizer_name_or_path must be set")
         files_hash = get_files_hash_if_exists(
             self.tokenizer_name_or_path,
             self.tokenizer_revision,
             filenames=["tokenizer_config.json", "tokenizer.json", "special_tokens_map.json", "vocab.json"],
         )
-        self.tokenizer_files_hash = ",".join(files_hash)
+        self.tokenizer_files_hash = files_hash
         if self.tokenizer_name is not None and self.tokenizer_name_or_path is None:
             if self.tokenizer_name != self.tokenizer_name_or_path:
                 raise ValueError(
@@ -939,6 +932,57 @@ def remove_dataset_source_field(dataset: Dataset) -> Dataset:
     return dataset
 
 
+TOOLS_COLUMN_KEY = "tools"
+
+# Cache version: increment this when transformation logic changes significantly
+# to invalidate old caches. v2: Added per-sample tool filtering in rlvr_tokenize_v3.
+DATASET_CACHE_VERSION = "v2"
+
+
+def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
+    """Validate that configured tools match tools in dataset's 'tools' column.
+
+    The tools column is a list of tool call names (strings) that are active for each sample.
+    This function validates that all tools in the dataset are configured (no unknown tools).
+    Extraneous configured tools (not in dataset) are allowed but logged as a warning.
+
+    Args:
+        dataset: The dataset to validate.
+        configured_tool_names: List of tool names configured in the launch job
+            (e.g., ["python", "search"]).
+        dataset_name: Name of the dataset for error messages.
+
+    Raises:
+        ValueError: If dataset contains tools that are not configured.
+    """
+    if TOOLS_COLUMN_KEY not in dataset.column_names:
+        return
+
+    dataset_tool_names: set[str] = set()
+    for tools in dataset[TOOLS_COLUMN_KEY]:
+        if tools is not None:
+            dataset_tool_names.update(t for t in tools if t)
+
+    unconfigured_tools = dataset_tool_names - set(configured_tool_names)
+    if unconfigured_tools:
+        raise ValueError(
+            f"Dataset '{dataset_name}' contains tools {sorted(unconfigured_tools)} that are not configured. "
+            f"Configured tools: {configured_tool_names}. "
+            f"All tools in the dataset must be configured for execution."
+        )
+
+    # extraneous tools might happen e.g. if you subsample a dataset,
+    # and end up with no samples with some set of tools present in the entire dataset.
+    # or you might just accidentally include tools you don't need.
+    extraneous_tools = set(configured_tool_names) - dataset_tool_names
+    if extraneous_tools:
+        logger.warning(
+            f"Configured tools {sorted(extraneous_tools)} are not found in {dataset_name}'s "
+            f"'{TOOLS_COLUMN_KEY}' column. Tools found in dataset: {sorted(dataset_tool_names)}. "
+            f"These tools will be available but never used by this dataset."
+        )
+
+
 # Preference dataset
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `CHOSEN_ATTENTION_MASK_KEY` and `REJECTED_ATTENTION_MASK_KEY`
@@ -969,12 +1013,9 @@ TOKENIZED_PREFERENCE_DATASET_KEYS = [
 
 # TODO: allow passing in sft_message key, so we can train on "chosen" of pref dataset.
 def sft_tokenize_v1(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
+    row: dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
 ):
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
-        prompt = row[sft_messages_key][:-1]
+    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
@@ -986,13 +1027,10 @@ def sft_tokenize_v1(
 
 
 def sft_tokenize_mask_out_prompt_v1(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
+    row: dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
 ):
     """mask out the prompt tokens by manipulating labels"""
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
-        prompt = row[sft_messages_key][:-1]
+    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
@@ -1004,10 +1042,10 @@ def sft_tokenize_mask_out_prompt_v1(
 
 
 def sft_filter_v1(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
-    max_prompt_token_length: Optional[int] = None,
-    max_token_length: Optional[int] = None,
+    max_prompt_token_length: int | None = None,
+    max_token_length: int | None = None,
     need_contain_labels: bool = True,
 ):
     max_prompt_token_length_ok = True
@@ -1022,12 +1060,12 @@ def sft_filter_v1(
     return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
 
-def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
-    input_ids = tokenizer.apply_chat_template(
+    input_ids_result = tokenizer.apply_chat_template(
         conversation=messages,
         tokenize=True,
         return_tensors="pt",
@@ -1036,6 +1074,8 @@ def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrained
         max_length=max_seq_length,
         add_generation_prompt=False,
     )
+    assert isinstance(input_ids_result, torch.Tensor)
+    input_ids = input_ids_result
     labels = input_ids.clone()
     # mask the non-assistant part for avoiding loss
     for message_idx, message in enumerate(messages):
@@ -1090,12 +1130,12 @@ def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrained
     return row
 
 
-def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
-    input_ids = tokenizer.apply_chat_template(
+    input_ids_result = tokenizer.apply_chat_template(
         conversation=messages,
         tokenize=True,
         return_tensors="pt",
@@ -1104,9 +1144,11 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreT
         max_length=max_seq_length,
         add_generation_prompt=False,
     )
+    assert isinstance(input_ids_result, torch.Tensor)
+    input_ids = input_ids_result
     labels = input_ids.clone()
     # mask all turns but the last for avoiding loss
-    for message_idx, message in enumerate(messages):
+    for message_idx, _message in enumerate(messages):
         if message_idx < len(messages) - 1:
             # we calculate the start index of this non-assistant message
             if message_idx == 0:
@@ -1158,11 +1200,11 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreT
     return row
 
 
-def sft_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
+def sft_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     return any(x != -100 for x in row[LABELS_KEY])
 
 
-def preference_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
+def preference_tokenize_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     # Extract prompt (all messages except the last one)
     prompt = row["chosen"][:-1]
 
@@ -1182,15 +1224,14 @@ def preference_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
 
 
 def preference_filter_v1(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
-    max_prompt_token_length: Optional[int] = None,
-    max_token_length: Optional[int] = None,
+    max_prompt_token_length: int | None = None,
+    max_token_length: int | None = None,
 ):
     # Check prompt length if specified
-    if max_prompt_token_length is not None:
-        if len(row[INPUT_IDS_PROMPT_KEY]) > max_prompt_token_length:
-            return False
+    if max_prompt_token_length is not None and len(row[INPUT_IDS_PROMPT_KEY]) > max_prompt_token_length:
+        return False
 
     # Check total sequence lengths if specified
     if max_token_length is not None:
@@ -1203,7 +1244,7 @@ def preference_filter_v1(
 
 
 def preference_tulu_tokenize_and_truncate_v1(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     max_seq_length: int,
     chosen_key: str = DEFAULT_CHOSEN_KEY,
@@ -1239,7 +1280,7 @@ def preference_tulu_tokenize_and_truncate_v1(
 
 
 def preference_tulu_tokenize_and_truncate_v1_2(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     max_seq_length: int,
     chosen_key: str = DEFAULT_CHOSEN_KEY,
@@ -1274,22 +1315,44 @@ def preference_tulu_tokenize_and_truncate_v1_2(
     }
 
 
-def preference_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
+def preference_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     return any(x != -100 for x in row[CHOSEN_LABELS_KEY]) and any(x != -100 for x in row[REJECTED_LABELS_KEY])
 
 
 def rlvr_tokenize_v1(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
+    system_prompt_override: str | None = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
+    pass_tools_to_chat_template: bool = True,
 ):
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
-        prompt = row[sft_messages_key][:-1]
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
+
+    # Override the system prompt if provided
+    if system_prompt_override:
+        if prompt[0]["role"] == "system":
+            prompt = prompt[1:]
+        prompt = [{"role": "system", "content": system_prompt_override}] + prompt
+
+    tools_for_template: list[dict[str, Any]] | None = None
+    if pass_tools_to_chat_template and tool_definitions:
+        sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+        if sample_active_tools is not None:
+            active_tool_names = set(sample_active_tools)
+            filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
+            if filtered_tools:
+                tools_for_template = filtered_tools
+        else:
+            tools_for_template = tool_definitions
+
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
+        prompt,
+        add_generation_prompt=True,
+        tools=tools_for_template,  # type: ignore[arg-type]
+    )
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
@@ -1302,16 +1365,13 @@ def rlvr_tokenize_v1(
 
 
 def rlvr_tokenize_v2(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
 ):
-    if len(row[sft_messages_key]) == 1:
-        prompt = row[sft_messages_key]
-    else:
-        prompt = row[sft_messages_key][:-1]
+    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     # weird issue with qwen: sometimes the padding token ends up in the input ids?
@@ -1323,32 +1383,36 @@ def rlvr_tokenize_v2(
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
-    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
-    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
-    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
-    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # if the verifier source is a string, we wrap it in a list (compatibility with multi-verifier datasets)
+    # we also then wrap ground truths in a list to match.
+    if isinstance(verifier_source_val, str):
+        verifier_source_val = [verifier_source_val]
+        ground_truths_val = [ground_truths_val]
+    row[GROUND_TRUTHS_KEY] = ground_truths_val
+    row[VERIFIER_SOURCE_KEY] = verifier_source_val
+
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
-    # some basic transformations:
-    # if ground truths is a string, make it a list
-    if isinstance(row[ground_truths_key], str):
-        row[ground_truths_key] = [row[ground_truths_key]]
-    # if dataset source is a string, make it a list
-    if isinstance(row[verifier_source_key], str):
-        row[verifier_source_key] = [row[verifier_source_key]]
     # drop the messages field as it often causes issues.
     row.pop(sft_messages_key)
     return row
 
 
 def rlvr_tokenize_v3(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
-    system_prompt_override: Optional[str] = None,
-    user_prompt_transform: Optional[str] = None,
+    system_prompt_override: str | None = None,
+    user_prompt_transform: str | None = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
+    pass_tools_to_chat_template: bool = True,
 ):
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
@@ -1361,6 +1425,17 @@ def rlvr_tokenize_v3(
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
+    tools_for_template: list[dict[str, Any]] | None = None
+    if pass_tools_to_chat_template and tool_definitions:
+        sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+        if sample_active_tools is not None:
+            active_tool_names = set(sample_active_tools)
+            filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
+            if filtered_tools:
+                tools_for_template = filtered_tools
+        else:
+            tools_for_template = tool_definitions
+
     if user_prompt_transform:
         for message in reversed(prompt):
             if message.get("role") != "user":
@@ -1369,31 +1444,40 @@ def rlvr_tokenize_v3(
             message["content"] = user_prompt_transform.format(prompt=content)
             break
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
+        prompt,
+        add_generation_prompt=True,
+        tools=tools_for_template,  # type: ignore[arg-type]
+    )
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
-    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
-    row[VERIFIER_SOURCE_KEY] = row[verifier_source_key]
-    # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
-    # row[DEFAULT_SFT_MESSAGES_KEY] = prompt
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # Get the raw values from the source keys
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+
+    # if the verifier source is a string, we wrap it in a list (compatibility with multi-verifier datasets)
+    # we also then wrap ground truths in a list to match.
+    if isinstance(verifier_source_val, str):
+        verifier_source_val = [verifier_source_val]
+        ground_truths_val = [ground_truths_val]
+    row[GROUND_TRUTHS_KEY] = ground_truths_val
+    row[VERIFIER_SOURCE_KEY] = verifier_source_val
+
     # concatenate all the previous messages as <role>: <content>\n <role>: <content>\n ...
     row[RAW_PROMPT_KEY] = "\n".join(f"{msg['role']}: {msg['content']}" for msg in prompt)
-    # some basic transformations:
-    # if ground truths is a string, make it a list
-    if isinstance(row[ground_truths_key], str):
-        row[ground_truths_key] = [row[ground_truths_key]]
-    # if dataset source is a string, make it a list
-    if isinstance(row[verifier_source_key], str):
-        row[verifier_source_key] = [row[verifier_source_key]]
     return row
 
 
 def rlvr_filter_v1(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     need_contain_labels: bool = True,
-    max_prompt_token_length: Optional[int] = None,
-    max_token_length: Optional[int] = None,
+    max_prompt_token_length: int | None = None,
+    max_token_length: int | None = None,
 ):
     max_prompt_token_length_ok = True
     if max_prompt_token_length is not None:
@@ -1408,7 +1492,7 @@ def rlvr_filter_v1(
 
 
 def rlvr_max_length_filter_v2(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: Optional[int] = None
+    row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_prompt_token_length: int | None = None
 ):
     if max_prompt_token_length is None:
         return True
@@ -1435,7 +1519,7 @@ class SimplePreferenceCollator:
         """Simple collator for preference dataset (always pad from the RIGHT)"""
         self.pad_token_id = pad_token_id
 
-    def __call__(self, batch: List[Dict[str, int]]):
+    def __call__(self, batch: list[dict[str, list[int]]]):
         """the input will have input_ids_chosen, input_ids_rejected"""
         # Find max length in the batch
         max_length_chosen = -1
@@ -1477,28 +1561,29 @@ class DatasetConfig:
     dataset_name: str
     dataset_split: str
     dataset_revision: str
-    dataset_range: Optional[int] = None
-    transform_fn: List[str] = field(default_factory=list)
-    transform_fn_args: List[Dict[str, Any]] = field(default_factory=list)
-    target_columns: Optional[List[str]] = None
+    dataset_range: int | None = None
+    transform_fn: list[str] = field(default_factory=list)
+    transform_fn_args: list[dict[str, Any]] = field(default_factory=list)
+    target_columns: list[str] | None = None
     dataset_config_seed: int = 42
 
     # for tracking purposes
-    dataset_commit_hash: Optional[str] = None
-    frac_or_num_samples: Optional[Union[int, float]] = None
-    original_dataset_size: Optional[int] = None
+    dataset_commit_hash: str | None = None
+    frac_or_num_samples: int | float | None = None
+    original_dataset_size: int | None = None
     is_upsampled: bool = False
+    dataset: Dataset = field(init=False)
 
     def __post_init__(self):
         # if the file exists locally, use the local file
         if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
             assert self.dataset_split == "train", "Only train split is supported for local jsonl files."
-            self.dataset = load_dataset(
+            dataset = load_dataset(
                 "json", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
         elif os.path.exists(self.dataset_name) and self.dataset_name.endswith(".parquet"):
             assert self.dataset_split == "train", "Only train split is supported for local parquet files."
-            self.dataset = load_dataset(
+            dataset = load_dataset(
                 "parquet", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
         else:
@@ -1506,12 +1591,14 @@ class DatasetConfig:
             self.dataset_commit_hash = get_commit_hash(
                 self.dataset_name, self.dataset_revision, "README.md", "dataset"
             )
-            self.dataset = load_dataset(
+            dataset = load_dataset(
                 self.dataset_name,
                 split=self.dataset_split,
                 revision=self.dataset_revision,
                 num_proc=max_num_processes(),
             )
+        assert isinstance(dataset, Dataset), f"Expected Dataset, got {type(dataset)}"
+        self.dataset = dataset
         if self.dataset_range is None:
             dataset_range = len(self.dataset)
             self.update_range(dataset_range)
@@ -1577,11 +1664,17 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         fn_kwargs = {"tokenizer": tokenizer}
         fn_kwargs.update(fn_args)
 
+        # Compute a custom fingerprint that includes DATASET_CACHE_VERSION to invalidate
+        # HuggingFace's internal .map() cache when transformation logic changes significantly
+        new_fingerprint = hashlib.sha256(
+            f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}".encode()
+        ).hexdigest()[:16]
+
         # perform the transformation
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         # Always preserve dataset_source if it exists
-        if DATASET_ORIGIN_KEY in dataset.column_names and DATASET_ORIGIN_KEY not in target_columns:
-            target_columns = target_columns + [DATASET_ORIGIN_KEY]
+        target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
+        target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
 
         if fn_type == "map":
             dataset = dataset.map(
@@ -1589,12 +1682,14 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
                 fn_kwargs=fn_kwargs,
                 remove_columns=[col for col in dataset.column_names if col not in target_columns],
                 num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+                new_fingerprint=new_fingerprint,
             )
         elif fn_type == "filter":
             dataset = dataset.filter(
                 fn,
                 fn_kwargs=fn_kwargs,
                 num_proc=get_num_proc(len(dataset), num_proc, FILTER_EXAMPLE_PER_SECOND_PER_CPU),
+                new_fingerprint=new_fingerprint,
             )
         # NOTE: elif we can implement packing here to create a packed SFT dataset. Low priority for now.
         else:
@@ -1605,22 +1700,44 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     return dataset
 
 
-def compute_config_hash(dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
-    """Compute a deterministic hash of both configs for caching."""
-    dc_dicts = [{k: v for k, v in asdict(dc).items() if v is not None} for dc in dcs]
+def _get_serializable_dataset_config_dict(dc: DatasetConfig, exclude_none: bool = False) -> dict:
+    """Convert DatasetConfig to a JSON-serializable dict.
+
+    Args:
+        dc: The DatasetConfig to convert.
+        exclude_none: If True, exclude keys with None values (useful for hashing).
+
+    Returns:
+        A dictionary representation of the DatasetConfig, excluding the non-serializable
+        'dataset' field.
+    """
+    d = asdict(dc)
+    d.pop("dataset", None)
+    if exclude_none:
+        d = {k: v for k, v in d.items() if v is not None}
+    return d
+
+
+def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
+    """Compute a deterministic hash of both configs for caching.
+
+    The hash includes DATASET_CACHE_VERSION to invalidate old caches when
+    transformation logic changes significantly.
+    """
+    dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
-    combined_dict = {"dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
+    combined_dict = {"cache_version": DATASET_CACHE_VERSION, "dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
     config_str = json.dumps(combined_dict, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:10]
 
 
 class DatasetTransformationCache:
-    def __init__(self, config_hash: str, hf_entity: Optional[str] = None):
+    def __init__(self, config_hash: str, hf_entity: str | None = None):
         self.config_hash = config_hash
         self.hf_entity = hf_entity or hf_whoami()["name"]
 
     def load_or_transform_dataset(
-        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+        self, dcs: list[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
     ) -> Dataset:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
@@ -1635,17 +1752,18 @@ class DatasetTransformationCache:
                 print("dataset_skip_cache is True, so we will not load the dataset from cache")
             else:
                 # Use the split from the first dataset config as default
-                dataset = load_dataset(
+                loaded_dataset = load_dataset(
                     repo_name,
                     split=DEFAULT_SPLIT_FOR_CACHED_DATASET,
                     revision=self.config_hash,
                     num_proc=max_num_processes(),
                 )
-                if "index" not in dataset.column_names:
-                    dataset = dataset.add_column("index", range(len(dataset)))
-                return dataset
+                assert isinstance(loaded_dataset, Dataset)
+                if "index" not in loaded_dataset.column_names:
+                    loaded_dataset = loaded_dataset.add_column("index", range(len(loaded_dataset)))
+                return loaded_dataset
 
-        print(f"Cache not found, transforming datasets...")
+        print("Cache not found, transforming datasets...")
 
         # Transform each dataset
         transformed_datasets = []
@@ -1697,9 +1815,11 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
 
         # NOTE: Load the dataset again to make sure it's downloaded to the HF cache
         print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
-        return load_dataset(
+        final_dataset = load_dataset(
             repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash, num_proc=max_num_processes()
         )
+        assert isinstance(final_dataset, Dataset)
+        return final_dataset
 
 
 class LocalDatasetTransformationCache:
@@ -1713,22 +1833,23 @@ class LocalDatasetTransformationCache:
         """Get the path to the cached dataset."""
         return os.path.join(self.dataset_local_cache_dir, self.config_hash)
 
-    def save_config(self, config_hash: str, dcs: List[DatasetConfig], tc: TokenizerConfig):
+    def save_config(self, config_hash: str, dcs: list[DatasetConfig], tc: TokenizerConfig):
         """Save the configuration to a JSON file."""
         config_path = os.path.join(self.get_cache_path(), "config.json")
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
 
+        # Filter out `dataset` field because HuggingFace Dataset objects are not JSON serializable
         config_dict = {
             "tokenizer_config": asdict(tc),
-            "dataset_configs": [asdict(dc) for dc in dcs],
+            "dataset_configs": [_get_serializable_dataset_config_dict(dc) for dc in dcs],
             "config_hash": config_hash,
         }
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=2)
 
     def load_or_transform_dataset(
-        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
-    ) -> Tuple[Dataset, Dict[str, Any]]:
+        self, dcs: list[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+    ) -> tuple[Dataset, dict[str, Any]]:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
 
@@ -1741,14 +1862,14 @@ class LocalDatasetTransformationCache:
             # Load statistics from cache if available
             stats_path = os.path.join(cache_path, "dataset_statistics.json")
             if os.path.exists(stats_path):
-                with open(stats_path, "r") as f:
+                with open(stats_path) as f:
                     statistics = json.load(f)
                 return dataset, statistics
             else:
                 # Return empty statistics if not cached
                 return dataset, {"per_dataset_stats": [], "dataset_order": []}
 
-        print(f"Cache not found or invalid, transforming datasets...")
+        print("Cache not found or invalid, transforming datasets...")
 
         # Transform each dataset and collect statistics
         transformed_datasets = []
@@ -1773,7 +1894,7 @@ class LocalDatasetTransformationCache:
                 "original_dataset_size": dc.original_dataset_size,
                 "is_upsampled": dc.is_upsampled,
                 "upsampling_factor": dc.dataset_range / dc.original_dataset_size
-                if dc.original_dataset_size and dc.original_dataset_size > 0
+                if dc.dataset_range is not None and dc.original_dataset_size and dc.original_dataset_size > 0
                 else 1.0,
             }
 
@@ -1824,13 +1945,39 @@ class LocalDatasetTransformationCache:
 
 
 def load_dataset_configs(
-    dataset_mixer_list: List[str],
-    dataset_mixer_list_splits: List[str],
-    dataset_transform_fn: List[str],
-    transform_fn_args: List[Dict[str, Any]],
-    target_columns: Optional[List[str]] = None,
+    dataset_mixer_list: list[str],
+    dataset_mixer_list_splits: list[str],
+    dataset_transform_fn: list[str],
+    transform_fn_args: list[dict[str, Any]],
+    target_columns: list[str] | None = None,
     dataset_config_seed: int = 42,
-) -> List[DatasetConfig]:
+) -> list[DatasetConfig]:
+    """
+    Load and configure datasets from a mixer list.
+
+    Args:
+        dataset_mixer_list: Alternating list of [dataset_name, amount, dataset_name, amount, ...].
+            The 'amount' value determines how many samples to use:
+
+            - Float values (must contain a decimal point): Interpreted as a PROPORTION of the dataset.
+              Examples: "1.0" = 100% of dataset, "0.5" = 50%, "3.0" = 300% (3x upsampling)
+
+            - Integer values (no decimal point): Interpreted as an absolute SAMPLE COUNT.
+              Examples: "100" = exactly 100 samples, "1000" = exactly 1000 samples
+
+            IMPORTANT: "1" means 1 sample, NOT 100% of the dataset. Use "1.0" for 100%.
+            This is a common source of errors - always use decimal notation for proportions.
+
+        dataset_mixer_list_splits: Split names for each dataset (e.g., ["train"]).
+            If a single split is provided, it's used for all datasets.
+        dataset_transform_fn: Transform function names to apply.
+        transform_fn_args: Arguments for transform functions.
+        target_columns: Optional list of columns to keep.
+        dataset_config_seed: Random seed for sampling.
+
+    Returns:
+        List of configured DatasetConfig objects.
+    """
     dcs = []
     if len(dataset_mixer_list_splits) == 1:
         print("by default, we will use the same split for all datasets")
@@ -1844,10 +1991,9 @@ def load_dataset_configs(
     for i in range(0, len(dataset_mixer_list), 2):
         dataset_name = dataset_mixer_list[i]
         frac_or_num_samples = dataset_mixer_list[i + 1]
-        if "." in frac_or_num_samples:
-            frac_or_num_samples = float(frac_or_num_samples)
-        else:
-            frac_or_num_samples = int(frac_or_num_samples)
+        # Parse amount: strings with "." become floats (proportions), without become ints (counts).
+        # IMPORTANT: "1" = 1 sample, "1.0" = 100% of dataset. This is a common mistake!
+        frac_or_num_samples = float(frac_or_num_samples) if "." in frac_or_num_samples else int(frac_or_num_samples)
         # Uses dataset_mixer_list_splits[i] where i increments by 2 (0, 2, 4...). This works because
         # all current usage provides a single split that gets replicated to len(dataset_mixer_list).
         # If different splits per dataset are needed, use dataset_mixer_list_splits[i // 2] instead.
@@ -1875,27 +2021,36 @@ def load_dataset_configs(
             new_range = int(frac_or_num_samples)
 
         print(f"Dataset {dataset_name}: {original_size} -> {new_range} samples (factor: {frac_or_num_samples})")
+
+        # Warn if using a suspiciously small integer count - likely a typo (meant "1.0" not "1")
+        if isinstance(frac_or_num_samples, int) and frac_or_num_samples <= 10 and original_size > 100:
+            logger.warning(
+                f"Dataset '{dataset_name}': Using only {frac_or_num_samples} sample(s) from {original_size} available. "
+                f"Did you mean '{float(frac_or_num_samples)}' for {frac_or_num_samples * 100}% of the dataset? "
+                f"Integer values (no decimal) = sample count, float values (with decimal) = proportion."
+            )
+
         dataset_config.update_range(new_range)
         dcs.append(dataset_config)
     return dcs
 
 
 def get_cached_dataset_tulu_with_statistics(
-    dataset_mixer_list: List[str],
-    dataset_mixer_list_splits: List[str],
+    dataset_mixer_list: list[str],
+    dataset_mixer_list_splits: list[str],
     tc: TokenizerConfig,
-    dataset_transform_fn: List[str],
-    transform_fn_args: List[Dict[str, Any]],
-    target_columns: Optional[List[str]] = None,
+    dataset_transform_fn: list[str],
+    transform_fn_args: list[dict[str, Any]],
+    target_columns: list[str] | None = None,
     dataset_cache_mode: Literal["hf", "local"] = "local",
-    dataset_config_hash: Optional[str] = None,
-    hf_entity: Optional[str] = None,
+    dataset_config_hash: str | None = None,
+    hf_entity: str | None = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
-    system_prompt_override: Optional[str] = None,
-) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
+    system_prompt_override: str | None = None,
+) -> tuple[Dataset, dict[str, Any]]:
     if dataset_config_hash is None:
         dcs = load_dataset_configs(
             dataset_mixer_list,
@@ -1924,19 +2079,19 @@ def get_cached_dataset_tulu_with_statistics(
 
 
 def get_cached_dataset_tulu(
-    dataset_mixer_list: List[str],
-    dataset_mixer_list_splits: List[str],
+    dataset_mixer_list: list[str],
+    dataset_mixer_list_splits: list[str],
     tc: TokenizerConfig,
-    dataset_transform_fn: List[str],
-    transform_fn_args: List[Dict[str, Any]],
-    target_columns: Optional[List[str]] = None,
+    dataset_transform_fn: list[str],
+    transform_fn_args: list[dict[str, Any]],
+    target_columns: list[str] | None = None,
     dataset_cache_mode: Literal["hf", "local"] = "local",
-    dataset_config_hash: Optional[str] = None,
-    hf_entity: Optional[str] = None,
+    dataset_config_hash: str | None = None,
+    hf_entity: str | None = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
-    system_prompt_override: Optional[str] = None,
+    system_prompt_override: str | None = None,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=dataset_mixer_list,

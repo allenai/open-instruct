@@ -4,7 +4,7 @@ import argparse
 import re
 
 import pandas as pd
-from datasets import load_dataset
+from datasets import Dataset, load_dataset
 from huggingface_hub import hf_hub_download, list_repo_files
 
 import open_instruct.utils as open_instruct_utils
@@ -116,8 +116,6 @@ def load_dataset_from_parquet(dataset_name):
     combined_df = pd.concat(dfs, ignore_index=True)
 
     # Convert to HF Dataset
-    from datasets import Dataset
-
     return Dataset.from_pandas(combined_df)
 
 

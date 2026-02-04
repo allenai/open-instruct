@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import pickle
 import shutil
+import subprocess
 import sys
 import time
 import zlib
@@ -292,7 +293,7 @@ def should_execute(program: str, tests: list[Any]) -> bool:
 
 def partial_undo_reliability_guard():
     """Undo the chmod, fchmod, print and open operation"""
-    import builtins
+    import builtins  # noqa: PLC0415
 
     os.chmod = tmp_chmod
     os.fchmod = tmp_fchmod
@@ -323,11 +324,11 @@ def reliability_guard(maximum_memory_bytes: int | None = None):
     Codex paper for more information about OpenAI's code sandbox, and proceed
     with caution.
     """
-    import faulthandler
-    import platform
+    import faulthandler  # noqa: PLC0415
+    import platform  # noqa: PLC0415
 
     if maximum_memory_bytes is not None:
-        import resource
+        import resource  # noqa: PLC0415
 
         resource.setrlimit(resource.RLIMIT_AS, (maximum_memory_bytes, maximum_memory_bytes))
         resource.setrlimit(resource.RLIMIT_DATA, (maximum_memory_bytes, maximum_memory_bytes))
@@ -336,14 +337,12 @@ def reliability_guard(maximum_memory_bytes: int | None = None):
 
     faulthandler.disable()
 
-    import builtins
+    import builtins  # noqa: PLC0415
 
     builtins.exit = None
     builtins.quit = None
     # builtins.open = None
     # builtins.print = lambda *args, **kwargs: None
-
-    import os
 
     # we save the current working directory and restore them later
     os.makedirs(cache_wd, exist_ok=True)
@@ -378,13 +377,9 @@ def reliability_guard(maximum_memory_bytes: int | None = None):
     os.getcwd = None
     os.chdir = None
 
-    import shutil
-
     shutil.rmtree = None
     shutil.move = None
     shutil.chown = None
-
-    import subprocess
 
     subprocess.Popen = None  # type: ignore
 

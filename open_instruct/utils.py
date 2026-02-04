@@ -19,7 +19,7 @@ import os
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+    from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum, OffloadStateTypeEnum
     import deepspeed.comm as dist
 
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
@@ -31,6 +31,7 @@ except Exception:
 # isort: on
 import dataclasses
 import functools
+import importlib
 import json
 import logging
 import math
@@ -57,8 +58,9 @@ import numpy as np
 import ray
 import requests
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
-import vllm.config
+import wandb
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
@@ -70,10 +72,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentPars
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import data_types, logger_utils
-
-WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
-GCP_CLUSTERS = ["ai2/augusta"]
-INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/augusta"]
+from open_instruct.launch_utils import GCP_CLUSTERS, gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -85,6 +84,22 @@ INVALID_LOGPROB = 1.0  # Sentinel value for masked/invalid log probabilities
 logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+def import_class_from_string(import_path: str) -> type:
+    """Dynamically import a class from a 'module.path:ClassName' string.
+
+    Args:
+        import_path: Import path in format 'module.submodule:ClassName'.
+
+    Returns:
+        The imported class.
+    """
+    if ":" not in import_path:
+        raise ValueError(f"Invalid import path '{import_path}'. Expected format: 'module.path:ClassName'")
+    module_name, class_name = import_path.rsplit(":", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)
 
 
 def warn_if_low_disk_space(
@@ -739,11 +754,15 @@ class ArgumentParserPlus(HfArgumentParser):
 
 # ----------------------------------------------------------------------------
 # Experiment tracking utilities
+def get_git_commit() -> str:
+    """Get the current git commit hash from environment variable."""
+    return os.environ.get("GIT_COMMIT", "unknown")
+
+
 def get_wandb_tags() -> list[str]:
     """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123,branch-main`)"""
     tags = [t for t in os.environ.get("WANDB_TAGS", "").split(",") if t != ""]
-    if "GIT_COMMIT" in os.environ:
-        git_commit = os.environ["GIT_COMMIT"]
+    if (git_commit := get_git_commit()) != "unknown":
         tags.append(f"commit: {git_commit}")
         try:
             # try finding the pull request number on github
@@ -1117,70 +1136,6 @@ def maybe_update_beaker_description(
         )
 
 
-def live_subprocess_output(cmd: list[str]) -> str:
-    output_lines = []
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    # Display output in real-time and collect it
-    for line in iter(process.stdout.readline, ""):
-        if line.strip():
-            print(line.strip())
-            output_lines.append(line.strip())
-    process.wait()
-    if process.returncode != 0:
-        # Get the actual error message from the process
-        process_error = process.stderr.read() if process.stderr else "No error message available"
-        error_message = f"gsutil command failed with return code {process.returncode}: {process_error}"
-        print(error_message)
-        raise Exception(error_message)
-
-    return "\n".join(output_lines)
-
-
-def download_from_hf(model_name_or_path: str, revision: str) -> None:
-    cmd = ["huggingface-cli", "download", model_name_or_path, "--revision", revision]
-    print(f"Downloading from HF with command: {cmd}")
-    output = live_subprocess_output(cmd)
-    # for some reason, sometimes the output includes the line including some loading message.
-    # so do some minor cleaning.
-    if "\n" in output:
-        output = output.split("\n")[-1].strip()
-    return output
-
-
-def download_from_gs_bucket(src_paths: list[str], dest_path: str) -> None:
-    os.makedirs(dest_path, exist_ok=True)
-    cmd = [
-        "gsutil",
-        "-o",
-        "GSUtil:parallel_thread_count=1",
-        "-o",
-        "GSUtil:sliced_object_download_threshold=150",
-        "-m",
-        "cp",
-        "-r",
-    ]
-    cmd.extend(src_paths)
-    cmd.append(dest_path)
-    print(f"Downloading from GS bucket with command: {cmd}")
-    live_subprocess_output(cmd)
-
-
-def gs_folder_exists(path: str) -> bool:
-    cmd = ["gsutil", "ls", path]
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    # print(f"GS stat command: {cmd}")
-    # print(f"GS stat stdout: {stdout}")
-    # print(f"GS stat stderr: {stderr}")
-    return process.returncode == 0
-
-
-def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
-    cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-r", src_path, dest_path]
-    print(f"Copying model to GS bucket with command: {cmd}")
-    live_subprocess_output(cmd)
-
-
 def sync_gs_bucket(src_path: str, dest_path: str) -> None:
     cmd = [
         "gsutil",
@@ -1352,8 +1307,6 @@ def retry_on_exception(max_attempts=4, delay=1, backoff=2):
 @functools.lru_cache(maxsize=1)
 def maybe_use_ai2_wandb_entity() -> str | None:
     """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
-    import wandb
-
     wandb.login()
     api = wandb.Api()
     current_user = api.viewer
@@ -1379,6 +1332,42 @@ def maybe_use_ai2_hf_entity() -> str | None:
         return "allenai"
     else:
         return None
+
+
+def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig | None:
+    """Set up exp_name, output_dir, HF Hub config, wandb_entity.
+
+    Modifies args in-place. Returns BeakerRuntimeConfig if on Beaker.
+    """
+    if getattr(args, "add_seed_and_date_to_exp_name", False):
+        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.exp_name)
+
+    if dist.is_initialized():
+        path_list = [args.output_dir]
+        dist.broadcast_object_list(path_list, src=0)
+        args.output_dir = path_list[0]
+
+    beaker_config = None
+    if is_beaker_job() and is_main_process:
+        beaker_config = maybe_get_beaker_config()
+
+    if getattr(args, "push_to_hub", False) and is_main_process:
+        if args.hf_repo_id is None:
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:
+            args.hf_entity = HfApi().whoami()["name"]
+        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.hf_repo_revision is None:
+            args.hf_repo_revision = args.exp_name
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
+    if getattr(args, "wandb_entity", None) is None:
+        args.wandb_entity = maybe_use_ai2_wandb_entity()
+
+    return beaker_config
 
 
 @retry_on_exception()
@@ -1577,7 +1566,7 @@ class RayProcess:
         if _SET_AFFINITY:
             return
 
-        from ctypes.util import find_library
+        from ctypes.util import find_library  # noqa: PLC0415
 
         class bitmask_t(Structure):
             _fields_ = [("size", c_ulong), ("maskp", POINTER(c_ulong))]
@@ -1607,8 +1596,6 @@ class RayProcess:
         self._set_numa_affinity(torch.distributed.get_rank() % torch.cuda.device_count())
 
         if model.zero_optimization_stage() == 3:
-            from deepspeed.runtime.zero.offload_config import OffloadStateTypeEnum
-
             model.optimizer.offload_states(
                 include=[
                     OffloadStateTypeEnum.optim_states,
@@ -1794,12 +1781,16 @@ GPU_SPECS = {
     "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 2.0e12},  # 2.0 TB/s HBM2e (80GB variant)
     "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
+    "h200": {"flops": 989e12, "memory_size": 141e9, "memory_bandwidth": 4.8e12},  # 4.8 TB/s HBM3e
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
     "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
     "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
     # Specs from https://www.techpowerup.com/gpu-specs/geforce-rtx-4090-mobile.c3949.
     "4090 laptop": {"flops": 32.98e12, "memory_size": 24e9, "memory_bandwidth": 576e9},
+    # DGX Spark GB10 (Blackwell) - unified LPDDR5X memory with CPU
+    # Specs from https://www.nvidia.com/en-us/products/workstations/dgx-spark/
+    "gb10": {"flops": 104e12, "memory_size": 128e9, "memory_bandwidth": 273e9},  # 273 GB/s LPDDR5X unified
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
@@ -1855,40 +1846,6 @@ class ModelDims:
         lm_head_params = self.vocab_size * self.hidden_size
 
         return embedding_params + layer_params + lm_head_params
-
-    @classmethod
-    def from_vllm_config(cls, vllm_config: vllm.config.VllmConfig) -> "ModelDims":
-        """Create ModelDims from a vLLM config object."""
-        model_config = vllm_config.model_config
-        hidden_size = model_config.get_hidden_size()
-
-        # Try to get intermediate_size, default to 4x hidden_size if not present
-        intermediate_size = getattr(model_config.hf_text_config, "intermediate_size", 4 * hidden_size)
-
-        sliding_window = getattr(model_config.hf_text_config, "sliding_window", None)
-        num_layers = model_config.get_num_layers(vllm_config.parallel_config)
-        num_sliding_window_layers = 0
-
-        if sliding_window is not None:
-            layer_types = getattr(model_config.hf_text_config, "layer_types", None)
-            if layer_types is not None:
-                num_sliding_window_layers = layer_types.count("sliding_attention")
-            else:
-                # If "layer_types" is None, then we assume all layers are sliding layers.
-                num_sliding_window_layers = num_layers
-
-        return cls(
-            num_layers=num_layers,
-            hidden_size=hidden_size,
-            intermediate_size=intermediate_size,
-            vocab_size=model_config.get_vocab_size(),
-            num_attn_heads=model_config.hf_text_config.num_attention_heads,
-            num_kv_heads=model_config.hf_text_config.num_key_value_heads,
-            head_dim=model_config.get_head_size(),
-            sliding_window=sliding_window,
-            num_sliding_window_layers=num_sliding_window_layers,
-            device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
-        )
 
     @classmethod
     def from_hf_config(cls, model_name_or_path: str) -> "ModelDims":
@@ -2452,6 +2409,44 @@ def get_device_name(device_name: str) -> str:
     )
 
 
+def calculate_utilization_metrics(
+    model_dims: ModelDims,
+    prompt_lengths: list[int],
+    response_lengths: list[int],
+    total_generation_time: float,
+    samples_per_prompt: int,
+    num_engines: int,
+    num_gpus_per_engine: int,
+    training_time: float,
+    num_training_gpus: int,
+) -> dict:
+    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+    )
+
+    actor_metrics = model_dims.calculate_actor_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        total_generation_time=total_generation_time,
+        samples_per_prompt=samples_per_prompt,
+        num_engines=num_engines,
+        num_gpus_per_engine=num_gpus_per_engine,
+    )
+
+    learner_metrics = model_dims.calculate_learner_utilization(
+        prompt_lengths=prompt_lengths,
+        response_lengths=response_lengths,
+        training_time=training_time,
+        samples_per_prompt=samples_per_prompt,
+        num_training_gpus=num_training_gpus,
+    )
+
+    utilization_metrics = {f"actor_{k}": v for k, v in actor_metrics.items()}
+    utilization_metrics["learner_mfu"] = learner_metrics["mfu"]
+
+    return utilization_metrics
+
+
 def check_calculation(
     percentage: float,
     metric_name: str,
@@ -2465,8 +2460,6 @@ def check_calculation(
 ) -> None:
     if percentage <= 100:
         return
-
-    import json
 
     full_device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
 
@@ -2629,16 +2622,3 @@ class UlyssesSPSplitter:
             kwargs[field.name] = sharded
 
         return data_types.CollatedBatchData(**kwargs)
-
-
-def get_denominator(loss_denominator: str | float) -> float | str:
-    """
-    Validates and converts the loss_denominator argument.
-    """
-    if loss_denominator == "token":
-        return "token"
-
-    val = float(loss_denominator)
-    if val <= 0:
-        raise ValueError(f"loss_denominator must be greater than 0 if not 'token', got: {loss_denominator}")
-    return val

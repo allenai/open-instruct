@@ -1,0 +1,77 @@
+name: PR Checks
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    branches:
+      - main
+  merge_group:
+
+jobs:
+  changelog:
+    name: CHANGELOG
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check that CHANGELOG has been updated
+      env:
+        PR_BODY: ${{ github.event.pull_request.body }}
+      run: |
+        if echo "$PR_BODY" | grep -q 'CHANGELOG='; then
+          REASON=$(echo "$PR_BODY" | grep -oP 'CHANGELOG=\K[^\n\r]*' | head -1)
+          echo "CHANGELOG check bypassed. Reason: $REASON"
+          exit 0
+        fi
+
+        # Only require changelog for open_instruct/** changes
+        if ! git diff --name-only $(git merge-base origin/main HEAD) | grep -q '^open_instruct/'; then
+          echo "No open_instruct/ changes detected, skipping CHANGELOG check"
+          exit 0
+        fi
+
+        CHANGELOG_DIFF=$(git diff $(git merge-base origin/main HEAD) -- CHANGELOG.md)
+        if [ -z "$CHANGELOG_DIFF" ]; then
+          echo "ERROR: Changes to open_instruct/ detected but CHANGELOG.md was not updated."
+          exit 1
+        fi
+
+        PR_URL="${{ github.event.pull_request.html_url }}"
+        if ! echo "$CHANGELOG_DIFF" | grep -q "$PR_URL"; then
+          echo "ERROR: CHANGELOG.md was updated but does not include the PR URL: $PR_URL"
+          echo "Please add a link to this PR in your changelog entry."
+          exit 1
+        fi
+
+        echo "Thanks for helping keep our CHANGELOG up-to-date!"
+
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "0.8.8"
+
+    - name: Style check
+      run: make style-check
+
+    - name: Quality check
+      run: make quality-check
