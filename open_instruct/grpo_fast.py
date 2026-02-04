@@ -285,9 +285,10 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 logger.warning("[freeze_parameters] No parameters found in model - freeze_parameters has no effect")
 
-        # use_reentrant=False is needed when some parameters are frozen, otherwise
-        # gradient checkpointing sees inputs without requires_grad=True and skips gradient computation
-        self.policy.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        # Note: When freezing parameters, keep embed_tokens trainable so gradient checkpointing
+        # sees inputs with requires_grad=True. Otherwise use_reentrant=False would be needed,
+        # but that conflicts with DeepSpeed ZeRO-3.
+        self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:

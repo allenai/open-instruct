@@ -191,7 +191,7 @@ class ExperimentConfig:
     freeze_parameters: bool = False
     """Whether to freeze parameters matching the freeze_patterns."""
     freeze_patterns: list[str] | None = field(default_factory=lambda: [
-        "model.embed_tokens.*",
+        # NOTE: Do NOT freeze embed_tokens - gradient checkpointing requires inputs with requires_grad=True
         "model.layers.*.self_attn.*",
         "model.layers.*.post_attention_layernorm.*",
         "model.layers.*.post_feedforward_layernorm.*",
