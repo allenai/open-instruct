@@ -132,6 +132,39 @@ logger = logger_utils.setup_logger(__name__)
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 
 
+def swap_moe_router_expert_preference(model: torch.nn.Module) -> int:
+    """Swap MoE router weights so expert 1 is preferred instead of expert 0.
+
+    This is useful when freezing expert 0 in a 2-expert MoE. By swapping the
+    router weights, expert 1 (trainable) will now be selected by the router,
+    ensuring gradient flow during training.
+
+    Args:
+        model: The model containing MoE layers with router gates.
+
+    Returns:
+        Number of router gates that were swapped.
+    """
+    swapped_count = 0
+    for name, module in model.named_modules():
+        # Look for router/gate modules in MoE layers
+        if "mlp.gate" in name and hasattr(module, "weight"):
+            with torch.no_grad():
+                w = module.weight.data
+                # Router weight shape is typically [num_experts, d_model] or [d_model, num_experts]
+                if w.shape[0] == 2:  # [2, d_model] - swap rows
+                    module.weight.data = w[[1, 0], :]
+                    swapped_count += 1
+                    logger.info(f"Swapped router weights (rows) for {name}, shape {w.shape}")
+                elif w.shape[1] == 2:  # [d_model, 2] - swap columns
+                    module.weight.data = w[:, [1, 0]]
+                    swapped_count += 1
+                    logger.info(f"Swapped router weights (columns) for {name}, shape {w.shape}")
+                else:
+                    logger.warning(f"Router {name} has unexpected shape {w.shape}, expected 2 experts. Skipping swap.")
+    return swapped_count
+
+
 def to_device_inplace(tensors_list: list[torch.Tensor], device: torch.device):
     for i in range(len(tensors_list)):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
@@ -256,11 +289,19 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.policy)
 
+        # Swap router preference before freezing (for MoE partial training)
+        if args.swap_router_preference:
+            swapped = swap_moe_router_expert_preference(self.policy)
+            if self.rank == 0:
+                logger.warning(f"[swap_router_preference] Swapped {swapped} router gates to prefer expert 1")
+
         # Freeze parameters if configured (e.g., for FlexOlmo partial training)
         if args.freeze_parameters:
             # Log parameter names for debugging pattern matching (using warning level to ensure visibility)
             param_names = [name for name, _ in self.policy.named_parameters()]
-            logger.warning(f"[freeze_parameters] Model has {len(param_names)} parameters. First 10 names: {param_names[:10]}")
+            logger.warning(
+                f"[freeze_parameters] Model has {len(param_names)} parameters. First 10 names: {param_names[:10]}"
+            )
             logger.warning(f"[freeze_parameters] Freeze patterns: {args.freeze_patterns}")
 
             frozen, trainable, frozen_tensors, trainable_tensors = freeze_parameters_by_pattern(
@@ -295,6 +336,19 @@ class PolicyTrainerRayProcess(RayProcess):
             # Only include trainable parameters (those with requires_grad=True)
             optim_params = [p for p in self.policy.parameters() if p.requires_grad]
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
+
+        # Log optimizer param groups for debugging freeze_parameters
+        if args.freeze_parameters and self.rank == 0:
+            total_optimizer_params = 0
+            for i, group in enumerate(self.optimizer.param_groups):
+                group_params = sum(p.numel() for p in group["params"])
+                total_optimizer_params += group_params
+                logger.warning(
+                    f"[freeze_parameters] Optimizer group {i}: {len(group['params'])} tensors, "
+                    f"{group_params:,} params, lr={group.get('lr', 'default')}"
+                )
+            logger.warning(f"[freeze_parameters] Total optimizer params: {total_optimizer_params:,}")
+
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
         if args.warmup_ratio > 0.0:
@@ -313,6 +367,14 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=False,
             mpu=self.mpu,
         )
+
+        # Log DeepSpeed optimizer info for debugging freeze_parameters
+        if args.freeze_parameters and self.rank == 0:
+            logger.warning(f"[freeze_parameters] DeepSpeed optimizer type: {type(self.optimizer)}")
+            if hasattr(self.optimizer, "param_groups"):
+                for i, group in enumerate(self.optimizer.param_groups):
+                    logger.warning(f"[freeze_parameters] DS optimizer group {i}: {len(group['params'])} tensors")
+
         optimization_steps_done = 0
         if args.checkpoint_state_dir:
             # check if the dir exists
@@ -752,8 +814,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Debug: check if loss has gradient before backward
                     if self.args.freeze_parameters and local_step == 0 and self.rank == 0:
-                        logger.warning(f"[freeze_parameters] Loss before backward: requires_grad={loss.requires_grad}, "
-                                     f"grad_fn={loss.grad_fn is not None}, value={loss.item():.4f}")
+                        logger.warning(
+                            f"[freeze_parameters] Loss before backward: requires_grad={loss.requires_grad}, "
+                            f"grad_fn={loss.grad_fn is not None}, value={loss.item():.4f}"
+                        )
 
                     self.model.backward(loss)
 
@@ -761,21 +825,33 @@ class PolicyTrainerRayProcess(RayProcess):
                     if self.args.freeze_parameters and local_step == 0 and self.rank == 0:
                         # Count params by requires_grad status
                         trainable_params = [(n, p) for n, p in self.model.module.named_parameters() if p.requires_grad]
-                        frozen_params = [(n, p) for n, p in self.model.module.named_parameters() if not p.requires_grad]
-                        logger.warning(f"[freeze_parameters] requires_grad status: {len(trainable_params)} trainable, "
-                                     f"{len(frozen_params)} frozen")
-                        logger.warning(f"[freeze_parameters] First 5 trainable: {[n for n, _ in trainable_params[:5]]}")
+                        frozen_params = [
+                            (n, p) for n, p in self.model.module.named_parameters() if not p.requires_grad
+                        ]
+                        logger.warning(
+                            f"[freeze_parameters] requires_grad status: {len(trainable_params)} trainable, "
+                            f"{len(frozen_params)} frozen"
+                        )
+                        logger.warning(
+                            f"[freeze_parameters] First 5 trainable: {[n for n, _ in trainable_params[:5]]}"
+                        )
                         logger.warning(f"[freeze_parameters] First 5 frozen: {[n for n, _ in frozen_params[:5]]}")
 
                         # Check gradients (note: with ZeRO-3, param.grad may be None after reduce-scatter)
-                        trainable_with_grad = [(n, p.grad.norm().item()) for n, p in trainable_params if p.grad is not None]
+                        trainable_with_grad = [
+                            (n, p.grad.norm().item()) for n, p in trainable_params if p.grad is not None
+                        ]
                         trainable_no_grad = [n for n, p in trainable_params if p.grad is None]
                         if trainable_with_grad:
-                            logger.warning(f"[freeze_parameters] Trainable with grads: {len(trainable_with_grad)}, "
-                                         f"first 5: {trainable_with_grad[:5]}")
+                            logger.warning(
+                                f"[freeze_parameters] Trainable with grads: {len(trainable_with_grad)}, "
+                                f"first 5: {trainable_with_grad[:5]}"
+                            )
                         if trainable_no_grad:
-                            logger.warning(f"[freeze_parameters] Trainable WITHOUT grads (ZeRO-3 may have scattered): "
-                                         f"{len(trainable_no_grad)}, first 5: {trainable_no_grad[:5]}")
+                            logger.warning(
+                                f"[freeze_parameters] Trainable WITHOUT grads (ZeRO-3 may have scattered): "
+                                f"{len(trainable_no_grad)}, first 5: {trainable_no_grad[:5]}"
+                            )
 
                     if (local_step + 1) % accumulation_steps == 0:
                         # Debug: check if weights change after step (only on first step)
@@ -792,10 +868,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         if weight_before is not None:
                             weight_after = test_param.data.float().mean().item()
                             weight_diff = abs(weight_after - weight_before)
-                            logger.warning(f"[freeze_parameters] Weight check (local partition) for {test_param_name}: "
-                                         f"before={weight_before:.6f}, after={weight_after:.6f}, diff={weight_diff:.8f}")
+                            logger.warning(
+                                f"[freeze_parameters] Weight check (local partition) for {test_param_name}: "
+                                f"before={weight_before:.6f}, after={weight_after:.6f}, diff={weight_diff:.8f}"
+                            )
                             if weight_diff < 1e-10:
-                                logger.warning("[freeze_parameters] WARNING: Weights did NOT change after optimizer step!")
+                                logger.warning(
+                                    "[freeze_parameters] WARNING: Weights did NOT change after optimizer step!"
+                                )
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:

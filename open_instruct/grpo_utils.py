@@ -190,16 +190,22 @@ class ExperimentConfig:
     # Parameter freezing for FlexOlmo
     freeze_parameters: bool = False
     """Whether to freeze parameters matching the freeze_patterns."""
-    freeze_patterns: list[str] | None = field(default_factory=lambda: [
-        # NOTE: Do NOT freeze embed_tokens - gradient checkpointing requires inputs with requires_grad=True
-        "model.layers.*.self_attn.*",
-        "model.layers.*.post_attention_layernorm.*",
-        "model.layers.*.post_feedforward_layernorm.*",
-        "model.layers.*.mlp.experts.0.*",  # Freeze expert 0 only (expert 1 + router remain trainable)
-        "lm_head.*",
-    ])
+    freeze_patterns: list[str] | None = field(
+        default_factory=lambda: [
+            # NOTE: Do NOT freeze embed_tokens - gradient checkpointing requires inputs with requires_grad=True
+            "model.layers.*.self_attn.*",
+            "model.layers.*.post_attention_layernorm.*",
+            "model.layers.*.post_feedforward_layernorm.*",
+            "model.layers.*.mlp.experts.0.*",  # Freeze expert 0 only (expert 1 + router remain trainable)
+            "lm_head.*",
+        ]
+    )
     """List of patterns (fnmatch-style) to match parameter names for freezing.
     Example: ['model.layers.*.mlp.*', 'model.embed_tokens.*']"""
+    swap_router_preference: bool = False
+    """Swap MoE router weights to prefer expert 1 instead of expert 0.
+    This is useful when freezing expert 0 - by swapping router preference,
+    expert 1 (trainable) participates in forward pass and receives gradients."""
 
     def __post_init__(self):
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:

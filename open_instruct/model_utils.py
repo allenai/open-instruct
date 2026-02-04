@@ -185,9 +185,7 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
             module.p = 0
 
 
-def freeze_parameters_by_pattern(
-    model: torch.nn.Module, patterns: list[str]
-) -> tuple[int, int, int, int]:
+def freeze_parameters_by_pattern(model: torch.nn.Module, patterns: list[str]) -> tuple[int, int, int, int]:
     """Freeze parameters matching any of the given fnmatch patterns.
 
     Args:
