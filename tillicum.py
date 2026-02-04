@@ -354,14 +354,35 @@ def rewrite_accelerate_for_multinode(command: list[str], num_nodes: int, gpus_pe
 
     Automatically injects:
     - --num_machines N
-    - --machine_rank $NODE_RANK
+    - --machine_rank $SLURM_PROCID (Slurm task ID, 0-indexed)
     - --main_process_ip $MASTER_ADDR
-    - --main_process_port 29500
+    - --main_process_port $MASTER_PORT
 
     Also scales --num_processes if specified.
+
+    IMPORTANT: Does NOT rewrite if --deepspeed_multinode_launcher standard is present,
+    as DeepSpeed's standard launcher handles multi-node coordination itself via torch.distributed.run.
     """
     # Check if this is an accelerate launch command
     if "accelerate" not in command or "launch" not in command:
+        return command
+
+    # Check if using DeepSpeed's standard launcher - if so, don't add accelerate multi-node params
+    cmd_str = " ".join(command)
+    if "--deepspeed_multinode_launcher" in cmd_str and "standard" in cmd_str:
+        # DeepSpeed standard launcher handles multi-node coordination itself
+        # Just scale --num_processes if present
+        command = command.copy()
+        total_gpus = num_nodes * gpus_per_node
+        for i, arg in enumerate(command):
+            if arg == "--num_processes" and i + 1 < len(command):
+                try:
+                    current_procs = int(command[i + 1])
+                    if current_procs == gpus_per_node:
+                        command[i + 1] = str(total_gpus)
+                        console.log(f"[yellow]Scaled --num_processes from {current_procs} to {total_gpus} for multi-node[/yellow]")
+                except ValueError:
+                    pass
         return command
 
     command = command.copy()  # Don't modify original
@@ -389,13 +410,13 @@ def rewrite_accelerate_for_multinode(command: list[str], num_nodes: int, gpus_pe
         args_to_insert.extend(["--num_machines", str(num_nodes)])
 
     if not has_machine_rank:
-        args_to_insert.extend(["--machine_rank", "$NODE_RANK"])
+        args_to_insert.extend(["--machine_rank", "$SLURM_PROCID"])
 
     if not has_main_process_ip:
         args_to_insert.extend(["--main_process_ip", "$MASTER_ADDR"])
 
     if not has_main_process_port:
-        args_to_insert.extend(["--main_process_port", "29500"])
+        args_to_insert.extend(["--main_process_port", "$MASTER_PORT"])
 
     # Insert the new args after "launch"
     for i, arg in enumerate(args_to_insert):
@@ -434,11 +455,21 @@ def get_passthrough_env_vars() -> dict[str, str]:
     return env_vars
 
 
+def needs_ray_cluster(commands: list[list[str]]) -> bool:
+    """Check if the commands need a Ray cluster (e.g., for GRPO with vLLM)."""
+    # Ray is only needed for GRPO training, not DPO or other training
+    for command in commands:
+        cmd_str = " ".join(command)
+        if "grpo_fast.py" in cmd_str:
+            return True
+    return False
+
+
 def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], experiment_dir: str) -> str:
     """Generate a Slurm batch script for Tillicum."""
     # Expand $USER for SBATCH directives (they don't expand shell vars)
     experiment_dir_expanded = experiment_dir.replace("$USER", os.environ.get("USER", "unknown"))
-    
+
     lines = ["#!/bin/bash"]
 
     # SBATCH directives
@@ -643,53 +674,66 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
         lines.append("nodes_array=($nodes)")
         lines.append("head_node=${nodes_array[0]}")
         lines.append("head_node_ip=$(hostname -I | awk '{print $1}')")
-        lines.append("# Find a free port dynamically to avoid conflicts")
-        lines.append("RAY_PORT=$(python -c 'import socket; s=socket.socket(); s.bind((\"\", 0)); print(s.getsockname()[1]); s.close()')")
-        lines.append("export IP_HEAD=$head_node_ip:$RAY_PORT")
+        lines.append("")
+        lines.append("# Set environment variables for DeepSpeed/Accelerate multi-node training")
+        lines.append("export MASTER_ADDR=$head_node_ip")
+        lines.append("export MASTER_PORT=29500")
+        lines.append("")
         lines.append('echo "Nodes: $nodes"')
         lines.append('echo "Head node: $head_node ($head_node_ip)"')
-        lines.append('echo "Ray head address: $IP_HEAD"')
         lines.append("")
         lines.append("# NCCL settings for multi-node communication")
         lines.append("export NCCL_IB_DISABLE=0")
         lines.append("export NCCL_NET_GDR_LEVEL=2")
         lines.append("export NCCL_CUMEM_ENABLE=0  # Performance fix for vLLM")
         lines.append("")
-        lines.append("# Start Ray head node")
-        lines.append('echo "Starting Ray head node on $head_node..."')
-        lines.append(f"srun --nodes=1 --ntasks=1 -w \"$head_node\" \\")
-        lines.append(f"    ray start --head --node-ip-address=\"$head_node_ip\" --port=$RAY_PORT \\")
-        lines.append(f"    --num-cpus=64 --num-gpus={args.gpus} --block &")
-        lines.append("")
-        lines.append("# Brief sleep to allow head node to start listening")
-        lines.append("sleep 5")
-        lines.append("")
-        lines.append("# Start Ray worker nodes")
-        lines.append("worker_num=1")
-        lines.append("for ((i=1; i<${#nodes_array[@]}; i++)); do")
-        lines.append('    node=${nodes_array[$i]}')
-        lines.append('    echo "Starting Ray worker $worker_num on $node..."')
-        lines.append(f"    srun --nodes=1 --ntasks=1 -w \"$node\" \\")
-        lines.append(f"        ray start --address \"$IP_HEAD\" \\")
-        lines.append(f"        --num-cpus=64 --num-gpus={args.gpus} --block &")
-        lines.append("    ((worker_num++))")
-        lines.append("done")
-        lines.append("")
-        lines.append("# Wait for all workers to connect (poll instead of fixed sleep)")
-        lines.append('echo "Waiting for all Ray nodes to connect..."')
-        lines.append("for attempt in {1..30}; do  # Timeout after 30*10=300 seconds")
-        lines.append("    connected_nodes=$(ray status 2>/dev/null | grep -c 'node_' || echo 0)")
-        lines.append(f"    if [ \"$connected_nodes\" -ge \"{args.nodes}\" ]; then")
-        lines.append(f'        echo "All {args.nodes} nodes connected!"')
-        lines.append("        break")
-        lines.append("    fi")
-        lines.append(f'    echo "Waiting for nodes... ($connected_nodes/{args.nodes} ready, attempt $attempt/30)"')
-        lines.append("    sleep 10")
-        lines.append("done")
-        lines.append("")
-        lines.append('echo "Final Ray cluster status:"')
-        lines.append("ray status")
-        lines.append("")
+
+        # Only start Ray cluster if needed (e.g., for GRPO with vLLM)
+        if needs_ray_cluster(commands):
+            lines.append("# Ray cluster setup (needed for vLLM/GRPO)")
+            lines.append("# Find a free port dynamically to avoid conflicts")
+            lines.append("RAY_PORT=$(python -c 'import socket; s=socket.socket(); s.bind((\"\", 0)); print(s.getsockname()[1]); s.close()')")
+            lines.append("export IP_HEAD=$head_node_ip:$RAY_PORT")
+            lines.append('echo "Ray head address: $IP_HEAD"')
+            lines.append("")
+            lines.append("# Start Ray head node")
+            lines.append('echo "Starting Ray head node on $head_node..."')
+            lines.append("srun --nodes=1 --ntasks=1 -w \"$head_node\" \\")
+            lines.append("    ray start --head --node-ip-address=\"$head_node_ip\" --port=$RAY_PORT \\")
+            lines.append(f"    --num-cpus=64 --num-gpus={args.gpus} --block &")
+            lines.append("")
+            lines.append("# Brief sleep to allow head node to start listening")
+            lines.append("sleep 5")
+            lines.append("")
+            lines.append("# Start Ray worker nodes")
+            lines.append("worker_num=1")
+            lines.append("for ((i=1; i<${#nodes_array[@]}; i++)); do")
+            lines.append('    node=${nodes_array[$i]}')
+            lines.append('    echo "Starting Ray worker $worker_num on $node..."')
+            lines.append("    srun --nodes=1 --ntasks=1 -w \"$node\" \\")
+            lines.append("        ray start --address \"$IP_HEAD\" \\")
+            lines.append(f"        --num-cpus=64 --num-gpus={args.gpus} --block &")
+            lines.append("    ((worker_num++))")
+            lines.append("done")
+            lines.append("")
+            lines.append("# Wait for all workers to connect (poll instead of fixed sleep)")
+            lines.append('echo "Waiting for all Ray nodes to connect..."')
+            lines.append("for attempt in {1..30}; do  # Timeout after 30*10=300 seconds")
+            lines.append("    connected_nodes=$(ray status 2>/dev/null | grep -c 'node_' || echo 0)")
+            lines.append(f"    if [ \"$connected_nodes\" -ge \"{args.nodes}\" ]; then")
+            lines.append(f'        echo "All {args.nodes} nodes connected!"')
+            lines.append("        break")
+            lines.append("    fi")
+            lines.append(f'    echo "Waiting for nodes... ($connected_nodes/{args.nodes} ready, attempt $attempt/30)"')
+            lines.append("    sleep 10")
+            lines.append("done")
+            lines.append("")
+            lines.append('echo "Final Ray cluster status:"')
+            lines.append("ray status")
+            lines.append("")
+        else:
+            lines.append("# Ray cluster not needed for this training type (DPO/SFT use DeepSpeed/Accelerate only)")
+            lines.append("")
 
     lines.append("")
 
@@ -719,8 +763,15 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
                 quoted_parts.append(shlex.quote(arg))
         cmd_str = " ".join(quoted_parts)
 
-        # For multi-node jobs, run on head node (Ray handles distribution via placement groups)
-        if args.nodes > 1:
+        # Detect if this is an accelerate/deepspeed command
+        is_accelerate_cmd = "accelerate" in " ".join(command) and "launch" in " ".join(command)
+
+        # For multi-node jobs with accelerate/deepspeed, use srun to launch on all nodes
+        if args.nodes > 1 and is_accelerate_cmd:
+            lines.append(f"# Running on all {args.nodes} nodes via srun (DeepSpeed/Accelerate multi-node)")
+            # srun will launch the command on all nodes, SLURM_PROCID will be 0, 1, 2, ... for each node
+            cmd_str = f"srun --nodes={args.nodes} --ntasks={args.nodes} --ntasks-per-node=1 {cmd_str}"
+        elif args.nodes > 1:
             lines.append(f"# Running on head node - Ray distributes to {args.nodes} nodes via placement groups")
 
         # If requeue is enabled, run in background and track PID for signal handling
@@ -735,8 +786,8 @@ def build_slurm_script(args: argparse.Namespace, commands: list[list[str]], expe
             lines.append(cmd_str)
         lines.append("")
 
-    # Cleanup Ray cluster for multi-node jobs
-    if args.nodes > 1:
+    # Cleanup Ray cluster for multi-node jobs (only if it was started)
+    if args.nodes > 1 and needs_ray_cluster(commands):
         lines.append("# Cleanup Ray cluster")
         lines.append('echo "Stopping Ray cluster..."')
         lines.append("ray stop --force")
@@ -761,11 +812,11 @@ def submit_batch_job(script_content: str, experiment_dir: str, dry_run: bool = F
     # Replace $USER with actual username for the local path
     local_experiment_dir = experiment_dir.replace("$USER", os.environ.get("USER", "unknown"))
     os.makedirs(local_experiment_dir, exist_ok=True)
-    
+
     script_path = os.path.join(local_experiment_dir, "job.slurm")
     with open(script_path, "w") as f:
         f.write(script_content)
-    
+
     console.log(f"Saved script to: [bold]{script_path}[/bold]")
 
     try:
@@ -781,7 +832,7 @@ def submit_batch_job(script_content: str, experiment_dir: str, dry_run: bool = F
             return job_id
         return None
     except subprocess.CalledProcessError as e:
-        console.log(f"[red]Error submitting job:[/red]")
+        console.log("[red]Error submitting job:[/red]")
         console.log(e.stderr)
         raise
 
@@ -801,7 +852,7 @@ def run_interactive_job(args: argparse.Namespace) -> None:
     if args.nodes > 1:
         cmd.extend([f"--nodes={args.nodes}", "--ntasks-per-node=1"])
 
-    console.log(f"[bold]Starting interactive session:[/bold]")
+    console.log("[bold]Starting interactive session:[/bold]")
     console.log(" ".join(cmd))
     console.log("")
     if args.nodes > 1:
@@ -871,10 +922,10 @@ def main():
     # Replace $USER with actual user for display
     display_dir = experiment_dir.replace("$USER", os.environ.get("USER", "$USER"))
     console.log(f"[bold]{display_dir}[/bold]")
-    console.log(f"  logs/        - Slurm output logs")
-    console.log(f"  output/      - Model output (use --output_dir $EXPERIMENT_DIR/output)")
-    console.log(f"  checkpoints/ - Training checkpoints")
-    console.log(f"  rollouts/    - Rollout traces (use --rollouts_save_path $EXPERIMENT_DIR/rollouts)")
+    console.log("  logs/        - Slurm output logs")
+    console.log("  output/      - Model output (use --output_dir $EXPERIMENT_DIR/output)")
+    console.log("  checkpoints/ - Training checkpoints")
+    console.log("  rollouts/    - Rollout traces (use --rollouts_save_path $EXPERIMENT_DIR/rollouts)")
 
     # Show passthrough env vars
     passthrough_vars = get_passthrough_env_vars()
@@ -894,7 +945,7 @@ def main():
     # Cost summary
     console.rule("[bold green]Cost Estimate[/bold green]")
     console.log(f"GPU Hours: {total_gpus} GPUs × {args.time} = {total_gpus * _parse_hours(args.time):.2f} GPU-hours")
-    console.log(f"Rate: $0.90 per GPU-hour")
+    console.log("Rate: $0.90 per GPU-hour")
     console.log(f"[bold]Estimated Cost: ${estimated_cost:.2f}[/bold]")
     console.log("")
 
