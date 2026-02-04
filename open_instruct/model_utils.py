@@ -185,7 +185,9 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
             module.p = 0
 
 
-def freeze_parameters_by_pattern(model: torch.nn.Module, patterns: list[str]) -> tuple[int, int]:
+def freeze_parameters_by_pattern(
+    model: torch.nn.Module, patterns: list[str]
+) -> tuple[int, int, int, int]:
     """Freeze parameters matching any of the given fnmatch patterns.
 
     Args:
@@ -193,20 +195,29 @@ def freeze_parameters_by_pattern(model: torch.nn.Module, patterns: list[str]) ->
         patterns: List of fnmatch patterns to match parameter names
 
     Returns:
-        Tuple of (frozen_count, trainable_count) parameter counts
+        Tuple of (frozen_count, trainable_count, frozen_tensors, trainable_tensors)
+        where counts are parameter counts and tensors are number of parameter tensors.
+        Note: With DeepSpeed ZeRO-3, param counts may be 0 due to sharding, but tensor
+        counts will be accurate.
     """
     frozen_count = 0
     trainable_count = 0
+    frozen_tensors = 0
+    trainable_tensors = 0
 
     for name, param in model.named_parameters():
         should_freeze = any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
+        # Use ds_numel if available (DeepSpeed ZeRO-3), otherwise numel()
+        numel = getattr(param, "ds_numel", None) or param.numel()
         if should_freeze:
             param.requires_grad = False
-            frozen_count += param.numel()
+            frozen_count += numel
+            frozen_tensors += 1
         else:
-            trainable_count += param.numel()
+            trainable_count += numel
+            trainable_tensors += 1
 
-    return frozen_count, trainable_count
+    return frozen_count, trainable_count, frozen_tensors, trainable_tensors
 
 
 def maybe_load_checkpoint(

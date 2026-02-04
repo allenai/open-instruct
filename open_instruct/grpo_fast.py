@@ -258,21 +258,32 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Freeze parameters if configured (e.g., for FlexOlmo partial training)
         if args.freeze_parameters:
-            # Log first few parameter names for debugging pattern matching
+            # Log parameter names for debugging pattern matching (using warning level to ensure visibility)
             param_names = [name for name, _ in self.policy.named_parameters()]
-            logger.info(f"Model has {len(param_names)} parameters. First 10 names: {param_names[:10]}")
-            logger.info(f"Freeze patterns: {args.freeze_patterns}")
+            logger.warning(f"[freeze_parameters] Model has {len(param_names)} parameters. First 10 names: {param_names[:10]}")
+            logger.warning(f"[freeze_parameters] Freeze patterns: {args.freeze_patterns}")
 
-            frozen, trainable = freeze_parameters_by_pattern(self.policy, args.freeze_patterns)
+            frozen, trainable, frozen_tensors, trainable_tensors = freeze_parameters_by_pattern(
+                self.policy, args.freeze_patterns
+            )
             total = frozen + trainable
+            total_tensors = frozen_tensors + trainable_tensors
             if total > 0:
                 pct_trainable = 100 * trainable / total
-                logger.info(
-                    f"Parameter freezing enabled: {frozen:,} params frozen, {trainable:,} params trainable "
-                    f"({pct_trainable:.1f}% trainable)"
+                logger.warning(
+                    f"[freeze_parameters] {frozen:,} params frozen, {trainable:,} params trainable "
+                    f"({pct_trainable:.1f}% trainable) | {frozen_tensors} tensors frozen, {trainable_tensors} tensors trainable"
+                )
+            elif total_tensors > 0:
+                # DeepSpeed ZeRO-3: param counts are 0 due to sharding, but tensor counts work
+                pct_trainable_tensors = 100 * trainable_tensors / total_tensors
+                logger.warning(
+                    f"[freeze_parameters] DeepSpeed ZeRO-3 detected (param counts are 0 due to sharding). "
+                    f"{frozen_tensors} tensors frozen, {trainable_tensors} tensors trainable "
+                    f"({pct_trainable_tensors:.1f}% trainable)"
                 )
             else:
-                logger.warning("No parameters found in model - freeze_parameters has no effect")
+                logger.warning("[freeze_parameters] No parameters found in model - freeze_parameters has no effect")
 
         self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
