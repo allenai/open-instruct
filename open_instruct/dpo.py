@@ -277,9 +277,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     dataset.set_format(type="pt")  # Must be after shuffle (shuffle resets format)
 
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
-    parallelism_factor = args.tensor_parallel_degree * args.context_parallel_degree
-    dp_world_size = world_size // parallelism_factor
-    dp_rank = global_rank // parallelism_factor
+    dp_world_size = world_size
+    dp_rank = global_rank
 
     logger_utils.setup_logger(rank=dp_rank)
 
@@ -310,7 +309,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         work_dir=args.output_dir,
         collator=collator,
         device=device,
-        fs_local_rank=global_rank,
     )
     # 4x batch size: forward-only (no backward), so no activation storage needed.
     cache_batch_size = args.per_device_train_batch_size * 4 * dp_world_size
@@ -324,16 +322,13 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         collator=collator,
         device=device,
         drop_last=False,
-        fs_local_rank=global_rank,
     )
 
-    tp = args.tensor_parallel_degree
     forward_fn = partial(
-        dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo,
-        tp_degree=tp,
+        dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
     )
     if args.packing:
-        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True, tp_degree=tp)
+        forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
     average_log_prob = args.loss_type.is_average_loss
 
     cache_kwargs = dict(
@@ -362,16 +357,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         reduce_dtype=DType.float32,
         wrapping_strategy=transformer_config.TransformerDataParallelWrappingStrategy.blocks,
     )
-    tp_config = (
-        transformer_config.TransformerTensorParallelConfig(degree=args.tensor_parallel_degree)
-        if args.tensor_parallel_degree > 1
-        else None
-    )
-    cp_config = (
-        transformer_config.TransformerContextParallelConfig.llama3(degree=args.context_parallel_degree, head_stride=4)
-        if args.context_parallel_degree > 1
-        else None
-    )
     ac_config = (
         transformer_config.TransformerActivationCheckpointingConfig(
             mode=transformer_config.TransformerActivationCheckpointingMode.budget,
@@ -388,8 +373,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         max_sequence_length=args.max_seq_length,
         dpo_config=args,
         dp_config=dp_config,
-        tp_config=tp_config,
-        cp_config=cp_config,
         ac_config=ac_config,
         compile_model=args.compile_model,
         max_grad_norm=max_grad_norm,
