@@ -19,7 +19,6 @@ from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import CheckpointerCallback
@@ -107,15 +106,6 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
     load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
     model = model.to(device=device, dtype=torch.bfloat16)
-
-    logger.info(f"Applying activation checkpointing (budget={args.activation_memory_budget})...")
-    model.apply_activation_checkpointing(
-        TransformerActivationCheckpointingMode.budget, activation_memory_budget=args.activation_memory_budget
-    )
-
-    if args.compile_model:
-        logger.info("Applying torch.compile to model blocks...")
-        model.apply_compile()
 
     return model, model_config
 
@@ -368,6 +358,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         if args.context_parallel_degree > 1
         else None
     )
+    ac_config = transformer_config.TransformerActivationCheckpointingConfig(
+        mode=transformer_config.TransformerActivationCheckpointingMode.budget,
+        activation_memory_budget=args.activation_memory_budget,
+    )
 
     train_module = DPOTrainModule(
         model=model,
@@ -378,6 +372,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         dp_config=dp_config,
         tp_config=tp_config,
         cp_config=cp_config,
+        ac_config=ac_config,
+        compile_model=args.compile_model,
         max_grad_norm=max_grad_norm,
         scheduler=scheduler,
         device=device,
