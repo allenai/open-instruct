@@ -356,9 +356,15 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         reduce_dtype=DType.float32,
         wrapping_strategy=transformer_config.TransformerDataParallelWrappingStrategy.blocks,
     )
-    tp_config = transformer_config.TransformerTensorParallelConfig(degree=args.tensor_parallel_degree)
-    cp_config = transformer_config.TransformerContextParallelConfig.llama3(
-        degree=args.context_parallel_degree, head_stride=4
+    tp_config = (
+        transformer_config.TransformerTensorParallelConfig(degree=args.tensor_parallel_degree)
+        if args.tensor_parallel_degree > 1
+        else None
+    )
+    cp_config = (
+        transformer_config.TransformerContextParallelConfig.llama3(degree=args.context_parallel_degree, head_stride=4)
+        if args.context_parallel_degree > 1
+        else None
     )
 
     train_module = DPOTrainModule(
