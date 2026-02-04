@@ -65,9 +65,10 @@ def create_wordle_samples(num_samples: int = 100, nothink: bool = False) -> list
         "olive", "peace", "quiet", "radio", "smile", "toast", "unity", "voice", "world", "young",
     ]
     samples = []
-    suffix = " /nothink" if nothink else ""
-    # Common starting words for Wordle (good letter coverage)
-    starters = ["crane", "slate", "trace", "crate", "stare", "raise", "arise", "irate", "salet", "reast"]
+    # /nothink goes in system prompt for Qwen3 models
+    nothink_suffix = " /nothink" if nothink else ""
+    # Common starting words for Wordle (good letter coverage) - only valid English words
+    starters = ["crane", "slate", "trace", "crate", "stare", "raise", "arise", "irate", "audio", "adieu"]
     for i in range(num_samples):
         word = words[i % len(words)]
         starter = starters[i % len(starters)]
@@ -76,11 +77,11 @@ def create_wordle_samples(num_samples: int = 100, nothink: bool = False) -> list
             "messages": [
                 {
                     "role": "system",
-                    "content": "Wordle: Guess the 5-letter word. Output ONLY a word in brackets. G=correct, Y=wrong spot, X=miss.",
+                    "content": f"Wordle: Guess the 5-letter word. Output ONLY a word in brackets like [crane]. G=correct, Y=wrong spot, X=miss.{nothink_suffix}",
                 },
                 {
                     "role": "user",
-                    "content": f"Guess a 5-letter word.{suffix}",
+                    "content": "Guess the 5-letter word. Output ONLY a word in brackets.",
                 },
                 {
                     "role": "assistant",
@@ -88,7 +89,7 @@ def create_wordle_samples(num_samples: int = 100, nothink: bool = False) -> list
                 },
                 {
                     "role": "user",
-                    "content": "[GAME] Guess 1: X X X X X",
+                    "content": "X X X X X",
                 },
             ],
             "ground_truth": word,
