@@ -289,7 +289,8 @@ class PolicyTrainerRayProcess(RayProcess):
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
-            optim_params = self.policy.parameters()
+            # Only include trainable parameters (those with requires_grad=True)
+            optim_params = [p for p in self.policy.parameters() if p.requires_grad]
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
@@ -746,6 +747,26 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
                     self.model.backward(loss)
+
+                    # Debug: log gradient stats for frozen vs trainable params (only on first step)
+                    if self.args.freeze_parameters and local_step == 0 and self.rank == 0:
+                        trainable_grads = []
+                        frozen_grads = []
+                        for name, param in self.model.module.named_parameters():
+                            if param.grad is not None:
+                                grad_norm = param.grad.norm().item()
+                                if param.requires_grad:
+                                    trainable_grads.append((name, grad_norm))
+                                else:
+                                    frozen_grads.append((name, grad_norm))
+                        if trainable_grads:
+                            logger.warning(f"[freeze_parameters] Trainable params with grads: {len(trainable_grads)}, "
+                                         f"first 5: {trainable_grads[:5]}")
+                        else:
+                            logger.warning("[freeze_parameters] WARNING: No trainable params have gradients!")
+                        if frozen_grads:
+                            logger.warning(f"[freeze_parameters] WARNING: {len(frozen_grads)} frozen params have grads!")
+
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
                     local_step += 1
