@@ -66,15 +66,30 @@ def create_wordle_samples(num_samples: int = 100, nothink: bool = False) -> list
     ]
     samples = []
     suffix = " /nothink" if nothink else ""
+    # Common starting words for Wordle (good letter coverage)
+    starters = ["crane", "slate", "trace", "crate", "stare", "raise", "arise", "irate", "salet", "reast"]
     for i in range(num_samples):
         word = words[i % len(words)]
+        starter = starters[i % len(starters)]
+        # Simple, direct prompt with few-shot example showing exact format
         samples.append({
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are playing Wordle. Guess 5-letter words by wrapping them in square brackets like [apple]. After each guess, you'll see feedback: G=green (correct position), Y=yellow (wrong position), X=not in word. You have 6 attempts.",
+                    "content": "Wordle: Guess the 5-letter word. Output ONLY a word in brackets. G=correct, Y=wrong spot, X=miss.",
                 },
-                {"role": "user", "content": f"Play Wordle! Guess a common 5-letter word. Format: [word]{suffix}"},
+                {
+                    "role": "user",
+                    "content": f"Guess a 5-letter word.{suffix}",
+                },
+                {
+                    "role": "assistant",
+                    "content": f"[{starter}]",
+                },
+                {
+                    "role": "user",
+                    "content": "[GAME] Guess 1: X X X X X",
+                },
             ],
             "ground_truth": word,
             "dataset": "env_last",
