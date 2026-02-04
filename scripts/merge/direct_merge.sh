@@ -56,4 +56,4 @@ uv run python mason.py \
     --gpus 0 \
     --priority normal \
     --description "Linear merge: ${NUM_MODELS}-model" \
-    -- bash -c \"cd /stage \&\& echo $SCRIPT_B64 \| base64 -d \> /tmp/linear_merge.py \&\& uv run python /tmp/linear_merge.py --models $MODELS_ARG --output_dir $OUTPUT_DIR --dtype bfloat16\"
+    -- bash -c \"cd /stage \&\& echo $SCRIPT_B64 \| base64 -d \> /tmp/direct_merge.py \&\& uv run python /tmp/direct_merge.py --models $MODELS_ARG --output_dir $OUTPUT_DIR --dtype bfloat16\"
