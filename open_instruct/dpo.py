@@ -220,14 +220,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             "Either disable packing or disable compile_model."
         )
 
-    if args.compile_model and args.tensor_parallel_degree > 1:
-        logger.warning(
-            "torch.compile is not compatible with tensor parallelism (DTensor view op fails). "
-            "Disabling compile_model. Note: budget activation checkpointing requires compile, "
-            "so it will also be disabled."
-        )
-        args.compile_model = False
-
     if args.dpo_use_paged_optimizer:
         raise ValueError("dpo_use_paged_optimizer is not supported with OLMo-core DPO training.")
 

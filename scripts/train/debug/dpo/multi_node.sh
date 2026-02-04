@@ -42,12 +42,11 @@ uv run python mason.py \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
-    --activation_memory_budget 1.0 \
+    --activation_memory_budget 0.5 \
     --with_tracking \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \
-    --tensor_parallel_degree 2 \
+    --context_parallel_degree 2 \
     --shard_degree 4 \
     --num_replicas 2 \
-    --no_compile_model \
     --try_auto_save_to_beaker false
