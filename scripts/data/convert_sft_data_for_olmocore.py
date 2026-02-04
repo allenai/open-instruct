@@ -48,6 +48,27 @@ OLMoCore accepts data in numpy mmap format. One file is for the input tokens and
             --max_seq_length 16384
     ```
 
+    Usage example with tokenizing by subset using the dataset_split_field argument:
+    gantry run \
+        --cluster ai2/saturn \
+        --budget ai2/oe-adapt --workspace ai2/olmo-instruct \
+        --install "curl -LsSf https://astral.sh/uv/install.sh | sh && /root/.local/bin/uv sync" \
+        --weka=oe-training-default:/weka/oe-training-default \
+        --weka=oe-adapt-default:/weka/oe-adapt-default \
+        --env-secret HF_TOKEN=saumyam_HF_TOKEN \
+        --gpus 8 \
+        --priority urgent \
+        --beaker-image nathanl/open_instruct_auto \
+        -- /root/.local/bin/uv run python scripts/data/convert_sft_data_for_olmocore.py \
+            --dataset_mixer_list \
+                allenai/Dolci-Instruct-SFT 1.0 \
+            --output_dir /weka/oe-adapt-default/saumyam/tokenize-subsets-dolci-instruct-sft \
+            --dataset_split_field source_dataset \
+            --visualize True \
+            --tokenizer_name_or_path tokenizer_path=/weka/oe-adapt-default/saumyam/open-instruct/dolma2-tokenizer-olmo-3-instruct-final \
+            --chat_template_name olmo123 \
+            --max_seq_length 32768
+            
     Dependencies for this script when run with `uv` are declared at the top of the file. `uv` will
     automatically install them *and not the project dependencies*.
 
