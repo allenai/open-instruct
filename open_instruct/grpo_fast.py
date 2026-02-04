@@ -1620,10 +1620,14 @@ def maybe_evaluate(
     eval_generation_config,
     model_dims: utils.ModelDims,
     actor_manager=None,
-):
-    """Optionally evaluate the model."""
+) -> bool:
+    """Optionally evaluate the model.
+
+    Returns:
+        True if evaluation results were successfully collected, False otherwise.
+    """
     if eval_dataset is None:
-        return
+        return True  # No eval to do, so consider it "successful"
 
     try:
         # timeout 0.01 if this is not the last training step
@@ -1684,8 +1688,10 @@ def maybe_evaluate(
         else:
             print_rich_table(df.iloc[:1])
         del table
+        return True
     except Empty:
         logger.warning("[Main Thread] 🙈 Evaluation responses not received")
+        return False
 
 
 def save_final_model(
@@ -1886,6 +1892,7 @@ def run_training(
         start_time=training_start_time,
         wandb_url=wandb_url,
     )
+    last_eval_collected = True
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
@@ -1899,6 +1906,11 @@ def run_training(
             and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
+            if not last_eval_collected:
+                logger.warning(
+                    "[Main Thread] ⚠️ Previous eval round was not fully collected and may be included in future evals. "
+                    "Consider increasing local_eval_every."
+                )
             for eval_example in iter(eval_data_loader):
                 add_prompt_to_generator(eval_example, 0, prompt_Q, generation_configs["eval"], is_eval=True)
 
@@ -1966,7 +1978,7 @@ def run_training(
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
         weight_sync_trigger_event.set()
 
-        maybe_evaluate(
+        last_eval_collected = maybe_evaluate(
             args,
             training_step,
             evaluation_inference_results_Q,
