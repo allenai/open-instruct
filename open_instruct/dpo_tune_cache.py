@@ -26,6 +26,7 @@ with contextlib.suppress(Exception):
 
 # isort: on
 import math
+import pathlib
 import random
 import shutil
 import time
@@ -524,11 +525,14 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         reference_cache = dpo_utils.build_reference_logprobs_cache(
             model=model,
             dataloader=train_dataloader,
-            accelerator=accelerator,
             average_log_prob=args.loss_type.is_average_loss,
             forward_fn=args.forward_fn,
             full_dataset_size=original_dataset_size,
-            reference_cache_hash=dpo_utils.compute_reference_cache_hash(args, tc),
+            device=accelerator.device,
+            cache_path=pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH)
+            / f"{dpo_utils.compute_reference_cache_hash(args, tc)}.pt",
+            is_main_process=accelerator.is_main_process,
+            model_dims=utils.ModelDims.from_hf_config(args.model_name_or_path),
             use_lora=args.use_lora,
         )
         logger.info("=============after cache logprobs")

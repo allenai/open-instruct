@@ -513,8 +513,9 @@ def build_reference_logprobs_cache(
     Returns:
         TensorCache containing 'chosen_logps' and 'rejected_logps' tensors.
     """
+    logger.info("Reference logprobs cache path: %s", cache_path)
     if cache_path.exists():
-        logger.info(f"Loading reference logprobs cache from {cache_path}")
+        logger.info("Loading reference logprobs cache from %s", cache_path)
         return model_utils.TensorCache.from_disk(cache_path, device=device)
 
     if is_main_process:

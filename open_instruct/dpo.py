@@ -315,8 +315,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     ref_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
-    reference_cache_path = pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt"
-    logger.info(f"Reference logprobs cache path: {reference_cache_path}")
 
     if args.cache_dataset_only:
         dataset_transformation.get_cached_dataset_tulu(
@@ -403,7 +401,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         forward_fn=forward_fn,
         full_dataset_size=len(dataset),
         device=device,
-        cache_path=reference_cache_path,
+        cache_path=pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt",
         is_main_process=is_main_process,
         model_dims=utils.ModelDims.from_hf_config(args.model_name_or_path),
         use_lora=False,
