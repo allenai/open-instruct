@@ -358,9 +358,13 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         if args.context_parallel_degree > 1
         else None
     )
-    ac_config = transformer_config.TransformerActivationCheckpointingConfig(
-        mode=transformer_config.TransformerActivationCheckpointingMode.budget,
-        activation_memory_budget=args.activation_memory_budget,
+    ac_config = (
+        transformer_config.TransformerActivationCheckpointingConfig(
+            mode=transformer_config.TransformerActivationCheckpointingMode.budget,
+            activation_memory_budget=args.activation_memory_budget,
+        )
+        if args.activation_memory_budget < 1.0
+        else None
     )
 
     train_module = DPOTrainModule(
