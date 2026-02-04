@@ -779,20 +779,20 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     if (local_step + 1) % accumulation_steps == 0:
                         # Debug: check if weights change after step (only on first step)
+                        # Note: With ZeRO-3, we only see the local partition, but change should still be visible
+                        weight_before = None
                         if self.args.freeze_parameters and local_step == 0 and self.rank == 0:
-                            # Snapshot a trainable weight before step
                             test_param_name = "model.layers.0.mlp.gate.weight"
                             test_param = dict(self.model.module.named_parameters())[test_param_name]
-                            with deepspeed.zero.GatheredParameters([test_param], modifier_rank=0):
-                                weight_before = test_param.data.clone().float().mean().item()
+                            # Just check local partition (don't use GatheredParameters to avoid sync issues)
+                            weight_before = test_param.data.float().mean().item()
 
                         self.model.step()
 
-                        if self.args.freeze_parameters and local_step == 0 and self.rank == 0:
-                            with deepspeed.zero.GatheredParameters([test_param], modifier_rank=0):
-                                weight_after = test_param.data.clone().float().mean().item()
+                        if weight_before is not None:
+                            weight_after = test_param.data.float().mean().item()
                             weight_diff = abs(weight_after - weight_before)
-                            logger.warning(f"[freeze_parameters] Weight check for {test_param_name}: "
+                            logger.warning(f"[freeze_parameters] Weight check (local partition) for {test_param_name}: "
                                          f"before={weight_before:.6f}, after={weight_after:.6f}, diff={weight_diff:.8f}")
                             if weight_diff < 1e-10:
                                 logger.warning("[freeze_parameters] WARNING: Weights did NOT change after optimizer step!")
