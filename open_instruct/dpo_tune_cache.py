@@ -171,6 +171,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     args.local_cache_dir = os.path.abspath(args.local_cache_dir)
     if is_beaker_job():
         args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+    beaker_config = None
+    if accelerator.is_main_process and is_beaker_job():
+        beaker_config = maybe_get_beaker_config()
     if args.push_to_hub and accelerator.is_main_process:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -182,8 +185,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         if args.hf_repo_revision is None:
             args.hf_repo_revision = args.exp_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-        if is_beaker_job():
-            beaker_config = maybe_get_beaker_config()
 
     # ------------------------------------------------------------
     # Initialize the trackers we use, and also store our configuration.
@@ -196,7 +197,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         # (Optional) Ai2 internal tracking
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
-        if accelerator.is_main_process and is_beaker_job():
+        if accelerator.is_main_process and beaker_config is not None:
             experiment_config.update(vars(beaker_config))
         experiment_config.update(vars(tc))
         accelerator.init_trackers(
@@ -721,7 +722,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     if (
         args.try_auto_save_to_beaker
         and accelerator.is_main_process
-        and is_beaker_job()
+        and beaker_config is not None
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
     ):
