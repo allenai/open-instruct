@@ -73,6 +73,22 @@ import numpy as np
 from tqdm import tqdm
 
 
+def sanitize_field_value_for_dirname(value: str) -> str:
+    """Convert field value to a safe directory name."""
+    # Convert to lowercase, 
+    safe_name = str(value).lower()
+    # Replace spaces and special characters with underscores
+    safe_name = safe_name.replace(" ", "_").replace("-", "_")
+    # Remove any remaining special characters
+    safe_name = "".join(c if c.isalnum() or c == "_" else "_" for c in safe_name)
+    # Remove consecutive underscores
+    while "__" in safe_name:
+        safe_name = safe_name.replace("__", "_")
+    # Remove leading/trailing underscores
+    safe_name = safe_name.strip("_")
+    return safe_name
+
+
 def save_checkpoint(output_dir: str, checkpoint_data: dict[str, Any]) -> None:
     """Save checkpoint to disk atomically."""
     checkpoint_path = os.path.join(output_dir, "_checkpoint.json")
@@ -174,6 +190,9 @@ class ConvertSFTDataArguments:
     """Shuffle seed for reproducible dataset ordering"""
     shuffle_seed: int = field(default=42)
 
+    """Field to split dataset by before tokenization. Each unique value will be processed separately."""
+    dataset_split_field: str | None = field(default=None)
+
 
 def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
@@ -181,6 +200,16 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         beaker_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
         if os.path.exists(beaker_cache_dir):
             args.dataset_local_cache_dir = beaker_cache_dir
+
+    # Validate dataset_split_field usage
+    if args.dataset_split_field is not None:
+        if len(args.dataset_mixer_list) != 2:
+            raise ValueError(
+                f"dataset_split_field can only be used with exactly 1 dataset. "
+                f"You provided {len(args.dataset_mixer_list) // 2} datasets in dataset_mixer_list. "
+                f"Expected format: ['dataset_name', 'weight'] (length 2), but got length {len(args.dataset_mixer_list)}."
+            )
+        print(f"Dataset split field enabled: will split dataset by '{args.dataset_split_field}' before tokenization")
 
     print("Verify these values match the tokenizer config used in Olmo-core:")
     print(f"Tokenizer vocab_size: {tc.tokenizer.vocab_size}")
@@ -216,15 +245,100 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     if args.tokenizer_config_only:
         return
 
+    # If dataset_split_field is provided, we need to split the dataset before tokenization
+    if args.dataset_split_field is not None:
+        from datasets import load_dataset
+
+        # Load raw dataset before tokenization
+        dataset_name = args.dataset_mixer_list[0]
+        dataset_split = args.dataset_mixer_list_splits[0]
+        print(f"Loading raw dataset {dataset_name} (split: {dataset_split}) to split by field '{args.dataset_split_field}'...")
+        raw_dataset = load_dataset(dataset_name, split=dataset_split)
+
+        # Check if field exists
+        if args.dataset_split_field not in raw_dataset.column_names:
+            raise ValueError(
+                f"Field '{args.dataset_split_field}' not found in dataset. "
+                f"Available fields: {raw_dataset.column_names}"
+            )
+
+        # Get unique values of the split field
+        print(f"Extracting unique values from field '{args.dataset_split_field}'...")
+        unique_values = set(raw_dataset[args.dataset_split_field])
+        unique_values = sorted(unique_values)  # Sort for reproducibility
+
+        print(f"Found {len(unique_values)} unique values in '{args.dataset_split_field}':")
+        for val in unique_values:
+            count = sum(1 for v in raw_dataset[args.dataset_split_field] if v == val)
+            print(f"  - '{val}': {count:,} examples")
+        print(f"Will create {len(unique_values)} separate tokenized datasets\n")
+
+        # Process each split separately
+        for split_value in unique_values:
+            sanitized_split_name = sanitize_field_value_for_dirname(split_value)
+            split_output_dir = os.path.join(output_dir, sanitized_split_name)
+
+            print(f"\n{'=' * 80}")
+            print(f"Processing split: {split_value} -> {sanitized_split_name}")
+            print(f"Output directory: {split_output_dir}")
+            print(f"{'=' * 80}\n")
+
+            # Filter dataset to this split value
+            split_dataset = raw_dataset.filter(lambda x: x[args.dataset_split_field] == split_value)
+            print(f"Filtered dataset size: {len(split_dataset):,} examples")
+
+            # Save filtered dataset to temporary location for processing
+            # We'll use the HuggingFace datasets library to save and load
+            temp_dataset_path = os.path.join(args.dataset_local_cache_dir, f"temp_split_{sanitized_split_name}")
+            os.makedirs(temp_dataset_path, exist_ok=True)
+            split_dataset.save_to_disk(temp_dataset_path)
+
+            # Now tokenize this split using the same pipeline as before
+            process_single_split(
+                args=args,
+                tc=tc,
+                split_output_dir=split_output_dir,
+                split_dataset_path=temp_dataset_path,
+                split_name=split_value,
+            )
+
+        print(f"\n{'=' * 80}")
+        print(f"All {len(unique_values)} splits processed successfully!")
+        print(f"{'=' * 80}\n")
+        return
+
+    # Original single-dataset processing
+    process_single_split(args=args, tc=tc, split_output_dir=output_dir, split_dataset_path=None, split_name=None)
+
+
+def process_single_split(
+    args: ConvertSFTDataArguments,
+    tc: TokenizerConfig,
+    split_output_dir: str,
+    split_dataset_path: str | None,
+    split_name: str | None,
+):
+    """Process a single dataset split (or the entire dataset if no splitting)."""
+    os.makedirs(split_output_dir, exist_ok=True)
+
     # TODO: improve configurability of transform factory
     transform_functions_and_args = [
         ("sft_tulu_tokenize_and_truncate_v1", {"max_seq_length": args.max_seq_length}),
         ("sft_tulu_filter_v1", {}),  # remove examples that don't have any labels
     ]
 
+    # Use temporary split dataset path if provided, otherwise use original dataset_mixer_list
+    if split_dataset_path is not None:
+        # For split datasets, we point to the temporary saved dataset
+        dataset_mixer_list = [split_dataset_path, "1.0"]
+        dataset_mixer_list_splits = ["train"]  # saved dataset always uses 'train' split
+    else:
+        dataset_mixer_list = args.dataset_mixer_list
+        dataset_mixer_list_splits = args.dataset_mixer_list_splits
+
     train_dataset, dataset_statistics = get_cached_dataset_tulu_with_statistics(
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+        dataset_mixer_list=dataset_mixer_list,
+        dataset_mixer_list_splits=dataset_mixer_list_splits,
         tc=tc,
         dataset_transform_fn=[func for func, _ in transform_functions_and_args],
         transform_fn_args=[args for _, args in transform_functions_and_args],
@@ -239,7 +353,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     # Use fixed seed for reproducible shuffling (required for resume)
     train_dataset = train_dataset.shuffle(seed=args.shuffle_seed)
 
-    if args.visualize:
+    if args.visualize and split_name is None:  # Only visualize for non-split case to avoid spam
         print("Visualizing first example...")
         visualize_token(train_dataset[0][INPUT_IDS_KEY], tc.tokenizer)
         print("Labels:", train_dataset[0][LABELS_KEY])
@@ -264,7 +378,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     }
 
     # Check for existing checkpoint to resume from
-    checkpoint = load_checkpoint(output_dir) if args.resume else None
+    checkpoint = load_checkpoint(split_output_dir) if args.resume else None
     if checkpoint:
         state.update(checkpoint)
         # JSON converts tuples to lists, convert back
@@ -347,7 +461,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
 
         # Save checkpoint periodically
         if (idx + 1) % args.checkpoint_interval == 0 and idx > start_idx:
-            save_checkpoint(output_dir, {
+            save_checkpoint(split_output_dir, {
                 "samples_processed": idx + 1,
                 "token_ids": token_ids,
                 "labels_mask": labels_mask,
@@ -430,14 +544,14 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     if token_dtype is None:
         raise ValueError(f"Vocab size {vocab_size} is too big for any numpy integer dtype!")
 
-    print(f"Writing converted data to {output_dir}")
-    _, token_chunk_boundaries = write_memmap_chunked(f"{output_dir}/token_ids", token_ids, token_dtype)
-    write_metadata_for_chunks(f"{output_dir}/token_ids", document_boundaries, token_chunk_boundaries)
+    print(f"Writing converted data to {split_output_dir}")
+    _, token_chunk_boundaries = write_memmap_chunked(f"{split_output_dir}/token_ids", token_ids, token_dtype)
+    write_metadata_for_chunks(f"{split_output_dir}/token_ids", document_boundaries, token_chunk_boundaries)
 
     # Write labels_mask using the same chunk boundaries as token_ids
     for i, (start, end) in enumerate(token_chunk_boundaries):
         chunk_data = labels_mask[start:end]
-        filename = f"{output_dir}/labels_mask_part_{i:04d}.npy"
+        filename = f"{split_output_dir}/labels_mask_part_{i:04d}.npy"
         mmap = np.memmap(filename, mode="w+", dtype=np.bool_, shape=(len(chunk_data),))
         mmap[:] = chunk_data
         mmap.flush()
@@ -446,11 +560,11 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     print("Data conversion completed successfully!")
 
     # Remove checkpoint file on successful completion
-    remove_checkpoint(output_dir)
+    remove_checkpoint(split_output_dir)
 
     # Write dataset statistics
     write_dataset_statistics(
-        output_dir=output_dir,
+        output_dir=split_output_dir,
         dataset_statistics=dataset_statistics,
         total_instances=total_instances,
         total_tokens=total_tokens,
