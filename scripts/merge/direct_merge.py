@@ -40,8 +40,13 @@ def merge_models(
     if weights is None:
         weights = [1.0] * len(model_paths)
 
+    if len(weights) != len(model_paths):
+        raise ValueError(f"Number of weights ({len(weights)}) must match number of models ({len(model_paths)})")
+
     # Normalize weights
     total_weight = sum(weights)
+    if total_weight == 0:
+        raise ValueError("Weights must not sum to zero")
     weights = [w / total_weight for w in weights]
 
     print(f"Merging {len(model_paths)} models with weights: {weights}")
