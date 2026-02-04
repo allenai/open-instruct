@@ -515,8 +515,13 @@ class PolicyTrainerRayProcess(RayProcess):
     ) -> torch.Tensor:
         """Compute value estimates for the given sequences.
 
+        This method computes per-token value estimates. When sequence parallelism is enabled,
+        the model forward pass is handled correctly by DeepSpeed's UlyssesSPAttention. However,
+        GAE advantage computation requires the full sequence, so the calling code in step()
+        gathers values across SP ranks before computing GAE, then extracts each rank's chunk.
+
         Args:
-            query_response: Input token IDs.
+            query_response: Input token IDs (this rank's chunk with SP).
             attention_mask: Attention mask.
             position_ids: Position IDs.
             response_mask: Boolean mask indicating response positions.
@@ -559,6 +564,63 @@ class PolicyTrainerRayProcess(RayProcess):
             # Zero out values at non-response positions
             values = values * response_mask.float()
         return values
+
+    def _gather_for_gae(
+        self,
+        values: torch.Tensor,
+        rewards: torch.Tensor,
+        dones: torch.Tensor,
+        response_masks: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+        """Gather tensors across SP ranks to reconstruct full sequences for GAE computation.
+
+        With sequence parallelism, each rank only has a chunk of the sequence. GAE requires
+        the full sequence to compute temporal differences correctly (value[t+1] - value[t]).
+        This method gathers all chunks and concatenates them in order.
+
+        Args:
+            values: Value estimates for this rank's chunk, shape (batch, chunk_len)
+            rewards: Rewards for this rank's chunk, shape (batch, chunk_len)
+            dones: Done flags for this rank's chunk, shape (batch, chunk_len)
+            response_masks: Response masks for this rank's chunk, shape (batch, chunk_len)
+
+        Returns:
+            Tuple of (full_values, full_rewards, full_dones, full_response_masks, chunk_len)
+            where each tensor has shape (batch, full_seq_len) and chunk_len is the length
+            of each rank's chunk (for later splitting).
+        """
+        sp_group = self.splitter.sp_group
+        sp_world_size = self.splitter.sp_world_size
+        chunk_len = values.shape[-1]
+
+        # Gather from all ranks
+        def gather_and_cat(tensor: torch.Tensor) -> torch.Tensor:
+            gathered = [torch.zeros_like(tensor) for _ in range(sp_world_size)]
+            torch.distributed.all_gather(gathered, tensor.contiguous(), group=sp_group)
+            # Concatenate chunks in rank order to reconstruct full sequence
+            return torch.cat(gathered, dim=-1)
+
+        full_values = gather_and_cat(values)
+        full_rewards = gather_and_cat(rewards)
+        full_dones = gather_and_cat(dones)
+        full_response_masks = gather_and_cat(response_masks)
+
+        return full_values, full_rewards, full_dones, full_response_masks, chunk_len
+
+    def _extract_sp_chunk(self, tensor: torch.Tensor, chunk_len: int) -> torch.Tensor:
+        """Extract this rank's chunk from a full-sequence tensor after GAE computation.
+
+        Args:
+            tensor: Full sequence tensor, shape (batch, full_seq_len)
+            chunk_len: Length of each SP rank's chunk
+
+        Returns:
+            This rank's chunk, shape (batch, chunk_len)
+        """
+        sp_rank = self.splitter.sp_rank
+        start_idx = sp_rank * chunk_len
+        end_idx = (sp_rank + 1) * chunk_len
+        return tensor[:, start_idx:end_idx]
 
     def forward(
         self,
@@ -794,14 +856,30 @@ class PolicyTrainerRayProcess(RayProcess):
                     old_values_BT.append(values.clone())
 
                 # Compute GAE advantages using value model predictions
-                # Stack all values, rewards, dones, and masks for batch GAE computation
+                # With sequence parallelism, we need to gather full sequences across SP ranks
+                # because GAE requires temporal differences (value[t+1] - value[t]) across the
+                # entire sequence, not just each rank's chunk.
                 for i in range(num_samples):
-                    values_np = values_BT[i].cpu().numpy()
-                    rewards_np = data_BT.rewards[i].cpu().numpy()
-                    dones_np = data_BT.dones[i].cpu().numpy()
-                    response_masks_np = data_BT.response_masks[i].cpu().numpy()
+                    if self.splitter is not None:
+                        # Gather full sequences from all SP ranks for correct GAE computation
+                        full_values, full_rewards, full_dones, full_response_masks, chunk_len = self._gather_for_gae(
+                            values_BT[i],
+                            data_BT.rewards[i],
+                            data_BT.dones[i],
+                            data_BT.response_masks[i].float(),
+                        )
+                        values_np = full_values.cpu().numpy()
+                        rewards_np = full_rewards.cpu().numpy()
+                        dones_np = full_dones.cpu().numpy()
+                        response_masks_np = full_response_masks.cpu().numpy()
+                    else:
+                        values_np = values_BT[i].cpu().numpy()
+                        rewards_np = data_BT.rewards[i].cpu().numpy()
+                        dones_np = data_BT.dones[i].cpu().numpy()
+                        response_masks_np = data_BT.response_masks[i].cpu().numpy()
+                        chunk_len = None
 
-                    # Compute GAE
+                    # Compute GAE on full sequence
                     advantages_np, returns_np = calculate_advantages_packed(
                         values_np,
                         rewards_np,
@@ -810,8 +888,18 @@ class PolicyTrainerRayProcess(RayProcess):
                         dones_np,
                         response_masks_np,
                     )
-                    gae_advantages_BT.append(torch.tensor(advantages_np, device=device, dtype=torch.float32))
-                    returns_BT.append(torch.tensor(returns_np, device=device, dtype=torch.float32))
+
+                    # Convert to tensors
+                    advantages = torch.tensor(advantages_np, device=device, dtype=torch.float32)
+                    returns = torch.tensor(returns_np, device=device, dtype=torch.float32)
+
+                    if self.splitter is not None:
+                        # Extract this rank's chunk of advantages and returns
+                        advantages = self._extract_sp_chunk(advantages, chunk_len)
+                        returns = self._extract_sp_chunk(returns, chunk_len)
+
+                    gae_advantages_BT.append(advantages)
+                    returns_BT.append(returns)
 
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
