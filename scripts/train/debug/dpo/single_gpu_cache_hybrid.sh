@@ -33,5 +33,5 @@ uv run python mason.py \
     --seed 123 \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \
-    --gradient_checkpointing \
+    --activation_memory_budget 0.5 \
     --with_tracking

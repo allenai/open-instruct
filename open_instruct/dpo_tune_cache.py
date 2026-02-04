@@ -362,7 +362,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     if args.use_lora:
         if args.use_qlora:
-            model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+            model = prepare_model_for_kbit_training(
+                model, use_gradient_checkpointing=args.activation_memory_budget < 1.0
+            )
 
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(
@@ -375,7 +377,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
-    elif args.gradient_checkpointing:
+    elif args.activation_memory_budget < 1.0:
         model.gradient_checkpointing_enable()
 
     model_dims = ModelDims(
