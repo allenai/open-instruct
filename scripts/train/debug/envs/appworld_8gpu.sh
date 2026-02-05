@@ -27,7 +27,6 @@ uv run python mason.py \
        --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
-       --timeout 6h \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
