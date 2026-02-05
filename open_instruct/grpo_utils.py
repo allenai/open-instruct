@@ -103,6 +103,26 @@ class ExperimentConfig:
     temperature: float = field(default=1.0, init=False)
     """RUNTIME VALUE: Temperature for sampling, set from streaming_config."""
 
+    # PPO with Value Model
+    use_value_model: bool = False
+    """Whether to use a learned value model for PPO-style training with GAE advantage estimation.
+    When True, advantages are computed using GAE with value model predictions instead of 
+    group-normalized rewards (GRPO style). This enables standard PPO training."""
+    value_model_name_or_path: str | None = None
+    """Optional path to a separate value model. If None, the value model shares the same 
+    base architecture as the policy but with a separate value head."""
+    value_loss_coef: float = 0.5
+    """Coefficient for the value function loss in the total loss."""
+    vf_clip_range: float = 0.2
+    """Clipping range for value function updates. Set to 0 to disable value clipping."""
+    gamma: float = 1.0
+    """Discount factor for GAE advantage estimation."""
+    gae_lambda: float = 0.95
+    """Lambda parameter for GAE advantage estimation."""
+    separate_value_model: bool = False
+    """If True, use a completely separate model for value estimation (doubles memory).
+    If False, share the base model with the policy and only add a separate value head."""
+
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
@@ -230,6 +250,17 @@ class ExperimentConfig:
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+
+        # PPO with Value Model validation
+        if self.use_value_model:
+            if self.gamma < 0 or self.gamma > 1:
+                raise ValueError(f"gamma must be in [0, 1], got {self.gamma}")
+            if self.gae_lambda < 0 or self.gae_lambda > 1:
+                raise ValueError(f"gae_lambda must be in [0, 1], got {self.gae_lambda}")
+            if self.value_loss_coef < 0:
+                raise ValueError(f"value_loss_coef must be >= 0, got {self.value_loss_coef}")
+            if self.vf_clip_range < 0:
+                raise ValueError(f"vf_clip_range must be >= 0, got {self.vf_clip_range}")
 
 
 def compute_grpo_loss(
