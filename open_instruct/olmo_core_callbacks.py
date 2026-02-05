@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
+import torch
 from olmo_core.distributed.utils import get_rank
 from olmo_core.train.callbacks.callback import Callback
 from olmo_core.train.callbacks.comet import CometCallback
@@ -171,6 +172,8 @@ class PerfCallback(Callback):
             return
         total_tokens_step = int(token_count_metric.item())
 
+        host_end = time.perf_counter()
+        torch.cuda.synchronize()
         interval_end = time.perf_counter()
         training_time = interval_end - self._interval_start_time
         total_time_elapsed = interval_end - self._start_time
@@ -218,7 +221,11 @@ class PerfCallback(Callback):
                 step_overhead_pct = 100 * (wall_clock_per_step - seconds_per_step) / wall_clock_per_step
                 self.trainer.record_metric("perf/step_overhead_pct", step_overhead_pct, reduce_type=None)
 
+        cuda_sync_ms = (interval_end - host_end) * 1000
+        host_step_time_ms = (host_end - self._pre_step_time) * 1000
         step_time_ms = (interval_end - self._pre_step_time) * 1000
+        self.trainer.record_metric("perf/cuda_sync_ms", cuda_sync_ms, reduce_type=None)
+        self.trainer.record_metric("perf/host_step_time_ms", host_step_time_ms, reduce_type=None)
         self.trainer.record_metric("perf/step_time_ms", step_time_ms, reduce_type=None)
         if self._prev_pre_step_time > 0:
             cycle_time_ms = (self._pre_step_time - self._prev_pre_step_time) * 1000
