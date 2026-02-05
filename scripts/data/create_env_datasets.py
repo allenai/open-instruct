@@ -55,6 +55,66 @@ def create_guess_number_samples(num_samples: int = 100, nothink: bool = False) -
     return samples
 
 
+def create_appworld_samples(tasks_dir: Path | None = None, nothink: bool = False) -> list[dict]:
+    """Create samples for AppWorld environment from task specs.
+
+    AppWorld has 733 tasks across 9 apps (Spotify, Amazon, Venmo, etc.).
+    Each task has a supervisor who needs help with API-based operations.
+    """
+    if tasks_dir is None:
+        tasks_dir = Path(__file__).parent.parent.parent / "data" / "tasks"
+
+    if not tasks_dir.exists():
+        print(f"Warning: AppWorld tasks directory not found at {tasks_dir}")
+        print("Skipping appworld dataset creation.")
+        return []
+
+    samples = []
+    system_prompt = """You are an AI assistant that helps users complete tasks in the AppWorld environment.
+
+You can execute Python code using the `execute` tool. Available APIs:
+- Use `apis.{app_name}.{api_name}(**params)` to call APIs
+- Use `apis.api_docs.show_api_doc(app_name, api_name)` to look up API documentation
+- Use `apis.supervisor.complete_task()` when done (with `answer=` if the task requires an answer)
+
+Think step by step about what APIs you need to call, then execute code to complete the task."""
+    if nothink:
+        system_prompt = "/nothink\n\n" + system_prompt
+
+    task_dirs = sorted(tasks_dir.iterdir())
+    for task_dir in task_dirs:
+        specs_file = task_dir / "specs.json"
+        if not specs_file.exists():
+            continue
+
+        with open(specs_file) as f:
+            specs = json.load(f)
+
+        task_id = task_dir.name
+        instruction = specs.get("instruction", "")
+        supervisor = specs.get("supervisor", {})
+
+        # Create user message with task details
+        user_content = f"""Task: {instruction}
+
+Supervisor: {supervisor.get('first_name', '')} {supervisor.get('last_name', '')}
+Email: {supervisor.get('email', '')}
+
+Complete this task by calling the appropriate APIs."""
+
+        samples.append({
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            "ground_truth": task_id,
+            "dataset": "env_last",
+            "env_config": {"task_id": task_id},
+        })
+
+    return samples
+
+
 def create_wordle_samples(num_samples: int = 100, nothink: bool = False) -> list[dict]:
     """Create samples for Wordle environment via OpenEnv."""
     words = [
@@ -107,16 +167,20 @@ def main():
     args = parser.parse_args()
 
     suffix = "-nothink" if args.nothink else ""
+    # (name, create_fn, num_samples) - num_samples=None means use all available
     datasets = [
         (f"rlenv-counter{suffix}", lambda n: create_counter_samples(n, nothink=args.nothink), 100),
         (f"rlenv-guess-number{suffix}", lambda n: create_guess_number_samples(n, nothink=args.nothink), 100),
         (f"rlenv-wordle{suffix}", lambda n: create_wordle_samples(n, nothink=args.nothink), 100),
+        (f"rlenv-appworld{suffix}", lambda _: create_appworld_samples(nothink=args.nothink), None),
     ]
 
     data_dir = Path(__file__).parent.parent.parent / "data" / "envs"
 
     for name, create_fn, num_samples in datasets:
         samples = create_fn(num_samples)
+        if not samples:
+            continue  # Skip if no samples (e.g., appworld without task files)
 
         # Save locally
         local_name = name.replace("-", "_")

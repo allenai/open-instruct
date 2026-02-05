@@ -25,9 +25,30 @@ class AppWorldEnv(RLEnvironment):
     See: https://github.com/stonybrooknlp/appworld
     """
 
-    use_tool_calls: bool = True
-    response_role: str = "tool"
+    # Environment feedback is returned as tool results
+    observation_role: str = "tool"
     max_steps: int = 50
+
+    # Tool definition for the execute function
+    _tool_definitions = [
+        {
+            "type": "function",
+            "function": {
+                "name": "execute",
+                "description": "Execute Python code in the AppWorld environment. Use apis.{app}.{api}(**params) to call APIs.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"code": {"type": "string", "description": "Python code to execute"}},
+                    "required": ["code"],
+                },
+            },
+        }
+    ]
+
+    @classmethod
+    def get_tool_definitions(cls) -> list[dict]:
+        """Return tool definitions for prompt injection."""
+        return cls._tool_definitions
 
     def __init__(
         self,
@@ -94,24 +115,9 @@ You can execute Python code using the `execute` tool. Use `apis.{{app_name}}.{{a
 Use `apis.api_docs.show_api_doc(app_name, api_name)` to look up API documentation.
 Use `apis.supervisor.complete_task()` when done (with `answer=` if the task requires an answer)."""
 
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "execute",
-                    "description": "Execute Python code in the AppWorld environment. Use apis.{app}.{api}(**params) to call APIs.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"code": {"type": "string", "description": "Python code to execute"}},
-                        "required": ["code"],
-                    },
-                },
-            }
-        ]
-
         return StepResult(
             observation=observation,
-            tools=tools,
+            tools=self._tool_definitions,
             info={"task_id": task_id, "supervisor": task.supervisor, "apps": list(task.app_descriptions.keys())},
         )
 
