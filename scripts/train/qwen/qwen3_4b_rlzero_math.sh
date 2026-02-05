@@ -1,24 +1,24 @@
 #!/bin/bash
 
-EXP_NAME="qwen3_4b_rlzero_math"
-MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Base"
-DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
+EXP_NAME="qwen3_4b_it_deepmath"
+MODEL_NAME_OR_PATH="Qwen/Qwen3-4B-Instruct"
+DATASETS="mnoukhov/DeepMath-103K-openinstruct 1.0"
 
-LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 32"
-LOCAL_EVAL_SPLITS="train train"
+LOCAL_EVALS="allenai/aime2024-25-rlvr 32"
+LOCAL_EVAL_SPLITS="test_2024 test_2024"
 
-EVALS="aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero"
+EVALS="aime:2024::justrl,aime:2025::justrl"
 
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="nathanl/open_instruct_auto"
+# BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="michaeln/open_instruct"
+cluster=ai2/saturn
 
 # Check if the first argument starts with the value of $BEAKER_NAME
-if [[ "$1" == "$BEAKER_USER"* ]]; then
-    BEAKER_IMAGE="$1"
-    shift
-fi
+# if [[ "$1" == "$BEAKER_USER"* ]]; then
+#     BEAKER_IMAGE="$1"
+#     shift
+# fi
 
-cluster=ai2/augusta
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
@@ -27,16 +27,16 @@ uv run mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
-    --gpus 8 \
+    --gpus 4 \
     --budget ai2/oe-adapt \
     -- source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run open_instruct/grpo_fast.py \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
-    --async_steps 8 \
+    --async_steps 4 \
     --active_sampling \
     --inflight_updates \
     --no_resampling_pass_rate 0.875 \
@@ -52,16 +52,16 @@ uv run mason.py \
     --dataset_mixer_eval_list $LOCAL_EVALS \
     --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
     --max_prompt_token_length 2048 \
-    --response_length 16384 \
-    --pack_length 18432 \
+    --response_length 24000 \
+    --pack_length 32000 \
     --model_name_or_path ${MODEL_NAME_OR_PATH} \
     --chat_template_name olmo_thinker_rlzero \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 1024000 \
-    --deepspeed_stage 3 \
-    --num_learners_per_node 8 \
-    --vllm_num_engines 24 \
+    --total_episodes 512000 \
+    --deepspeed_stage 2 \
+    --num_learners_per_node 1 \
+    --vllm_num_engines 3 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
@@ -77,8 +77,9 @@ uv run mason.py \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority normal \
-    --eval_on_step_0 True \
     --oe_eval_tasks $EVALS \
     --load_ref_policy False \
     --keep_last_n_checkpoints -1 \
-    --oe_eval_gpu_multiplier 2 --push_to_hub False $@
+    --oe_eval_gpu_multiplier 2  \
+    --oe_eval_beaker_image michaeln/oe_eval_internal \
+    --push_to_hub False $@
