@@ -337,7 +337,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # Note: When freezing parameters, keep embed_tokens trainable so gradient checkpointing
         # sees inputs with requires_grad=True. Otherwise use_reentrant=False would be needed,
         # but that conflicts with DeepSpeed ZeRO-3.
-        self.policy.gradient_checkpointing_enable()
+        # self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
