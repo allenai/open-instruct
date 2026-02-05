@@ -360,6 +360,10 @@ class StreamingDataLoaderConfig:
     verification_reward: float = 10.0
     remap_verifier: str | None = None
 
+    # Reward aggregation
+    reward_aggregator: str = "last"
+    """How to combine per-turn rewards: 'last' (sparse) or 'sum' (dense)."""
+
     # LLM judge verifier
     llm_judge_model: str = "azure/gpt-4o-mini-standard"
     llm_judge_max_tokens: int = 2048
@@ -1210,11 +1214,8 @@ class DataPreparationActor:
                 }
 
                 tool_stats = ToolStatistics(tool_names=self.tool_names)
-                excess_calls = result.request_info.excess_tool_calls or [
-                    {} for _ in range(len(result.request_info.tool_call_stats))
-                ]
-                for rollout_stats, excess in zip(result.request_info.tool_call_stats, excess_calls):
-                    tool_stats.add_rollout(rollout_stats, excess)
+                for rollout_stats in result.request_info.tool_call_stats:
+                    tool_stats.add_rollout(rollout_stats)
                 step_metrics.update(tool_stats.compute_metrics())
 
                 assert result.token_statistics is not None

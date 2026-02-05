@@ -1006,19 +1006,16 @@ class CodeVerifier(VerifierFunction):
         return CodeVerifierConfig
 
 
-class LastRewardEnvVerifier(VerifierFunction):
+class PassthroughVerifier(VerifierFunction):
     """
-    Verifier for RL environments that uses the final reward from the last step.
+    Passthrough verifier for environment-only tasks.
 
-    Uses rollout_state from rollout metadata (not the label from dataset).
-    Returns the final reward (last in rewards list, or 0.0 if empty).
-
-    Use verifier_source="env_last" in dataset to activate this verifier.
-    Best for sparse reward environments (e.g., Wordle - only reward at end).
+    Returns 0.0 score — contributes nothing from the verifier side.
+    Per-turn rewards from the rollout are handled by the RewardAggregator.
     """
 
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
-        super().__init__("env_last", verifier_config=verifier_config, weight=1.0)
+        super().__init__("passthrough", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
         self,
@@ -1028,43 +1025,28 @@ class LastRewardEnvVerifier(VerifierFunction):
         query: str | None = None,
         rollout_state: dict | None = None,
     ) -> VerificationResult:
-        if rollout_state is None:
-            logger.warning("LastRewardEnvVerifier received no rollout_state")
-            return VerificationResult(score=0.0)
-
-        rewards = rollout_state.get("rewards", [])
-        final_reward = rewards[-1] if rewards else 0.0
-        return VerificationResult(score=final_reward)
+        return VerificationResult(score=0.0)
 
 
-class SumRewardEnvVerifier(VerifierFunction):
-    """
-    Verifier for RL environments that sums all rewards across the rollout.
+class RewardAggregator(ABC):
+    """Combines per-turn rewards into a final scalar."""
 
-    Uses rollout_state from rollout metadata (not the label from dataset).
-    Returns the sum of all rewards in the rewards list.
+    @abstractmethod
+    def __call__(self, rewards: list[float]) -> float: ...
 
-    Use verifier_source="env_sum" in dataset to activate this verifier.
-    Best for dense reward environments (e.g., per-step rewards).
-    """
 
-    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
-        super().__init__("env_sum", verifier_config=verifier_config, weight=1.0)
+class LastRewardAggregator(RewardAggregator):
+    """Return the last reward (sparse reward envs)."""
 
-    def __call__(
-        self,
-        tokenized_prediction: list[int],
-        prediction: str,
-        label: Any,
-        query: str | None = None,
-        rollout_state: dict | None = None,
-    ) -> VerificationResult:
-        if rollout_state is None:
-            logger.warning("SumRewardEnvVerifier received no rollout_state")
-            return VerificationResult(score=0.0)
+    def __call__(self, rewards: list[float]) -> float:
+        return rewards[-1] if rewards else 0.0
 
-        rewards = rollout_state.get("rewards", [])
-        return VerificationResult(score=sum(rewards))
+
+class SumRewardAggregator(RewardAggregator):
+    """Sum all rewards (dense reward envs)."""
+
+    def __call__(self, rewards: list[float]) -> float:
+        return sum(rewards)
 
 
 def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFunction]:
@@ -1094,6 +1076,13 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
     for judge_type in JUDGE_PROMPT_MAP:
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config))
         verifiers[instance.name.lower()] = instance
+
+    # Backward compatibility: env_last and env_sum now use PassthroughVerifier
+    # (per-turn rewards are handled by the RewardAggregator instead)
+    passthrough = verifiers.get("passthrough")
+    if passthrough is not None:
+        verifiers["env_last"] = passthrough
+        verifiers["env_sum"] = passthrough
 
     # if we have remap arg, remap!
     if streaming_config and streaming_config.remap_verifier:
@@ -1213,9 +1202,14 @@ class RewardConfig:
     only_reward_good_outputs: bool = False
     additive_format_reward: bool = False
     verifier_functions: dict[str, VerifierFunction] = dataclasses.field(default_factory=dict)
+    reward_aggregator: str = "last"
+    """How to combine per-turn rewards: 'last' (sparse) or 'sum' (dense)."""
 
     def build(self) -> Callable:
         """Build and return the reward function."""
+        aggregator: RewardAggregator = {"last": LastRewardAggregator(), "sum": SumRewardAggregator()}[
+            self.reward_aggregator
+        ]
 
         async def reward_fn(
             responses: list,
@@ -1230,7 +1224,7 @@ class RewardConfig:
             tool_errors = infos.tool_errors
             tool_outputs = infos.tool_outputs
             tool_calleds = infos.tool_calleds
-            rollout_states = getattr(infos, "rollout_states", None) or [None] * len(decoded_responses)
+            rollout_states = getattr(infos, "rollout_states", None) or [{}] * len(decoded_responses)
             good_outputs = [
                 len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
                 for i in range(len(tool_outputs))
@@ -1260,14 +1254,28 @@ class RewardConfig:
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
+
+                # Combine per-turn rewards with verifier scores via aggregator
                 for i in range(len(verifiable_rewards)):
                     if not self.only_reward_good_outputs or (good_outputs[i] and self.only_reward_good_outputs):
-                        if self.apply_r1_style_format_reward and self.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] + scores[i]
-                        elif self.apply_r1_style_format_reward and not self.additive_format_reward:
-                            scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
+                        turn_rewards = list(rollout_states[i].get("rewards", []))
+                        verifier_score = verifiable_rewards[i]
+
+                        # Add verifier score to last turn (or create a single-element list)
+                        if turn_rewards:
+                            turn_rewards[-1] += verifier_score
                         else:
-                            scores[i] = verifiable_rewards[i]
+                            turn_rewards = [verifier_score]
+
+                        raw_score = aggregator(turn_rewards)
+
+                        if self.apply_r1_style_format_reward and self.additive_format_reward:
+                            scores[i] = raw_score + scores[i]
+                        elif self.apply_r1_style_format_reward and not self.additive_format_reward:
+                            scores[i] = raw_score if format_scores[i] == 1 else 0
+                        else:
+                            scores[i] = raw_score
+
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()

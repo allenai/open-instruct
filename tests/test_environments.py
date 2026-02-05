@@ -3,8 +3,10 @@
 import asyncio
 
 from open_instruct.environments import ENV_REGISTRY, EnvironmentState, StepResult, ToolCall, get_env_class
+from open_instruct.environments.base import RLEnvironment
 from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
-from open_instruct.ground_truth_utils import LastRewardEnvVerifier, SumRewardEnvVerifier
+from open_instruct.ground_truth_utils import LastRewardAggregator, SumRewardAggregator
+from open_instruct.tools.utils import Tool
 
 
 def run_async(coro):
@@ -29,6 +31,16 @@ class TestDataClasses:
         state = EnvironmentState()
         assert state.final_reward == 0.0
         assert state.total_reward == 0.0
+
+
+class TestInheritance:
+    """Test that RLEnvironment extends Tool."""
+
+    def test_rlenvironment_is_tool(self):
+        assert issubclass(RLEnvironment, Tool)
+
+    def test_counter_env_is_tool(self):
+        assert issubclass(CounterEnv, Tool)
 
 
 class TestRegistry:
@@ -78,17 +90,21 @@ class TestGuessNumberEnv:
         run_async(_test())
 
 
-class TestVerifiers:
-    """Test environment verifiers."""
+class TestRewardAggregators:
+    """Test reward aggregators (replaced env verifiers)."""
 
-    def test_last_reward_verifier(self):
-        verifier = LastRewardEnvVerifier()
-        rollout_state = {"rewards": [0.1, 0.5, 1.0], "step_count": 3, "done": True}
-        result = verifier([], "", None, rollout_state=rollout_state)
-        assert result.score == 1.0
+    def test_last_reward_aggregator(self):
+        agg = LastRewardAggregator()
+        assert agg([0.1, 0.5, 1.0]) == 1.0
 
-    def test_sum_reward_verifier(self):
-        verifier = SumRewardEnvVerifier()
-        rollout_state = {"rewards": [1.0, 2.0, 3.0], "step_count": 3, "done": True}
-        result = verifier([], "", None, rollout_state=rollout_state)
-        assert result.score == 6.0
+    def test_last_reward_aggregator_empty(self):
+        agg = LastRewardAggregator()
+        assert agg([]) == 0.0
+
+    def test_sum_reward_aggregator(self):
+        agg = SumRewardAggregator()
+        assert agg([1.0, 2.0, 3.0]) == 6.0
+
+    def test_sum_reward_aggregator_empty(self):
+        agg = SumRewardAggregator()
+        assert agg([]) == 0.0

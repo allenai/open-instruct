@@ -1325,6 +1325,7 @@ def create_model_and_optimizer(
         tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
         max_tool_calls=tools_config.max_tool_calls if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
+        over_limit_penalty=env_config.over_limit_penalty if env_config and env_config.enabled else None,
         prompt_queue=prompt_Q,
         results_queue=inference_results_Q,
         eval_results_queue=evaluation_inference_results_Q,
@@ -2118,6 +2119,7 @@ def main(
         only_reward_good_outputs=tools_config.only_reward_good_outputs,
         additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args, streaming_config),
+        reward_aggregator=streaming_config.reward_aggregator,
     )
 
     # AFTER potentially adding tool stop sequences, create generation configs

@@ -1,11 +1,12 @@
 """Base classes for RL environments."""
 
 import importlib
-from abc import ABC, abstractmethod
+import time
+from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from open_instruct.tools.utils import ToolCall
+from open_instruct.tools.utils import Tool, ToolCall, ToolOutput
 
 
 @dataclass
@@ -53,19 +54,19 @@ def register_env(name: str):
     return decorator
 
 
-class RLEnvironment(ABC):
-    """Abstract base class for RL environments (use as Ray actors via ray.remote)."""
+class RLEnvironment(Tool):
+    """Abstract base class for RL environments (use as Ray actors via ray.remote).
+
+    Extends Tool so that environments and regular tools share a common base.
+    Environments use reset()/step() instead of _execute().
+    """
 
     # Role for model output in conversation (used when no tool parser)
     response_role: str = "assistant"
 
-    # Role for environment observations/feedback in conversation
-    # "user" = wrap in user turn, "tool" = wrap in tool turn
-    observation_role: str = "user"
-
-    async def setup(self) -> None:
-        """Called once at start of training for resource initialization."""
-        pass
+    async def _execute(self, **kwargs) -> ToolOutput:
+        """Not used by environments — they use step() via safe_execute()."""
+        raise NotImplementedError("RLEnvironment uses step() via safe_execute()")
 
     @abstractmethod
     async def reset(self, task_id: str | None = None) -> StepResult:
@@ -77,34 +78,37 @@ class RLEnvironment(ABC):
         """Execute action, return observation, reward, done."""
         pass
 
-    def get_metrics(self) -> dict[str, float]:
-        """Return custom metrics."""
-        return {}
+    async def safe_execute(self, _name_: str = "", _id_: str | None = None, **kwargs) -> ToolOutput:
+        """Unified interface matching regular tools.
 
-    def get_observation_role(self) -> str:
-        """Return the role to use for environment observations in conversation."""
-        return self.observation_role
-
-    async def close(self) -> None:
-        """Cleanup resources for a single episode."""
-        pass
-
-    async def shutdown(self) -> None:
-        """Called once at end of training for resource cleanup."""
-        pass
-
-    @classmethod
-    def get_tool_definitions(cls) -> list[dict]:
-        """Return tool definitions in OpenAI format for prompt injection.
-
-        Override this method to provide tool definitions that will be included
-        in the chat template. This is called at dataset setup time, before
-        any environment instances are created.
-
-        Returns:
-            List of tool definitions in OpenAI format (same as returned by reset()).
+        Wraps step() and returns a ToolOutput so that callers can use
+        the same dispatch path for both environments and regular tools.
         """
-        return []
+        start = time.perf_counter()
+        tc = ToolCall(name=_name_, args=kwargs, id=_id_)
+        try:
+            result = await self.step(tc)
+            return ToolOutput(
+                output=result.observation or "",
+                called=True,
+                error="",
+                timeout=False,
+                runtime=time.perf_counter() - start,
+                reward=result.reward,
+                done=result.done,
+                info=result.info,
+            )
+        except Exception as e:
+            return ToolOutput(
+                output=f"Error: {e}",
+                called=True,
+                error=str(e),
+                timeout=False,
+                runtime=time.perf_counter() - start,
+                reward=0.0,
+                done=True,
+                info={},
+            )
 
 
 def get_env_class(env_name: str | None = None, env_class: str | None = None) -> type[RLEnvironment]:
