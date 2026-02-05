@@ -2,12 +2,12 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=/weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h-long-context-drope/step23842-hf
 LR=1e-6
-EXP_NAME=hybrid-7b-DPO-cache-debug-4k-${LR}
+EXP_NAME=hybrid-7b-DPO-cache-debug-2k-${LR}
 
 uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --description "2 node DPO cache run with hybrid model, 4k sequence length." \
+    --description "2 node DPO cache run with hybrid model, 2k sequence length." \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
@@ -28,7 +28,7 @@ uv run python mason.py \
     --model_name_or_path "$MODEL_NAME" \
     --trust_remote_code \
     --chat_template_name olmo \
-    --max_seq_length 4096 \
+    --max_seq_length 2048 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
     --learning_rate "$LR" \
