@@ -41,7 +41,7 @@ uv run python mason.py \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 4096 \
     --response_length 8192 \
-    --pack_length 16384 \
+    --pack_length 32768 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
     --num_samples_per_prompt_rollout 4 \
@@ -50,6 +50,7 @@ uv run python mason.py \
     --learning_rate 3e-7 \
     --total_episodes 640 \
     --deepspeed_stage 3 \
+    --sequence_parallel_size 2 \
     --num_epochs 1 \
     --num_learners_per_node 8 \
     --vllm_num_engines 8 \
@@ -57,11 +58,12 @@ uv run python mason.py \
     --beta 0.01 \
     --seed 42 \
     --gradient_checkpointing \
+    --vllm_enable_prefix_caching \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
     --env_name appworld \
-    --env_pool_size 16 \
+    --env_pool_size 8 \
     --env_max_steps 50 \
     --tool_parser_type vllm_hermes \
     --no_filter_zero_std_samples \
