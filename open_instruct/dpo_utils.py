@@ -383,6 +383,9 @@ class ExperimentConfig(
     save_to_hub: str | None = field(
         default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
     )
+    gradient_checkpointing: bool = field(
+        default=False, metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."}
+    )
     use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
