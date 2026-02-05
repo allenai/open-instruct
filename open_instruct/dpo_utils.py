@@ -145,7 +145,13 @@ class TrainingConfig:
     max_train_steps: int | None = None
     """If set, overrides the number of training steps. Otherwise, num_epochs is used."""
     activation_memory_budget: float = 1.0
-    """Memory budget for activation checkpointing (0.0-1.0). 1.0 disables checkpointing (default), values < 1.0 enable budget-mode checkpointing. See: https://pytorch.org/blog/activation-checkpointing-techniques/."""
+    """Memory budget for activation checkpointing (0.0-1.0).
+
+    A practical "just turn it on" default is `0.5` (somewhat arbitrary, but works well in practice):
+    any value < 1.0 enables budget-mode checkpointing. Higher values use more memory and are
+    typically faster; lower values use less memory and are typically slower, so use the highest
+    value your hardware can support. See: https://pytorch.org/blog/activation-checkpointing-techniques/.
+    """
     use_8bit_optimizer: bool = False
     """Use 8bit optimizer from bitsandbytes."""
     dpo_use_paged_optimizer: bool = False
