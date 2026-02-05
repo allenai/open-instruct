@@ -36,7 +36,7 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source configs/beaker_configs/ray_node_setup.sh \&\& appworld download data \&\& python open_instruct/grpo_fast.py \
+       -- source configs/beaker_configs/ray_node_setup.sh \&\& uv run appworld download data \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/rlenv-appworld-nothink 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 4096 \
