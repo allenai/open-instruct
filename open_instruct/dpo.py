@@ -378,7 +378,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     )
 
     # Build reference cache after train_module init because TransformerTrainModule applies
-    # FSDP parallelism to the model, and we need the parallelized model for correct logprobs.
+    # FSDP parallelism to the model, and we need the parallelized model to calculate the
+    # logprobs in case the model is too big to fit in memory.
     logger.info("Caching reference logprobs...")
     train_module.reference_cache = dpo_utils.build_reference_logprobs_cache(model=train_module.model, **cache_kwargs)
 
