@@ -135,25 +135,37 @@ class OpenEnvTextClient(RLEnvironment):
         data = await self._request("POST", "/step", json={"action": {"message": message}})
 
         # Extract observation - handle both dict and string formats
-        observation = data.get("observation", "")
-        if isinstance(observation, dict):
-            # TextArena returns observation as dict with messages
-            messages = observation.get("messages", [])
+        obs_data = data.get("observation", "")
+        info = data.get("info", {})
+
+        if isinstance(obs_data, dict):
+            # TextArena returns observation as dict with messages and info
+            messages = obs_data.get("messages", [])
+            # Extract info from observation dict (TextArena puts reward_signals here)
+            if "info" in obs_data:
+                info = obs_data["info"]
             if messages:
                 # Get the last message content
-                content = messages[-1].get("content", str(observation))
+                content = messages[-1].get("content", str(obs_data))
                 # Extract just the feedback portion for cleaner context
                 # TextArena includes full history, but we only need the latest feedback
                 observation = self._extract_feedback(content)
             else:
-                observation = observation.get("prompt", str(observation))
+                observation = obs_data.get("prompt", str(obs_data))
+        else:
+            observation = obs_data
 
-        return StepResult(
-            observation=observation,
-            reward=float(data.get("reward", 0.0)),
-            done=bool(data.get("done", False)),
-            info=data.get("info", {}),
-        )
+        # Compute reward from reward_signals if available (TextArena provides shaped rewards)
+        # Otherwise use the main reward field
+        reward = float(data.get("reward", 0.0))
+        if "reward_signals" in info:
+            signals = info["reward_signals"]
+            # Sum all reward signals - they're typically normalized to [0, 1]
+            # wordle.greens: 0.2 per green (max 1.0), wordle.yellows: 0.2 per yellow (max 1.0)
+            # wordle.correct: 1.0 if solved, wordle.repetitions: bonus for diverse letters
+            reward = sum(signals.values())
+
+        return StepResult(observation=observation, reward=reward, done=bool(data.get("done", False)), info=info)
 
     def _extract_feedback(self, content: str) -> str:
         """Extract just the feedback portion from TextArena's verbose response.

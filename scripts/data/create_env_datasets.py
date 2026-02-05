@@ -65,33 +65,17 @@ def create_wordle_samples(num_samples: int = 100, nothink: bool = False) -> list
         "olive", "peace", "quiet", "radio", "smile", "toast", "unity", "voice", "world", "young",
     ]
     samples = []
-    # /nothink goes in system prompt for Qwen3 models
-    nothink_suffix = " /nothink" if nothink else ""
-    # Common starting words for Wordle (good letter coverage) - only valid English words
-    starters = ["crane", "slate", "trace", "crate", "stare", "raise", "arise", "irate", "audio", "adieu"]
+    # Instructions go in the user message
+    instructions = "Wordle: Guess a 5-letter word. Output ONLY a bracketed word like [crane]. You'll get feedback showing each letter: G=correct position, Y=in word but wrong position, X=not in word. Use the feedback to make better guesses."
     for i in range(num_samples):
         word = words[i % len(words)]
-        starter = starters[i % len(starters)]
-        # Simple, direct prompt with few-shot example showing exact format
+        # Build messages list - system prompt only contains /nothink when enabled
+        messages = []
+        if nothink:
+            messages.append({"role": "system", "content": "/nothink"})
+        messages.append({"role": "user", "content": instructions})
         samples.append({
-            "messages": [
-                {
-                    "role": "system",
-                    "content": f"Wordle: Guess the 5-letter word. Output ONLY a word in brackets like [crane]. G=correct, Y=wrong spot, X=miss.{nothink_suffix}",
-                },
-                {
-                    "role": "user",
-                    "content": "Guess the 5-letter word. Output ONLY a word in brackets.",
-                },
-                {
-                    "role": "assistant",
-                    "content": f"[{starter}]",
-                },
-                {
-                    "role": "user",
-                    "content": "X X X X X",
-                },
-            ],
+            "messages": messages,
             "ground_truth": word,
             "dataset": "env_last",
             "env_config": {"task_id": word},

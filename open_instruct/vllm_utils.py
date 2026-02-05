@@ -104,9 +104,10 @@ def format_observation_for_chat(observation: str, role: str) -> str:
     Returns:
         Formatted string with chat template markers
     """
-    # Format: close assistant turn, add role turn with observation, start new assistant turn
+    # Format: add role turn with observation, start new assistant turn
+    # Note: We don't add <|im_end|> at the start because the model already outputs it
     # Using Qwen/ChatML format: <|im_start|>role\ncontent<|im_end|>
-    return f"<|im_end|>\n<|im_start|>{role}\n{observation}<|im_end|>\n<|im_start|>assistant\n"
+    return f"\n<|im_start|>{role}\n{observation}<|im_end|>\n<|im_start|>assistant\n"
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> ModelDims:
@@ -668,8 +669,9 @@ class LLMRayActor:
             call_names = ray.get([actor.get_call_name.remote() for actor in self.tool_actors])
             self.tool_actor_map = dict(zip(call_names, self.tool_actors))
 
-        # Environment pools (lazy-initialized)
+        # Environment pools (lazy-initialized) and lock to prevent race conditions
         self.env_pools: dict[str, EnvironmentPool] = {}
+        self._env_pool_lock: asyncio.Lock | None = None  # Initialized lazily in event loop
 
         # Tool parser (initialized in _init_tool_parser, may remain None for env-only mode)
         self.tool_parser: ToolParser | None = None
@@ -927,7 +929,20 @@ async def _get_or_create_env_pool(actor: LLMRayActor, env_config: dict) -> Envir
     env_class = env_config.get("env_class")
     pool_key = env_name or env_class
 
-    if pool_key not in actor.env_pools:
+    # Fast path: pool already exists
+    if pool_key in actor.env_pools:
+        return actor.env_pools[pool_key]
+
+    # Lazy-initialize lock in event loop context (can't create in __init__ which runs outside loop)
+    if actor._env_pool_lock is None:
+        actor._env_pool_lock = asyncio.Lock()
+
+    # Use lock to prevent race condition when multiple requests try to create the same pool
+    async with actor._env_pool_lock:
+        # Check again inside lock (another request may have created it while we waited)
+        if pool_key in actor.env_pools:
+            return actor.env_pools[pool_key]
+
         pool_size = env_config.get("pool_size", 64)
         env_kwargs = {
             k: v
@@ -937,7 +952,7 @@ async def _get_or_create_env_pool(actor: LLMRayActor, env_config: dict) -> Envir
         pool = EnvironmentPool(pool_size=pool_size, env_name=env_name, env_class=env_class, **env_kwargs)
         await pool.initialize()
         actor.env_pools[pool_key] = pool
-    return actor.env_pools[pool_key]
+        return actor.env_pools[pool_key]
 
 
 @dataclasses.dataclass
@@ -1000,12 +1015,27 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     all_allowed_tools = env_tool_names | regular_tool_names
 
     max_steps = env_config.get("max_steps", 50) if env_config else actor.max_tool_calls
-    current_max_tokens = sampling_params.max_tokens
+
+    # For multi-turn environment interactions, cap per-turn generation to prevent context explosion.
+    # This reserves room for observations and future turns. Default 256 for envs, full budget otherwise.
+    per_turn_max_tokens = 256 if env_config is not None else sampling_params.max_tokens
+    current_max_tokens = min(sampling_params.max_tokens, per_turn_max_tokens)
 
     try:
         while state.num_calls < max_steps:
             # Check env done condition
             if state.env_state is not None and state.env_state["done"]:
+                break
+
+            # Dynamically adjust max_tokens based on remaining room in context
+            # Constraint: prompt_len + max_tokens <= max_model_len
+            remaining_room = max_model_len - len(state.current_prompt)
+            current_max_tokens = max(1, min(per_turn_max_tokens, remaining_room))
+            if remaining_room <= 0:
+                logger.warning(
+                    f"[process_request] Prompt length {len(state.current_prompt)} exceeds max_model_len "
+                    f"{max_model_len}, stopping generation for {sub_request_id}"
+                )
                 break
 
             # Generate model output
