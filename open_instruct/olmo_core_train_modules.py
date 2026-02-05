@@ -77,9 +77,9 @@ class DPOTrainModule(TransformerTrainModule):
         if dpo_config.packing:
             self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
         elif dpo_config.concatenated_forward:
-            self._forward_fn = partial(dpo_utils.concatenated_forward_olmo)
+            self._forward_fn = dpo_utils.concatenated_forward_olmo
         else:
-            self._forward_fn = partial(dpo_utils.separate_forward_olmo)
+            self._forward_fn = dpo_utils.separate_forward_olmo
 
     def pre_train(self):
         # Override to skip batch size validation from TransformerTrainModule.
