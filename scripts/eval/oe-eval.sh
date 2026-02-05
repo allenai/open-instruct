@@ -366,7 +366,7 @@ for TASK in "${TASKS[@]}"; do
             ${REVISION_ARG} \
             ${WANDB_ARG} \
             --cluster "$CLUSTER" \
-            --beaker-retries 2 \
+            --beaker-retries 1 \
             --beaker-image "$BEAKER_IMAGE" \
             --beaker-priority "$PRIORITY" \
             --push-datalake \
@@ -388,7 +388,7 @@ for TASK in "${TASKS[@]}"; do
         ${REVISION_ARG} \
         ${WANDB_ARG} \
         --cluster ai2/augusta \
-        --beaker-retries 2 \
+        --beaker-retries 1 \
         --beaker-image "$BEAKER_IMAGE" \
         --beaker-priority  "$PRIORITY" \
         --push-datalake \
