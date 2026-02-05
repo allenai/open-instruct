@@ -28,7 +28,7 @@ uv run python open_instruct/grpo_fast.py \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --temperature 0.7 \
     --learning_rate 3e-7 \
-    --total_episodes 24 \
+    --total_episodes 48 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
