@@ -59,6 +59,7 @@ class AppWorldEnv(RLEnvironment):
         raise_on_failure: bool = False,
         random_seed: int = 42,
         ground_truth_mode: str = "minimal",  # Options: 'full', 'partial', 'minimal'
+        timeout: float | None = None,  # Ignored - AppWorld doesn't use timeout
         **kwargs: Any,
     ):
         # Each actor gets a unique experiment name to avoid file conflicts
@@ -69,7 +70,8 @@ class AppWorldEnv(RLEnvironment):
         self._raise_on_failure = raise_on_failure
         self._random_seed = random_seed
         self._ground_truth_mode = ground_truth_mode
-        self._extra_kwargs = kwargs
+        # Filter out keys that AppWorld doesn't accept
+        self._extra_kwargs = {k: v for k, v in kwargs.items() if k not in ("timeout", "base_url")}
 
         self._world = None
         self._task_id: str | None = None
