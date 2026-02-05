@@ -72,12 +72,29 @@ def create_appworld_samples(tasks_dir: Path | None = None, nothink: bool = False
     samples = []
     system_prompt = """You are an AI assistant that helps users complete tasks in the AppWorld environment.
 
-You can execute Python code using the `execute` tool. Available APIs:
-- Use `apis.{app_name}.{api_name}(**params)` to call APIs
-- Use `apis.api_docs.show_api_doc(app_name, api_name)` to look up API documentation
-- Use `apis.supervisor.complete_task()` when done (with `answer=` if the task requires an answer)
+You have access to an `execute` tool that runs Python code in a sandboxed environment. Standard Python libraries (smtplib, boto3, requests, etc.) are NOT available. Instead, you MUST use the pre-loaded `apis` object to interact with apps.
 
-Think step by step about what APIs you need to call, then execute code to complete the task."""
+## How to call APIs
+
+Always use the `execute` tool to run code. For example, to look up API docs:
+<tool_call>
+{"name": "execute", "arguments": {"code": "apis.api_docs.show_api_doc('venmo', 'get_balance')"}}
+</tool_call>
+
+Then call APIs using the `apis` object (do NOT use `import`):
+<tool_call>
+{"name": "execute", "arguments": {"code": "result = apis.venmo.get_balance()\\nprint(result)"}}
+</tool_call>
+
+When done, complete the task:
+<tool_call>
+{"name": "execute", "arguments": {"code": "apis.supervisor.complete_task()"}}
+</tool_call>
+
+## Available apps
+spotify, amazon, venmo, gmail, splitwise, simple_note, todoist, phone, file_system
+
+Always start by looking up the relevant API docs, then call the APIs step by step."""
     if nothink:
         system_prompt = "/nothink\n\n" + system_prompt
 

@@ -105,20 +105,20 @@ class AppWorldEnv(RLEnvironment):
             raise_on_failure=self._raise_on_failure,
             random_seed=self._random_seed,
             ground_truth_mode=self._ground_truth_mode,
+            timeout_seconds=None,  # Disable signal-based timeouts (incompatible with Ray actors)
             **self._extra_kwargs,
         )
 
         task = self._world.task
+        apps = ", ".join(task.app_descriptions.keys())
         observation = f"""Task: {task.instruction}
 
 Supervisor: {task.supervisor["first_name"]} {task.supervisor["last_name"]}
 Email: {task.supervisor["email"]}
 
-Available Apps: {", ".join(task.app_descriptions.keys())}
+Available Apps: {apps}
 
-You can execute Python code using the `execute` tool. Use `apis.{{app_name}}.{{api_name}}(**params)` to call APIs.
-Use `apis.api_docs.show_api_doc(app_name, api_name)` to look up API documentation.
-Use `apis.supervisor.complete_task()` when done (with `answer=` if the task requires an answer)."""
+Remember: use `apis.<app_name>.<api_name>(**params)` to call APIs. Start by looking up docs with `apis.api_docs.show_api_doc(app_name, api_name)`. When done, call `apis.supervisor.complete_task()`."""
 
         return StepResult(
             observation=observation,

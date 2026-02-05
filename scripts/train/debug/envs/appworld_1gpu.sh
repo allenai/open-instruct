@@ -27,15 +27,15 @@ uv run python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/rlenv-appworld-nothink 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 2048 \
-    --pack_length 4096 \
+    --response_length 8192 \
+    --pack_length 16384 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 4 \
     --num_samples_per_prompt_rollout 2 \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --temperature 0.7 \
     --learning_rate 3e-7 \
-    --total_episodes 32 \
+    --total_episodes 80 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \

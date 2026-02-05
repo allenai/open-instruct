@@ -40,8 +40,8 @@ uv run python mason.py \
     --dataset_mixer_list hamishivi/rlenv-appworld-nothink 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 4096 \
-    --response_length 8192 \
-    --pack_length 32768 \
+    --response_length 16384 \
+    --pack_length 65536 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
     --num_samples_per_prompt_rollout 4 \
