@@ -84,7 +84,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
         collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
         device: torch.device | None = None,
         drop_last: bool = True,
-        fs_local_rank: int | None = None,
     ) -> None:
         """Initialize the HFDataLoader.
 
@@ -101,7 +100,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
             device: Device to move tensors to.
             drop_last: If True, drop the last incomplete batch. If False, pad the last batch
                 with repeated indices to fill a complete batch.
-            fs_local_rank: File system local rank. Defaults to dp_rank when None.
 
         Note:
             The dataset must have an 'index' column for tracking samples across epochs.
@@ -113,7 +111,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             global_batch_size=batch_size,
             dp_world_size=dp_world_size,
             dp_rank=dp_rank,
-            fs_local_rank=fs_local_rank if fs_local_rank is not None else dp_rank,
+            fs_local_rank=dp_rank,
         )
 
         if "index" not in dataset.column_names:
