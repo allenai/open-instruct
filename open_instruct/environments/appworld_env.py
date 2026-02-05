@@ -1,6 +1,7 @@
 """AppWorld environment for interactive coding agent tasks."""
 
 import logging
+import uuid
 from typing import Any
 
 from .base import RLEnvironment, StepResult, ToolCall, register_env
@@ -60,7 +61,9 @@ class AppWorldEnv(RLEnvironment):
         ground_truth_mode: str = "minimal",  # Options: 'full', 'partial', 'minimal'
         **kwargs: Any,
     ):
-        self._experiment_name = experiment_name
+        # Each actor gets a unique experiment name to avoid file conflicts
+        # when multiple actors work on the same task_id concurrently
+        self._experiment_name = f"{experiment_name}_{uuid.uuid4().hex[:8]}"
         self._max_interactions = max_interactions
         self._max_api_calls_per_interaction = max_api_calls_per_interaction
         self._raise_on_failure = raise_on_failure
