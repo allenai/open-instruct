@@ -473,7 +473,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if args.freeze_non_experts:
             frozen, trainable = freeze_non_expert_params(self.policy)
             logger.info(f"Froze {frozen:,} params, training {trainable:,} params (experts + router only)")
-        self.policy.gradient_checkpointing_enable()
+        # self.policy.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
