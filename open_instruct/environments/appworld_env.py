@@ -57,7 +57,7 @@ class AppWorldEnv(RLEnvironment):
         max_api_calls_per_interaction: int = 500,
         raise_on_failure: bool = False,
         random_seed: int = 42,
-        ground_truth_mode: str = "none",
+        ground_truth_mode: str = "minimal",  # Options: 'full', 'partial', 'minimal'
         **kwargs: Any,
     ):
         self._experiment_name = experiment_name

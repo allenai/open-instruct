@@ -5,10 +5,8 @@
 # and 457 APIs. The model executes Python code to complete tasks.
 #
 # Requirements:
-# - appworld package installed:
-#   pip install appworld
-#   appworld install
-#   appworld download data
+# - appworld package installed (included in project dependencies)
+# - AppWorld data already in repo at data/ (base_dbs, tasks, api_docs)
 # - 1 GPU available
 
 set -e
@@ -19,6 +17,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
+export APPWORLD_ROOT="$REPO_ROOT"
 
 echo "Starting AppWorld environment training (1 GPU)..."
 echo "Note: AppWorld has 733 tasks across 9 apps (Spotify, Amazon, Venmo, etc.)"

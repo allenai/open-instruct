@@ -5,7 +5,8 @@
 # and 457 APIs. The model executes Python code to complete tasks.
 #
 # Requirements:
-# - appworld package installed (pip install appworld && appworld install && appworld download data)
+# - appworld package installed (included in project dependencies)
+# - AppWorld data already in repo at data/ (base_dbs, tasks, api_docs)
 # - 8 GPUs available
 #
 # Note: This script uses mason to launch on Beaker cluster.
@@ -31,6 +32,7 @@ uv run python mason.py \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
+       --env APPWORLD_ROOT=. \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --budget ai2/oe-adapt \
        --gpus 8 \
