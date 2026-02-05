@@ -922,6 +922,117 @@ class CodeVerifier(VerifierFunction):
         return CodeVerifierConfig
 
 
+@dataclasses.dataclass
+class RubricVerifierConfig(VerifierConfig):
+    """Configuration for rubric verifier."""
+
+    rubric_judge_model: str = "gpt-4.1"
+    rubric_judge_max_tokens: int = 2048
+    rubric_judge_temperature: float = 0.0
+    rubric_judge_timeout: int = 60
+    seed: int = 42
+
+
+class RubricVerifier(VerifierFunction):
+    """
+    Verifier that scores responses against rubrics defined in the ground truth.
+
+    The ground truth label should be a JSON string or dict with:
+    - "query": The original question
+    - "rubrics": List of rubric dicts with "description" and "weight" keys
+
+    Returns weighted average of rubric scores.
+    """
+
+    RUBRIC_SCORING_PROMPT = """You will be given a question someone asked (in <question></question> tags) and the corresponding response (in <response></response> tags) given to them by an assistant. You will then be given a specific criterion of the response to evaluate (in <criterion></criterion> tags).
+Return a score on a scale of 0 to 2 indicating how appropriate the response is based on the given criterion. Judge only the specified aspect(s), not any other qualities of the answer. Output JSON in the format: {{"score": x}}."""
+
+    def __init__(self, verifier_config: RubricVerifierConfig) -> None:
+        super().__init__("rubric", verifier_config=verifier_config, weight=1.0)
+        self.config = verifier_config
+
+    async def async_call(
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
+    ) -> VerificationResult:
+        """Score response against all rubrics in the ground truth."""
+        from open_instruct.search_rewards.utils.run_utils import extract_json_from_response, run_litellm_async
+
+        # Parse the ground truth
+        if isinstance(label, str):
+            try:
+                label = json.loads(label)
+            except json.JSONDecodeError:
+                logger.warning(f"Could not parse rubric label as JSON: {label[:100]}")
+                return VerificationResult(score=0.0)
+
+        if not isinstance(label, dict):
+            logger.warning(f"Rubric label is not a dict: {type(label)}")
+            return VerificationResult(score=0.0)
+
+        question = label.get("query") or label.get("Question") or query
+        rubrics = label.get("rubrics", [])
+
+        if not rubrics:
+            logger.warning("No rubrics found in ground truth")
+            return VerificationResult(score=0.0)
+
+        # Score each rubric in parallel
+        async def score_rubric(rubric: dict) -> tuple[float, float]:
+            description = rubric.get("description") or rubric.get("rubric_item") or rubric.get("Ingredient", "")
+            weight = rubric.get("weight", 1.0)
+
+            user_prompt = f"<question>{question}</question>\n<response>{prediction}</response>\n<criterion>{description}</criterion>"
+
+            try:
+                model_name = os.environ.get("RUBRIC_JUDGE_MODEL", self.config.rubric_judge_model)
+                resp = await run_litellm_async(
+                    model_name=model_name,
+                    system_prompt=self.RUBRIC_SCORING_PROMPT,
+                    user_prompt=user_prompt,
+                    temperature=self.config.rubric_judge_temperature,
+                    max_tokens=self.config.rubric_judge_max_tokens,
+                    timeout=self.config.rubric_judge_timeout,
+                )
+
+                obj = extract_json_from_response(resp)
+                if obj and isinstance(obj, dict) and "score" in obj:
+                    score = float(obj["score"]) / 2.0  # Normalize from 0-2 to 0-1
+                    return score, weight
+            except Exception as e:
+                logger.warning(f"Error scoring rubric: {e}")
+
+            return 0.0, weight
+
+        # Run all rubric scoring in parallel
+        results = await asyncio.gather(*[score_rubric(r) for r in rubrics])
+
+        # Compute weighted average
+        total_weight = sum(abs(w) for _, w in results)
+        if total_weight == 0:
+            return VerificationResult(score=0.0)
+
+        weighted_sum = sum(s * w for s, w in results)
+        final_score = weighted_sum / total_weight
+
+        return VerificationResult(score=final_score)
+
+    def __call__(
+        self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
+    ) -> VerificationResult:
+        """Synchronous wrapper for async_call."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                raise RuntimeError("Cannot call synchronous method from async context. Use async_call instead.")
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+        except RuntimeError:
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        return RubricVerifierConfig
+
+
 def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFunction]:
     """
     Build all verifiers with the given configs.
