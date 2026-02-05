@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - Documentation and runtime warning for `dataset_mixer_list` format (float=proportion, int=count) (https://github.com/allenai/open-instruct/pull/1434).
 
 ### Changed
+- Let TransformerTrainModule handle FSDP parallelism instead of manual application in DPO (https://github.com/allenai/open-instruct/pull/1458).
 - Refactored DPOTrainModule to inherit from TransformerTrainModule (https://github.com/allenai/open-instruct/pull/1456)
 - Increased vLLM health check timeout from 30s to 600s (10 minutes) (https://github.com/allenai/open-instruct/pull/1452).
 - Updated vllm version to 0.14.1 (https://github.com/allenai/open-instruct/pull/1433).

@@ -16,7 +16,7 @@ from olmo_core.optim import OptimConfig
 from olmo_core.optim.scheduler import Scheduler
 from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import TransformerTrainModule
-from olmo_core.train.train_module.transformer.config import TransformerDataParallelConfig
+from olmo_core.train.train_module.transformer import config as transformer_config
 from transformers import PreTrainedTokenizer
 
 from open_instruct import data_types, dpo_utils, grpo_utils, logger_utils, model_utils, utils
@@ -43,8 +43,11 @@ class DPOTrainModule(TransformerTrainModule):
         rank_microbatch_size: int,
         max_sequence_length: int,
         dpo_config: dpo_utils.ExperimentConfig,
-        reference_cache: model_utils.TensorCache,
-        dp_config: TransformerDataParallelConfig | None = None,
+        dp_config: transformer_config.TransformerDataParallelConfig | None = None,
+        tp_config: transformer_config.TransformerTensorParallelConfig | None = None,
+        cp_config: transformer_config.TransformerContextParallelConfig | None = None,
+        ac_config: transformer_config.TransformerActivationCheckpointingConfig | None = None,
+        compile_model: bool = True,
         max_grad_norm: float | None = None,
         scheduler: Scheduler | None = None,
         device: torch.device | None = None,
@@ -57,6 +60,10 @@ class DPOTrainModule(TransformerTrainModule):
             rank_microbatch_size=rank_microbatch_size,
             max_sequence_length=max_sequence_length,
             dp_config=dp_config,
+            tp_config=tp_config,
+            cp_config=cp_config,
+            ac_config=ac_config,
+            compile_model=compile_model,
             max_grad_norm=max_grad_norm,
             scheduler=scheduler,
             device=device,
@@ -65,7 +72,7 @@ class DPOTrainModule(TransformerTrainModule):
         )
 
         self.dpo_config = dpo_config
-        self.reference_cache = reference_cache
+        self.reference_cache: model_utils.TensorCache | None = None
 
         if dpo_config.packing:
             self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
@@ -75,6 +82,9 @@ class DPOTrainModule(TransformerTrainModule):
             self._forward_fn = dpo_utils.separate_forward_olmo
 
     def pre_train(self):
+        # Override to skip batch size validation from TransformerTrainModule.
+        # DPO processes 2x sequences per batch (chosen + rejected), so the parent's
+        # validation (global_batch_size % rank_microbatch_size == 0) would fail.
         pass
 
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
@@ -146,7 +156,7 @@ class GRPOTrainModule(TransformerTrainModule):
         grpo_config: grpo_utils.ExperimentConfig,
         tokenizer: PreTrainedTokenizer,
         ref_policy: Transformer | None = None,
-        dp_config: TransformerDataParallelConfig | None = None,
+        dp_config: transformer_config.TransformerDataParallelConfig | None = None,
         max_grad_norm: float | None = None,
         scheduler: Scheduler | None = None,
         device: torch.device | None = None,
