@@ -2,12 +2,12 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=allenai/OLMo-2-1124-7B
 LR=1e-6
-EXP_NAME=olmo2-7b-DPO-debug-2k-bs4-${LR}
+EXP_NAME=olmo2-7b-DPO-debug-16k-packing-${LR}
 
 uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --description "2 node DPO run with OLMo2-7B, 2k seq len, bs=4." \
+    --description "2 node DPO run with OLMo2-7B, 16k seq len, packing, no compile." \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
@@ -28,20 +28,22 @@ uv run python mason.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
     --chat_template_name olmo \
-    --max_seq_length 2048 \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 8 \
+    --max_seq_length 16384 \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 4 \
     --learning_rate "$LR" \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
     --num_epochs 1 \
-    --output_dir output/dpo_olmo2_debug_2k_bs4/ \
+    --output_dir output/dpo_olmo2_debug_16k_packing/ \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 1000 \
     --seed 123 \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
+    --packing \
+    --compile_model false \
     --activation_memory_budget 0.5 \
     --with_tracking \
     --push_to_hub false \
