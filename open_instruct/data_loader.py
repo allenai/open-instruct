@@ -268,9 +268,10 @@ class HFDataLoader(data_loader.DataLoaderBase):
         Raises:
             ValueError: If no input_ids tensors are found in the batch.
         """
-        # attention_mask is 1 for all non-padding tokens, and 0 otherwise.
-        # Using sum() excludes padding tokens from the count.
-        num_tokens = batch["attention_mask"].sum().item()
+        if "attention_mask" in batch:
+            num_tokens = batch["attention_mask"].sum().item()
+        else:
+            num_tokens = sum(v.numel() for k, v in batch.items() if "input_ids" in k and isinstance(v, torch.Tensor))
         return num_tokens * self.dp_world_size
 
 
