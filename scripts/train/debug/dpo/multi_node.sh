@@ -40,7 +40,7 @@ uv run python mason.py \
     --output_dir output/dpo_olmo2_debug_16k_baseline/ \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 7680 \
     --seed 123 \
-    --logging_steps 1 \
+    --logging_steps 10 \
     --loss_type dpo_norm \
     --beta 5 \
     --activation_memory_budget 0.1 \
