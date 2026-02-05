@@ -6,10 +6,10 @@
 #
 # Requirements:
 # - appworld package installed (included in project dependencies)
-# - AppWorld data already in repo at data/ (base_dbs, tasks, api_docs)
 # - 8 GPUs available
 #
 # Note: This script uses mason to launch on Beaker cluster.
+# AppWorld data is downloaded at runtime via `appworld download data`.
 
 # Get the Beaker username to construct the image name
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
@@ -27,7 +27,7 @@ uv run python mason.py \
        --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
-       --timeout 4h \
+       --timeout 6h \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
@@ -37,11 +37,11 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- source configs/beaker_configs/ray_node_setup.sh \&\& appworld download data \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/rlenv-appworld-nothink 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 4096 \
-    --response_length 4096 \
+    --response_length 8192 \
     --pack_length 16384 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
@@ -50,7 +50,7 @@ uv run python mason.py \
     --temperature 0.7 \
     --learning_rate 3e-7 \
     --total_episodes 640 \
-    --deepspeed_stage 2 \
+    --deepspeed_stage 3 \
     --num_epochs 1 \
     --num_learners_per_node 8 \
     --vllm_num_engines 8 \
