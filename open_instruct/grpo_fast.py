@@ -2159,13 +2159,24 @@ def main(
     # This scans each dataset's env_config column for unique env_names, then
     # fetches tool definitions for each. The env_tool_map is passed to
     # rlvr_tokenize_v3 for per-sample tool injection into chat templates.
-    env_tool_map: dict[str, list[dict[str, Any]]] = {}
-    if env_config.enabled:
-        env_tool_map = discover_env_tool_definitions(
-            dataset_mixer_list=streaming_config.dataset_mixer_list,
-            dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
-            env_config=env_config,
-        )
+    # Always run discovery: datasets may self-describe their env type even when
+    # no --env_name/--env_class is given on the CLI.
+    env_tool_map = discover_env_tool_definitions(
+        dataset_mixer_list=streaming_config.dataset_mixer_list,
+        dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
+        env_config=env_config,
+    )
+    if env_tool_map:
+        # Discovery found environments — ensure env_config.enabled is True
+        # so downstream plumbing (base_env_config, env pools, etc.) works.
+        if not env_config.enabled:
+            # Pick the first discovered env_name as a default to enable routing.
+            first_env_name = next(iter(env_tool_map))
+            env_config.env_name = first_env_name
+            logger.info(
+                f"Auto-enabled env_config from dataset discovery (env_name={first_env_name}). "
+                f"All discovered envs: {list(env_tool_map.keys())}"
+            )
         # Add all discovered env tool defs to global tool_definitions (parser needs them all)
         all_env_tool_defs = [td for defs in env_tool_map.values() for td in defs]
         # Deduplicate by function name
