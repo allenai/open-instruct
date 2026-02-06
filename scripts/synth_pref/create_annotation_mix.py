@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pandas as pd
 from jinja2 import BaseLoader, Environment
+from scripts.synth_pref.utils.ultrafeedback_template import user_prompts
 from tqdm import tqdm
 
 from open_instruct import logger_utils
-from scripts.synth_pref.utils.ultrafeedback_template import user_prompts
 
 logger = logger_utils.setup_logger(__name__)
 

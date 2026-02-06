@@ -8,6 +8,7 @@ They are then automatically added to the REWARD_FN_MAPPING.
 import ast
 import asyncio
 import copy
+import dataclasses
 import json
 import logging
 import os
@@ -17,14 +18,13 @@ import weakref
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 import requests
 from litellm import acompletion
 
-from open_instruct import logger_utils
+from open_instruct import context_window_checker, logger_utils
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
 from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
@@ -49,7 +49,7 @@ logging.getLogger("cost_calculator").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-@dataclass
+@dataclasses.dataclass
 class VerifierConfig:
     """For now this config exists to support LMJudgeVerifer, can be expanded to support other verifers"""
 
@@ -60,9 +60,7 @@ class VerifierConfig:
         Only fields that exist in both the sources and VerifierConfig will be passed through.
         Later sources override earlier ones if they have the same field.
         """
-        import dataclasses
-
-        verifier_fields = {field.name for field in dataclasses.fields(cls)}
+        verifier_fields = {f.name for f in dataclasses.fields(cls)}
 
         matching_kwargs = {}
         for source in arg_sources:
@@ -75,7 +73,7 @@ class VerifierConfig:
         return cls(**matching_kwargs)
 
 
-@dataclass
+@dataclasses.dataclass
 class LMJudgeVerifierConfig(VerifierConfig):
     # judge args
     llm_judge_model: str
@@ -86,7 +84,7 @@ class LMJudgeVerifierConfig(VerifierConfig):
     seed: int
 
 
-@dataclass
+@dataclasses.dataclass
 class CodeVerifierConfig(VerifierConfig):
     code_api_url: str
     code_max_execution_time: float
@@ -94,14 +92,14 @@ class CodeVerifierConfig(VerifierConfig):
     code_apply_perf_penalty: bool
 
 
-@dataclass
+@dataclasses.dataclass
 class VerificationResult:
     score: float
     cost: float = 0.0
     reasoning: str | None = None
 
 
-@dataclass
+@dataclasses.dataclass
 class MaxLengthVerifierConfig(VerifierConfig):
     max_length_verifier_max_length: int = 32768
 
@@ -426,20 +424,20 @@ class StringMatcherVerifier(VerifierFunction):
 class F1Verifier(VerifierFunction):
     """
     Verifier that computes the string F1 score between the prediction and the label.
+
+    The label can be a single string or a list of strings. If a list is provided,
+    the maximum F1 score across all labels is returned.
     """
 
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("string_f1", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
+        self, tokenized_prediction: list[int], prediction: str, label: str | list[str], query: str | None = None
     ) -> VerificationResult:
-        # remove thinking section from the prediction
-        prediction = prediction.split("</think>")[-1]
-        # remove answer tags from the prediction
-        prediction = prediction.replace("<answer>", "").replace("</answer>", "")
-        # return f1 score
-        score = f1_score(prediction, label)["f1"]
+        prediction = remove_thinking_section(prediction)
+        labels: list[str] = label if isinstance(label, list) else [label]
+        score = max(f1_score(prediction, str(lab))["f1"] for lab in labels)
         return VerificationResult(score=score)
 
 
@@ -689,21 +687,8 @@ class LMJudgeVerifier(VerifierFunction):
             try:
                 messages = build_messages(prompt)
 
-                # Faeze: check if the request would exceed context window
-                # Import the context window checker
-                try:
-                    from open_instruct.context_window_checker import (
-                        check_context_window_limit,
-                        truncate_messages_to_fit_context,
-                    )
-
-                    context_check_available = True
-                except ImportError:
-                    logger.warning("Context window checker not available. Proceeding without context checking.")
-                    context_check_available = False
-
                 # Check if the request would exceed context window
-                if context_check_available and not check_context_window_limit(
+                if not context_window_checker.check_context_window_limit(
                     messages=messages,
                     max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                     model_name=self.verifier_config.llm_judge_model,
@@ -711,7 +696,7 @@ class LMJudgeVerifier(VerifierFunction):
                     safety_margin=150,
                 ):
                     # Try to truncate messages to fit
-                    messages = truncate_messages_to_fit_context(
+                    messages = context_window_checker.truncate_messages_to_fit_context(
                         messages=messages,
                         max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                         model_name=self.verifier_config.llm_judge_model,
@@ -720,7 +705,7 @@ class LMJudgeVerifier(VerifierFunction):
                     )
 
                     # Check again after truncation
-                    if not check_context_window_limit(
+                    if not context_window_checker.check_context_window_limit(
                         messages=messages,
                         max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                         model_name=self.verifier_config.llm_judge_model,
@@ -1063,7 +1048,7 @@ async def apply_verifiable_reward(
     return response_rewards, response_per_func_rewards
 
 
-@dataclass
+@dataclasses.dataclass
 class RewardConfig:
     """Configuration for reward function computation."""
 
@@ -1075,7 +1060,7 @@ class RewardConfig:
     non_stop_penalty_value: float = -10.0
     only_reward_good_outputs: bool = False
     additive_format_reward: bool = False
-    verifier_functions: dict[str, VerifierFunction] = field(default_factory=dict)
+    verifier_functions: dict[str, VerifierFunction] = dataclasses.field(default_factory=dict)
 
     def build(self) -> Callable:
         """Build and return the reward function."""

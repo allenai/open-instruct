@@ -1,3 +1,4 @@
+#!/bin/bash
 python open_instruct/reward_modeling.py \
     --dataset_mixer_list trl-internal-testing/sentiment-trl-style 400 \
     --model_name_or_path EleutherAI/pythia-14m \

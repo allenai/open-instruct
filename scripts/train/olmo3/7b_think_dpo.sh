@@ -1,3 +1,4 @@
+#!/bin/bash
 BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 MODEL_NAME=/weka/oe-adapt-default/saumyam/checkpoints/olmo2-7B-sft/rl-sft/olmo2.5-6T-LC-sigma-reasoning-mix-decontam-v2-special-tokens-v3-think-FIX
 EXP_NAME=sm0922-rsn-dpo-delta-yolo_scottmix1_150k-8e-8
@@ -22,7 +23,7 @@ uv run python mason.py \
     --model_name_or_path $MODEL_NAME \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
-    --dataset_mixer_list scottgeng00/olmo-3-preference-mix-deltas_reasoning-yolo_scottmix-DECON 1.0 \
+    --mixer_list scottgeng00/olmo-3-preference-mix-deltas_reasoning-yolo_scottmix-DECON 1.0 \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
@@ -30,13 +31,12 @@ uv run python mason.py \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
-    --num_train_epochs 1 \
+    --num_epochs 1 \
     --logging_steps 1 \
-    --dpo_loss_type dpo_norm \
-    --dpo_beta 5 \
+    --loss_type dpo_norm \
+    --beta 5 \
     --use_flash_attn \
     --gradient_checkpointing \
-    --report_to wandb \
     --chat_template_name olmo_thinker \
     --with_tracking \
     --eval_workspace usable-olmo \

@@ -32,7 +32,7 @@ class TestGrpoFastBase(unittest.TestCase):
         tracked_resources = {}
         try:
             # Try to access resource tracker directly
-            from multiprocessing.resource_tracker import _resource_tracker
+            from multiprocessing.resource_tracker import _resource_tracker  # noqa: PLC0415
 
             if hasattr(_resource_tracker, "_cache"):
                 for name, rtype in list(_resource_tracker._cache.items()):
@@ -42,7 +42,7 @@ class TestGrpoFastBase(unittest.TestCase):
         except Exception:
             # Alternative approach: check via resource_tracker module
             try:
-                import multiprocessing.resource_tracker as rt
+                import multiprocessing.resource_tracker as rt  # noqa: PLC0415
 
                 if hasattr(rt, "getfd"):
                     # This is a hack to get the cache info
@@ -232,7 +232,13 @@ class TestGrpoFastBase(unittest.TestCase):
 
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
         data_loader = data_loader_lib.HFDataLoader(
-            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
+            dataset=mock_dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir="/tmp",
+            collator=lambda x: x[0],
         )
 
         for example in data_loader:
@@ -556,7 +562,13 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
         data_loader = data_loader_lib.HFDataLoader(
-            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
+            dataset=mock_dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir="/tmp",
+            collator=lambda x: x[0],
         )
 
         for example in data_loader:
@@ -587,7 +599,13 @@ class TestStreamingAccumulation(TestGrpoFastBase):
 
         mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
         data_loader = data_loader_lib.HFDataLoader(
-            dataset=mock_dataset, batch_size=1, seed=42, rank=0, world_size=1, work_dir="/tmp"
+            dataset=mock_dataset,
+            batch_size=1,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir="/tmp",
+            collator=lambda x: x[0],
         )
 
         for example in data_loader:

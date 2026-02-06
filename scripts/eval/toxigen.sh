@@ -1,3 +1,4 @@
+#!/bin/bash
 # example scripts for toxigen
 
 # evaluate an open-instruct model with chat format

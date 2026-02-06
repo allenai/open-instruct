@@ -1,3 +1,4 @@
+#!/bin/bash
 export split_int_mix_3="hamishivi/omega-combined 63033 allenai/IF_multi_constraints_upto5 63033 saurabh5/rlvr_acecoder_filtered 63033 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2 63033"
 
 # Get the Beaker username to construct the image name

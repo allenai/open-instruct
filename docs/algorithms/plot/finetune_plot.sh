@@ -1,3 +1,4 @@
+#!/bin/bash
 python -m openrlbenchmark.rlops_multi_metrics \
     --filters '?we=ai2-llm&wpn=open_instruct_public&xaxis=_step&ceik=chat_template_name&cen=chat_template_name&metrics=train_loss&metrics=learning_rate&metric_names=Training Loss&metric_names=Learning Rate' \
         'tulu?tag=no-tag-679-g2d47f44&tag=tulu3_8b_sft&cl=Tulu3 8B SFT' \

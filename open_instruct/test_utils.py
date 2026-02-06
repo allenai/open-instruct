@@ -28,7 +28,7 @@ import torch
 from dateutil import parser
 from parameterized import parameterized
 
-from open_instruct import data_types, grpo_fast, utils
+from open_instruct import data_types, launch_utils, utils
 from open_instruct.finetune import FlatArguments
 
 
@@ -127,7 +127,7 @@ class GetDatasetsTest(unittest.TestCase):
         self.assertTrue(parser.parse("0001-01-01T00:00:00Z"))
 
 
-def _setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_description):
+def setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_description):
     """Shared mock setup for beaker tests."""
     mock_is_beaker_job.return_value = True
 
@@ -166,7 +166,7 @@ class TestBeakerDescription(unittest.TestCase):
         env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
         mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
 
-        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+        mock_client, mock_spec, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Beaker-Mason job."
         )
 
@@ -224,7 +224,7 @@ class TestBeakerDescription(unittest.TestCase):
         env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "def456", "GIT_BRANCH": "dev"}
         mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
 
-        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+        mock_client, mock_spec, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, "Initial job description"
         )
 
@@ -259,7 +259,7 @@ class TestBeakerDescription(unittest.TestCase):
             "https://wandb.ai/ai2-llm/open_instruct_internal/runs/n53oxnzb "
             "[5.0% complete (step 1/20), eta 0m]"
         )
-        mock_client, mock_spec, description_history = _setup_beaker_mocks(
+        mock_client, mock_spec, description_history = setup_beaker_mocks(
             mock_beaker_from_env, mock_is_beaker_job, previous_run_description
         )
 
@@ -381,8 +381,8 @@ class TestDownloadFromGsBucket(unittest.TestCase):
             def mock_live_subprocess_output(cmd):
                 captured_cmd["cmd"] = cmd
 
-            with mock.patch.object(utils, "live_subprocess_output", side_effect=mock_live_subprocess_output):
-                utils.download_from_gs_bucket(src_paths=src_paths, dest_path=str(dest_path))
+            with mock.patch.object(launch_utils, "live_subprocess_output", side_effect=mock_live_subprocess_output):
+                launch_utils.download_from_gs_bucket(src_paths=src_paths, dest_path=str(dest_path))
 
             expected_cmd = [
                 "gsutil",
@@ -542,7 +542,7 @@ class TestModelDims(unittest.TestCase):
 
     @parameterized.expand(_load_mbu_test_cases())
     def test_mbu_reproduction(self, name, case_data):
-        metrics = grpo_fast.calculate_utilization_metrics(
+        metrics = utils.calculate_utilization_metrics(
             model_dims=MODEL_DIMS[case_data["model_name"]],
             prompt_lengths=case_data["prompt_lengths"],
             response_lengths=case_data["response_lengths"],
@@ -583,7 +583,7 @@ class TestModelDims(unittest.TestCase):
         prompt_lengths = [prompt_len] * num_prompts
         response_lengths = [int(response_len)] * (num_prompts * samples_per_prompt)
 
-        metrics = grpo_fast.calculate_utilization_metrics(
+        metrics = utils.calculate_utilization_metrics(
             model_dims=MODEL_DIMS[model_name],
             prompt_lengths=prompt_lengths,
             response_lengths=response_lengths,
@@ -608,34 +608,6 @@ class TestModelDims(unittest.TestCase):
             f"(num_engines={num_engines}, num_gpus_per_engine={num_gpus_per_engine})",
         )
         self.assertLessEqual(metrics["learner_mfu"], 100)
-
-    def test_model_dims_match_vllm_config(self):
-        expected_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
-
-        mock_hf_text_config = mock.Mock()
-        mock_hf_text_config.intermediate_size = 18944
-        mock_hf_text_config.sliding_window = None
-        mock_hf_text_config.num_attention_heads = 28
-        mock_hf_text_config.num_key_value_heads = 4
-
-        mock_model_config = mock.Mock()
-        mock_model_config.get_hidden_size.return_value = 3584
-        mock_model_config.get_num_layers.return_value = 28
-        mock_model_config.get_vocab_size.return_value = 152064
-        mock_model_config.get_head_size.return_value = 128
-        mock_model_config.hf_text_config = mock_hf_text_config
-
-        mock_vllm_config = mock.Mock()
-        mock_vllm_config.model_config = mock_model_config
-        mock_vllm_config.parallel_config = mock.Mock()
-
-        with (
-            mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
-            mock.patch("torch.cuda.is_available", return_value=True),
-        ):
-            vllm_dims = utils.ModelDims.from_vllm_config(mock_vllm_config)
-
-        self.assertEqual(vllm_dims, expected_dims)
 
 
 class TestModelDimsFromHFConfig(unittest.TestCase):
@@ -756,24 +728,6 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
 #             "natolambert/tulu-v2-sft-mixture-science": 7468,  # original data slightly different
 #         }
 #         _ = get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["messages"])
-
-
-class TestGetDenominator(unittest.TestCase):
-    @parameterized.expand([("token", "token"), ("0.5", 0.5), (0.5, 0.5), (1, 1.0)])
-    def test_valid_inputs(self, input_val, expected):
-        self.assertEqual(utils.get_denominator(input_val), expected)
-
-    @parameterized.expand(
-        [
-            ("invalid", "could not convert string to float"),
-            ("-1", "loss_denominator must be greater than 0"),
-            (0, "loss_denominator must be greater than 0"),
-            ("0", "loss_denominator must be greater than 0"),
-        ]
-    )
-    def test_invalid_inputs(self, input_val, error_msg):
-        with self.assertRaisesRegex(ValueError, error_msg):
-            utils.get_denominator(input_val)
 
 
 class TestRayGetWithProgress(unittest.TestCase):
