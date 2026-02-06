@@ -56,7 +56,7 @@ do
             --loss_type dpo_norm \
             --beta 5 \
             --use_flash_attn \
-            --gradient_checkpointing \
+            --activation_memory_budget 0.5 \
             --chat_template_name olmo123 \
             --with_tracking
     done
