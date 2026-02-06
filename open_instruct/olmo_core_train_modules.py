@@ -206,6 +206,7 @@ class GRPOTrainModule(TransformerTrainModule):
     - num_flops_per_token
     - state_dict/load_state_dict via dist_cp_sd
 
+
     Only train_batch differs (GRPO loss instead of CE loss).
     """
 
