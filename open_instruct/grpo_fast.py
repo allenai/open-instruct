@@ -1019,7 +1019,7 @@ def setup_runtime_variables(
             "Must mask tool use when using vLLM logprobs or truncated importance sampling."
         )
     if args.eval_pass_at_k < 1:
-        raise ValueError(f"pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
+        raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     streaming_config.dataset_local_cache_dir = os.path.abspath(streaming_config.dataset_local_cache_dir)
