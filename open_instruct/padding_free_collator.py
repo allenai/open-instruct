@@ -140,6 +140,13 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
         rejected_valid = rejected_features.pop("_num_valid_seqs")
         num_valid = min(chosen_valid, rejected_valid)
 
+        if num_valid < chosen_valid and "cu_seq_lens_q" in chosen_features:
+            chosen_features["cu_seq_lens_q"] = chosen_features["cu_seq_lens_q"][: num_valid + 1]
+            chosen_features["cu_seq_lens_k"] = chosen_features["cu_seq_lens_k"][: num_valid + 1]
+        if num_valid < rejected_valid and "cu_seq_lens_q" in rejected_features:
+            rejected_features["cu_seq_lens_q"] = rejected_features["cu_seq_lens_q"][: num_valid + 1]
+            rejected_features["cu_seq_lens_k"] = rejected_features["cu_seq_lens_k"][: num_valid + 1]
+
         result = {}
         for k in chosen_features:
             result["chosen_" + k] = chosen_features[k]
