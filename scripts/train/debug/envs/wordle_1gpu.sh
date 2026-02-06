@@ -87,6 +87,7 @@ uv run python open_instruct/grpo_fast.py \
     --env_base_url "$WORDLE_URL" \
     --env_pool_size 4 \
     --env_max_steps 6 \
+    --tool_parser_type vllm_hermes \
     --no_filter_zero_std_samples \
     --dataset_skip_cache \
     --output_dir output/wordle_debug
