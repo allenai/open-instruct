@@ -551,11 +551,16 @@ def build_reference_logprobs_cache(
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
 
-            batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
-            total_tokens += batch_tokens
-            total_examples += len(batch["index"])
-
             bs = len(batch["index"])
+            if "chosen_cu_seq_lens_k" in batch:
+                chosen_actual = batch["chosen_cu_seq_lens_k"][-1].item()
+                rejected_actual = batch["rejected_cu_seq_lens_k"][-1].item()
+                batch_tokens = chosen_actual + rejected_actual
+            else:
+                batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
+            total_tokens += batch_tokens
+            total_examples += bs
+
             if "chosen_cu_seq_lens_k" in batch:
                 chosen_cu = batch["chosen_cu_seq_lens_k"]
                 rejected_cu = batch["rejected_cu_seq_lens_k"]

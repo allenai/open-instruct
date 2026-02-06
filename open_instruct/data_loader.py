@@ -270,6 +270,12 @@ class HFDataLoader(data_loader.DataLoaderBase):
         """
         if "attention_mask" in batch:
             num_tokens = batch["attention_mask"].sum().item()
+        elif "chosen_cu_seq_lens_k" in batch:
+            chosen_actual = batch["chosen_cu_seq_lens_k"][-1].item()
+            rejected_actual = batch["rejected_cu_seq_lens_k"][-1].item()
+            num_tokens = chosen_actual + rejected_actual
+        elif "cu_seq_lens_k" in batch:
+            num_tokens = batch["cu_seq_lens_k"][-1].item()
         else:
             num_tokens = sum(v.numel() for k, v in batch.items() if "input_ids" in k and isinstance(v, torch.Tensor))
         return num_tokens * self.dp_world_size
