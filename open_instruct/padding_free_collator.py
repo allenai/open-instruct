@@ -89,14 +89,20 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
                     seq_idx_tensor = seq_idx_tensor[:, : self.max_seq_length]
                 if self.return_flash_attn_kwargs:
                     cu_seq_lens_tensor = ret["cu_seq_lens_q"].clamp_max_(self.max_seq_length)
-                    valid_mask = cu_seq_lens_tensor[1:] > cu_seq_lens_tensor[:-1]
-                    num_valid_seqs = valid_mask.sum().item()
+                    valid_mask = torch.cat(
+                        [
+                            torch.tensor([True], device=cu_seq_lens_tensor.device),
+                            cu_seq_lens_tensor[1:] > cu_seq_lens_tensor[:-1],
+                        ]
+                    )
+                    num_valid_seqs = valid_mask.sum().item() - 1
                     if num_valid_seqs < len(features):
                         logger.warning(
                             f"Truncation dropped {len(features) - num_valid_seqs} sequences "
                             f"(packed {len(features)} sequences into {current_len} tokens, "
                             f"truncated to {self.max_seq_length}, {num_valid_seqs} sequences remain)"
                         )
+                        cu_seq_lens_tensor = cu_seq_lens_tensor[valid_mask]
                     ret["cu_seq_lens_q"] = ret["cu_seq_lens_k"] = cu_seq_lens_tensor
             elif current_len < self.max_seq_length:
                 pad_len = self.max_seq_length - current_len
