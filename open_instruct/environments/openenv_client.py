@@ -17,7 +17,7 @@ class OpenEnvClient(RLEnvironment):
     response_role = "tool"
     max_steps = 50
 
-    def __init__(self, base_url: str, timeout: int = 30, headers: dict[str, str] | None = None):
+    def __init__(self, base_url: str, timeout: int = 30, headers: dict[str, str] | None = None, **kwargs):
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._headers = headers or {}
@@ -86,7 +86,7 @@ class OpenEnvTextClient(RLEnvironment):
     observation_role = "user"  # Environment feedback wrapped in user role
     max_steps = 50
 
-    def __init__(self, base_url: str, timeout: int = 30, headers: dict[str, str] | None = None):
+    def __init__(self, base_url: str, timeout: int = 30, headers: dict[str, str] | None = None, **kwargs):
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._headers = headers or {}
@@ -212,7 +212,13 @@ class OpenEnvREPLClient(RLEnvironment):
     max_steps = 30
 
     def __init__(
-        self, base_url: str, context: str = "", task_prompt: str = "", timeout: int = 60, max_iterations: int = 30
+        self,
+        base_url: str,
+        context: str = "",
+        task_prompt: str = "",
+        timeout: int = 60,
+        max_iterations: int = 30,
+        **kwargs,
     ):
         self._base_url = base_url.rstrip("/")
         self._context = context

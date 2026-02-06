@@ -135,8 +135,25 @@ class EnvConfig:
 
     @property
     def enabled(self) -> bool:
-        """Return True if environment is configured."""
-        return self.env_name is not None or self.env_class is not None
+        """Return True if environment is configured.
+
+        This is true when any env-specific field is set, not just env_name/env_class.
+        This allows setting host-specific defaults (backend, task_data_dir, etc.)
+        without requiring --env_name, since datasets can self-describe their env type
+        via per-sample env_config.
+
+        Note: env_pool_size, env_max_steps, env_timeout have non-None defaults,
+        so they are not checked here. They flow through to_env_config_dict() when
+        enabled is True.
+        """
+        return (
+            self.env_name is not None
+            or self.env_class is not None
+            or self.env_base_url is not None
+            or self.env_backend is not None
+            or self.env_task_data_dir is not None
+            or self.env_image is not None
+        )
 
     def to_env_config_dict(self) -> dict:
         """Convert to dict format expected by PromptRequest.env_config."""

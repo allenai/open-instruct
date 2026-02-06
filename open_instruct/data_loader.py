@@ -556,14 +556,14 @@ def add_prompt_to_generator(
 ) -> None:
     index = example["index"]
 
-    # Merge base env_config with per-sample env_config
+    # Merge base env_config with per-sample env_config.
+    # Only apply base_env_config to samples that have their own env_config,
+    # so non-env samples (env_config=None) don't get routed to environments.
     env_config = None
     sample_env_config = example.get(ENV_CONFIG_KEY)
-    if base_env_config is not None or sample_env_config is not None:
+    if sample_env_config is not None:
         env_config = dict(base_env_config) if base_env_config else {}
-        # Per-sample env_config overrides base config
-        if sample_env_config:
-            env_config.update(sample_env_config)
+        env_config.update(sample_env_config)
 
     param_prompt_Q.put(
         data_types.PromptRequest(

@@ -62,7 +62,6 @@ uv run python mason.py \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
-    --env_name appworld \
     --env_pool_size 8 \
     --env_max_steps 50 \
     --tool_parser_type vllm_hermes \

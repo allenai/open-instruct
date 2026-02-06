@@ -10,9 +10,10 @@ from open_instruct.environments.agent_task import AgentTaskEnv
 from open_instruct.environments.backends import DaytonaBackend, ExecutionResult, create_backend
 from open_instruct.environments.base import RLEnvironment
 from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
+from open_instruct.environments.openenv_client import OpenEnvClient, OpenEnvREPLClient, OpenEnvTextClient
 from open_instruct.environments.sandbox_lm import SandboxLMEnv, _truncate_output
 from open_instruct.ground_truth_utils import LastRewardAggregator, SumRewardAggregator
-from open_instruct.tools.utils import Tool
+from open_instruct.tools.utils import EnvConfig, Tool
 
 
 def run_async(coro):
@@ -744,3 +745,124 @@ class TestDaytonaBackend:
         backend = DaytonaBackend()
         # Should not raise
         backend.close()
+
+
+# ---------------------------------------------------------------------------
+# EnvConfig merge logic tests
+# ---------------------------------------------------------------------------
+def _merge_env_config(base_env_config: dict | None, sample_env_config: dict | None) -> dict | None:
+    """Replicate the merge logic from data_loader._put_prompt_request."""
+    env_config = None
+    if sample_env_config is not None:
+        env_config = dict(base_env_config) if base_env_config else {}
+        env_config.update(sample_env_config)
+    return env_config
+
+
+class TestEnvConfigMerge:
+    """Test env_config merge logic (from data_loader._put_prompt_request)."""
+
+    def test_merge_with_sample_and_base(self):
+        """Sample env_config + base → merged with sample overriding base."""
+        base = {"backend": "docker", "pool_size": 8, "timeout": 300}
+        sample = {"task_id": "task_001", "env_name": "agent_task"}
+        result = _merge_env_config(base, sample)
+        assert result == {"backend": "docker", "pool_size": 8, "timeout": 300, "task_id": "task_001", "env_name": "agent_task"}
+
+    def test_merge_without_sample(self):
+        """No sample env_config + base → None (key new behavior)."""
+        base = {"backend": "docker", "pool_size": 8, "env_name": "agent_task"}
+        result = _merge_env_config(base, None)
+        assert result is None
+
+    def test_merge_no_base(self):
+        """Sample env_config, no base → sample only."""
+        sample = {"task_id": "42", "env_name": "counter"}
+        result = _merge_env_config(None, sample)
+        assert result == {"task_id": "42", "env_name": "counter"}
+
+    def test_merge_sample_overrides_base(self):
+        """Per-sample values override base values."""
+        base = {"timeout": 60, "backend": "docker"}
+        sample = {"task_id": "1", "env_name": "counter", "timeout": 120}
+        result = _merge_env_config(base, sample)
+        assert result["timeout"] == 120
+
+    def test_merge_both_none(self):
+        """Both None → None."""
+        result = _merge_env_config(None, None)
+        assert result is None
+
+
+class TestEnvConfigEnabled:
+    """Test EnvConfig.enabled property."""
+
+    def test_enabled_with_env_name(self):
+        config = EnvConfig(env_name="counter")
+        assert config.enabled is True
+
+    def test_enabled_with_env_class(self):
+        config = EnvConfig(env_class="my.module.MyEnv")
+        assert config.enabled is True
+
+    def test_enabled_with_backend_only(self):
+        """EnvConfig with only backend set → enabled (host-specific default)."""
+        config = EnvConfig(env_backend="docker")
+        assert config.enabled is True
+
+    def test_enabled_with_task_data_dir_only(self):
+        """EnvConfig with only task_data_dir set → enabled."""
+        config = EnvConfig(env_task_data_dir="/data/tasks")
+        assert config.enabled is True
+
+    def test_enabled_with_base_url_only(self):
+        """EnvConfig with only base_url set → enabled."""
+        config = EnvConfig(env_base_url="http://localhost:8765")
+        assert config.enabled is True
+
+    def test_enabled_with_image_only(self):
+        """EnvConfig with only image set → enabled."""
+        config = EnvConfig(env_image="python:3.12-slim")
+        assert config.enabled is True
+
+    def test_not_enabled_default(self):
+        """Default EnvConfig (no identity fields) → not enabled."""
+        config = EnvConfig()
+        assert config.enabled is False
+
+    def test_not_enabled_only_operational_fields(self):
+        """EnvConfig with only pool_size/max_steps/timeout → not enabled."""
+        config = EnvConfig(env_pool_size=16, env_max_steps=20, env_timeout=120)
+        assert config.enabled is False
+
+
+class TestOpenEnvClientKwargs:
+    """Test that OpenEnv clients accept **kwargs without raising."""
+
+    def test_openenv_client_accepts_extra_kwargs(self):
+        client = OpenEnvClient(
+            base_url="http://localhost:8765",
+            timeout=30,
+            task_data_dir="/data/tasks",
+            backend="docker",
+        )
+        assert client._base_url == "http://localhost:8765"
+        assert client._timeout == 30
+
+    def test_openenv_text_client_accepts_extra_kwargs(self):
+        client = OpenEnvTextClient(
+            base_url="http://localhost:8765",
+            timeout=30,
+            task_data_dir="/data/tasks",
+            backend="docker",
+        )
+        assert client._base_url == "http://localhost:8765"
+
+    def test_openenv_repl_client_accepts_extra_kwargs(self):
+        client = OpenEnvREPLClient(
+            base_url="http://localhost:8765",
+            timeout=60,
+            task_data_dir="/data/tasks",
+            backend="docker",
+        )
+        assert client._base_url == "http://localhost:8765"

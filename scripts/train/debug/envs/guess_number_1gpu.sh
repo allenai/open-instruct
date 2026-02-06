@@ -42,7 +42,6 @@ uv run python open_instruct/grpo_fast.py \
     --single_gpu_mode \
     --push_to_hub false \
     --save_traces \
-    --env_name guess_number \
     --env_pool_size 4 \
     --env_max_steps 10 \
     --tool_parser_type vllm_hermes \

@@ -50,7 +50,6 @@ uv run python open_instruct/grpo_fast.py \
     --single_gpu_mode \
     --push_to_hub false \
     --save_traces \
-    --env_name appworld \
     --env_pool_size 4 \
     --env_max_steps 20 \
     --tool_parser_type vllm_hermes \

@@ -349,7 +349,7 @@ def generate_jsonl(output_dir: str, task_ids: list[str], output_file: str) -> No
                 with open(image_file) as imgf:
                     image_tag = imgf.read().strip()
 
-            env_config = {"task_id": task_id}
+            env_config = {"task_id": task_id, "env_name": "agent_task"}
             if image_tag:
                 env_config["image"] = image_tag
 
@@ -359,7 +359,7 @@ def generate_jsonl(output_dir: str, task_ids: list[str], output_file: str) -> No
                     {"role": "user", "content": instruction},
                 ],
                 "ground_truth": task_id,
-                "dataset": "env_last",
+                "dataset": "passthrough",
                 "env_config": env_config,
             }
             f.write(json.dumps(record) + "\n")

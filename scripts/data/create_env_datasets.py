@@ -26,8 +26,8 @@ def create_counter_samples(num_samples: int = 100, nothink: bool = False) -> lis
                 },
             ],
             "ground_truth": str(target),
-            "dataset": "env_last",
-            "env_config": {"task_id": str(target)},
+            "dataset": "passthrough",
+            "env_config": {"task_id": str(target), "env_name": "counter"},
         })
     return samples
 
@@ -49,8 +49,8 @@ def create_guess_number_samples(num_samples: int = 100, nothink: bool = False) -
                 {"role": "user", "content": user_content},
             ],
             "ground_truth": str(secret),
-            "dataset": "env_last",
-            "env_config": {"task_id": str(secret)},
+            "dataset": "passthrough",
+            "env_config": {"task_id": str(secret), "env_name": "guess_number"},
         })
     return samples
 
@@ -125,8 +125,8 @@ Complete this task by calling the appropriate APIs."""
                 {"role": "user", "content": user_content},
             ],
             "ground_truth": task_id,
-            "dataset": "env_last",
-            "env_config": {"task_id": task_id},
+            "dataset": "passthrough",
+            "env_config": {"task_id": task_id, "env_name": "appworld"},
         })
 
     return samples
@@ -154,8 +154,8 @@ def create_wordle_samples(num_samples: int = 100, nothink: bool = False) -> list
         samples.append({
             "messages": messages,
             "ground_truth": word,
-            "dataset": "env_last",
-            "env_config": {"task_id": word},
+            "dataset": "passthrough",
+            "env_config": {"task_id": word, "env_name": "openenv_text"},
         })
     return samples
 
