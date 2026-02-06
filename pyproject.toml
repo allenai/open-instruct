@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = "==3.12.*"
 dependencies = [
     "accelerate>=1.10.1",
+    "aiohttp>=3.9.0",
     "antlr4-python3-runtime==4.11",
     "backoff>=2.2.1",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
@@ -36,6 +37,8 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
     "mcp>=1.9.0",
+    "e2b-code-interpreter>=1.0.0",
+    "docker>=7.0.0",
 ]
 
 [build-system]
@@ -80,6 +83,9 @@ code = [
 ]
 dr-tulu = [
     "dr_agent",
+]
+appworld = [
+    "appworld @ git+https://github.com/stonybrooknlp/appworld.git",
 ]
 
 [tool.uv]
@@ -153,6 +159,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # This class runs in vLLM worker processes; imports are inside methods.
 "open_instruct/vllm_utils_workerwrap.py" = ["PLC0415"]
+# Lazy imports for optional dependencies and circular import avoidance
+"open_instruct/environments/*.py" = ["PLC0415", "B027"]
+"open_instruct/ground_truth_utils.py" = ["PLC0415"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["open_instruct", "mason"]

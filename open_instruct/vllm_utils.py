@@ -61,9 +61,11 @@ from vllm.v1.core import kv_cache_utils
 from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
 from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_KEY, VERIFIER_SOURCE_KEY
+from open_instruct.environments import EnvironmentPool
+from open_instruct.environments.base import EnvironmentState
 from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.tools.parsers import ToolParser, create_tool_parser
-from open_instruct.tools.utils import ToolOutput
+from open_instruct.tools.utils import ToolCall, ToolOutput
 from open_instruct.utils import ModelDims, get_device_name, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
@@ -127,8 +129,8 @@ class CompletionOutput:
     tool_runtime: float = 0.0
     tool_called: bool = False
     tool_call_stats: list[ToolCallStats] = dataclasses.field(default_factory=list)
-    excess_tool_calls: dict[str, int] = dataclasses.field(default_factory=dict)
-    """Dict mapping tool name to count of calls that exceeded max_tool_calls limit."""
+    env_state: dict = dataclasses.field(default_factory=dict)
+    """Environment state dict (rewards, step_count, done, info) — always present."""
 
 
 @dataclasses.dataclass
@@ -314,7 +316,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_runtimes = [getattr(out, "tool_runtime", 0.0) for out in final_output.outputs]
         tool_calleds = [getattr(out, "tool_called", False) for out in final_output.outputs]
         tool_call_stats = [out.tool_call_stats for out in final_output.outputs]
-        excess_tool_calls = [getattr(out, "excess_tool_calls", {}) for out in final_output.outputs]
+        rollout_states = [getattr(out, "env_state", {}) for out in final_output.outputs]
     else:
         # Use default values when tools are not used
         masks = [[1] * len(resp) for resp in response_ids]
@@ -325,7 +327,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         tool_runtimes = [0.0] * len(response_ids)
         tool_calleds = [False] * len(response_ids)
         tool_call_stats = [[] for _ in response_ids]
-        excess_tool_calls = [{} for _ in response_ids]
+        rollout_states = [{} for _ in response_ids]
 
     result = GenerationResult(
         responses=response_ids,
@@ -339,7 +341,7 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
             tool_runtimes=tool_runtimes,
             tool_calleds=tool_calleds,
             tool_call_stats=tool_call_stats,
-            excess_tool_calls=excess_tool_calls,
+            rollout_states=rollout_states,
         ),
         index=metadata["index"],
         prompt_id=metadata["prompt_id"],
@@ -467,6 +469,7 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "prompt_token_ids": list(request.prompt),
         "start_time": time.perf_counter(),
         "active_tools": request.active_tools,
+        "env_config": request.env_config,
     }
 
     for j in range(request.generation_config.n):
@@ -567,6 +570,7 @@ class LLMRayActor:
         tool_parser_type: str = "legacy",
         max_tool_calls: int = 5,
         mask_tool_use: bool = True,
+        over_limit_penalty: float | None = None,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
         results_queue: ray_queue.Queue,
@@ -580,7 +584,14 @@ class LLMRayActor:
     ):
         assert_threaded_actor(self)
         self._init_config(
-            tool_actors, max_tool_calls, mask_tool_use, inflight_updates, reward_config, train_dataset, eval_dataset
+            tool_actors,
+            max_tool_calls,
+            mask_tool_use,
+            over_limit_penalty,
+            inflight_updates,
+            reward_config,
+            train_dataset,
+            eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
 
@@ -599,6 +610,7 @@ class LLMRayActor:
         tool_actors: list[ray.actor.ActorHandle] | None,
         max_tool_calls: int,
         mask_tool_use: bool,
+        over_limit_penalty: float | None,
         inflight_updates: bool,
         reward_config: RewardConfig | None,
         train_dataset,
@@ -607,6 +619,7 @@ class LLMRayActor:
         self.tool_actors = tool_actors or []
         self.max_tool_calls = max_tool_calls
         self.mask_tool_use = mask_tool_use
+        self.over_limit_penalty = over_limit_penalty
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
         self.active_tasks = {}
@@ -628,6 +641,13 @@ class LLMRayActor:
             call_names = ray.get([actor.get_call_name.remote() for actor in self.tool_actors])
             self.tool_actor_map = dict(zip(call_names, self.tool_actors))
 
+        # Environment pools (lazy-initialized) and lock to prevent race conditions
+        self.env_pools: dict[str, EnvironmentPool] = {}
+        self._env_pool_lock: asyncio.Lock | None = None  # Initialized lazily in event loop
+
+        # Tool parser (initialized in _init_tool_parser, may remain None for env-only mode)
+        self.tool_parser: ToolParser | None = None
+
     def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
         self.prompt_queue = prompt_queue
@@ -646,15 +666,21 @@ class LLMRayActor:
         self._process_future = self.executor.submit(self.process_from_queue)
 
     def _init_tool_parser(self, tool_parser_type: str) -> None:
-        if not self.tool_actors:
-            return
-        _tool_definitions = ray.get([actor.get_openai_tool_definitions.remote() for actor in self.tool_actors])
-        self.tool_parser = create_tool_parser(
-            parser_type=tool_parser_type,
-            tool_actors=self.tool_actors,
-            tokenizer=self.llm_engine.tokenizer,
-            tool_definitions=_tool_definitions,
-        )
+        # Get tool definitions from tool actors if they exist
+        _tool_definitions = None
+        if self.tool_actors:
+            _tool_definitions = ray.get([actor.get_openai_tool_definitions.remote() for actor in self.tool_actors])
+
+        # Always create a tool parser if the parser type supports it.
+        # vllm parsers can work without tool definitions (for environment-only mode).
+        # Legacy/dr_tulu parsers require tool_actors, so skip them if no actors.
+        if tool_parser_type.startswith("vllm_") or self.tool_actors:
+            self.tool_parser = create_tool_parser(
+                parser_type=tool_parser_type,
+                tool_actors=self.tool_actors,
+                tokenizer=self.llm_engine.tokenizer,
+                tool_definitions=_tool_definitions,
+            )
 
     def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
@@ -869,167 +895,274 @@ class LLMRayActor:
         return int(max_concurrency)
 
 
+async def _get_or_create_env_pool(actor: LLMRayActor, env_config: dict) -> EnvironmentPool:
+    """Get or create an environment pool for the given config."""
+    env_name = env_config.get("env_name")
+    env_class = env_config.get("env_class")
+    pool_key = env_name or env_class
+
+    # Fast path: pool already exists
+    if pool_key in actor.env_pools:
+        return actor.env_pools[pool_key]
+
+    # Lazy-initialize lock in event loop context (can't create in __init__ which runs outside loop)
+    if actor._env_pool_lock is None:
+        actor._env_pool_lock = asyncio.Lock()
+
+    # Use lock to prevent race condition when multiple requests try to create the same pool
+    async with actor._env_pool_lock:
+        # Check again inside lock (another request may have created it while we waited)
+        if pool_key in actor.env_pools:
+            return actor.env_pools[pool_key]
+
+        pool_size = env_config.get("pool_size", 64)
+        env_kwargs = {
+            k: v
+            for k, v in env_config.items()
+            if k not in ("env_name", "env_class", "task_id", "max_steps", "pool_size")
+        }
+        pool = EnvironmentPool(pool_size=pool_size, env_name=env_name, env_class=env_class, **env_kwargs)
+        await pool.initialize()
+        actor.env_pools[pool_key] = pool
+        return actor.env_pools[pool_key]
+
+
+@dataclasses.dataclass
+class _RolloutState:
+    """Mutable state for tool/environment rollout."""
+
+    response_tokens: list[int] = dataclasses.field(default_factory=list)
+    response_logprobs: list[float] = dataclasses.field(default_factory=list)
+    response_masks: list[int] = dataclasses.field(default_factory=list)
+    current_prompt: list[int] = dataclasses.field(default_factory=list)
+    cumulative_logprob: float = 0.0
+    tool_call_stats: list[ToolCallStats] = dataclasses.field(default_factory=list)
+    num_calls: int = 0
+    timeout: bool = False
+    tool_error: str = ""
+    tool_output: str = ""
+    env_state: EnvironmentState = dataclasses.field(default_factory=EnvironmentState)
+    """Always present — tracks per-turn rewards for both tools and environments."""
+    actor_map: dict[str, Any] = dataclasses.field(default_factory=dict)
+    """Maps tool/env call names to their Ray actor handles."""
+    env_tool_names: set[str] = dataclasses.field(default_factory=set)
+    """Set of tool names belonging to the environment (vs regular tools)."""
+    last_output: Any = None
+
+    async def dispatch(self, actor, tool_name: str, tool_args: dict, rollout_id: str | None = None) -> str:
+        """Unified dispatch for both regular tools and environment actors.
+
+        Calls safe_execute on the actor and updates rollout state from the result.
+        """
+        result: ToolOutput = await actor.safe_execute.remote(_name_=tool_name, _id_=rollout_id, **tool_args)
+
+        self.tool_call_stats.append(ToolCallStats(tool_name, not result.error and not result.timeout, result.runtime))
+        self.timeout = self.timeout or result.timeout
+        self.tool_error += result.error or ""
+        self.tool_output += result.output
+
+        # Track rewards: failure penalty for errors/timeouts, otherwise use tool's reward
+        if result.error or result.timeout:
+            self.env_state.rewards.append(-0.1)
+        elif result.reward is not None:
+            self.env_state.rewards.append(result.reward)
+        self.env_state.done = self.env_state.done or result.done
+        self.env_state.info.update(result.info)
+        self.env_state.step_count += 1
+
+        return result.output
+
+
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
-    """Process a single async request with tool support, awaiting tools inline."""
+    """Process a single async request with unified tool and environment support."""
     await _check_health(actor.server_port)
-    response_tokens = []
-    response_logprobs = []
-    response_masks = []
-    cumulative_logprob = 0.0
-    num_calls = 0
-    timeout = False
-    tool_error = ""
-    tool_output = ""
-    tool_runtime = 0.0
-    tool_called = False
-    tool_call_stats: list[ToolCallStats] = []
-    excess_tool_calls: dict[str, int] = {}
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
     request_metadata = actor.request_metadata[base_request_id]
-    original_prompt = request_metadata["prompt_token_ids"]
-    active_tools = request_metadata["active_tools"]
-    current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
+    env_config = request_metadata.get("env_config")
+
+    state = _RolloutState(current_prompt=list(request_metadata["prompt_token_ids"]), env_state=EnvironmentState())
+
+    # Setup: determine allowed tools (from env or tool actors)
+    env_actor = None
+    env_pool = None
+    env_tool_names: set[str] = set()
+
+    if env_config is not None:
+        env_pool = await _get_or_create_env_pool(actor, env_config)
+        env_actor = await env_pool.acquire()
+
+        reset_result = await env_actor.reset.remote(task_id=env_config.get("task_id"), env_config=env_config)
+        env_tool_names = {t["function"]["name"] for t in (reset_result.tools or []) if "function" in t}
+
+        if reset_result.observation:
+            obs_tokens = actor.llm_engine.tokenizer.encode(f"\n{reset_result.observation}\n", add_special_tokens=False)
+            state.response_tokens.extend(obs_tokens)
+            state.response_logprobs.extend([0.0] * len(obs_tokens))
+            state.response_masks.extend([0] * len(obs_tokens))
+            state.current_prompt.extend(obs_tokens)
+
+    if env_config is not None and actor.tool_parser is None:
+        raise ValueError(
+            "Environment requires a tool parser. Use a vllm_* parser type "
+            "(e.g., tool_parser_type='vllm_qwen') when configuring environments."
+        )
+
+    active_tools = request_metadata.get("active_tools")
+    configured_tools = set(actor.tool_actor_map.keys())
+    regular_tool_names = configured_tools & set(active_tools) if active_tools is not None else configured_tools
+    # Text-based envs: no env_tool_names, so model output is sent as "message"
+    is_text_env = env_actor is not None and not env_tool_names
+    if is_text_env:
+        env_tool_names = {"message"}
+    all_allowed_tools = env_tool_names | regular_tool_names
+
+    # Build unified actor map: maps tool call names -> Ray actor handles
+    for name in regular_tool_names:
+        state.actor_map[name] = actor.tool_actor_map[name]
+    if env_actor is not None:
+        for name in env_tool_names:
+            state.actor_map[name] = env_actor
+    state.env_tool_names = env_tool_names
+
+    max_steps = env_config.get("max_steps", 50) if env_config else actor.max_tool_calls
+    over_limit_penalty = getattr(actor, "over_limit_penalty", None)
+
     current_max_tokens = sampling_params.max_tokens
 
-    configured_tools = set(actor.tool_actor_map.keys())
-    allowed_tools = configured_tools & set(active_tools) if active_tools is not None else configured_tools
+    try:
+        while state.num_calls < max_steps:
+            # Check env done condition
+            if state.env_state.done:
+                break
 
-    while True:
-        current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
-        api_response = await actor.client.completions.create(
-            model=actor.model_name,
-            prompt=current_prompt,
-            extra_body={
-                "return_token_ids": True,
-                "cache_salt": base_request_id,
-                "include_stop_str_in_output": True,
-                "skip_special_tokens": False,
-            },
-            **dataclasses.asdict(current_sampling_params),
-        )
-
-        output = api_response.choices[0]
-        model_tokens = list(output.token_ids)
-
-        response_tokens.extend(model_tokens)
-        current_prompt.extend(model_tokens)
-
-        assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
-        for logprob in output.logprobs.token_logprobs:
-            response_logprobs.append(logprob)
-            cumulative_logprob += logprob
-
-        response_masks.extend([1] * len(model_tokens))
-
-        # check if we have tools to check for
-        # allowed_tools is empty if active_tools=[] for this sample (no tools active)
-        if not actor.tool_actors or actor.tool_parser is None or not allowed_tools:
-            break
-
-        tool_calls = actor.tool_parser.get_tool_calls(output.text)
-        # Sometimes the model will make a tool call that *looks* valid,
-        # but actually that tool doesn't exist for it! So we filter these out.
-        # In future, we could instead add an error message to the model output to indicate that the tool call is invalid.
-        tool_calls = [tc for tc in tool_calls if tc.name in allowed_tools]
-        if not tool_calls:
-            break
-
-        # Execute tool calls
-        outputs: list[str] = []
-        for tool_call in tool_calls:
-            tool_called = True
-            num_calls += 1
-
-            # Check if we've exceeded max tool calls
-            if num_calls > actor.max_tool_calls:
-                exceeded_message = "Max tool calls exceeded"
-                tool_error += exceeded_message
-                outputs.append(exceeded_message)
-                excess_tool_calls[tool_call.name] = excess_tool_calls.get(tool_call.name, 0) + 1
-                continue
-
-            try:
-                tool_result: ToolOutput = await actor.tool_actor_map[tool_call.name].safe_execute.remote(
-                    **tool_call.args
+            # Dynamically adjust max_tokens based on remaining response budget and context room
+            remaining_budget = sampling_params.max_tokens - len(state.response_masks)
+            remaining_room = max_model_len - len(state.current_prompt)
+            current_max_tokens = max(1, min(remaining_budget, remaining_room))
+            if remaining_budget <= 0:
+                break
+            if remaining_room <= 0:
+                logger.warning(
+                    f"[process_request] Prompt length {len(state.current_prompt)} exceeds max_model_len "
+                    f"{max_model_len}, stopping generation for {sub_request_id}"
                 )
-            except TypeError as e:
-                # This can happen if the model generated a tool call with missing/wrong arguments
-                error_msg = f"Tool call '{tool_call.name}' failed: {e}. Args received: {tool_call.args}"
-                logger.warning(error_msg)
-                tool_result = ToolOutput(output="", error=error_msg, called=True, timeout=False, runtime=0.0)
+                break
 
-            timeout = timeout or tool_result.timeout
-            tool_error += tool_result.error or ""
-            tool_output += tool_result.output
-            tool_runtime += tool_result.runtime
-            outputs.append(tool_result.output)
-
-            tool_call_stats.append(
-                ToolCallStats(
-                    tool_name=tool_call.name,
-                    success=not tool_result.error and not tool_result.timeout,
-                    runtime=tool_result.runtime,
-                )
+            # Generate model output
+            current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
+            api_response = await actor.client.completions.create(
+                model=actor.model_name,
+                prompt=state.current_prompt,
+                extra_body={
+                    "return_token_ids": True,
+                    "cache_salt": base_request_id,
+                    "include_stop_str_in_output": True,
+                    "skip_special_tokens": False,
+                },
+                **dataclasses.asdict(current_sampling_params),
             )
 
-        tool_tokens, tool_logprobs, tool_masks, excess = process_tool_tokens(
-            tool_outputs=outputs,
-            tool_parser=actor.tool_parser,
-            tokenizer=actor.llm_engine.tokenizer,
-            current_prompt_len=len(current_prompt),
-            current_response_len=len(response_masks),
-            max_model_len=max_model_len,
-            max_tokens=sampling_params.max_tokens,
-            mask_tool_use=actor.mask_tool_use,
-        )
+            output = api_response.choices[0]
+            state.last_output = output
+            model_tokens = list(output.token_ids)
 
-        response_tokens.extend(tool_tokens)
-        response_logprobs.extend(tool_logprobs)
-        response_masks.extend(tool_masks)
-        current_prompt.extend(tool_tokens)
+            state.response_tokens.extend(model_tokens)
+            state.current_prompt.extend(model_tokens)
 
-        current_max_tokens = sampling_params.max_tokens - len(response_masks)
-        if excess > 0 or current_max_tokens <= 0:
-            break
+            assert output.logprobs and output.logprobs.token_logprobs
+            for logprob in output.logprobs.token_logprobs:
+                state.response_logprobs.append(logprob)
+                state.cumulative_logprob += logprob
+            state.response_masks.extend([1] * len(model_tokens))
 
-    if output.finish_reason == "stop" and len(response_tokens) == 0:
+            # Collect tool calls from parser output
+            tool_calls = (
+                [tc for tc in actor.tool_parser.get_tool_calls(output.text) if tc.name in all_allowed_tools]
+                if actor.tool_parser is not None
+                else []
+            )
+            # Text-based envs: always send model output as a "message" to the environment
+            if is_text_env:
+                tool_calls.append(ToolCall(name="message", args={"message": output.text}))
+            if not tool_calls:
+                state.env_state.done = True
+                break
+
+            # Execute tool calls via unified dispatch
+            observations: list[str] = []
+            for tc in tool_calls:
+                if state.num_calls >= max_steps:
+                    if over_limit_penalty is not None:
+                        state.env_state.rewards.append(over_limit_penalty)
+                        state.env_state.done = True
+                    break
+                state.num_calls += 1
+                obs = await state.dispatch(state.actor_map[tc.name], tc.name, tc.args, rollout_id=sub_request_id)
+                observations.append(obs)
+                if state.env_state.done:
+                    break
+
+            if observations:
+                tokens, logprobs, masks, excess = process_tool_tokens(
+                    observations,
+                    actor.tool_parser,
+                    actor.llm_engine.tokenizer,
+                    len(state.current_prompt),
+                    len(state.response_masks),
+                    max_model_len,
+                    sampling_params.max_tokens,
+                    actor.mask_tool_use,
+                )
+                state.response_tokens.extend(tokens)
+                state.response_logprobs.extend(logprobs)
+                state.response_masks.extend(masks)
+                state.current_prompt.extend(tokens)
+                if excess > 0:
+                    break
+
+    finally:
+        if env_pool is not None and env_actor is not None:
+            env_pool.release(env_actor)
+
+    # Handle empty response
+    if len(state.response_tokens) == 0:
         eos_token_id = actor.llm_engine.tokenizer.eos_token_id
-        response_tokens.append(eos_token_id)
-        response_masks.append(1)
-        response_logprobs.append(float("nan"))
+        state.response_tokens.append(eos_token_id)
+        state.response_masks.append(1)
+        state.response_logprobs.append(float("nan"))
+
+    finish_reason = state.last_output.finish_reason if state.last_output else "stop"
 
     complete_output = CompletionOutput(
         index=split_request_id(sub_request_id)["request_index"],
-        token_ids=response_tokens,
-        cumulative_logprob=cumulative_logprob,
-        logprobs=response_logprobs,
-        finish_reason=output.finish_reason,
+        token_ids=state.response_tokens,
+        cumulative_logprob=state.cumulative_logprob,
+        logprobs=state.response_logprobs,
+        finish_reason=finish_reason,
+        mask=state.response_masks,
+        num_calls=state.num_calls,
+        timeout=state.timeout,
+        tool_error=state.tool_error,
+        tool_output=state.tool_output,
+        tool_runtime=sum(s.runtime for s in state.tool_call_stats),
+        tool_called=state.num_calls > 0,
+        tool_call_stats=state.tool_call_stats,
+        env_state=dataclasses.asdict(state.env_state),
     )
-    if actor.tool_actors:
-        complete_output.mask = response_masks
-        complete_output.num_calls = num_calls
-        complete_output.timeout = timeout
-        complete_output.tool_error = tool_error
-        complete_output.tool_output = tool_output
-        complete_output.tool_runtime = tool_runtime
-        complete_output.tool_called = tool_called
-        complete_output.tool_call_stats = tool_call_stats
-        complete_output.excess_tool_calls = excess_tool_calls
 
     actor.active_tasks.pop(sub_request_id, None)
-
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
-            "expected_n": actor.request_metadata[base_request_id]["original_sampling_params"].n,
+            "expected_n": request_metadata["original_sampling_params"].n,
             "request_output": RequestOutput(
                 request_id=sub_request_id,
-                prompt_token_ids=actor.request_metadata[base_request_id]["prompt_token_ids"],
+                prompt_token_ids=request_metadata["prompt_token_ids"],
                 outputs=[complete_output],
             ),
-            "use_tools": bool(actor.tool_actors),
+            "use_tools": bool(actor.tool_actors) or env_config is not None,
         }
     )
 
@@ -1070,6 +1203,7 @@ def create_vllm_engines(
     tool_parser_type: str = "legacy",
     max_tool_calls: int = 5,
     mask_tool_use: bool = True,
+    over_limit_penalty: float | None = None,
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
@@ -1080,7 +1214,6 @@ def create_vllm_engines(
     eval_dataset=None,
     vllm_dtype: str = "bfloat16",
 ) -> list[ray.actor.ActorHandle]:
-    # Convert max_tool_calls to a dict mapping tool end strings to their limits
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
     # Using "ray" executor causes placement group context loss in vLLM v1's
@@ -1157,6 +1290,7 @@ def create_vllm_engines(
                 tool_parser_type=tool_parser_type,
                 max_tool_calls=max_tool_calls,
                 mask_tool_use=mask_tool_use,
+                over_limit_penalty=over_limit_penalty,
                 inflight_updates=inflight_updates,
                 reward_config=reward_config,
                 train_dataset=train_dataset,

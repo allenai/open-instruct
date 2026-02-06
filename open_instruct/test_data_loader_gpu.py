@@ -442,6 +442,45 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(set(all_indices), set(range(num_examples)))
 
 
+class TestBuildIndexMap(unittest.TestCase):
+    def test_build_index_map_ordered_dataset(self):
+        """Test that build_index_map works on an ordered dataset."""
+        dataset = make_test_dataset(10)
+        index_map = open_instruct.data_loader.build_index_map(dataset)
+
+        # For an ordered dataset, index column value equals positional index
+        for i in range(10):
+            self.assertEqual(index_map[i], i)
+
+    def test_build_index_map_shuffled_dataset(self):
+        """Test that build_index_map allows correct lookups on a shuffled dataset."""
+        dataset = make_test_dataset(10)
+        shuffled = dataset.shuffle(seed=42)
+
+        index_map = open_instruct.data_loader.build_index_map(shuffled)
+
+        # Verify we can look up each sample by its index column value
+        for original_idx in range(10):
+            position = index_map[original_idx]
+            example = shuffled[position]
+            self.assertEqual(example["index"], original_idx)
+            self.assertEqual(example["text"], f"example_{original_idx}")
+            self.assertEqual(example["label"], original_idx)
+
+    def test_build_index_map_multiple_shuffles(self):
+        """Test that build_index_map works after multiple shuffles."""
+        dataset = make_test_dataset(20)
+        shuffled = dataset.shuffle(seed=1).shuffle(seed=2).shuffle(seed=3)
+
+        index_map = open_instruct.data_loader.build_index_map(shuffled)
+
+        # Verify lookups still work correctly
+        for original_idx in range(20):
+            position = index_map[original_idx]
+            example = shuffled[position]
+            self.assertEqual(example["index"], original_idx)
+
+
 class TestStreamingDataLoaderConfigSaveTraces(unittest.TestCase):
     def test_save_traces_requires_rollouts_save_path(self):
         """Test that save_traces=True with empty rollouts_save_path raises ValueError."""

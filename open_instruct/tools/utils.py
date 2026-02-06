@@ -100,12 +100,91 @@ class ToolsConfig:
 
 
 @dataclass
+class EnvConfig:
+    """Configuration for RL environments used during generation."""
+
+    env_name: str | None = None
+    """Name of registered environment (e.g., 'sandbox', 'openenv')."""
+
+    env_class: str | None = None
+    """Full class path for custom environment (e.g., 'mymodule.MyEnv')."""
+
+    env_base_url: str | None = None
+    """Base URL for OpenEnv servers (e.g., 'http://localhost:8765')."""
+
+    env_backend: str | None = None
+    """Backend for sandbox environments ('e2b' or 'docker')."""
+
+    env_pool_size: int = 64
+    """Number of environment actors to create."""
+
+    env_max_steps: int = 50
+    """Maximum steps per episode before forcing done=True."""
+
+    env_timeout: int = 60
+    """Timeout in seconds for environment operations."""
+
+    over_limit_penalty: float | None = None
+    """Penalty reward applied when max_steps is exceeded. None = no penalty (just stop)."""
+
+    env_task_data_dir: str | None = None
+    """Directory containing per-task data files (for agent_task environment)."""
+
+    env_image: str | None = None
+    """Docker image override for sandbox/agent_task environments."""
+
+    @property
+    def enabled(self) -> bool:
+        """Return True if environment is configured.
+
+        This is true when any env-specific field is set, not just env_name/env_class.
+        This allows setting host-specific defaults (backend, task_data_dir, etc.)
+        without requiring --env_name, since datasets can self-describe their env type
+        via per-sample env_config.
+
+        Note: env_pool_size, env_max_steps, env_timeout have non-None defaults,
+        so they are not checked here. They flow through to_env_config_dict() when
+        enabled is True.
+        """
+        return (
+            self.env_name is not None
+            or self.env_class is not None
+            or self.env_base_url is not None
+            or self.env_backend is not None
+            or self.env_task_data_dir is not None
+            or self.env_image is not None
+        )
+
+    def to_env_config_dict(self) -> dict:
+        """Convert to dict format expected by PromptRequest.env_config."""
+        config = {
+            "env_name": self.env_name,
+            "env_class": self.env_class,
+            "max_steps": self.env_max_steps,
+            "pool_size": self.env_pool_size,
+            "timeout": self.env_timeout,
+        }
+        if self.env_base_url:
+            config["base_url"] = self.env_base_url
+        if self.env_backend:
+            config["backend"] = self.env_backend
+        if self.env_task_data_dir:
+            config["task_data_dir"] = self.env_task_data_dir
+        if self.env_image:
+            config["image"] = self.env_image
+        return {k: v for k, v in config.items() if v is not None}
+
+
+@dataclass
 class ToolOutput:
     output: str
     called: bool
     error: str
     timeout: bool
     runtime: float
+    reward: float | None = None
+    done: bool = False
+    info: dict = field(default_factory=dict)
 
 
 def truncate(text: str, max_length: int = 500) -> str:
@@ -143,16 +222,12 @@ class ToolStatistics:
         self._counts: defaultdict[str, int] = defaultdict(int)
         self._failures: defaultdict[str, int] = defaultdict(int)
         self._runtimes: defaultdict[str, float] = defaultdict(float)
-        self._excess_calls: defaultdict[str, int] = defaultdict(int)
 
-    def add_rollout(
-        self, tool_call_stats: list[ToolCallStats], excess_tool_calls: dict[str, int] | None = None
-    ) -> None:
+    def add_rollout(self, tool_call_stats: list[ToolCallStats]) -> None:
         """Add statistics from a single rollout.
 
         Args:
             tool_call_stats: List of ToolCallStats from a single rollout.
-            excess_tool_calls: Dict mapping tool name to count of calls that exceeded the limit.
         """
         self.num_rollouts += 1
         for s in tool_call_stats:
@@ -160,11 +235,6 @@ class ToolStatistics:
             self._counts[s.tool_name] += 1
             self._failures[s.tool_name] += not s.success
             self._runtimes[s.tool_name] += s.runtime
-
-        if excess_tool_calls:
-            for tool_name, count in excess_tool_calls.items():
-                self.tool_names.add(tool_name)
-                self._excess_calls[tool_name] += count
 
     def compute_metrics(self) -> dict[str, float]:
         """Compute per-tool and aggregate metrics.
@@ -174,11 +244,9 @@ class ToolStatistics:
             - tools/{name}/avg_calls_per_rollout
             - tools/{name}/failure_rate
             - tools/{name}/avg_runtime
-            - tools/{name}/avg_excess_calls_per_rollout
             - tools/aggregate/avg_calls_per_rollout
             - tools/aggregate/failure_rate
             - tools/aggregate/avg_runtime
-            - tools/aggregate/avg_excess_calls_per_rollout
         """
         if not self.num_rollouts or not self.tool_names:
             return {}
@@ -187,32 +255,30 @@ class ToolStatistics:
         total_calls = 0
         total_failures = 0
         total_runtime = 0.0
-        total_excess = 0
 
         for name in self.tool_names:
             calls, failures, runtime = self._counts[name], self._failures[name], self._runtimes[name]
-            excess = self._excess_calls[name]
             metrics[f"tools/{name}/avg_calls_per_rollout"] = calls / self.num_rollouts
             metrics[f"tools/{name}/failure_rate"] = failures / calls if calls else 0.0
             metrics[f"tools/{name}/avg_runtime"] = runtime / calls if calls else 0.0
-            metrics[f"tools/{name}/avg_excess_calls_per_rollout"] = excess / self.num_rollouts
             total_calls += calls
             total_failures += failures
             total_runtime += runtime
-            total_excess += excess
 
         metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / self.num_rollouts
         metrics["tools/aggregate/failure_rate"] = total_failures / total_calls if total_calls else 0.0
         metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls if total_calls else 0.0
-        metrics["tools/aggregate/avg_excess_calls_per_rollout"] = total_excess / self.num_rollouts
 
         return metrics
 
 
 @dataclass
 class ToolCall:
+    """Parsed tool call from model output."""
+
     name: str
     args: dict[str, Any]
+    id: str | None = None
 
 
 @dataclass
@@ -408,25 +474,49 @@ def coerce_args(properties: dict[str, Any], kwargs: dict[str, Any]) -> dict[str,
 
 
 class Tool(ABC):
-    config_name: str
+    config_name: str = ""
     """Name used to specify the tool in the CLI."""
-    description: str
+    description: str = ""
     """Default description used for e.g. system prompts."""
-    call_name: str
+    call_name: str = ""
     """Name used to identify the tool when function calling."""
-    parameters: dict[str, Any]
+    parameters: dict[str, Any] = {}
     """JSON schema for tool parameters. Exposed to the model when calling the tool."""
+    observation_role: str = "tool"
+    """Role for observations/feedback in conversation."""
 
-    def __init__(self, config_name: str, description: str, call_name: str, parameters: dict[str, Any]) -> None:
-        self.config_name = config_name
-        self.description = description
-        self.call_name = call_name
-        self.parameters = parameters
-        # validate parameters are valid JSON
-        try:
-            json.loads(json.dumps(parameters))
-        except Exception as e:
-            raise ValueError(f"Invalid parameters: {e}") from e
+    async def setup(self) -> None:
+        """Called once at start of training for resource initialization."""
+        return
+
+    async def close(self) -> None:
+        """Cleanup resources for a single episode."""
+        return
+
+    async def shutdown(self) -> None:
+        """Called once at end of training for resource cleanup."""
+        return
+
+    def get_observation_role(self) -> str:
+        """Return the role to use for observations in conversation."""
+        return self.observation_role
+
+    def get_metrics(self) -> dict[str, float]:
+        """Return custom metrics."""
+        return {}
+
+    @classmethod
+    def get_tool_definitions(cls) -> list[dict]:
+        """Return tool definitions in OpenAI format for prompt injection.
+
+        Override this method to provide tool definitions that will be included
+        in the chat template. This is called at dataset setup time, before
+        any instances are created.
+
+        Returns:
+            List of tool definitions in OpenAI format.
+        """
+        return []
 
     def get_call_name(self) -> str:
         """Get the tool's call name (used when function calling)."""
@@ -455,7 +545,12 @@ class Tool(ABC):
         This method coerces kwargs to match the tool's parameter schema types
         before calling _execute(). Use this instead of _execute() when you want
         automatic type coercion (e.g., when calling from Ray actors).
+
+        Reserved meta-kwargs (_name_, _id_) are stripped before coercion so that
+        callers can use a unified dispatch interface for both tools and environments.
         """
+        kwargs.pop("_name_", None)
+        kwargs.pop("_id_", None)
         try:
             properties = self.parameters.get("properties", {})
             coerced_kwargs = coerce_args(properties, kwargs)

@@ -35,6 +35,7 @@ from transformers import PreTrainedTokenizer
 
 from open_instruct import data_types, utils
 from open_instruct.dataset_transformation import (
+    ENV_CONFIG_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     RAW_PROMPT_KEY,
@@ -47,6 +48,22 @@ from open_instruct.tools.utils import ToolStatistics
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
 logger = logging.getLogger(__name__)
+
+
+def build_index_map(dataset: Dataset) -> dict[int, int]:
+    """Build a mapping from index column values to positional indices.
+
+    This allows looking up samples by their 'index' column value regardless of
+    whether the dataset has been shuffled. The 'index' column is a unique identifier
+    assigned during dataset creation.
+
+    Args:
+        dataset: HuggingFace Dataset with an 'index' column.
+
+    Returns:
+        Dictionary mapping index column values to positional indices.
+    """
+    return {idx: pos for pos, idx in enumerate(dataset["index"])}
 
 
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
@@ -339,8 +356,11 @@ class StreamingDataLoaderConfig:
 
     # Reward - Verifiable reward
     apply_verifiable_reward: bool = True
-    verification_reward: float = 10.0
     remap_verifier: str | None = None
+
+    # Reward aggregation
+    reward_aggregator: str = "last"
+    """How to combine per-turn rewards: 'last' (sparse) or 'sum' (dense)."""
 
     # LLM judge verifier
     llm_judge_model: str = "azure/gpt-4o-mini-standard"
@@ -406,7 +426,7 @@ class StreamingDataLoaderConfig:
 
         self.max_possible_score = 0.0
         if self.apply_verifiable_reward:
-            self.max_possible_score += self.verification_reward
+            self.max_possible_score += 1.0
         if self.apply_r1_style_format_reward and self.additive_format_reward:
             self.max_possible_score += self.r1_style_format_reward
 
@@ -526,9 +546,24 @@ class BatchStatistics:
 
 
 def add_prompt_to_generator(
-    example: dict[str, Any], epoch_number: int, param_prompt_Q: ray_queue.Queue, generation_config, is_eval: bool
+    example: dict[str, Any],
+    epoch_number: int,
+    param_prompt_Q: ray_queue.Queue,
+    generation_config,
+    is_eval: bool,
+    base_env_config: dict | None = None,
 ) -> None:
     index = example["index"]
+
+    # Merge base env_config with per-sample env_config.
+    # Only apply base_env_config to samples that have their own env_config,
+    # so non-env samples (env_config=None) don't get routed to environments.
+    env_config = None
+    sample_env_config = example.get(ENV_CONFIG_KEY)
+    if sample_env_config is not None:
+        env_config = dict(base_env_config) if base_env_config else {}
+        env_config.update(sample_env_config)
+
     param_prompt_Q.put(
         data_types.PromptRequest(
             prompt=example[INPUT_IDS_PROMPT_KEY],
@@ -537,6 +572,7 @@ def add_prompt_to_generator(
             prompt_id=f"{epoch_number}_{index}",
             is_eval=is_eval,
             active_tools=example.get(TOOLS_COLUMN_KEY),
+            env_config=env_config,
         )
     )
 
@@ -560,6 +596,7 @@ def accumulate_inference_batches(
     verbose: bool = False,
     max_possible_score: float = 1.0,
     requeue_on_timeout: bool = True,
+    base_env_config: dict | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -571,6 +608,10 @@ def accumulate_inference_batches(
         assert param_prompt_Q is not None and iter_dataloader is not None and dataset is not None, (
             "replenish_prompts requires param_prompt_Q and iter_dataloader and dataset"
         )
+
+    # Build index map to look up samples by their 'index' column value.
+    # This makes lookups independent of dataset shuffling.
+    index_to_position = build_index_map(dataset)
 
     results = []
     all_queries = []
@@ -626,7 +667,7 @@ def accumulate_inference_batches(
             f"Index: {result.index}, Prompt ID: {result.prompt_id}"
         )
 
-        example = dataset[result.index]
+        example = dataset[index_to_position[result.index]]
         query = example[INPUT_IDS_PROMPT_KEY]
         ground_truth = example[GROUND_TRUTHS_KEY]
         dataset_name = example[VERIFIER_SOURCE_KEY]
@@ -637,7 +678,14 @@ def accumulate_inference_batches(
             assert iter_dataloader is not None
             assert param_prompt_Q is not None
             example = next(iter_dataloader)
-            add_prompt_to_generator(example, iter_dataloader._epoch, param_prompt_Q, generation_config, is_eval=False)
+            add_prompt_to_generator(
+                example,
+                iter_dataloader._epoch,
+                param_prompt_Q,
+                generation_config,
+                is_eval=False,
+                base_env_config=base_env_config,
+            )
 
         for i in range(len(result.finish_reasons)):
             if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
@@ -924,6 +972,7 @@ class DataPreparationActor:
         run_name: str,
         model_name: str | None,
         initial_state: dict | None = None,
+        base_env_config: dict | None = None,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
@@ -942,6 +991,7 @@ class DataPreparationActor:
         self.tool_names = tool_names
         self.run_name = run_name
         self.model_name = model_name
+        self.base_env_config = base_env_config
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
@@ -987,6 +1037,7 @@ class DataPreparationActor:
                 self.param_prompt_Q,
                 self.generation_config,
                 is_eval=False,
+                base_env_config=self.base_env_config,
             )
 
         for step in range(self.training_step, self.num_training_steps):
@@ -1013,6 +1064,7 @@ class DataPreparationActor:
                 training_step=step,
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
+                base_env_config=self.base_env_config,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
@@ -1160,11 +1212,8 @@ class DataPreparationActor:
                 }
 
                 tool_stats = ToolStatistics(tool_names=self.tool_names)
-                excess_calls = result.request_info.excess_tool_calls or [
-                    {} for _ in range(len(result.request_info.tool_call_stats))
-                ]
-                for rollout_stats, excess in zip(result.request_info.tool_call_stats, excess_calls):
-                    tool_stats.add_rollout(rollout_stats, excess)
+                for rollout_stats in result.request_info.tool_call_stats:
+                    tool_stats.add_rollout(rollout_stats)
                 step_metrics.update(tool_stats.compute_metrics())
 
                 assert result.token_statistics is not None

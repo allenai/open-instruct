@@ -407,6 +407,10 @@ def get_datasets(beaker_datasets, cluster: list[str]):
             beaker.BeakerDataMount(
                 source=beaker.BeakerDataSource(weka="oe-training-default"), mount_path="/weka/oe-training-default"
             ),
+            # Mount Docker socket for Docker-based RL environments (sandbox_lm, agent_task)
+            beaker.BeakerDataMount(
+                source=beaker.BeakerDataSource(host_path="/var/run/docker.sock"), mount_path="/var/run/docker.sock"
+            ),
         ]
     elif all(c in launch_utils.GCP_CLUSTERS for c in cluster):
         res = [

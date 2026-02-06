@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Generic RL environment support with AppWorld, OpenEnv, and sandbox environments (https://github.com/allenai/open-instruct/pull/1453).
 - Warning when eval prompts are queuing up (new eval round starts before the previous one completes) (https://github.com/allenai/open-instruct/pull/1461).
 - OLMo 3 tokenizer settings documentation covering chat template decisions for Instruct and Think models (https://github.com/allenai/open-instruct/pull/1455).
 - torch.compile support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1445).
