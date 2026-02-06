@@ -45,4 +45,7 @@ uv run python mason.py \
     --activation_memory_budget 0.5 \
     --with_tracking \
     --push_to_hub false \
-    --try_launch_beaker_eval_jobs false
+    --try_launch_beaker_eval_jobs false \
+    --shard_degree 8 \
+    --num_replicas 2 \
+    --try_auto_save_to_beaker false
