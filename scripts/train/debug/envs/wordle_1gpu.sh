@@ -83,6 +83,7 @@ uv run python open_instruct/grpo_fast.py \
     --single_gpu_mode \
     --push_to_hub false \
     --save_traces \
+    --env_name openenv_text \
     --env_base_url "$WORDLE_URL" \
     --env_pool_size 4 \
     --env_max_steps 6 \

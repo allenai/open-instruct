@@ -47,6 +47,7 @@ uv run python open_instruct/grpo_fast.py \
     --single_gpu_mode \
     --push_to_hub false \
     --save_traces \
+    --env_name agent_task \
     --env_backend docker \
     --env_task_data_dir "$REPO_ROOT/data/agent_task_test" \
     --env_image python:3.12-slim \
