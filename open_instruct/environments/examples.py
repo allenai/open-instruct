@@ -164,6 +164,11 @@ class GuessNumberEnv(RLEnvironment):
                     observation=f"Invalid guess: {guess}. Please provide an integer.", reward=-0.1, done=False
                 )
 
+        # Closeness reward: 1.0 for exact match, 0.0 for maximally wrong
+        distance = abs(guess - self._secret)
+        max_distance = self._max_val - self._min_val
+        closeness_reward = 1.0 - distance / max_distance if max_distance > 0 else 0.0
+
         if guess == self._secret:
             return StepResult(
                 observation=f"Correct! The number was {self._secret}. You got it in {self._guesses} guesses!",
@@ -172,9 +177,9 @@ class GuessNumberEnv(RLEnvironment):
                 info={"guesses": self._guesses},
             )
         elif guess < self._secret:
-            return StepResult(observation=f"{guess} is too low.", reward=0.0, done=False)
+            return StepResult(observation=f"{guess} is too low. Try higher.", reward=closeness_reward, done=False)
         else:
-            return StepResult(observation=f"{guess} is too high.", reward=0.0, done=False)
+            return StepResult(observation=f"{guess} is too high. Try lower.", reward=closeness_reward, done=False)
 
     def get_metrics(self) -> dict[str, float]:
         return {"guesses": float(self._guesses)}
