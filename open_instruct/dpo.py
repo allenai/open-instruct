@@ -21,7 +21,7 @@ from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
-from olmo_core.train.callbacks import CheckpointerCallback
+from olmo_core.train.callbacks import CheckpointerCallback, ProfilerCallback
 from olmo_core.train.train_module.transformer import config as transformer_config
 
 from open_instruct import data_loader as data_loader_lib
@@ -148,6 +148,10 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_training_gpus=dp_world_size,
     )
+    if args.profiling:
+        trainer_callbacks["profiler"] = ProfilerCallback(
+            skip_first=5, wait=1, warmup=2, active=3, repeat=1, profile_memory=True
+        )
     return trainer_callbacks
 
 
@@ -294,7 +298,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     if args.packing:
         logger.info("Using packing/padding-free collation")
-        collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
+        collator = TensorDataCollatorWithFlatteningDPO(
+            return_position_ids=True, return_flash_attn_kwargs=True, max_seq_length=args.max_seq_length
+        )
     else:
         collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
@@ -310,7 +316,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         device=device,
     )
     # 4x batch size: forward-only (no backward), so no activation storage needed.
-    cache_batch_size = args.per_device_train_batch_size * 4 * dp_world_size
+    # With packing, use smaller batch size (half) to avoid truncation when packing long sequences.
+    cache_batch_multiplier = 0.5 if args.packing else 4
+    cache_batch_size = int(args.per_device_train_batch_size * cache_batch_multiplier * dp_world_size)
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=cache_batch_size,

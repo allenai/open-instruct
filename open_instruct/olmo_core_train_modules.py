@@ -118,6 +118,12 @@ class DPOTrainModule(TransformerTrainModule):
             assert token_count is not None
             self.record_metric("train/token_count", token_count, reduce_type=None)
 
+            if "_wasted_tokens_from_truncation" in batch:
+                self.record_metric(
+                    "train/wasted_tokens_from_truncation", batch["_wasted_tokens_from_truncation"], ReduceType.sum
+                )
+                self.record_metric("train/sequences_dropped", batch["_sequences_dropped"], ReduceType.sum)
+
             if self.dpo_config.loss_type.computes_reward_metrics:
                 accuracy = (chosen_rewards > rejected_rewards).float().mean()
                 margin = (chosen_rewards - rejected_rewards).mean()

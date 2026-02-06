@@ -387,6 +387,7 @@ class ExperimentConfig(
         default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
     )
     use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
+    profiling: bool = field(default=False, metadata={"help": "Enable torch profiler to trace training steps."})
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
@@ -555,13 +556,24 @@ def build_reference_logprobs_cache(
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
 
-            batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
-            total_tokens += batch_tokens
-            total_examples += len(batch["index"])
-
             bs = len(batch["index"])
-            chosen_lengths = [batch["chosen_input_ids"].shape[1]] * bs
-            rejected_lengths = [batch["rejected_input_ids"].shape[1]] * bs
+            if "chosen_cu_seq_lens_k" in batch:
+                chosen_actual = batch["chosen_cu_seq_lens_k"][-1].item()
+                rejected_actual = batch["rejected_cu_seq_lens_k"][-1].item()
+                batch_tokens = chosen_actual + rejected_actual
+            else:
+                batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
+            total_tokens += batch_tokens
+            total_examples += bs
+
+            if "chosen_cu_seq_lens_k" in batch:
+                chosen_cu = batch["chosen_cu_seq_lens_k"]
+                rejected_cu = batch["rejected_cu_seq_lens_k"]
+                chosen_lengths = (chosen_cu[1:] - chosen_cu[:-1]).tolist()
+                rejected_lengths = (rejected_cu[1:] - rejected_cu[:-1]).tolist()
+            else:
+                chosen_lengths = [batch["chosen_input_ids"].shape[1]] * bs
+                rejected_lengths = [batch["rejected_input_ids"].shape[1]] * bs
             pbar.set_postfix(
                 {
                     "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
@@ -1019,7 +1031,7 @@ def concatenated_forward_olmo(
         all_logps = pf_get_batch_logps(
             logits,
             concatenated_batch["concatenated_labels"],
-            concatenated_batch["concatenated_cu_seq_lens"],
+            concatenated_batch["concatenated_cu_seq_lens_k"],
             average_log_prob=average_log_prob,
         )
     chosen_logps = all_logps[:bs]

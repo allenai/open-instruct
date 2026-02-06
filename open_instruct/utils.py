@@ -1941,8 +1941,8 @@ class ModelDims:
                     self.attn_flops(L, L, sliding_window=self.sliding_window) + self.mlp_flops(L)
                 )
 
-            # Always include a single LM head after prefill (next-token logits)
-            total += FLOP_PER_MAC * self.hidden_size * self.vocab_size
+            # LM head is applied to each token position during training
+            total += L * FLOP_PER_MAC * self.hidden_size * self.vocab_size
 
         return total
 
