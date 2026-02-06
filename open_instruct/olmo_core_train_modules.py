@@ -33,12 +33,7 @@ def split_batch_dpo(batch: dict[str, Any], num_microbatch_instances: int) -> lis
     if batch_size <= num_microbatch_instances:
         return [batch]
 
-    micro_batches: dict[str, list] = {}
-    for key, value in batch.items():
-        if key == "input_ids":
-            continue
-        assert isinstance(value, torch.Tensor), f"unexpected item in batch: '{key}={value}'"
-        micro_batches[key] = value.split(num_microbatch_instances, dim=0)
+    micro_batches = {k: v.split(num_microbatch_instances, dim=0) for k, v in batch.items() if k != "input_ids"}
 
     return [
         {key: value[i] for key, value in micro_batches.items()} for i in range(len(micro_batches["chosen_input_ids"]))
