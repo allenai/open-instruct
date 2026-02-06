@@ -93,12 +93,8 @@ class DPOTrainModule(TransformerTrainModule):
         self.reference_cache: model_utils.TensorCache | None = None
 
         self._metrics: dict[str, torch.Tensor] = {
-            "loss": torch.tensor(0.0, device=device),
-            "chosen_logps": torch.tensor(0.0, device=device),
-            "rejected_logps": torch.tensor(0.0, device=device),
-            "chosen_rewards": torch.tensor(0.0, device=device),
-            "rejected_rewards": torch.tensor(0.0, device=device),
-            "accuracy": torch.tensor(0.0, device=device),
+            k: torch.tensor(0.0, device=device)
+            for k in ["loss", "chosen_logps", "rejected_logps", "chosen_rewards", "rejected_rewards", "accuracy"]
         }
         if dpo_config.load_balancing_loss:
             self._metrics["aux_loss"] = torch.tensor(0.0, device=device)
