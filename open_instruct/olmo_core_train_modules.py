@@ -152,6 +152,7 @@ class DPOTrainModule(TransformerTrainModule):
 
         micro_batches = split_batch_dpo(batch, self.sample_microbatch_size)
         num_micro_batches = len(micro_batches)
+        total_tokens = (batch["chosen_attention_mask"].sum() + batch["rejected_attention_mask"].sum()).float()
 
         for v in self._metrics.values():
             v.zero_()
@@ -159,11 +160,13 @@ class DPOTrainModule(TransformerTrainModule):
         for micro_batch_idx, micro_batch in enumerate(micro_batches):
             with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
                 loss, step_metrics = self._compute_microbatch_loss(micro_batch)
+                micro_tokens = (
+                    micro_batch["chosen_attention_mask"].sum() + micro_batch["rejected_attention_mask"].sum()
+                ).float()
+                weight = micro_tokens / total_tokens
                 for k, v in step_metrics.items():
-                    self._metrics[k] += v.detach()
-                (loss / num_micro_batches).backward()
-
-        self._metrics = {k: v / num_micro_batches for k, v in self._metrics.items()}
+                    self._metrics[k] += v.detach() * weight
+                (loss * weight).backward()
 
         self.model.post_batch(dry_run=dry_run)
 
