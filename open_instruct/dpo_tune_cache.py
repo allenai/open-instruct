@@ -526,19 +526,20 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # Cache the logprobs
     if args.loss_type.needs_reference_model:
-        reference_cache = dpo_utils.build_reference_logprobs_cache(
-            model=model,
-            dataloader=train_dataloader,
-            average_log_prob=args.loss_type.is_average_loss,
-            forward_fn=args.forward_fn,
-            full_dataset_size=original_dataset_size,
-            device=accelerator.device,
-            cache_path=pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH)
-            / f"{dpo_utils.compute_reference_cache_hash(args, tc)}.pt",
-            is_main_process=accelerator.is_main_process,
-            model_dims=utils.ModelDims.from_hf_config(args.model_name_or_path),
-            use_lora=args.use_lora,
-        )
+        with model_utils.unwrap_model_for_generation(model, accelerator) as unwrapped:
+            reference_cache = dpo_utils.build_reference_logprobs_cache(
+                model=unwrapped,
+                dataloader=train_dataloader,
+                average_log_prob=args.loss_type.is_average_loss,
+                forward_fn=args.forward_fn,
+                full_dataset_size=original_dataset_size,
+                device=accelerator.device,
+                cache_path=pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH)
+                / f"{dpo_utils.compute_reference_cache_hash(args, tc)}.pt",
+                is_main_process=accelerator.is_main_process,
+                model_dims=utils.ModelDims.from_hf_config(args.model_name_or_path),
+                use_lora=args.use_lora,
+            )
         logger.info("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
         torch.cuda.empty_cache()
