@@ -1,9 +1,12 @@
 """Unit tests for RL environments."""
 
 import asyncio
+import os
+import tempfile
 from unittest.mock import MagicMock, patch
 
 from open_instruct.environments import ENV_REGISTRY, EnvironmentState, StepResult, ToolCall, get_env_class
+from open_instruct.environments.agent_task import AgentTaskEnv
 from open_instruct.environments.backends import ExecutionResult
 from open_instruct.environments.base import RLEnvironment
 from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
@@ -374,3 +377,159 @@ class TestTruncateOutput:
         assert "line 0" in result
         assert "line 199" in result
         assert "<Observation truncated in middle for saving context>" in result
+
+
+# ---------------------------------------------------------------------------
+# AgentTaskEnv tests (mocked backends + temp directories)
+# ---------------------------------------------------------------------------
+class TestAgentTaskEnv:
+    """Tests for the agent_task environment with mocked backends."""
+
+    def test_registration(self):
+        assert "agent_task" in ENV_REGISTRY
+
+    def test_tool_definitions(self):
+        env = AgentTaskEnv()
+        tools = env.get_tool_definitions()
+        assert len(tools) == 3
+        names = {t["function"]["name"] for t in tools}
+        assert names == {"execute_bash", "str_replace_editor", "submit"}
+
+    def test_reset_with_task_data(self):
+        async def _test():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                # Create task data structure
+                task_id = "task_001"
+                task_dir = os.path.join(tmpdir, task_id)
+                os.makedirs(os.path.join(task_dir, "environment", "seeds"))
+                os.makedirs(os.path.join(task_dir, "tests"))
+
+                # Write instruction
+                with open(os.path.join(task_dir, "instruction.md"), "w") as f:
+                    f.write("Fix the bug in main.py")
+
+                # Write seed file
+                with open(os.path.join(task_dir, "environment", "seeds", "main.py"), "w") as f:
+                    f.write("print('hello')")
+
+                # Write test script
+                with open(os.path.join(task_dir, "tests", "test.sh"), "w") as f:
+                    f.write("#!/bin/bash\npython main.py")
+
+                mock_backend = _make_mock_backend()
+                with patch("open_instruct.environments.sandbox_lm.create_backend", return_value=mock_backend):
+                    env = AgentTaskEnv(task_data_dir=tmpdir)
+                    result = await env.reset(task_id=task_id)
+
+                assert isinstance(result, StepResult)
+                assert "Fix the bug in main.py" in result.observation
+                assert result.tools is not None
+                assert len(result.tools) == 3
+
+                # Verify seeds were copied
+                write_calls = mock_backend.write_file.call_args_list
+                seed_calls = [c for c in write_calls if "/workspace/main.py" in c.args[0]]
+                assert len(seed_calls) == 1
+                assert seed_calls[0].args[1] == "print('hello')"
+
+                # Verify test script was copied
+                test_calls = [c for c in write_calls if "/tests/test.sh" in c.args[0]]
+                assert len(test_calls) == 1
+
+        run_async(_test())
+
+    def test_reset_without_task_data(self):
+        async def _test():
+            mock_backend = _make_mock_backend()
+            with patch("open_instruct.environments.sandbox_lm.create_backend", return_value=mock_backend):
+                env = AgentTaskEnv()
+                result = await env.reset()
+
+            assert isinstance(result, StepResult)
+            assert "Sandbox ready." in result.observation
+
+        run_async(_test())
+
+    def test_submit_success(self):
+        async def _test():
+            mock_backend = _make_mock_backend()
+            with patch("open_instruct.environments.sandbox_lm.create_backend", return_value=mock_backend):
+                env = AgentTaskEnv()
+                await env.reset()
+
+            # test -f check → EXISTS, run test.sh → success, cat reward.txt → "1"
+            mock_backend.run_command.side_effect = [
+                ExecutionResult(stdout="EXISTS", stderr="", exit_code=0),  # test -f
+                ExecutionResult(stdout="All tests passed", stderr="", exit_code=0),  # test.sh
+                ExecutionResult(stdout="1", stderr="", exit_code=0),  # cat reward.txt
+            ]
+            result = await env.step(ToolCall(name="submit", args={}))
+            assert result.done is True
+            assert result.reward == 1.0
+
+        run_async(_test())
+
+    def test_submit_failure(self):
+        async def _test():
+            mock_backend = _make_mock_backend()
+            with patch("open_instruct.environments.sandbox_lm.create_backend", return_value=mock_backend):
+                env = AgentTaskEnv()
+                await env.reset()
+
+            # test -f check → EXISTS, run test.sh → failure, cat reward.txt → "0"
+            mock_backend.run_command.side_effect = [
+                ExecutionResult(stdout="EXISTS", stderr="", exit_code=0),  # test -f
+                ExecutionResult(stdout="FAILED", stderr="Error", exit_code=1),  # test.sh
+                ExecutionResult(stdout="0", stderr="", exit_code=0),  # cat reward.txt
+            ]
+            result = await env.step(ToolCall(name="submit", args={}))
+            assert result.done is True
+            assert result.reward == 0.0
+
+        run_async(_test())
+
+    def test_submit_no_test_script(self):
+        async def _test():
+            mock_backend = _make_mock_backend()
+            with patch("open_instruct.environments.sandbox_lm.create_backend", return_value=mock_backend):
+                env = AgentTaskEnv()
+                await env.reset()
+
+            # test -f check → not EXISTS
+            mock_backend.run_command.return_value = ExecutionResult(stdout="", stderr="", exit_code=1)
+            result = await env.step(ToolCall(name="submit", args={}))
+            assert result.done is True
+            assert result.reward == 0.0
+            assert "No test script" in result.observation
+
+        run_async(_test())
+
+    def test_bash_inherited(self):
+        async def _test():
+            mock_backend = _make_mock_backend()
+            mock_backend.run_command.return_value = ExecutionResult(
+                stdout="hello from agent_task", stderr="", exit_code=0
+            )
+            with patch("open_instruct.environments.sandbox_lm.create_backend", return_value=mock_backend):
+                env = AgentTaskEnv()
+                await env.reset()
+
+            result = await env.step(ToolCall(name="execute_bash", args={"command": "echo hello"}))
+            assert result.reward == 0.0
+            assert "hello from agent_task" in result.observation
+
+        run_async(_test())
+
+    def test_workspace_cwd(self):
+        async def _test():
+            mock_backend = _make_mock_backend()
+            with patch("open_instruct.environments.sandbox_lm.create_backend", return_value=mock_backend):
+                env = AgentTaskEnv()
+                await env.reset()
+
+            # Verify /workspace cwd setup commands ran
+            commands = [call.args[0] for call in mock_backend.run_command.call_args_list]
+            assert any("mkdir -p /workspace" in c for c in commands)
+            assert any("/workspace" in c and ".sandbox_cwd" in c for c in commands)
+
+        run_async(_test())

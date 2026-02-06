@@ -127,6 +127,12 @@ class EnvConfig:
     over_limit_penalty: float | None = None
     """Penalty reward applied when max_steps is exceeded. None = no penalty (just stop)."""
 
+    env_task_data_dir: str | None = None
+    """Directory containing per-task data files (for agent_task environment)."""
+
+    env_image: str | None = None
+    """Docker image override for sandbox/agent_task environments."""
+
     @property
     def enabled(self) -> bool:
         """Return True if environment is configured."""
@@ -145,6 +151,10 @@ class EnvConfig:
             config["base_url"] = self.env_base_url
         if self.env_backend:
             config["backend"] = self.env_backend
+        if self.env_task_data_dir:
+            config["task_data_dir"] = self.env_task_data_dir
+        if self.env_image:
+            config["image"] = self.env_image
         return {k: v for k, v in config.items() if v is not None}
 
 
