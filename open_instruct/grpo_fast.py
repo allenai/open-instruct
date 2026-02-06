@@ -2036,9 +2036,10 @@ def maybe_evaluate(
             eval_result.finish_reasons
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
-        model_step_min = eval_reward_metrics.get("eval/model_step_min")
-        model_step_max = eval_reward_metrics.get("eval/model_step_max")
-        model_step_span = eval_reward_metrics.get("eval/model_step_span")
+        model_step_min = eval_reward_metrics.pop("eval/model_step_min", None)
+        model_step_max = eval_reward_metrics.pop("eval/model_step_max", None)
+        model_step_mean = eval_reward_metrics.pop("eval/model_step_mean", None)
+        model_step_span = eval_reward_metrics.pop("eval/model_step_span", None)
         eval_k = eval_generation_config.n
         scores = np.array(eval_batch.scores)
         pass_at_1 = None
@@ -2067,14 +2068,13 @@ def maybe_evaluate(
             eval_metrics["eval/pass_at_1"] = pass_at_1
         if pass_at_k is not None:
             eval_metrics[f"eval/pass_at_{eval_k}"] = pass_at_k
-        if model_step_min is not None and model_step_max is not None:
-            eval_metrics["eval/model_step_assumed"] = float(training_step)
-            eval_metrics["eval/model_step_min"] = model_step_min
-            eval_metrics["eval/model_step_max"] = model_step_max
+        if model_step_min is not None and model_step_max is not None and model_step_mean is not None:
+            assumed_step = float(training_step)
+            eval_metrics["eval/model_step_diff_min"] = model_step_min - assumed_step
+            eval_metrics["eval/model_step_diff_max"] = model_step_max - assumed_step
+            eval_metrics["eval/model_step_diff_avg"] = model_step_mean - assumed_step
             if model_step_span is not None:
-                eval_metrics["eval/model_step_span"] = model_step_span
-            eval_metrics["eval/model_step_delta_min"] = model_step_min - float(training_step)
-            eval_metrics["eval/model_step_delta_max"] = model_step_max - float(training_step)
+                eval_metrics["eval/model_step_diff_span"] = model_step_span
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens

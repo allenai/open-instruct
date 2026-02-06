@@ -96,7 +96,12 @@ class TestMaybeEvaluate(unittest.TestCase):
             decoded_responses=["resp_a", "resp_b"],
             ground_truths=["42", "42"],
         )
-        reward_metrics = {"model_step_min": 100.0, "model_step_max": 105.0, "model_step_span": 5.0}
+        reward_metrics = {
+            "model_step_min": 100.0,
+            "model_step_max": 105.0,
+            "model_step_mean": 103.0,
+            "model_step_span": 5.0,
+        }
 
         with (
             patch(
@@ -119,12 +124,10 @@ class TestMaybeEvaluate(unittest.TestCase):
             )
 
         logged = mock_print_metrics.call_args.args[0]
-        self.assertEqual(logged["eval/model_step_assumed"], 100.0)
-        self.assertEqual(logged["eval/model_step_min"], 100.0)
-        self.assertEqual(logged["eval/model_step_max"], 105.0)
-        self.assertEqual(logged["eval/model_step_span"], 5.0)
-        self.assertEqual(logged["eval/model_step_delta_min"], 0.0)
-        self.assertEqual(logged["eval/model_step_delta_max"], 5.0)
+        self.assertEqual(logged["eval/model_step_diff_min"], 0.0)
+        self.assertEqual(logged["eval/model_step_diff_max"], 5.0)
+        self.assertEqual(logged["eval/model_step_diff_avg"], 3.0)
+        self.assertEqual(logged["eval/model_step_diff_span"], 5.0)
 
 
 if __name__ == "__main__":
