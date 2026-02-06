@@ -5,10 +5,10 @@ This module provides DPO (Direct Preference Optimization) training using
 OLMo-core's native training infrastructure.
 """
 
-import functools
 import os
 import pathlib
 import shutil
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -325,14 +325,16 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
+    forward_kwargs: dict[str, Any] = {}
     if args.packing:
-        forward_fn = functools.partial(forward_fn, packing=True)
+        forward_kwargs["packing"] = True
     average_log_prob = args.loss_type.is_average_loss
 
     cache_kwargs = dict(
         dataloader=cache_data_loader,
         average_log_prob=average_log_prob,
         forward_fn=forward_fn,
+        forward_kwargs=forward_kwargs,
         full_dataset_size=len(dataset),
         device=device,
         cache_path=reference_cache_path,
