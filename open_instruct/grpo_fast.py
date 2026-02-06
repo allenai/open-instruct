@@ -880,16 +880,34 @@ class PolicyTrainerRayProcess(RayProcess):
                     if (local_step + 1) % accumulation_steps == 0:
                         # Debug: check if weights change after step (only on first step)
                         # Note: With ZeRO-3, param.data is a stale placeholder; use ds_tensor instead
-                        weight_before = None
+                        # Compare expert 1 (always trainable) vs expert 0 (frozen when freeze_parameters=True)
+                        # at a mid-layer for stronger gradient signal
+                        debug_params = None
                         fp32_before = None
                         if self.rank == 0:
-                            test_param_name = "model.layers.0.mlp.gate.weight"
-                            test_param = dict(self.model.module.named_parameters())[test_param_name]
-                            # Read the correct tensor: ds_tensor for ZeRO-3, param.data otherwise
-                            if hasattr(test_param, "ds_tensor"):
-                                weight_before = test_param.ds_tensor.float().mean().item()
-                            else:
-                                weight_before = test_param.data.float().mean().item()
+                            params_dict = dict(self.model.module.named_parameters())
+                            # Pick mid-layer; fall back to layer 0 if model is smaller than expected
+                            mid_layer = min(
+                                14, max(int(k.split(".")[2]) for k in params_dict if k.startswith("model.layers."))
+                            )
+                            debug_names = {
+                                "expert1_trainable": f"model.layers.{mid_layer}.mlp.experts.1.up_proj.weight",
+                                "expert0_frozen": f"model.layers.{mid_layer}.mlp.experts.0.up_proj.weight",
+                                "router": f"model.layers.{mid_layer}.mlp.gate.weight",
+                            }
+
+                            def _read_ds(p):
+                                return (
+                                    p.ds_tensor.float().mean().item()
+                                    if hasattr(p, "ds_tensor")
+                                    else p.data.float().mean().item()
+                                )
+
+                            debug_params = {}
+                            for label, name in debug_names.items():
+                                if name in params_dict:
+                                    p = params_dict[name]
+                                    debug_params[label] = {"name": name, "param": p, "before": _read_ds(p)}
                             # Also check optimizer fp32 master buffer as a second signal
                             try:
                                 fp32_flat = self.model.optimizer.fp32_partitioned_groups_flat[0]
@@ -900,18 +918,14 @@ class PolicyTrainerRayProcess(RayProcess):
 
                         self.model.step()
 
-                        if weight_before is not None:
-                            if hasattr(test_param, "ds_tensor"):
-                                weight_after = test_param.ds_tensor.float().mean().item()
-                            else:
-                                weight_after = test_param.data.float().mean().item()
-                            weight_diff = abs(weight_after - weight_before)
-                            logger.warning(
-                                f"[weight_debug] Weight check (ds_tensor) for {test_param_name}: "
-                                f"before={weight_before:.6f}, after={weight_after:.6f}, diff={weight_diff:.8f}"
-                            )
-                            if weight_diff < 1e-10:
-                                logger.warning("[weight_debug] WARNING: Weights did NOT change after optimizer step!")
+                        if debug_params:
+                            for label, info in debug_params.items():
+                                after = _read_ds(info["param"])
+                                diff = abs(after - info["before"])
+                                logger.warning(
+                                    f"[weight_debug] {label} ({info['name']}): "
+                                    f"before={info['before']:.8f}, after={after:.8f}, diff={diff:.10f}"
+                                )
                             # Check fp32 master buffer change
                             if fp32_before is not None:
                                 try:
