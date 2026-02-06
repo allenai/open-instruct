@@ -78,9 +78,12 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         labels_tensor = torch.cat(ret["labels"], dim=0)[None]
 
         num_valid_seqs = len(features)
+        wasted_tokens = 0
+        sequences_dropped = 0
         if self.max_seq_length is not None:
             current_len = input_ids_tensor.shape[1]
             if current_len > self.max_seq_length:
+                wasted_tokens = current_len - self.max_seq_length
                 input_ids_tensor = input_ids_tensor[:, : self.max_seq_length]
                 labels_tensor = labels_tensor[:, : self.max_seq_length]
                 if position_ids_tensor is not None:
@@ -96,9 +99,10 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
                         ]
                     )
                     num_valid_seqs = valid_mask.sum().item() - 1
-                    if num_valid_seqs < len(features):
+                    sequences_dropped = len(features) - num_valid_seqs
+                    if sequences_dropped > 0:
                         logger.warning(
-                            f"Truncation dropped {len(features) - num_valid_seqs} sequences "
+                            f"Truncation dropped {sequences_dropped} sequences "
                             f"(packed {len(features)} sequences into {current_len} tokens, "
                             f"truncated to {self.max_seq_length}, {num_valid_seqs} sequences remain)"
                         )
@@ -116,6 +120,8 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         ret["input_ids"] = input_ids_tensor
         ret["labels"] = labels_tensor
         ret["_num_valid_seqs"] = num_valid_seqs
+        ret["_wasted_tokens_from_truncation"] = wasted_tokens
+        ret["_sequences_dropped"] = sequences_dropped
         if position_ids_tensor is not None:
             ret["position_ids"] = position_ids_tensor
         if seq_idx_tensor is not None:
@@ -138,6 +144,10 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
 
         chosen_valid = chosen_features.pop("_num_valid_seqs")
         rejected_valid = rejected_features.pop("_num_valid_seqs")
+        chosen_wasted = chosen_features.pop("_wasted_tokens_from_truncation")
+        rejected_wasted = rejected_features.pop("_wasted_tokens_from_truncation")
+        chosen_dropped = chosen_features.pop("_sequences_dropped")
+        rejected_dropped = rejected_features.pop("_sequences_dropped")
         num_valid = min(chosen_valid, rejected_valid)
 
         if num_valid < chosen_valid and "cu_seq_lens_q" in chosen_features:
@@ -147,7 +157,10 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
             rejected_features["cu_seq_lens_q"] = rejected_features["cu_seq_lens_q"][: num_valid + 1]
             rejected_features["cu_seq_lens_k"] = rejected_features["cu_seq_lens_k"][: num_valid + 1]
 
-        result = {}
+        result = {
+            "_wasted_tokens_from_truncation": chosen_wasted + rejected_wasted,
+            "_sequences_dropped": max(chosen_dropped, rejected_dropped),
+        }
         for k in chosen_features:
             result["chosen_" + k] = chosen_features[k]
         for k in rejected_features:
