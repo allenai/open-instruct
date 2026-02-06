@@ -526,10 +526,16 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # Cache the logprobs
     if args.loss_type.needs_reference_model:
+        cache_batch_size = args.per_device_train_batch_size * 4
+        cache_dataloader = DataLoader(train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=cache_batch_size)
+        cache_dataloader = accelerator.prepare(cache_dataloader)
+        logger.info(
+            f"Caching with batch size {cache_batch_size} (4x training batch size {args.per_device_train_batch_size})"
+        )
         with model_utils.unwrap_model_for_generation(model, accelerator) as unwrapped:
             reference_cache = dpo_utils.build_reference_logprobs_cache(
                 model=unwrapped,
-                dataloader=train_dataloader,
+                dataloader=cache_dataloader,
                 average_log_prob=args.loss_type.is_average_loss,
                 forward_fn=args.forward_fn,
                 full_dataset_size=original_dataset_size,

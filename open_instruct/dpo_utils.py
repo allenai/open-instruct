@@ -538,10 +538,12 @@ def build_reference_logprobs_cache(
 
     total_tokens = 0
     total_examples = 0
+    total_batches = len(dataloader)
+    cache_start_time = time.perf_counter()
 
     with torch.no_grad():
         pbar = tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")
-        for batch in pbar:
+        for batch_idx, batch in enumerate(pbar):
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
@@ -567,6 +569,10 @@ def build_reference_logprobs_cache(
                     "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
                 }
             )
+            if is_main_process:
+                utils.maybe_update_beaker_description(
+                    current_step=batch_idx, total_steps=total_batches, start_time=cache_start_time
+                )
 
     if dist.is_initialized():
         dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
