@@ -68,6 +68,7 @@ uv run python mason.py \
     --tool_parser_type vllm_hermes \
     --no_filter_zero_std_samples \
     --dataset_skip_cache \
+    --rollouts_save_path /output/rollouts \
     --output_dir /output \
     --exp_name agent_task_qwen3_4b_grpo \
     --local_eval_every 10 \

@@ -66,6 +66,7 @@ uv run python mason.py \
     --env_max_steps 50 \
     --tool_parser_type vllm_hermes \
     --no_filter_zero_std_samples \
+    --rollouts_save_path /output/rollouts \
     --output_dir /output \
     --exp_name appworld_qwen3_4b_grpo \
     --local_eval_every 10 \
