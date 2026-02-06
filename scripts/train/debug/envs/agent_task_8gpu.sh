@@ -20,7 +20,7 @@ uv run python mason.py \
        --image "$BEAKER_IMAGE" \
        --description "AgentTask GRPO training with Qwen3-4B-Instruct" \
        --pure_docker_mode \
-       --workspace ai2/open-instruct-dev \
+       --workspace ai2/olmo-instruct \
        --priority urgent \
        --preemptible \
        --num_nodes 1 \
