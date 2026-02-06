@@ -1301,6 +1301,16 @@ def preference_tulu_tokenize_and_truncate_v1_2(
         raise ValueError("chosen messages field is empty.")
     if len(rejected_messages) == 0:
         raise ValueError("rejected messages field is empty.")
+    for messages in (chosen_messages, rejected_messages):
+        if any(m.get("content") is None for m in messages):
+            return {
+                CHOSEN_INPUT_IDS_KEY: [],
+                CHOSEN_LABELS_KEY: [],
+                CHOSEN_ATTENTION_MASK_KEY: [],
+                REJECTED_INPUT_IDS_KEY: [],
+                REJECTED_LABELS_KEY: [],
+                REJECTED_ATTENTION_MASK_KEY: [],
+            }
 
     chosen_encoded = last_turn_tulu_tokenize_and_truncate_v1(
         {DEFAULT_SFT_MESSAGES_KEY: chosen_messages}, tokenizer, max_seq_length

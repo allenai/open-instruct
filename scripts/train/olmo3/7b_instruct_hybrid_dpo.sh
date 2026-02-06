@@ -11,6 +11,7 @@ do
         EXP_NAME=hybrid-7b-DPO-SFT-${SFT_LR}-${LR}
         uv run python mason.py \
             --cluster ai2/jupiter \
+            --description "Hybrid 7B DPO, SFT-${SFT_LR}, LR=${LR}, 4 nodes, 16k seq, ZeRO-3." \
             --workspace ai2/olmo-instruct \
             --priority urgent \
             --max_retries 2 \
