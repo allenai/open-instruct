@@ -307,6 +307,131 @@ Launch 8-GPU scripts on Beaker:
 ./scripts/train/build_image_and_launch.sh scripts/train/debug/envs/agent_task_8gpu.sh
 ```
 
+## Rewards and Verifiers
+
+### How Rewards Work
+
+Environment rewards flow through three stages:
+
+1. **Per-turn accumulation** — During rollout, each tool call returns a reward that's appended to `EnvironmentState.rewards`
+2. **Verifier scoring** — After the episode, a verifier function evaluates the final output against ground truth
+3. **Aggregation** — Per-turn rewards and verifier scores are combined into a single scalar for training
+
+```
+Rollout:  step1 → reward=0.0    step2 → reward=0.0    step3 → reward=1.0
+                                                              ↓
+Verifier: PassthroughVerifier → score=0.0  (env provides its own rewards)
+                                                              ↓
+Aggregation: LastRewardAggregator([0.0, 0.0, 1.0]) → 1.0  (final training reward)
+```
+
+### Verifier Sources
+
+Each dataset sample has a `dataset` field (verifier source) that determines how it's evaluated. For environments, use `"passthrough"`:
+
+| Verifier Source | Behavior |
+|----------------|----------|
+| `"passthrough"` | No-op verifier (score=0.0). Rewards come entirely from the environment. |
+| `"gsm8k"` | Extracts last number from response, checks against ground truth |
+| `"math"` | Checks boxed/Minerva/LaTeX math answers |
+| `"ifeval"` | Instruction-following evaluation |
+| `"llm_judge"` | Uses an LLM to judge response quality |
+| `"code"` | Executes code against test cases |
+
+For backward compatibility, `"env_last"` and `"env_sum"` also map to `PassthroughVerifier`.
+
+**Environment datasets should use `"passthrough"`** (or the legacy `"env_last"` / `"env_sum"`):
+
+```python
+{
+    "messages": [...],
+    "ground_truth": "7",
+    "dataset": "passthrough",
+    "env_config": {"env_name": "counter", "task_id": "7"},
+}
+```
+
+### Reward Aggregators
+
+The `--reward_aggregator` flag controls how per-turn rewards are combined:
+
+| Aggregator | Flag | Behavior | Use Case |
+|-----------|------|----------|----------|
+| Last | `--reward_aggregator last` (default) | Takes the final reward | Sparse reward envs (reward only at end) |
+| Sum | `--reward_aggregator sum` | Sums all rewards | Dense reward envs (reward at each step) |
+
+The aggregator applies **after** the verifier score is added to the last turn:
+
+```
+turn_rewards = [0.0, -0.1, 1.0]     # from environment
+verifier_score = 0.0                  # from PassthroughVerifier
+turn_rewards[-1] += verifier_score    # [0.0, -0.1, 1.0]
+
+# With --reward_aggregator last:
+final_reward = 1.0
+
+# With --reward_aggregator sum:
+final_reward = 0.9
+```
+
+### Combining Environment and Verifier Rewards
+
+You can use environment rewards *and* a verifier together. For example, sandbox_lm uses `--apply_verifiable_reward true` with a math verifier — the model gets rewards both from the environment (per-step feedback) and from correctness checking (was the final answer right?):
+
+```bash
+uv run python open_instruct/grpo_fast.py \
+    --apply_verifiable_reward true \
+    --verification_reward 10 \
+    ...
+```
+
+The `--verification_reward` is a **multiplier** on the verifier score. If the math verifier returns 0.8, the verifier contribution is `10 * 0.8 = 8.0`, added to the last turn's environment reward before aggregation.
+
+### Multi-Verifier Datasets
+
+A single sample can be evaluated by multiple verifiers by using lists:
+
+```python
+{
+    "messages": [...],
+    "ground_truth": ["42", "The answer is 42"],
+    "dataset": ["math", "string_match"],
+    "env_config": {...},
+}
+```
+
+Each verifier's weighted score is summed. Verifier weights default to 1.0 but can be configured.
+
+### Reward Flow Summary
+
+```
+Environment            Verifier                  Aggregator
+─────────             ─────────                  ──────────
+step() → reward 0.0 ─┐
+step() → reward 0.0 ─┤
+step() → reward 1.0 ─┤   PassthroughVerifier     LastRewardAggregator
+                      ├── → score = 0.0      ──► ([0.0, 0.0, 1.0]) = 1.0
+                      │   added to last turn       ──► training reward
+                      │
+                      │   OR with math verifier:
+                      ├── MathVerifier
+                      │   → score = 8.0      ──► ([0.0, 0.0, 9.0]) = 9.0
+                      │   added to last turn       ──► training reward
+```
+
+### CLI Flags for Rewards
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--reward_aggregator` | `last` | `"last"` or `"sum"` — how to combine per-turn rewards |
+| `--apply_verifiable_reward` | `true` | Whether to run verifier functions |
+| `--verification_reward` | `10` | Multiplier for verifier scores |
+| `--apply_r1_style_format_reward` | `false` | Bonus for correct `<think>` formatting |
+| `--r1_style_format_reward` | `1.0` | Format reward value |
+| `--additive_format_reward` | `false` | Add format reward to score (vs. gate on it) |
+| `--non_stop_penalty` | `false` | Penalize responses that didn't stop naturally |
+| `--non_stop_penalty_value` | `0.0` | Penalty value for non-stop responses |
+
 ## Inspecting Rollouts
 
 When `--save_traces` is enabled, rollouts are saved as JSONL files. Inspect them to debug environment interactions:
