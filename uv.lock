@@ -4469,7 +4469,7 @@ wheels = [
 [[package]]
 name = "transformers"
 version = "5.0.0.dev0"
-source = { git = "https://github.com/yanhong-lbh/transformers?branch=olmo-3.5-hybrid-clean#196bf0acdeb27907c4c626d7ace85cd9bdb13b0b" }
+source = { git = "https://github.com/yanhong-lbh/transformers?branch=olmo-3.5-hybrid-clean#38c37da9dc0abe622fdce0ae8460c494776958bc" }
 dependencies = [
     { name = "filelock", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "huggingface-hub", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
