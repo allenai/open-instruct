@@ -175,17 +175,12 @@ def concatenated_inputs(
         ret[f"{tag}labels"] = torch.cat([chosen_features["labels"], rejected_features["labels"]], dim=-1)
 
     if "cu_seq_lens_q" in chosen_features:
+        chosen_input_len = chosen_features["input_ids"].shape[-1]
         ret[f"{tag}cu_seq_lens_q"] = torch.cat(
-            [
-                chosen_features["cu_seq_lens_q"],
-                rejected_features["cu_seq_lens_q"][1:] + chosen_features["cu_seq_lens_q"][-1],
-            ]
+            [chosen_features["cu_seq_lens_q"], rejected_features["cu_seq_lens_q"][1:] + chosen_input_len]
         )
         ret[f"{tag}cu_seq_lens_k"] = torch.cat(
-            [
-                chosen_features["cu_seq_lens_k"],
-                rejected_features["cu_seq_lens_k"][1:] + chosen_features["cu_seq_lens_k"][-1],
-            ]
+            [chosen_features["cu_seq_lens_k"], rejected_features["cu_seq_lens_k"][1:] + chosen_input_len]
         )
         ret[f"{tag}max_length_q"] = max(chosen_features["max_length_q"], rejected_features["max_length_q"])
         ret[f"{tag}max_length_k"] = max(chosen_features["max_length_k"], rejected_features["max_length_k"])
@@ -196,8 +191,9 @@ def concatenated_inputs(
         )
 
     if "seq_idx" in chosen_features:
+        chosen_num_seqs = len(chosen_features["cu_seq_lens_k"]) - 1
         ret[f"{tag}seq_idx"] = torch.cat(
-            [chosen_features["seq_idx"], rejected_features["seq_idx"] + chosen_features["seq_idx"][0, -1]], dim=-1
+            [chosen_features["seq_idx"], rejected_features["seq_idx"] + chosen_num_seqs], dim=-1
         )
 
     return ret, len(chosen_features["cu_seq_lens_k"]) - 1
