@@ -2,12 +2,12 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=/weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h-long-context-drope/step23842-hf
 LR=1e-6
-EXP_NAME=hybrid-7b-DPO-cache-debug-2k-reentrantFalse-${LR}
+EXP_NAME=hybrid-7b-DPO-cache-debug-2k-zero3-${LR}
 
 uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --description "2 node DPO cache, hybrid model, 2k seq, use_reentrant=False, expandable_segments." \
+    --description "2 node DPO cache, hybrid model, 2k seq, ZeRO-3." \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
@@ -44,4 +44,5 @@ uv run python mason.py \
     --loss_type dpo_norm \
     --beta 5 \
     --activation_memory_budget 0.5 \
+    --zero_stage 3 \
     --with_tracking
