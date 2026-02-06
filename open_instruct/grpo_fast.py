@@ -883,7 +883,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         # Debug: check if weights change after step (only on first step)
                         # Note: With ZeRO-3, we only see the local partition, but change should still be visible
                         weight_before = None
-                        if local_step == 0 and self.rank == 0: # and self.args.freeze_parameters:
+                        if self.rank == 0: # and self.args.freeze_parameters:
                             test_param_name = "model.layers.0.mlp.gate.weight"
                             test_param = dict(self.model.module.named_parameters())[test_param_name]
                             # Just check local partition (don't use GatheredParameters to avoid sync issues)
