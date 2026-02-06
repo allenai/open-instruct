@@ -2077,8 +2077,11 @@ def main(
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
 
-    # Add environment tool definitions if environment is configured
-    if env_config.enabled:
+    # Add environment tool definitions if a specific environment type is configured.
+    # When only host-specific defaults are set (backend, task_data_dir, etc.) without
+    # env_name/env_class, tool definitions are discovered per-sample during rollout
+    # from the environment's reset() result.
+    if env_config.enabled and (env_config.env_name is not None or env_config.env_class is not None):
         env_cls = get_env_class(env_name=env_config.env_name, env_class=env_config.env_class)
         env_tool_defs = env_cls.get_tool_definitions()
         if env_tool_defs:
