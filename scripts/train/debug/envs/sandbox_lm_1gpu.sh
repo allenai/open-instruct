@@ -56,6 +56,7 @@ uv run python open_instruct/grpo_fast.py \
     --env_max_steps 30 \
     --env_timeout 120 \
     --tool_parser_type vllm_hermes \
+    --system_prompt_override_file scripts/train/debug/envs/sandbox_lm_system_prompt.txt \
     --no_filter_zero_std_samples \
     --output_dir output/sandbox_lm_debug
 
