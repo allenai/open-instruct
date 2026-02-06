@@ -7,6 +7,7 @@
 
 
 # Workflow
+- When creating a PR, always add a summary to `CHANGELOG.md` with a link to the PR (e.g., `- Description of change (https://github.com/allenai/open-instruct/pull/123).`).
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
 - To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
@@ -28,7 +29,9 @@
 - If you are given a Beaker URL (beaker\.allen\.ai.*) use the Beaker CLI tool to interact with it.
 
 # Coding conventions
-- Always use `logger = logger_utils.setup_logger(__name__)` for logging.
+- Never use `import logging` or `logging.info()` directly. Always use `logger = logger_utils.setup_logger(__name__)` and `logger.info()`.
+- Imports always go at the top of the file, never inline.
+- Use `from package import module` instead of `import package.module`.
 
 # Documentation
 To verify that documentation changes don't alter the generated output:
