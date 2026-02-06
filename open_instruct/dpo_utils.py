@@ -383,6 +383,7 @@ class ExperimentConfig(
         default=None, metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"}
     )
     use_liger_kernel: bool = field(default=False, metadata={"help": "Whether to use LigerKernel for training."})
+    profiling: bool = field(default=False, metadata={"help": "Enable torch profiler to trace training steps."})
     hf_metadata_dataset: str | None = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
