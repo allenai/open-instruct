@@ -132,6 +132,7 @@ class DPOTrainModule(TransformerTrainModule):
         )
 
         loss = losses.mean()
+
         if self.dpo_config.load_balancing_loss and aux_loss is not None:
             loss = loss + self.dpo_config.load_balancing_weight * aux_loss
 
