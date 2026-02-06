@@ -280,13 +280,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.use_lora:
         raise ValueError("LoRA is not supported with OLMo-core DPO training. Use dpo_tune_cache.py instead.")
 
-    if args.packing and args.compile_model:
-        raise ValueError(
-            "packing and compile_model cannot be used together. "
-            "Packing creates variable-length batches which causes torch.compile to recompile on every batch. "
-            "Either disable packing or disable compile_model."
-        )
-
     tc.tokenizer_name_or_path = (
         args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
     )
@@ -345,7 +338,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     if args.packing:
         logger.info("Using packing/padding-free collation")
-        collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
+        collator = TensorDataCollatorWithFlatteningDPO(
+            return_position_ids=True, return_flash_attn_kwargs=True, max_seq_length=args.max_seq_length
+        )
     else:
         collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 

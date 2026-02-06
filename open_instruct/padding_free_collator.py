@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import torch
+import torch.nn.functional as F
 from transformers import DefaultDataCollator
 
 
@@ -22,6 +23,7 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
     return_position_ids: bool = True
     return_seq_idx: bool = True
     separator_id: int = -100
+    max_seq_length: int | None = None
 
     def __call__(self, features, return_tensors=None, separator_id=None):
         if return_tensors is None:
@@ -62,12 +64,32 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
                 cu_seq_lens, dtype=torch.int32, device=features[0]["input_ids"].device
             )
             ret["max_length_q"] = ret["max_length_k"] = max_length
+        position_ids_tensor = None
+        seq_idx_tensor = None
         if self.return_position_ids:
-            ret["position_ids"] = torch.cat(pos_ids, dim=0)[None]
+            position_ids_tensor = torch.cat(pos_ids, dim=0)[None]
         if self.return_seq_idx:
-            ret["seq_idx"] = torch.cat(seq_idx, dim=0)[None]
-        ret["input_ids"] = torch.cat(ret["input_ids"], dim=0)[None]
-        ret["labels"] = torch.cat(ret["labels"], dim=0)[None]
+            seq_idx_tensor = torch.cat(seq_idx, dim=0)[None]
+        input_ids_tensor = torch.cat(ret["input_ids"], dim=0)[None]
+        labels_tensor = torch.cat(ret["labels"], dim=0)[None]
+
+        if self.max_seq_length is not None:
+            current_len = input_ids_tensor.shape[1]
+            if current_len < self.max_seq_length:
+                pad_len = self.max_seq_length - current_len
+                input_ids_tensor = F.pad(input_ids_tensor, (0, pad_len), value=0)
+                labels_tensor = F.pad(labels_tensor, (0, pad_len), value=-100)
+                if position_ids_tensor is not None:
+                    position_ids_tensor = F.pad(position_ids_tensor, (0, pad_len), value=0)
+                if seq_idx_tensor is not None:
+                    seq_idx_tensor = F.pad(seq_idx_tensor, (0, pad_len), value=-1)
+
+        ret["input_ids"] = input_ids_tensor
+        ret["labels"] = labels_tensor
+        if position_ids_tensor is not None:
+            ret["position_ids"] = position_ids_tensor
+        if seq_idx_tensor is not None:
+            ret["seq_idx"] = seq_idx_tensor
         return ret
 
 
