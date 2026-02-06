@@ -839,29 +839,27 @@ class PolicyTrainerRayProcess(RayProcess):
                     torch.cuda.empty_cache()
 
                     # Debug: check if loss has gradient before backward
-                    if self.args.freeze_parameters and local_step == 0 and self.rank == 0:
+                    if local_step == 0 and self.rank == 0:
                         logger.warning(
-                            f"[freeze_parameters] Loss before backward: requires_grad={loss.requires_grad}, "
+                            f"[grad_debug] Loss before backward: requires_grad={loss.requires_grad}, "
                             f"grad_fn={loss.grad_fn is not None}, value={loss.item():.4f}"
                         )
 
                     self.model.backward(loss)
 
                     # Debug: log gradient stats for frozen vs trainable params (only on first step)
-                    if self.args.freeze_parameters and local_step == 0 and self.rank == 0:
+                    if local_step == 0 and self.rank == 0:
                         # Count params by requires_grad status
                         trainable_params = [(n, p) for n, p in self.model.module.named_parameters() if p.requires_grad]
                         frozen_params = [
                             (n, p) for n, p in self.model.module.named_parameters() if not p.requires_grad
                         ]
                         logger.warning(
-                            f"[freeze_parameters] requires_grad status: {len(trainable_params)} trainable, "
+                            f"[grad_debug] requires_grad status: {len(trainable_params)} trainable, "
                             f"{len(frozen_params)} frozen"
                         )
-                        logger.warning(
-                            f"[freeze_parameters] First 5 trainable: {[n for n, _ in trainable_params[:5]]}"
-                        )
-                        logger.warning(f"[freeze_parameters] First 5 frozen: {[n for n, _ in frozen_params[:5]]}")
+                        logger.warning(f"[grad_debug] First 5 trainable: {[n for n, _ in trainable_params[:5]]}")
+                        logger.warning(f"[grad_debug] First 5 frozen: {[n for n, _ in frozen_params[:5]]}")
 
                         # Check gradients (note: with ZeRO-3, param.grad may be None after reduce-scatter)
                         trainable_with_grad = [
@@ -870,38 +868,63 @@ class PolicyTrainerRayProcess(RayProcess):
                         trainable_no_grad = [n for n, p in trainable_params if p.grad is None]
                         if trainable_with_grad:
                             logger.warning(
-                                f"[freeze_parameters] Trainable with grads: {len(trainable_with_grad)}, "
+                                f"[grad_debug] Trainable with grads: {len(trainable_with_grad)}, "
                                 f"first 5: {trainable_with_grad[:5]}"
                             )
                         if trainable_no_grad:
                             logger.warning(
-                                f"[freeze_parameters] Trainable WITHOUT grads (ZeRO-3 may have scattered): "
+                                f"[grad_debug] Trainable WITHOUT grads (ZeRO-3 may have scattered): "
                                 f"{len(trainable_no_grad)}, first 5: {trainable_no_grad[:5]}"
                             )
 
                     if (local_step + 1) % accumulation_steps == 0:
                         # Debug: check if weights change after step (only on first step)
-                        # Note: With ZeRO-3, we only see the local partition, but change should still be visible
+                        # Note: With ZeRO-3, param.data is a stale placeholder; use ds_tensor instead
                         weight_before = None
-                        if self.rank == 0: # and self.args.freeze_parameters:
+                        fp32_before = None
+                        if self.rank == 0:
                             test_param_name = "model.layers.0.mlp.gate.weight"
                             test_param = dict(self.model.module.named_parameters())[test_param_name]
-                            # Just check local partition (don't use GatheredParameters to avoid sync issues)
-                            weight_before = test_param.data.float().mean().item()
+                            # Read the correct tensor: ds_tensor for ZeRO-3, param.data otherwise
+                            if hasattr(test_param, "ds_tensor"):
+                                weight_before = test_param.ds_tensor.float().mean().item()
+                            else:
+                                weight_before = test_param.data.float().mean().item()
+                            # Also check optimizer fp32 master buffer as a second signal
+                            try:
+                                fp32_flat = self.model.optimizer.fp32_partitioned_groups_flat[0]
+                                if fp32_flat is not None:
+                                    fp32_before = fp32_flat.float().mean().item()
+                            except (AttributeError, IndexError):
+                                pass
 
                         self.model.step()
 
                         if weight_before is not None:
-                            weight_after = test_param.data.float().mean().item()
+                            if hasattr(test_param, "ds_tensor"):
+                                weight_after = test_param.ds_tensor.float().mean().item()
+                            else:
+                                weight_after = test_param.data.float().mean().item()
                             weight_diff = abs(weight_after - weight_before)
                             logger.warning(
-                                f"[freeze_parameters] Weight check (local partition) for {test_param_name}: "
+                                f"[weight_debug] Weight check (ds_tensor) for {test_param_name}: "
                                 f"before={weight_before:.6f}, after={weight_after:.6f}, diff={weight_diff:.8f}"
                             )
                             if weight_diff < 1e-10:
-                                logger.warning(
-                                    "[freeze_parameters] WARNING: Weights did NOT change after optimizer step!"
-                                )
+                                logger.warning("[weight_debug] WARNING: Weights did NOT change after optimizer step!")
+                            # Check fp32 master buffer change
+                            if fp32_before is not None:
+                                try:
+                                    fp32_flat = self.model.optimizer.fp32_partitioned_groups_flat[0]
+                                    fp32_after = fp32_flat.float().mean().item()
+                                    fp32_diff = abs(fp32_after - fp32_before)
+                                    logger.warning(
+                                        f"[weight_debug] Optimizer fp32 buffer: "
+                                        f"before={fp32_before:.6f}, after={fp32_after:.6f}, "
+                                        f"diff={fp32_diff:.8f}"
+                                    )
+                                except (AttributeError, IndexError):
+                                    pass
                     local_step += 1
                     with torch.no_grad():
                         if self.args.load_ref_policy:
