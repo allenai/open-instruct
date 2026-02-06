@@ -37,6 +37,7 @@ from datetime import timedelta
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
+    from deepspeed.ops.adam import DeepSpeedCPUAdam
     from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
     from deepspeed.utils import groups
 
@@ -262,13 +263,9 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             optim_params = self.policy.parameters()
         if args.deepspeed_cpu_adam:
-            from deepspeed.ops.adam import DeepSpeedCPUAdam
-
             self.optimizer = DeepSpeedCPUAdam(optim_params, lr=args.learning_rate)
         else:
-            self.optimizer = torch.optim.AdamW(
-                optim_params, lr=args.learning_rate, fused=args.fused_optimizer
-            )
+            self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
         if args.warmup_ratio > 0.0:
