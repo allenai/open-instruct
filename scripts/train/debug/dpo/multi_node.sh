@@ -29,9 +29,9 @@ uv run python mason.py \
     --model_name_or_path "$MODEL_NAME" \
     --chat_template_name olmo \
     --max_seq_length 16384 \
-    --per_device_train_batch_size 2 \
+    --per_device_train_batch_size 4 \
     --packing \
-    --gradient_accumulation_steps 2 \
+    --gradient_accumulation_steps 1 \
     --learning_rate "$LR" \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
