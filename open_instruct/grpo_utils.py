@@ -194,10 +194,10 @@ class ExperimentConfig:
         default_factory=lambda: [
             # NOTE: Do NOT freeze embed_tokens - gradient checkpointing requires inputs with requires_grad=True
             "model.layers.*.self_attn.*",
-            # "model.layers.*.post_attention_layernorm.*",
-            # "model.layers.*.post_feedforward_layernorm.*",
-            # "model.layers.*.mlp.experts.0.*",  # Freeze expert 0 only (expert 1 + router remain trainable)
-            # "lm_head.*",
+            "model.layers.*.post_attention_layernorm.*",
+            "model.layers.*.post_feedforward_layernorm.*",
+            "model.layers.*.mlp.experts.0.*",  # Freeze expert 0 only (expert 1 + router remain trainable)
+            "lm_head.*",
         ]
     )
     """List of patterns (fnmatch-style) to match parameter names for freezing.
