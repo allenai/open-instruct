@@ -5,12 +5,18 @@ This module provides common utilities for working with OLMo-core models,
 including model configuration mappings and helper functions.
 """
 
+import pathlib
+from typing import Any
+
+import safetensors.torch
+import torch.distributed as dist
 import transformers
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.fla.layer import FLAConfig
 from olmo_core.nn.hf.checkpoint import save_hf_model
 from olmo_core.nn.transformer import TransformerConfig
 from olmo_core.nn.transformer.config import TransformerBlockType
+from torch.distributed.tensor import DTensor, distribute_tensor
 
 from open_instruct import logger_utils
 
@@ -106,6 +112,99 @@ def get_transformer_config(
     if attn_backend is not None:
         kwargs["attn_backend"] = AttentionBackendName(attn_backend)
     return getattr(TransformerConfig, config_name)(**kwargs)
+
+
+def _convert_hf_key_to_olmo_core(hf_key: str) -> str:
+    """Convert a single HF state dict key to the OLMo-core equivalent.
+
+    Handles both standard attention layers and FLA (linear attention) layers in
+    hybrid models. Key mappings derived from olmo-core's
+    convert_checkpoint_to_hf_hybrid.py (reversed).
+    """
+    # Global keys
+    if hf_key == "model.embed_tokens.weight":
+        return "embeddings.weight"
+    if hf_key == "model.norm.weight":
+        return "lm_head.norm.weight"
+    if hf_key == "lm_head.weight":
+        return "lm_head.w_out.weight"
+
+    # FLA layer keys: model.layers.{i}.linear_attn.* -> blocks.{i}.fla.inner.*
+    if ".linear_attn." in hf_key:
+        return hf_key.replace("model.layers.", "blocks.").replace(".linear_attn.", ".fla.inner.")
+
+    # FLA norm: model.layers.{i}.attention_layer_norm.* -> blocks.{i}.fla_norm.*
+    if ".attention_layer_norm." in hf_key:
+        return hf_key.replace("model.layers.", "blocks.").replace(".attention_layer_norm.", ".fla_norm.")
+
+    # FLA feedforward norm: model.layers.{i}.feedforward_layer_norm.* -> blocks.{i}.feed_forward_norm.*
+    if ".feedforward_layer_norm." in hf_key:
+        return hf_key.replace("model.layers.", "blocks.").replace(".feedforward_layer_norm.", ".feed_forward_norm.")
+
+    # Attention keys: model.layers.{i}.self_attn.{q,k,v,o}_proj -> blocks.{i}.attention.w_{q,k,v,out}
+    attn_proj_map = {
+        ".self_attn.q_proj.": ".attention.w_q.",
+        ".self_attn.k_proj.": ".attention.w_k.",
+        ".self_attn.v_proj.": ".attention.w_v.",
+        ".self_attn.o_proj.": ".attention.w_out.",
+    }
+    for hf_pat, olmo_pat in attn_proj_map.items():
+        if hf_pat in hf_key:
+            return hf_key.replace("model.layers.", "blocks.").replace(hf_pat, olmo_pat)
+
+    # Attention norms: self_attn.q_norm, self_attn.k_norm
+    if ".self_attn.q_norm." in hf_key:
+        return hf_key.replace("model.layers.", "blocks.").replace(".self_attn.q_norm.", ".attention.q_norm.")
+    if ".self_attn.k_norm." in hf_key:
+        return hf_key.replace("model.layers.", "blocks.").replace(".self_attn.k_norm.", ".attention.k_norm.")
+
+    # Layer norms for attention blocks
+    if ".post_attention_layernorm." in hf_key:
+        return hf_key.replace("model.layers.", "blocks.").replace(".post_attention_layernorm.", ".attention_norm.")
+    if ".post_feedforward_layernorm." in hf_key:
+        return hf_key.replace("model.layers.", "blocks.").replace(
+            ".post_feedforward_layernorm.", ".feed_forward_norm."
+        )
+
+    # MLP keys
+    mlp_map = {
+        ".mlp.gate_proj.": ".feed_forward.w1.",
+        ".mlp.down_proj.": ".feed_forward.w2.",
+        ".mlp.up_proj.": ".feed_forward.w3.",
+    }
+    for hf_pat, olmo_pat in mlp_map.items():
+        if hf_pat in hf_key:
+            return hf_key.replace("model.layers.", "blocks.").replace(hf_pat, olmo_pat)
+
+    raise ValueError(f"Unknown HF key: {hf_key}")
+
+
+def load_hf_model_weights(
+    model_name_or_path: str, model_state_dict: dict[str, Any], process_group: dist.ProcessGroup | None = None
+):
+    """Load HF weights into an OLMo-core model state dict.
+
+    Loads directly from safetensors and remaps keys using mappings derived from
+    olmo-core's convert_checkpoint_to_hf_hybrid.py. This supports both standard
+    and hybrid (FLA) checkpoints, unlike olmo-core's load_hf_model which has
+    neither FLA key mappings nor support for single-file safetensors checkpoints.
+    """
+    model_path = pathlib.Path(model_name_or_path)
+    safetensors_file = model_path / "model.safetensors"
+    if not safetensors_file.exists():
+        raise FileNotFoundError(f"Expected safetensors file at {safetensors_file}")
+
+    logger.info(f"Loading safetensors from {safetensors_file}")
+    hf_state_dict = safetensors.torch.load_file(str(safetensors_file))
+
+    for hf_key, tensor in hf_state_dict.items():
+        olmo_key = _convert_hf_key_to_olmo_core(hf_key)
+        olmo_core_state = model_state_dict[olmo_key]
+        if isinstance(olmo_core_state, DTensor):
+            olmo_core_state = distribute_tensor(tensor, olmo_core_state.device_mesh, olmo_core_state.placements)
+        else:
+            olmo_core_state = tensor
+        model_state_dict[olmo_key] = olmo_core_state
 
 
 def save_state_dict_as_hf(model_config, state_dict, save_dir, original_model_name_or_path, tokenizer):

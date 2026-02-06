@@ -19,7 +19,6 @@ from olmo_core.distributed import parallel as dist_parallel
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType, build_world_mesh, get_dp_model_mesh
 from olmo_core.nn.attention.backend import has_flash_attn_3
-from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.transformer.config import TransformerActivationCheckpointingMode
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
@@ -109,7 +108,7 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     model = model_config.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
-    load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
+    olmo_core_utils.load_hf_model_weights(args.model_name_or_path, model.state_dict())
     model = model.to(device=device, dtype=torch.bfloat16)
 
     logger.info(f"Applying activation checkpointing (budget={args.activation_memory_budget})...")
@@ -208,7 +207,8 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, model, dp_world_size: int
     device_name = utils.get_device_name(torch.cuda.get_device_name(0))
     device_peak_flops = int(utils.GPU_SPECS[device_name]["flops"])
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback(
-        num_flops_per_token=model.num_flops_per_token(args.max_seq_length), device_peak_flops=device_peak_flops
+        num_flops_per_token=model.num_flops_per_token(args.max_seq_length),
+        device_peak_flops_per_second=device_peak_flops,
     )
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
