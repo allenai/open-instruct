@@ -38,6 +38,7 @@ dependencies = [
     "uvicorn>=0.20.0",
     "mcp>=1.9.0",
     "e2b-code-interpreter>=1.0.0",
+    "docker>=7.0.0",
 ]
 
 [build-system]
