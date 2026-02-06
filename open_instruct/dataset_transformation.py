@@ -1481,6 +1481,9 @@ class DatasetConfig:
     is_upsampled: bool = False
 
     def __post_init__(self):
+        # Get HF token from environment if available
+        hf_token = os.environ.get("HF_TOKEN", None)
+        
         # if the file exists locally, use the local file
         if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
             assert self.dataset_split == "train", "Only train split is supported for local jsonl files."
@@ -1501,6 +1504,7 @@ class DatasetConfig:
                 self.dataset_name,
                 split=self.dataset_split,
                 revision=self.dataset_revision,
+                token=hf_token,
                 num_proc=max_num_processes(),
             )
         if self.dataset_range is None:
@@ -1615,6 +1619,9 @@ class DatasetTransformationCache:
     ) -> Dataset:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
+        
+        # Get HF token from environment if available
+        hf_token = os.environ.get("HF_TOKEN", None)
 
         # NOTE: the cached dataset is always train split
         DEFAULT_SPLIT_FOR_CACHED_DATASET = "train"
@@ -1630,6 +1637,7 @@ class DatasetTransformationCache:
                     repo_name,
                     split=DEFAULT_SPLIT_FOR_CACHED_DATASET,
                     revision=self.config_hash,
+                    token=hf_token,
                     num_proc=max_num_processes(),
                 )
 
@@ -1684,8 +1692,10 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
 
         # NOTE: Load the dataset again to make sure it's downloaded to the HF cache
         print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
+        # Get HF token from environment if available
+        hf_token = os.environ.get("HF_TOKEN", None)
         return load_dataset(
-            repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash, num_proc=max_num_processes()
+            repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash, token=hf_token, num_proc=max_num_processes()
         )
 
 

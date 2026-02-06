@@ -1,0 +1,17 @@
+python scripts/submit_eval_jobs.py \
+  --model_name Olmo-3-7B-Think-DPO  \
+  --location /weka/oe-adapt-default/yikew/olmo/Olmo-3-7B-Think-DPO \
+  --cluster   ai2/jupiter  \
+  --evaluate_on_weka \
+  --is_tuned \
+  --workspace "ai2/tulu-3-results" \
+  --priority normal \
+  --preemptible \
+  --use_hf_tokenizer_template \
+  --run_oe_eval_experiments \
+  --skip_oi_evals \
+  --oe_eval_max_length 16384 \
+  --step 250 \
+  --gpu_multiplier 1 \
+  --oe_eval_tasks mmlu:cot::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,simpleqa::tulu-thinker_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,gpqa:0shot_cot::hamish_zs_reasoning_deepseek,zebralogic::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,minerva_math::hamish_zs_reasoning_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,gsm8k::zs_cot_latex_deepseek,omega_500:0-shot-chat_deepseek,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek \
+  --beaker_image oe-eval-beaker/oe_eval_auto

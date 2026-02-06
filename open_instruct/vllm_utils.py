@@ -389,7 +389,7 @@ def init_process_group(
 async def _check_health(port: int) -> None:
     async with (
         aiohttp.ClientSession() as session,
-        session.get(f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=2.0)) as response,
+        session.get(f"http://127.0.0.1:{port}/health", timeout=aiohttp.ClientTimeout(total=300.0)) as response,
     ):
         if response.status != 200:
             raise RuntimeError(f"vLLM server health check failed with status {response.status}")

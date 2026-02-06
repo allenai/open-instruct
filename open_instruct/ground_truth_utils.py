@@ -623,16 +623,18 @@ class LMJudgeVerifier(VerifierFunction):
 
     def __init__(self, judge_type: str, verifier_config: LMJudgeVerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
+        self.judge_type = judge_type
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
         self.extractor = EXTRACTOR_MAP[judge_type]
         os.environ["AZURE_API_VERSION"] = "2024-12-01-preview"
 
-    def parse_completion(self, completion):
+    def parse_completion(self, completion, label: str | None = None):
         """
         Extract reasoning and score from an OpenAI API completion response.
 
         Args:
             completion: The OpenAI API completion response object
+            label: Optional ground truth label (e.g., for flip task to compute F1 score)
 
         Returns:
             tuple: (reasoning, score) extracted from the response
@@ -649,7 +651,11 @@ class LMJudgeVerifier(VerifierFunction):
             pattern = r"<think>\s*.*?\s*</think>\s*"
             content = re.sub(pattern, "", completion.choices[0].message.content, flags=re.DOTALL)
             content = content.replace("<answer>", "").replace("</answer>", "")
-            reasoning, score = self.extractor(content)
+            # For flip task, pass label to extractor for F1 calculation
+            if self.judge_type == "flip" and label is not None:
+                reasoning, score = self.extractor(content, ground_truth=label)
+            else:
+                reasoning, score = self.extractor(content)
             # logger.warning("Model response processed successfully.")
             # logger.warning(f"Extracted reasoning: {reasoning}")
             # logger.warning(f"Extracted score: {score}")
@@ -679,7 +685,48 @@ class LMJudgeVerifier(VerifierFunction):
         """
         # client = self._get_client()
         final_answer = extract_final_answer(prediction)
-        prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
+        # Handle different template formats (flip uses {context} instead of {input}, and doesn't use {label})
+        if self.judge_type == "flip":
+            # For flip task, extract the last user message as ground_truth and use everything before as context
+            if query is None:
+                context = ""
+                flip_ground_truth = label
+            else:
+                # Parse the query string to find the last user message
+                # Format is typically "role: content\nrole: content\n..."
+                lines = query.split("\n")
+                context_lines = []
+                flip_ground_truth = None
+                
+                # Find the last line that starts with "user" followed by optional space and colon (case insensitive)
+                for i in range(len(lines) - 1, -1, -1):
+                    line = lines[i].strip()
+                    # Check if this line starts with "user" (case insensitive) followed by optional space and colon
+                    line_lower = line.lower()
+                    if line_lower.startswith("user"):
+                        # Find where the colon is (might be "user:" or "user :" or "user")
+                        colon_idx = line.find(":")
+                        if colon_idx != -1:
+                            # Extract the content after "user" and colon as ground_truth
+                            flip_ground_truth = line[colon_idx + 1:].strip()
+                            # Everything before this line is context
+                            context_lines = lines[:i]
+                            break
+                
+                if flip_ground_truth is None:
+                    # No user message found, use label as fallback
+                    flip_ground_truth = label
+                    context_lines = lines
+                    logger.warning("No user message found, using empty ground_truth and context.")
+                
+                context = "\n".join(context_lines) if context_lines else ""
+            
+            prompt = self.prompt_template.format(context=context, output=final_answer)
+            # Store the ground_truth for later use in parse_completion
+            flip_label = flip_ground_truth
+        else:
+            prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
+            flip_label = None
 
         max_retries = 3  # for rate limits
         retry_delay = 1.0
@@ -738,7 +785,9 @@ class LMJudgeVerifier(VerifierFunction):
                     seed=self.verifier_config.seed,
                     timeout=self.verifier_config.llm_judge_timeout,
                 )
-                reasoning, score = self.parse_completion(response)
+                # For flip task, use the extracted ground_truth instead of the original label
+                label_to_use = flip_label if self.judge_type == "flip" and flip_label is not None else label
+                reasoning, score = self.parse_completion(response, label=label_to_use)
                 cost = self.get_cost(response, self.verifier_config.llm_judge_model)
                 # normalize score to be between 0 and 1
                 return VerificationResult(score=score, cost=cost, reasoning=reasoning)

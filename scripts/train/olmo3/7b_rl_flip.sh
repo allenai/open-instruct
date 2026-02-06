@@ -3,17 +3,18 @@
 # OLMo 3 model
 MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
 
-DATASETS="yikeee/rlvr_general_mix 1.0"
+DATASETS="yikeee/rlvr_general_mix_flip 1.0"
 # DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
-LOCAL_EVALS="hamishivi/rlvr_general_mix 8"
+# LOCAL_EVALS="hamishivi/rlvr_general_mix 8"
+LOCAL_EVALS="yikeee/rlvr_general_mix_flip 8"
 LOCAL_EVAL_SPLITS="train"
 
 EVALS="alpaca_eval_v3::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,gpqa:0shot_cot::hamish_zs_reasoning_deepseek "
 
 JUDGE_BASE_URL=http://saturn-cs-aus-252.reviz.ai2.in:8001/v1
 
-EXP_NAME="grpo_general_judge"
+EXP_NAME="grpo_general_flip"
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="yikew/open_instruct_olmo4"
 shift
@@ -28,7 +29,7 @@ python mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 3 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env WANDB_ENTITY=ai2-llm \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
@@ -66,7 +67,7 @@ python open_instruct/grpo_fast.py \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 \
     --backend_timeout 3600 \
-    --vllm_num_engines 24 \
+    --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
     --llm_judge_model hosted_vllm/Qwen/Qwen3-1.7B \
     --llm_judge_timeout 3600 \

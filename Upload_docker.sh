@@ -1,5 +1,5 @@
-beaker image delete  tengx/open_instruct_olmo4
+beaker image delete  yikew/open_instruct_olmo4
 
-docker build . -t  tengx/open_instruct_olmo4
+docker build . -t  yikew/open_instruct_olmo4
 
-beaker image create tengx/open_instruct_olmo4 --name open_instruct_olmo4
+beaker image create yikew/open_instruct_olmo4 --name open_instruct_olmo4

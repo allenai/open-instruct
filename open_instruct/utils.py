@@ -409,7 +409,10 @@ def get_datasets(
             else:
                 try:
                     # Try first if dataset on a Hub repo
-                    dataset = load_dataset(ds, ds_config, split=split, num_proc=max_num_processes())
+                    # dataset = load_dataset(ds, ds_config, split=split, num_proc=max_num_processes())
+                    # Get HF token from environment if available
+                    hf_token = os.environ.get("HF_TOKEN", None)
+                    dataset = load_dataset(ds, ds_config, split=split, token=hf_token, num_proc=max_num_processes())
                 except DatasetGenerationError:
                     # If not, check local dataset
                     dataset = load_from_disk(os.path.join(ds, split))

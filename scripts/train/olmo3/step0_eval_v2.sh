@@ -1,0 +1,17 @@
+python scripts/submit_eval_jobs.py \
+  --model_name Olmo-3-7B-Think-DPO-judge-1.7b-step400  \
+  --location /weka/oe-adapt-default/allennlp/deletable_checkpoint/yikew/grpo_general_judge_think__1__1767345031_checkpoints/step_400 \
+  --cluster   ai2/jupiter  \
+  --evaluate_on_weka \
+  --is_tuned \
+  --workspace "ai2/tulu-3-results" \
+  --priority normal \
+  --preemptible \
+  --use_hf_tokenizer_template \
+  --run_oe_eval_experiments \
+  --skip_oi_evals \
+  --oe_eval_max_length 16384 \
+  --step 250 \
+  --gpu_multiplier 1 \
+  --oe_eval_tasks bbh:cot::hamish_zs_reasoning_deepseek_v2,gpqa:0shot_cot::hamish_zs_reasoning_deepseek,gsm8k::zs_cot_latex_deepseek,omega_500:0-shot-chat_deepseek \
+  --beaker_image oe-eval-beaker/oe_eval_auto
