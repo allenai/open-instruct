@@ -47,7 +47,7 @@ uv run python mason.py \
     --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
     --temperature 1.0 \
     --learning_rate 3e-7 \
-    --total_episodes 32000 \
+    --total_episodes 256000 \
     --deepspeed_stage 3 \
     --sequence_parallel_size 2 \
     --num_epochs 1 \
