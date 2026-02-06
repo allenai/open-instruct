@@ -356,7 +356,6 @@ class StreamingDataLoaderConfig:
 
     # Reward - Verifiable reward
     apply_verifiable_reward: bool = True
-    verification_reward: float = 10.0
     remap_verifier: str | None = None
 
     # Reward aggregation
@@ -427,7 +426,7 @@ class StreamingDataLoaderConfig:
 
         self.max_possible_score = 0.0
         if self.apply_verifiable_reward:
-            self.max_possible_score += self.verification_reward
+            self.max_possible_score += 1.0
         if self.apply_r1_style_format_reward and self.additive_format_reward:
             self.max_possible_score += self.r1_style_format_reward
 

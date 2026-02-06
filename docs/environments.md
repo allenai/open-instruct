@@ -381,11 +381,10 @@ You can use environment rewards *and* a verifier together. For example, sandbox_
 ```bash
 uv run python open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
-    --verification_reward 10 \
     ...
 ```
 
-The `--verification_reward` is a **multiplier** on the verifier score. If the math verifier returns 0.8, the verifier contribution is `10 * 0.8 = 8.0`, added to the last turn's environment reward before aggregation.
+Verifier scores are in the range [0.0, 1.0] and are added to the last turn's environment reward before aggregation.
 
 ### Multi-Verifier Datasets
 
@@ -415,7 +414,7 @@ step() → reward 1.0 ─┤   PassthroughVerifier     LastRewardAggregator
                       │
                       │   OR with math verifier:
                       ├── MathVerifier
-                      │   → score = 8.0      ──► ([0.0, 0.0, 9.0]) = 9.0
+                      │   → score = 0.8      ──► ([0.0, 0.0, 1.8]) = 1.8
                       │   added to last turn       ──► training reward
 ```
 
@@ -425,7 +424,6 @@ step() → reward 1.0 ─┤   PassthroughVerifier     LastRewardAggregator
 |------|---------|-------------|
 | `--reward_aggregator` | `last` | `"last"` or `"sum"` — how to combine per-turn rewards |
 | `--apply_verifiable_reward` | `true` | Whether to run verifier functions |
-| `--verification_reward` | `10` | Multiplier for verifier scores |
 | `--apply_r1_style_format_reward` | `false` | Bonus for correct `<think>` formatting |
 | `--r1_style_format_reward` | `1.0` | Format reward value |
 | `--additive_format_reward` | `false` | Add format reward to score (vs. gate on it) |

@@ -1121,7 +1121,6 @@ async def apply_verifiable_reward(
     decoded_responses: list[str],
     ground_truths: list,
     datasets: list[str],
-    reward_mult: int = 10,
     queries: list[str] | None = None,
     rollout_states: list[dict | None] | None = None,
 ):
@@ -1154,14 +1153,7 @@ async def apply_verifiable_reward(
                 rollout_state=rollout_state,
             )
             async_tasks.append(task)
-            task_metadata.append(
-                {
-                    "response_idx": i,
-                    "dataset": reward_func.name,
-                    "reward_weight": reward_func.weight,
-                    "reward_mult": reward_mult,
-                }
-            )
+            task_metadata.append({"response_idx": i, "dataset": reward_func.name, "reward_weight": reward_func.weight})
 
     if async_tasks:
         reward_results = await asyncio.gather(*async_tasks)
@@ -1176,10 +1168,9 @@ async def apply_verifiable_reward(
         response_idx = metadata["response_idx"]
         dataset = metadata["dataset"]
         reward_weight = metadata["reward_weight"]
-        reward_mult = metadata["reward_mult"]
 
         score = result.score if hasattr(result, "score") else result
-        weighted_reward = reward_mult * score * reward_weight
+        weighted_reward = score * reward_weight
 
         response_rewards[response_idx] += weighted_reward
         response_per_func_rewards[response_idx][dataset] = (
@@ -1196,7 +1187,6 @@ class RewardConfig:
     apply_r1_style_format_reward: bool = False
     r1_style_format_reward: float = 1.0
     apply_verifiable_reward: bool = True
-    verification_reward: int = 10
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = -10.0
     only_reward_good_outputs: bool = False
@@ -1248,7 +1238,6 @@ class RewardConfig:
                     decoded_responses,
                     ground_truths,
                     datasets,
-                    reward_mult=self.verification_reward,
                     queries=queries,
                     rollout_states=rollout_states,
                 )
