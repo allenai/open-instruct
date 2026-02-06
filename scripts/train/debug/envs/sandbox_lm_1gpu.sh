@@ -32,8 +32,7 @@ uv run python open_instruct/grpo_fast.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 4 \
     --num_samples_per_prompt_rollout 2 \
-    --model_name_or_path allenai/Olmo-3-1025-7B \
-    --chat_template_name olmo_thinker_rlzero \
+    --model_name_or_path Qwen/Qwen3-0.6B \
     --temperature 1.0 \
     --learning_rate 1e-6 \
     --total_episodes 80 \
