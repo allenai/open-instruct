@@ -234,6 +234,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.use_8bit_optimizer:
         raise ValueError("use_8bit_optimizer is not supported with OLMo-core DPO training.")
 
+
     tc.tokenizer_name_or_path = (
         args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
     )
