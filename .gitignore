@@ -160,3 +160,4 @@ dmypy.json
 cache/
 local_dataset_cache/
 scratch/
+experiments/
