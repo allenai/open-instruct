@@ -163,8 +163,7 @@ class DPOTrainModule(TransformerTrainModule):
                     self._metrics[k] += v.detach()
                 (loss / num_micro_batches).backward()
 
-        for v in self._metrics.values():
-            v /= num_micro_batches
+        self._metrics = {k: v / num_micro_batches for k, v in self._metrics.items()}
 
         self.model.post_batch(dry_run=dry_run)
 
