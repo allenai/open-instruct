@@ -39,15 +39,15 @@ uv run python mason.py \
     --dataset_mixer_list allenai/Dolci-RLZero-Math-7B 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 16384 \
+    --response_length 63488 \
     --pack_length 65536 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 16 \
-    --num_samples_per_prompt_rollout 4 \
+    --num_unique_prompts_rollout 64 \
+    --num_samples_per_prompt_rollout 8 \
     --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
     --temperature 1.0 \
     --learning_rate 3e-7 \
-    --total_episodes 640 \
+    --total_episodes 32000 \
     --deepspeed_stage 3 \
     --sequence_parallel_size 2 \
     --num_epochs 1 \
