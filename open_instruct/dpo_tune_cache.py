@@ -378,7 +378,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
     elif args.activation_memory_budget < 1.0:
-        model.gradient_checkpointing_enable()
+        logger.info(f"Enabling gradient checkpointing (activation_memory_budget={args.activation_memory_budget})")
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
     model_dims = ModelDims(
         num_layers=config.num_hidden_layers,
