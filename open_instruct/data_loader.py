@@ -101,6 +101,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
         device: torch.device | None = None,
         drop_last: bool = True,
+        fs_local_rank: int | None = None,
     ) -> None:
         """Initialize the HFDataLoader.
 
@@ -117,6 +118,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             device: Device to move tensors to.
             drop_last: If True, drop the last incomplete batch. If False, pad the last batch
                 with repeated indices to fill a complete batch.
+            fs_local_rank: File system local rank. Defaults to dp_rank when None.
 
         Note:
             The dataset must have an 'index' column for tracking samples across epochs.
@@ -128,7 +130,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             global_batch_size=batch_size,
             dp_world_size=dp_world_size,
             dp_rank=dp_rank,
-            fs_local_rank=dp_rank,
+            fs_local_rank=fs_local_rank if fs_local_rank is not None else dp_rank,
         )
 
         if "index" not in dataset.column_names:
@@ -285,12 +287,9 @@ class HFDataLoader(data_loader.DataLoaderBase):
         Raises:
             ValueError: If no input_ids tensors are found in the batch.
         """
-        num_tokens = 0
-        for key, value in batch.items():
-            if "input_ids" in key and isinstance(value, torch.Tensor):
-                num_tokens += value.numel()
-        if num_tokens == 0:
-            raise ValueError("Batch contains no input_ids tensors. Cannot compute token count.")
+        # attention_mask is 1 for all non-padding tokens, and 0 otherwise.
+        # Using sum() excludes padding tokens from the count.
+        num_tokens = batch["attention_mask"].sum().item()
         return num_tokens * self.dp_world_size
 
 
