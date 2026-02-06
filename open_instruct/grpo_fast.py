@@ -1462,10 +1462,7 @@ def setup_datasets(
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
     transform_fn_args = [
-        {
-            "system_prompt_override": system_prompt_override,
-            "user_prompt_transform": streaming_config.user_prompt_transform,
-        },
+        {"system_prompt_override": system_prompt_override},
         {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(

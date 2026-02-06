@@ -1348,7 +1348,6 @@ def rlvr_tokenize_v3(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
     system_prompt_override: Optional[str] = None,
-    user_prompt_transform: Optional[str] = None,
 ):
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
@@ -1360,14 +1359,6 @@ def rlvr_tokenize_v3(
         if prompt[0]["role"] == "system":
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
-
-    if user_prompt_transform:
-        for message in reversed(prompt):
-            if message.get("role") != "user":
-                continue
-            content = message.get("content") or ""
-            message["content"] = user_prompt_transform.format(prompt=content)
-            break
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
