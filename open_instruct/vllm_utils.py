@@ -954,6 +954,8 @@ class _RolloutState:
 
         Calls safe_execute on the actor and updates rollout state from the result.
         """
+        if not isinstance(tool_args, dict):
+            tool_args = {}
         result: ToolOutput = await actor.safe_execute.remote(_name_=tool_name, _id_=rollout_id, **tool_args)
 
         self.tool_call_stats.append(ToolCallStats(tool_name, not result.error and not result.timeout, result.runtime))
