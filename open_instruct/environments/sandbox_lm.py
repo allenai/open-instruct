@@ -135,7 +135,7 @@ class SandboxLMEnv(RLEnvironment):
     # ------------------------------------------------------------------
     # Reset
     # ------------------------------------------------------------------
-    async def reset(self, task_id: str | None = None) -> StepResult:
+    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
         # Tear down previous sandbox if any
         if self._backend is not None:
             self._backend.close()

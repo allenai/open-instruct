@@ -40,7 +40,7 @@ class OpenEnvClient(RLEnvironment):
             response.raise_for_status()
             return await response.json()
 
-    async def reset(self, task_id: str | None = None) -> StepResult:
+    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
         """Reset the environment on the remote server."""
         self._step_count = 0
         data = await self._request("POST", "/reset", json={"task_id": task_id})
@@ -108,7 +108,7 @@ class OpenEnvTextClient(RLEnvironment):
             response.raise_for_status()
             return await response.json()
 
-    async def reset(self, task_id: str | None = None) -> StepResult:
+    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
         """Reset the environment on the remote server.
 
         Note: We return an empty observation because text-based environments
@@ -235,7 +235,7 @@ class OpenEnvREPLClient(RLEnvironment):
             response.raise_for_status()
             return await response.json()
 
-    async def reset(self, task_id: str | None = None) -> StepResult:
+    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
         """Reset the REPL environment."""
         self._step_count = 0
         data = await self._request(

@@ -57,10 +57,14 @@ class AgentTaskEnv(SandboxLMEnv):
     # ------------------------------------------------------------------
     # Reset
     # ------------------------------------------------------------------
-    async def reset(self, task_id: str | None = None) -> StepResult:
-        # Override Docker image if per-task image.txt exists
-        task_dir = None
-        if self._task_data_dir and task_id:
+    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
+        per_sample_config = kwargs.get("env_config") or {}
+
+        # Image priority: env_config["image"] > image.txt on disk > default from __init__
+        env_image = per_sample_config.get("image")
+        if env_image:
+            self._backend_kwargs["image"] = env_image
+        elif self._task_data_dir and task_id:
             task_dir = os.path.join(self._task_data_dir, task_id)
             image_file = os.path.join(task_dir, "image.txt")
             if os.path.isfile(image_file):
@@ -70,7 +74,11 @@ class AgentTaskEnv(SandboxLMEnv):
                     self._backend_kwargs["image"] = image_tag
 
         # Parent reset: tears down old container, creates new one, writes bash wrapper
-        await super().reset(task_id)
+        await super().reset(task_id, **kwargs)
+
+        task_dir = None
+        if self._task_data_dir and task_id:
+            task_dir = os.path.join(self._task_data_dir, task_id)
 
         assert self._backend is not None
 

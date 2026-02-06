@@ -69,7 +69,7 @@ class RLEnvironment(Tool):
         raise NotImplementedError("RLEnvironment uses step() via safe_execute()")
 
     @abstractmethod
-    async def reset(self, task_id: str | None = None) -> StepResult:
+    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
         """Initialize episode, return observation and tools."""
         pass
 

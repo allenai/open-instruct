@@ -35,7 +35,7 @@ class SandboxEnv(RLEnvironment):
         self._step_count = 0
         self._submitted_answer: str | None = None
 
-    async def reset(self, task_id: str | None = None) -> StepResult:
+    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
         """Initialize the sandbox for a new episode."""
         if self._backend is not None:
             self._backend.close()

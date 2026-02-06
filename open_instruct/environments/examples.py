@@ -49,7 +49,7 @@ class CounterEnv(RLEnvironment):
         """Return tool definitions for prompt injection."""
         return cls._tool_definitions
 
-    async def reset(self, task_id: str | None = None) -> StepResult:
+    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
         self._current = 0
         self._step_count = 0
 
@@ -133,7 +133,7 @@ class GuessNumberEnv(RLEnvironment):
         """Return tool definitions for prompt injection."""
         return cls._tool_definitions
 
-    async def reset(self, task_id: str | None = None) -> StepResult:
+    async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
         if task_id and task_id.isdigit():
             self._secret = int(task_id)
         else:

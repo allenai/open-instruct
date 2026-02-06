@@ -993,7 +993,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         env_pool = await _get_or_create_env_pool(actor, env_config)
         env_actor = await env_pool.acquire()
 
-        reset_result = await env_actor.reset.remote(task_id=env_config.get("task_id"))
+        reset_result = await env_actor.reset.remote(task_id=env_config.get("task_id"), env_config=env_config)
         env_tool_names = {t["function"]["name"] for t in (reset_result.tools or []) if "function" in t}
 
         if reset_result.observation:

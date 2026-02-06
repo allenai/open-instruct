@@ -534,6 +534,63 @@ class TestAgentTaskEnv:
 
         run_async(_test())
 
+    def test_reset_image_from_env_config(self):
+        """env_config['image'] should override the default image."""
+
+        async def _test():
+            mock_backend = _make_mock_backend()
+            with patch("open_instruct.environments.sandbox_lm.create_backend", return_value=mock_backend):
+                env = AgentTaskEnv(image="ubuntu:24.04")
+                await env.reset(task_id="task_001", env_config={"task_id": "task_001", "image": "custom:latest"})
+
+            # The backend should have been created with the env_config image
+            assert env._backend_kwargs["image"] == "custom:latest"
+
+        run_async(_test())
+
+    def test_reset_image_fallback_to_file(self):
+        """image.txt on disk should be used when env_config has no image."""
+
+        async def _test():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                task_id = "task_img"
+                task_dir = os.path.join(tmpdir, task_id)
+                os.makedirs(task_dir)
+                with open(os.path.join(task_dir, "image.txt"), "w") as f:
+                    f.write("from-file:v1")
+
+                mock_backend = _make_mock_backend()
+                with patch("open_instruct.environments.sandbox_lm.create_backend", return_value=mock_backend):
+                    env = AgentTaskEnv(task_data_dir=tmpdir, image="default:img")
+                    await env.reset(task_id=task_id, env_config={"task_id": task_id})
+
+                assert env._backend_kwargs["image"] == "from-file:v1"
+
+        run_async(_test())
+
+    def test_reset_env_config_image_overrides_file(self):
+        """env_config['image'] should take priority over image.txt on disk."""
+
+        async def _test():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                task_id = "task_both"
+                task_dir = os.path.join(tmpdir, task_id)
+                os.makedirs(task_dir)
+                with open(os.path.join(task_dir, "image.txt"), "w") as f:
+                    f.write("from-file:v1")
+
+                mock_backend = _make_mock_backend()
+                with patch("open_instruct.environments.sandbox_lm.create_backend", return_value=mock_backend):
+                    env = AgentTaskEnv(task_data_dir=tmpdir, image="default:img")
+                    await env.reset(
+                        task_id=task_id, env_config={"task_id": task_id, "image": "from-config:v2"}
+                    )
+
+                # env_config image should win over image.txt
+                assert env._backend_kwargs["image"] == "from-config:v2"
+
+        run_async(_test())
+
 
 # ---------------------------------------------------------------------------
 # DaytonaBackend tests (mocked SDK)

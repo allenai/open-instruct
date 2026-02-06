@@ -342,6 +342,17 @@ def generate_jsonl(output_dir: str, task_ids: list[str], output_file: str) -> No
             else:
                 instruction = f"Complete the task: {task_id}"
 
+            # Read image tag if available
+            image_file = os.path.join(output_dir, task_id, "image.txt")
+            image_tag = None
+            if os.path.isfile(image_file):
+                with open(image_file) as imgf:
+                    image_tag = imgf.read().strip()
+
+            env_config = {"task_id": task_id}
+            if image_tag:
+                env_config["image"] = image_tag
+
             record = {
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},
@@ -349,11 +360,47 @@ def generate_jsonl(output_dir: str, task_ids: list[str], output_file: str) -> No
                 ],
                 "ground_truth": task_id,
                 "dataset": "env_last",
-                "env_config": {"task_id": task_id},
+                "env_config": env_config,
             }
             f.write(json.dumps(record) + "\n")
 
     logger.info(f"Wrote {len(task_ids)} records to {output_file}")
+
+
+def copy_task_data(output_dir: str, task_ids: list[str], hf_data_dir: str) -> None:
+    """Copy task data to a ``data/`` subfolder suitable for a HuggingFace dataset repo.
+
+    The resulting layout is::
+
+        hf_data_dir/
+        ├── task_001/
+        │   ├── instruction.md
+        │   ├── tests/test.sh
+        │   ├── environment/seeds/...
+        │   └── setup.sh
+        ├── task_002/
+        ...
+
+    Users clone the HF repo and pass ``--env_task_data_dir <repo>/data`` at
+    training time.
+
+    Args:
+        output_dir: Base directory containing the full task subdirectories.
+        task_ids: List of task IDs to copy.
+        hf_data_dir: Destination directory (typically ``<hf_repo>/data``).
+    """
+    os.makedirs(hf_data_dir, exist_ok=True)
+
+    for task_id in task_ids:
+        src = os.path.join(output_dir, task_id)
+        dst = os.path.join(hf_data_dir, task_id)
+        if not os.path.isdir(src):
+            continue
+        if os.path.exists(dst):
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+
+    logger.info(f"Copied {len(task_ids)} task directories to {hf_data_dir}")
 
 
 def main():
@@ -373,6 +420,11 @@ def main():
     parser.add_argument("--registry", type=str, help="Registry prefix for pushing images (e.g., ghcr.io/myorg)")
     parser.add_argument("--default_image", type=str, help="Default Docker image for tasks without Dockerfiles")
     parser.add_argument("--output_file", type=str, help="Output JSONL file path (default: {output_dir}/dataset.jsonl)")
+    parser.add_argument(
+        "--hf_data_dir",
+        type=str,
+        help="Copy task data to this directory (for uploading to an HF dataset repo under data/)",
+    )
 
     args = parser.parse_args()
 
@@ -411,6 +463,10 @@ def main():
     # Generate JSONL dataset
     output_file = args.output_file or os.path.join(args.output_dir, "dataset.jsonl")
     generate_jsonl(args.output_dir, task_ids, output_file)
+
+    # Copy task data for HF repo upload
+    if args.hf_data_dir:
+        copy_task_data(args.output_dir, task_ids, args.hf_data_dir)
 
     logger.info(f"Done! {len(task_ids)} tasks processed. Output: {args.output_dir}")
 

@@ -1667,6 +1667,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Always preserve dataset_source if it exists
         target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
         target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
+        target_columns = _preserve_column(ENV_CONFIG_KEY, dataset, target_columns)
 
         if fn_type == "map":
             dataset = dataset.map(
