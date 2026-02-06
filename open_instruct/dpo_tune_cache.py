@@ -137,6 +137,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     accelerator = Accelerator(
         dataloader_config=dataloader_config,
+        mixed_precision="bf16" if args.zero_stage is not None else None,
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
         gradient_accumulation_plugin=GradientAccumulationPlugin(
