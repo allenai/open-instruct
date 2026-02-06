@@ -52,8 +52,8 @@ uv run python mason.py \
     --deepspeed_stage 3 \
     --sequence_parallel_size 2 \
     --num_epochs 1 \
-    --num_learners_per_node 8 \
-    --vllm_num_engines 8 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.01 \
     --seed 42 \
