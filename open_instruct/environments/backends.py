@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import subprocess
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -13,14 +14,6 @@ try:
 except ImportError:
     E2BSandbox = None
     HAS_E2B = False
-
-try:
-    from llm_in_sandbox import DockerRuntime
-
-    HAS_LLM_IN_SANDBOX = True
-except ImportError:
-    DockerRuntime = None
-    HAS_LLM_IN_SANDBOX = False
 
 try:
     from daytona import Daytona, DaytonaConfig
@@ -187,87 +180,100 @@ class E2BBackend(SandboxBackend):
 
 class DockerBackend(SandboxBackend):
     """
-    Local Docker backend using llm-in-sandbox.
+    Local Docker backend using the ``docker`` CLI directly.
 
     Runs code in a Docker container on the local machine.
     Requires Docker to be installed and running.
 
     Features:
     - Full OS capabilities
-    - File I/O with mounted directories
+    - File I/O via docker exec
     - Bash/shell execution
     """
 
-    def __init__(self, image: str = "cdx123/llm-in-sandbox:v0.1"):
+    def __init__(self, image: str = "ubuntu:24.04"):
         """
         Initialize Docker backend.
 
         Args:
-            image: Docker image to use (default: llm-in-sandbox)
+            image: Docker image to use (default: ubuntu:24.04)
         """
         self._image = image
-        self._runtime = None
+        self._container_id: str | None = None
 
     def start(self) -> None:
         """Start the Docker container."""
-        if not HAS_LLM_IN_SANDBOX:
-            raise ImportError("llm_in_sandbox not installed. Run: pip install llm-in-sandbox")
-
         logger.info(f"Starting Docker container (image={self._image})")
-        self._runtime = DockerRuntime(docker_image=self._image)
-        logger.info("Docker container started")
+        result = subprocess.run(
+            ["docker", "run", "-d", "--rm", self._image, "sleep", "infinity"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self._container_id = result.stdout.strip()
+        logger.info(f"Docker container started: {self._container_id[:12]}")
 
     def run_code(self, code: str, language: str = "python") -> ExecutionResult:
         """Execute code in the Docker container."""
-        if self._runtime is None:
+        if self._container_id is None:
             raise RuntimeError("Container not started. Call start() first.")
 
         filename = f"/tmp/code_{uuid.uuid4().hex}.py"
-        self._runtime.run(f"cat > {filename} << 'CODEEOF'\n{code}\nCODEEOF")
+        self.write_file(filename, code)
 
         try:
             if language == "python":
-                output, exit_code = self._runtime.run(f"python {filename}")
+                return self.run_command(f"python {filename}")
             else:
-                output, exit_code = self._runtime.run(code)
+                return self.run_command(code)
         finally:
-            self._runtime.run(f"rm -f {filename}")
-
-        return ExecutionResult(stdout=output, stderr="", exit_code=0 if str(exit_code) == "0" else 1)
+            self.run_command(f"rm -f {filename}")
 
     def run_command(self, command: str) -> ExecutionResult:
         """Execute a shell command in the Docker container."""
-        if self._runtime is None:
+        if self._container_id is None:
             raise RuntimeError("Container not started. Call start() first.")
 
-        output, exit_code = self._runtime.run(command)
-        return ExecutionResult(stdout=output, stderr="", exit_code=0 if str(exit_code) == "0" else 1)
+        result = subprocess.run(
+            ["docker", "exec", self._container_id, "bash", "-c", command], capture_output=True, text=True
+        )
+        return ExecutionResult(stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode)
 
     def write_file(self, path: str, content: str | bytes) -> None:
         """Write a file to the Docker container."""
-        if self._runtime is None:
+        if self._container_id is None:
             raise RuntimeError("Container not started. Call start() first.")
 
         if isinstance(content, bytes):
             encoded_content = base64.b64encode(content).decode("ascii")
-            self._runtime.run(f"echo '{encoded_content}' | base64 -d > {path}")
+            subprocess.run(
+                ["docker", "exec", self._container_id, "bash", "-c", f"echo '{encoded_content}' | base64 -d > {path}"],
+                capture_output=True,
+                check=True,
+            )
         else:
-            self._runtime.run(f"cat > {path} << 'FILEEOF'\n{content}\nFILEEOF")
+            subprocess.run(
+                ["docker", "exec", "-i", self._container_id, "bash", "-c", f"cat > {path}"],
+                input=content,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
 
     def read_file(self, path: str) -> str | bytes:
         """Read a file from the Docker container."""
-        if self._runtime is None:
+        if self._container_id is None:
             raise RuntimeError("Container not started. Call start() first.")
 
-        output, _ = self._runtime.run(f"cat {path}")
-        return output
+        result = subprocess.run(["docker", "exec", self._container_id, "cat", path], capture_output=True, text=True)
+        return result.stdout
 
     def close(self) -> None:
         """Stop and remove the Docker container."""
-        if self._runtime is not None:
-            logger.info("Closing Docker container")
-            self._runtime.close()
-            self._runtime = None
+        if self._container_id is not None:
+            logger.info(f"Closing Docker container: {self._container_id[:12]}")
+            subprocess.run(["docker", "stop", self._container_id], capture_output=True)
+            self._container_id = None
 
 
 class DaytonaBackend(SandboxBackend):
