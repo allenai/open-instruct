@@ -168,6 +168,11 @@ def get_batch_logps(
 ) -> torch.Tensor:
     assert logits.shape[:-1] == labels.shape
 
+    actual_len = cu_seq_lens[-1].item()
+    if logits.shape[1] > actual_len:
+        logits = logits[:, :actual_len, :]
+        labels = labels[:, :actual_len]
+
     # - we are going to get crossings at labels / logits
     #   cont batch boundaries, but we assume that the
     #   loss mask == True at those places
