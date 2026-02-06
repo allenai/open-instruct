@@ -75,7 +75,17 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
 
         if self.max_seq_length is not None:
             current_len = input_ids_tensor.shape[1]
-            if current_len < self.max_seq_length:
+            if current_len > self.max_seq_length:
+                input_ids_tensor = input_ids_tensor[:, : self.max_seq_length]
+                labels_tensor = labels_tensor[:, : self.max_seq_length]
+                if position_ids_tensor is not None:
+                    position_ids_tensor = position_ids_tensor[:, : self.max_seq_length]
+                if seq_idx_tensor is not None:
+                    seq_idx_tensor = seq_idx_tensor[:, : self.max_seq_length]
+                if self.return_flash_attn_kwargs:
+                    cu_seq_lens_tensor = ret["cu_seq_lens_q"].clamp_max_(self.max_seq_length)
+                    ret["cu_seq_lens_q"] = ret["cu_seq_lens_k"] = cu_seq_lens_tensor
+            elif current_len < self.max_seq_length:
                 pad_len = self.max_seq_length - current_len
                 input_ids_tensor = F.pad(input_ids_tensor, (0, pad_len), value=0)
                 labels_tensor = F.pad(labels_tensor, (0, pad_len), value=-100)
@@ -167,11 +177,6 @@ def get_batch_logps(
     logits: torch.Tensor, labels: torch.Tensor, cu_seq_lens: torch.Tensor, average_log_prob: bool = False
 ) -> torch.Tensor:
     assert logits.shape[:-1] == labels.shape
-
-    actual_len = cu_seq_lens[-1].item()
-    if logits.shape[1] > actual_len:
-        logits = logits[:, :actual_len, :]
-        labels = labels[:, :actual_len]
 
     # - we are going to get crossings at labels / logits
     #   cont batch boundaries, but we assume that the
