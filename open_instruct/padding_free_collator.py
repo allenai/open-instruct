@@ -4,6 +4,10 @@ import torch
 import torch.nn.functional as F
 from transformers import DefaultDataCollator
 
+from open_instruct import logger_utils
+
+logger = logger_utils.setup_logger(__name__)
+
 
 @dataclass
 class TensorDataCollatorWithFlattening(DefaultDataCollator):
@@ -73,6 +77,7 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         input_ids_tensor = torch.cat(ret["input_ids"], dim=0)[None]
         labels_tensor = torch.cat(ret["labels"], dim=0)[None]
 
+        num_valid_seqs = len(features)
         if self.max_seq_length is not None:
             current_len = input_ids_tensor.shape[1]
             if current_len > self.max_seq_length:
@@ -84,6 +89,14 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
                     seq_idx_tensor = seq_idx_tensor[:, : self.max_seq_length]
                 if self.return_flash_attn_kwargs:
                     cu_seq_lens_tensor = ret["cu_seq_lens_q"].clamp_max_(self.max_seq_length)
+                    valid_mask = cu_seq_lens_tensor[1:] > cu_seq_lens_tensor[:-1]
+                    num_valid_seqs = valid_mask.sum().item()
+                    if num_valid_seqs < len(features):
+                        logger.warning(
+                            f"Truncation dropped {len(features) - num_valid_seqs} sequences "
+                            f"(packed {len(features)} sequences into {current_len} tokens, "
+                            f"truncated to {self.max_seq_length}, {num_valid_seqs} sequences remain)"
+                        )
                     ret["cu_seq_lens_q"] = ret["cu_seq_lens_k"] = cu_seq_lens_tensor
             elif current_len < self.max_seq_length:
                 pad_len = self.max_seq_length - current_len
@@ -96,6 +109,7 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
 
         ret["input_ids"] = input_ids_tensor
         ret["labels"] = labels_tensor
+        ret["_num_valid_seqs"] = num_valid_seqs
         if position_ids_tensor is not None:
             ret["position_ids"] = position_ids_tensor
         if seq_idx_tensor is not None:
@@ -106,7 +120,6 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
 @dataclass
 class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
     def __call__(self, features, return_tensors=None, separator_id=None):
-        # call the original collator on chosen and rejected separately, then combine
         def filter_batch(match_string, features):
             return [{k.replace(match_string, ""): v for k, v in f.items() if match_string in k} for f in features]
 
@@ -117,13 +130,18 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
             filter_batch("rejected_", features), return_tensors=return_tensors, separator_id=separator_id
         )
 
+        chosen_valid = chosen_features.pop("_num_valid_seqs")
+        rejected_valid = rejected_features.pop("_num_valid_seqs")
+        num_valid = min(chosen_valid, rejected_valid)
+
         result = {}
         for k in chosen_features:
             result["chosen_" + k] = chosen_features[k]
         for k in rejected_features:
             result["rejected_" + k] = rejected_features[k]
         if "index" in features[0]:
-            result["index"] = torch.tensor([f["index"] for f in features])
+            all_indices = torch.tensor([f["index"] for f in features])
+            result["index"] = all_indices[:num_valid]
         return result
 
 
