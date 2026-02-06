@@ -59,7 +59,6 @@ uv run python mason.py \
     --push_to_hub false \
     --with_tracking \
     --save_traces \
-    --env_name agent_task \
     --env_backend docker \
     --env_task_data_dir data/agent_task_test \
     --env_image python:3.12-slim \

@@ -936,8 +936,8 @@ TOOLS_COLUMN_KEY = "tools"
 ENV_CONFIG_KEY = "env_config"
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v2: Added per-sample tool filtering in rlvr_tokenize_v3.
-DATASET_CACHE_VERSION = "v2"
+# to invalidate old caches. v3: Added per-sample env tool injection in rlvr_tokenize_v3.
+DATASET_CACHE_VERSION = "v3"
 
 
 def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
@@ -1413,6 +1413,7 @@ def rlvr_tokenize_v3(
     system_prompt_override: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
+    env_tool_map: dict[str, list[dict[str, Any]]] | None = None,
 ):
     prompt = row.pop(sft_messages_key)
     assert len(prompt) > 0, "Empty prompt in dataset"
@@ -1426,15 +1427,35 @@ def rlvr_tokenize_v3(
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     tools_for_template: list[dict[str, Any]] | None = None
-    if pass_tools_to_chat_template and tool_definitions:
-        sample_active_tools = row.get(TOOLS_COLUMN_KEY)
-        if sample_active_tools is not None:
-            active_tool_names = set(sample_active_tools)
-            filtered_tools = [t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names]
-            if filtered_tools:
-                tools_for_template = filtered_tools
-        else:
-            tools_for_template = tool_definitions
+    if pass_tools_to_chat_template:
+        # Start with per-sample active tools filtered from global tool_definitions
+        if tool_definitions:
+            sample_active_tools = row.get(TOOLS_COLUMN_KEY)
+            if sample_active_tools is not None:
+                active_tool_names = set(sample_active_tools)
+                filtered_tools = [
+                    t for t in tool_definitions if t.get("function", {}).get("name") in active_tool_names
+                ]
+                if filtered_tools:
+                    tools_for_template = filtered_tools
+            else:
+                tools_for_template = tool_definitions
+
+        # Add environment-specific tools based on per-sample env_config.env_name
+        if env_tool_map:
+            sample_env_config = row.get(ENV_CONFIG_KEY)
+            if sample_env_config and isinstance(sample_env_config, dict):
+                env_name = sample_env_config.get("env_name")
+                if env_name and env_name in env_tool_map:
+                    env_tools = env_tool_map[env_name]
+                    if tools_for_template is None:
+                        tools_for_template = env_tools
+                    else:
+                        # Merge: add env tools that aren't already present
+                        existing_names = {t.get("function", {}).get("name") for t in tools_for_template}
+                        for et in env_tools:
+                            if et.get("function", {}).get("name") not in existing_names:
+                                tools_for_template = list(tools_for_template) + [et]
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,

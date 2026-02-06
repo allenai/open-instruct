@@ -82,6 +82,7 @@ from open_instruct import logger_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
+    ENV_CONFIG_KEY,
     INPUT_IDS_PROMPT_KEY,
     TOOLS_COLUMN_KEY,
     TokenizerConfig,
@@ -1093,6 +1094,7 @@ def setup_datasets(
     tool_definitions: list[dict[str, Any]],
     pass_tools_to_chat_template: bool,
     configured_tool_call_names: list[str] | None = None,
+    env_tool_map: dict[str, list[dict[str, Any]]] | None = None,
 ):
     """Set up training and evaluation datasets.
 
@@ -1105,6 +1107,7 @@ def setup_datasets(
         pass_tools_to_chat_template: Whether to pass tools to chat template.
         configured_tool_call_names: List of tool call names configured in the launch job.
             Used to validate against per-sample tools in datasets.
+        env_tool_map: Mapping from env_name → tool definitions for per-sample injection.
     """
     system_prompt_override = None
     if streaming_config.system_prompt_override_file is not None:
@@ -1118,6 +1121,7 @@ def setup_datasets(
             "system_prompt_override": system_prompt_override,
             "tool_definitions": tool_definitions,
             "pass_tools_to_chat_template": pass_tools_to_chat_template,
+            "env_tool_map": env_tool_map or {},
         },
         {"max_prompt_token_length": streaming_config.max_prompt_token_length},
     ]
@@ -2044,6 +2048,80 @@ def initialize_tools(tools_config: ToolsConfig, tokenizer) -> tuple[list, list, 
     return tool_actors, tool_definitions, stop_sequences, tool_call_names
 
 
+def discover_env_tool_definitions(
+    dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str], env_config: EnvConfig
+) -> dict[str, list[dict[str, Any]]]:
+    """Scan datasets for unique env_names and build a map of env_name → tool definitions.
+
+    This enables per-sample tool injection: each sample's prompt gets only the tools
+    for its environment type.
+
+    Args:
+        dataset_mixer_list: Alternating list of [dataset_name, amount, ...].
+        dataset_mixer_list_splits: Split names for each dataset.
+        env_config: CLI-level environment config (used as fallback for --env_name/--env_class).
+
+    Returns:
+        Dict mapping env_name → list of tool definition dicts (OpenAI format).
+    """
+    env_tool_map: dict[str, list[dict[str, Any]]] = {}
+
+    # Collect env_names from dataset env_config columns
+    env_names: set[str] = set()
+    if len(dataset_mixer_list_splits) == 1:
+        splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
+    else:
+        splits = dataset_mixer_list_splits
+
+    for i in range(0, len(dataset_mixer_list), 2):
+        dataset_name = dataset_mixer_list[i]
+        split = splits[i]
+        try:
+            ds = datasets.load_dataset(dataset_name, split=split)
+        except Exception:
+            logger.warning(f"Could not load dataset {dataset_name} for env discovery, skipping")
+            continue
+        if ENV_CONFIG_KEY not in ds.column_names:
+            continue
+        for row in ds:
+            sample_env_config = row.get(ENV_CONFIG_KEY)
+            if sample_env_config and isinstance(sample_env_config, dict):
+                name = sample_env_config.get("env_name")
+                if name:
+                    env_names.add(name)
+
+    # Add CLI-level env_name as fallback
+    if env_config.env_name is not None:
+        env_names.add(env_config.env_name)
+
+    # Build tool definitions for each env_name
+    for name in sorted(env_names):
+        try:
+            env_cls = get_env_class(env_name=name)
+            tool_defs = env_cls.get_tool_definitions()
+            if tool_defs:
+                env_tool_map[name] = tool_defs
+                logger.info(f"Discovered env '{name}' tools: {[t['function']['name'] for t in tool_defs]}")
+        except Exception as e:
+            logger.warning(f"Could not get tool definitions for env '{name}': {e}")
+
+    # Also handle --env_class (custom class path)
+    if env_config.env_class is not None and env_config.env_class not in env_tool_map:
+        try:
+            env_cls = get_env_class(env_class=env_config.env_class)
+            tool_defs = env_cls.get_tool_definitions()
+            if tool_defs:
+                env_tool_map[env_config.env_class] = tool_defs
+                logger.info(
+                    f"Discovered env class '{env_config.env_class}' tools: "
+                    f"{[t['function']['name'] for t in tool_defs]}"
+                )
+        except Exception as e:
+            logger.warning(f"Could not get tool definitions for env class '{env_config.env_class}': {e}")
+
+    return env_tool_map
+
+
 def main(
     args: grpo_utils.ExperimentConfig,
     tc: TokenizerConfig,
@@ -2077,19 +2155,32 @@ def main(
         logger.info(f"Adding tool stop sequences to config: {tool_stop_sequences}")
         streaming_config.stop_strings.extend(tool_stop_sequences)
 
-    # Add environment tool definitions if a specific environment type is configured.
-    # When only host-specific defaults are set (backend, task_data_dir, etc.) without
-    # env_name/env_class, tool definitions are discovered per-sample during rollout
-    # from the environment's reset() result.
-    if env_config.enabled and (env_config.env_name is not None or env_config.env_class is not None):
-        env_cls = get_env_class(env_name=env_config.env_name, env_class=env_config.env_class)
-        env_tool_defs = env_cls.get_tool_definitions()
-        if env_tool_defs:
-            tool_definitions = list(tool_definitions) + env_tool_defs
-            env_tool_names = [t["function"]["name"] for t in env_tool_defs]
-            logger.info(f"Added environment tool definitions: {env_tool_names}")
-            # Update tool_call_names to include env tools (for dataset validation)
-            tools_config.tool_call_names = list(tools_config.tool_call_names) + env_tool_names
+    # Discover environment tool definitions from datasets and CLI flags.
+    # This scans each dataset's env_config column for unique env_names, then
+    # fetches tool definitions for each. The env_tool_map is passed to
+    # rlvr_tokenize_v3 for per-sample tool injection into chat templates.
+    env_tool_map: dict[str, list[dict[str, Any]]] = {}
+    if env_config.enabled:
+        env_tool_map = discover_env_tool_definitions(
+            dataset_mixer_list=streaming_config.dataset_mixer_list,
+            dataset_mixer_list_splits=streaming_config.dataset_mixer_list_splits,
+            env_config=env_config,
+        )
+        # Add all discovered env tool defs to global tool_definitions (parser needs them all)
+        all_env_tool_defs = [td for defs in env_tool_map.values() for td in defs]
+        # Deduplicate by function name
+        seen_names = {t["function"]["name"] for t in tool_definitions}
+        for td in all_env_tool_defs:
+            name = td["function"]["name"]
+            if name not in seen_names:
+                tool_definitions = list(tool_definitions) + [td]
+                seen_names.add(name)
+        # Update tool_call_names to include all env tool names (for dataset validation)
+        all_env_tool_names = [t["function"]["name"] for defs in env_tool_map.values() for t in defs]
+        new_names = [n for n in all_env_tool_names if n not in set(tools_config.tool_call_names)]
+        if new_names:
+            tools_config.tool_call_names = list(tools_config.tool_call_names) + new_names
+            logger.info(f"Added environment tool names: {new_names}")
 
     train_dataset, eval_dataset = setup_datasets(
         args,
@@ -2099,6 +2190,7 @@ def main(
         tool_definitions,
         pass_tools_to_chat_template=tools_config.pass_tools_to_chat_template,
         configured_tool_call_names=tools_config.tool_call_names if tools_config.enabled else None,
+        env_tool_map=env_tool_map,
     )
 
     if len(train_dataset) < (

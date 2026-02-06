@@ -5,6 +5,9 @@ import os
 import tempfile
 from unittest.mock import MagicMock, patch
 
+from datasets import Dataset
+
+from open_instruct.dataset_transformation import ENV_CONFIG_KEY, rlvr_tokenize_v3
 from open_instruct.environments import ENV_REGISTRY, EnvironmentState, StepResult, ToolCall, get_env_class
 from open_instruct.environments.agent_task import AgentTaskEnv
 from open_instruct.environments.backends import DaytonaBackend, ExecutionResult, create_backend
@@ -866,3 +869,265 @@ class TestOpenEnvClientKwargs:
             backend="docker",
         )
         assert client._base_url == "http://localhost:8765"
+
+
+# ---------------------------------------------------------------------------
+# discover_env_tool_definitions tests
+# ---------------------------------------------------------------------------
+class TestDiscoverEnvToolDefinitions:
+    """Test discover_env_tool_definitions from grpo_fast."""
+
+    def test_discovers_counter_env(self):
+        """Discover counter env tools from a mock dataset."""
+        from open_instruct.grpo_fast import discover_env_tool_definitions
+
+        # Create a temporary dataset with env_config containing env_name
+        ds = Dataset.from_dict({
+            "messages": [
+                [{"role": "user", "content": "Count to 3"}],
+                [{"role": "user", "content": "Count to 5"}],
+            ],
+            "ground_truth": ["3", "5"],
+            "dataset": ["passthrough", "passthrough"],
+            "env_config": [
+                {"task_id": "3", "env_name": "counter"},
+                {"task_id": "5", "env_name": "counter"},
+            ],
+        })
+
+        with patch("open_instruct.grpo_fast.datasets.load_dataset", return_value=ds):
+            env_tool_map = discover_env_tool_definitions(
+                dataset_mixer_list=["fake_dataset", "1.0"],
+                dataset_mixer_list_splits=["train"],
+                env_config=EnvConfig(),
+            )
+
+        assert "counter" in env_tool_map
+        tool_names = {t["function"]["name"] for t in env_tool_map["counter"]}
+        assert "increment" in tool_names
+        assert "submit" in tool_names
+
+    def test_discovers_multiple_envs(self):
+        """Discover tools from a dataset mixing two env types."""
+        from open_instruct.grpo_fast import discover_env_tool_definitions
+
+        ds = Dataset.from_dict({
+            "messages": [
+                [{"role": "user", "content": "Count to 3"}],
+                [{"role": "user", "content": "Guess 42"}],
+            ],
+            "ground_truth": ["3", "42"],
+            "dataset": ["passthrough", "passthrough"],
+            "env_config": [
+                {"task_id": "3", "env_name": "counter"},
+                {"task_id": "42", "env_name": "guess_number"},
+            ],
+        })
+
+        with patch("open_instruct.grpo_fast.datasets.load_dataset", return_value=ds):
+            env_tool_map = discover_env_tool_definitions(
+                dataset_mixer_list=["fake_dataset", "1.0"],
+                dataset_mixer_list_splits=["train"],
+                env_config=EnvConfig(),
+            )
+
+        assert "counter" in env_tool_map
+        assert "guess_number" in env_tool_map
+        counter_names = {t["function"]["name"] for t in env_tool_map["counter"]}
+        guess_names = {t["function"]["name"] for t in env_tool_map["guess_number"]}
+        assert "increment" in counter_names
+        assert "guess" in guess_names
+
+    def test_no_env_config_column(self):
+        """Dataset without env_config column returns empty map."""
+        from open_instruct.grpo_fast import discover_env_tool_definitions
+
+        ds = Dataset.from_dict({
+            "messages": [[{"role": "user", "content": "Hello"}]],
+            "ground_truth": ["hi"],
+            "dataset": ["math"],
+        })
+
+        with patch("open_instruct.grpo_fast.datasets.load_dataset", return_value=ds):
+            env_tool_map = discover_env_tool_definitions(
+                dataset_mixer_list=["fake_dataset", "1.0"],
+                dataset_mixer_list_splits=["train"],
+                env_config=EnvConfig(),
+            )
+
+        assert env_tool_map == {}
+
+    def test_cli_env_name_fallback(self):
+        """CLI --env_name should be included even without dataset env_config."""
+        from open_instruct.grpo_fast import discover_env_tool_definitions
+
+        ds = Dataset.from_dict({
+            "messages": [[{"role": "user", "content": "Hello"}]],
+            "ground_truth": ["hi"],
+            "dataset": ["math"],
+        })
+
+        with patch("open_instruct.grpo_fast.datasets.load_dataset", return_value=ds):
+            env_tool_map = discover_env_tool_definitions(
+                dataset_mixer_list=["fake_dataset", "1.0"],
+                dataset_mixer_list_splits=["train"],
+                env_config=EnvConfig(env_name="counter"),
+            )
+
+        assert "counter" in env_tool_map
+
+
+# ---------------------------------------------------------------------------
+# Per-sample env tool injection in rlvr_tokenize_v3 tests
+# ---------------------------------------------------------------------------
+class TestPerSampleEnvToolInjection:
+    """Test that rlvr_tokenize_v3 injects env-specific tools per sample."""
+
+    def _make_tokenizer(self):
+        """Create a mock tokenizer for testing."""
+        tokenizer = MagicMock()
+        tokenizer.pad_token_id = 0
+        tokenizer.apply_chat_template.return_value = [1, 2, 3, 4, 5]
+        return tokenizer
+
+    def _counter_tool_map(self):
+        return {
+            "counter": [
+                {"type": "function", "function": {"name": "increment", "parameters": {}}},
+                {"type": "function", "function": {"name": "submit", "parameters": {}}},
+            ],
+        }
+
+    def _guess_tool_map(self):
+        return {
+            "guess_number": [
+                {"type": "function", "function": {"name": "guess", "parameters": {}}},
+            ],
+        }
+
+    def test_env_tools_injected_for_matching_sample(self):
+        """Sample with env_config.env_name=counter should get counter tools."""
+        tokenizer = self._make_tokenizer()
+        env_tool_map = self._counter_tool_map()
+
+        row = {
+            "messages": [{"role": "user", "content": "Count to 3"}],
+            "ground_truth": "3",
+            "dataset": "passthrough",
+            "env_config": {"task_id": "3", "env_name": "counter"},
+        }
+
+        rlvr_tokenize_v3(row, tokenizer, env_tool_map=env_tool_map)
+
+        # Check that apply_chat_template was called with counter tools
+        call_kwargs = tokenizer.apply_chat_template.call_args
+        tools_passed = call_kwargs.kwargs.get("tools") or call_kwargs[1].get("tools")
+        assert tools_passed is not None
+        tool_names = {t["function"]["name"] for t in tools_passed}
+        assert "increment" in tool_names
+        assert "submit" in tool_names
+
+    def test_no_env_tools_for_non_env_sample(self):
+        """Sample without env_config should not get env tools."""
+        tokenizer = self._make_tokenizer()
+        env_tool_map = self._counter_tool_map()
+
+        row = {
+            "messages": [{"role": "user", "content": "What is 2+2?"}],
+            "ground_truth": "4",
+            "dataset": "math",
+        }
+
+        rlvr_tokenize_v3(row, tokenizer, env_tool_map=env_tool_map)
+
+        call_kwargs = tokenizer.apply_chat_template.call_args
+        tools_passed = call_kwargs.kwargs.get("tools") or call_kwargs[1].get("tools")
+        assert tools_passed is None
+
+    def test_env_tools_combined_with_regular_tools(self):
+        """Env tools should merge with regular tool_definitions."""
+        tokenizer = self._make_tokenizer()
+        env_tool_map = self._counter_tool_map()
+        regular_tools = [
+            {"type": "function", "function": {"name": "python", "parameters": {}}},
+        ]
+
+        row = {
+            "messages": [{"role": "user", "content": "Count to 3"}],
+            "ground_truth": "3",
+            "dataset": "passthrough",
+            "env_config": {"task_id": "3", "env_name": "counter"},
+        }
+
+        rlvr_tokenize_v3(row, tokenizer, tool_definitions=regular_tools, env_tool_map=env_tool_map)
+
+        call_kwargs = tokenizer.apply_chat_template.call_args
+        tools_passed = call_kwargs.kwargs.get("tools") or call_kwargs[1].get("tools")
+        assert tools_passed is not None
+        tool_names = {t["function"]["name"] for t in tools_passed}
+        # Should have both regular and env tools
+        assert "python" in tool_names
+        assert "increment" in tool_names
+        assert "submit" in tool_names
+
+    def test_different_envs_get_different_tools(self):
+        """Counter and guess_number samples get their respective tools."""
+        tokenizer = self._make_tokenizer()
+        env_tool_map = {**self._counter_tool_map(), **self._guess_tool_map()}
+
+        counter_row = {
+            "messages": [{"role": "user", "content": "Count to 3"}],
+            "ground_truth": "3",
+            "dataset": "passthrough",
+            "env_config": {"task_id": "3", "env_name": "counter"},
+        }
+
+        guess_row = {
+            "messages": [{"role": "user", "content": "Guess 42"}],
+            "ground_truth": "42",
+            "dataset": "passthrough",
+            "env_config": {"task_id": "42", "env_name": "guess_number"},
+        }
+
+        rlvr_tokenize_v3(counter_row, tokenizer, env_tool_map=env_tool_map)
+        counter_call = tokenizer.apply_chat_template.call_args
+        counter_tools = counter_call.kwargs.get("tools") or counter_call[1].get("tools")
+        counter_names = {t["function"]["name"] for t in counter_tools}
+
+        tokenizer.reset_mock()
+        tokenizer.apply_chat_template.return_value = [1, 2, 3, 4, 5]
+
+        rlvr_tokenize_v3(guess_row, tokenizer, env_tool_map=env_tool_map)
+        guess_call = tokenizer.apply_chat_template.call_args
+        guess_tools = guess_call.kwargs.get("tools") or guess_call[1].get("tools")
+        guess_names = {t["function"]["name"] for t in guess_tools}
+
+        assert "increment" in counter_names
+        assert "guess" not in counter_names
+        assert "guess" in guess_names
+        assert "increment" not in guess_names
+
+    def test_no_duplicate_tools_when_env_tool_already_in_definitions(self):
+        """Env tools already present in tool_definitions should not be duplicated."""
+        tokenizer = self._make_tokenizer()
+        env_tool_map = self._counter_tool_map()
+        # Include increment in the regular tool_definitions too
+        regular_tools = [
+            {"type": "function", "function": {"name": "increment", "parameters": {}}},
+        ]
+
+        row = {
+            "messages": [{"role": "user", "content": "Count to 3"}],
+            "ground_truth": "3",
+            "dataset": "passthrough",
+            "env_config": {"task_id": "3", "env_name": "counter"},
+        }
+
+        rlvr_tokenize_v3(row, tokenizer, tool_definitions=regular_tools, env_tool_map=env_tool_map)
+
+        call_kwargs = tokenizer.apply_chat_template.call_args
+        tools_passed = call_kwargs.kwargs.get("tools") or call_kwargs[1].get("tools")
+        assert tools_passed is not None
+        # Count how many times "increment" appears
+        increment_count = sum(1 for t in tools_passed if t["function"]["name"] == "increment")
+        assert increment_count == 1
