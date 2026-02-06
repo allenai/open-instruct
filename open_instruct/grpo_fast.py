@@ -1393,37 +1393,54 @@ def create_generation_configs(
     return {"train": generation_config, "eval": eval_generation_config}
 
 
+class WeightSyncTrigger:
+    """Event-like trigger that also carries the latest target model step."""
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._step: int | None = None
+
+    def notify(self, step: int | None = None) -> None:
+        with self._lock:
+            if step is not None:
+                self._step = step
+        self._event.set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        return self._event.wait(timeout=timeout)
+
+    def clear(self) -> None:
+        self._event.clear()
+
+    def get_step(self) -> int | None:
+        with self._lock:
+            return self._step
+
+
 def weight_sync_thread(
     args: grpo_utils.ExperimentConfig,
     stop_event: threading.Event,
-    weight_sync_trigger_event: threading.Event,
+    weight_sync_trigger: WeightSyncTrigger,
     policy_group: ModelGroup,
     vllm_engines,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
-    weight_sync_steps_Q: Queue,
     resume_training_step: int = 1,
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
-    initial_resume_model_step = resume_training_step - 1 if resume_training_step > 1 else None
     if resume_training_step > 1:
-        weight_sync_trigger_event.set()
+        weight_sync_trigger.notify(step=resume_training_step - 1)
 
     while not stop_event.is_set():
         # Wait for weight sync trigger from main thread
-        if not weight_sync_trigger_event.wait(timeout=1.0):
+        if not weight_sync_trigger.wait(timeout=1.0):
             continue
 
         # Clear the event for next iteration
-        weight_sync_trigger_event.clear()
-        target_model_step = None
-        try:
-            target_model_step = weight_sync_steps_Q.get_nowait()
-        except Empty:
-            if initial_resume_model_step is not None:
-                target_model_step = initial_resume_model_step
-                initial_resume_model_step = None
+        weight_sync_trigger.clear()
+        target_model_step = weight_sync_trigger.get_step()
 
         with Timer("[Weight Sync]") as timer:
             logger.debug("[Weight Sync Thread] Starting weight sync")
@@ -1898,25 +1915,21 @@ def run_training(
         logger.info("Restored dataloader state from checkpoint")
 
     logger.info("======== ✅ weight sync thread starts =========")
-    weight_sync_trigger_event = threading.Event()
-    weight_sync_steps_Q = Queue(maxsize=max(streaming_config.async_steps + 2, 4))
+    weight_sync_trigger = WeightSyncTrigger()
     initial_model_step = resume_training_step - 1
     ray_get_with_progress(
         [engine.set_model_step.remote(initial_model_step) for engine in vllm_engines],
         desc=f"Initializing vLLM model step to {initial_model_step}",
     )
-    if resume_training_step > 1:
-        weight_sync_steps_Q.put_nowait(initial_model_step)
     weight_sync_thread_future = executor.submit(
         weight_sync_thread,
         args,
         stop_event,
-        weight_sync_trigger_event,
+        weight_sync_trigger,
         policy_group,
         vllm_engines,
         actor_manager,
         weight_sync_metrics_Q,
-        weight_sync_steps_Q,
         resume_training_step,
     )
 
@@ -2051,11 +2064,7 @@ def run_training(
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
         logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-        try:
-            weight_sync_steps_Q.put_nowait(training_step)
-        except Full:
-            logger.warning("[Main Thread] Weight sync step queue full; step metadata may lag.")
-        weight_sync_trigger_event.set()
+        weight_sync_trigger.notify(step=training_step)
 
         last_eval_collected = maybe_evaluate(
             args,
