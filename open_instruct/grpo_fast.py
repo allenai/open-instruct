@@ -2192,19 +2192,6 @@ def main(
         if new_names:
             tools_config.tool_call_names = list(tools_config.tool_call_names) + new_names
             logger.info(f"Added environment tool names: {new_names}")
-        # Ensure stop sequences are set for the tool parser so multi-turn tool
-        # use works (model stops at </tool_call> to let the env process it).
-        if tools_config.tool_parser_type and not tool_stop_sequences:
-            parser_type = tools_config.tool_parser_type
-            if "hermes" in parser_type:
-                env_stop = ["</tool_call>"]
-            elif "llama" in parser_type:
-                env_stop = ["<|eom_id|>"]
-            else:
-                env_stop = []
-            if env_stop:
-                streaming_config.stop_strings.extend(env_stop)
-                logger.info(f"Added env tool stop sequences for {parser_type}: {env_stop}")
 
     train_dataset, eval_dataset = setup_datasets(
         args,
