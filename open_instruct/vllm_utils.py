@@ -1003,17 +1003,18 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             state.response_masks.extend([0] * len(obs_tokens))
             state.current_prompt.extend(obs_tokens)
 
-    if env_config is not None and actor.tool_parser is None:
-        raise ValueError(
-            "Environment requires a tool parser. Use a vllm_* parser type "
-            "(e.g., tool_parser_type='vllm_qwen') when configuring environments."
-        )
-
     active_tools = request_metadata.get("active_tools")
     configured_tools = set(actor.tool_actor_map.keys())
     regular_tool_names = configured_tools & set(active_tools) if active_tools is not None else configured_tools
     # Text-based envs: no env_tool_names, so model output is sent as "message"
     is_text_env = env_actor is not None and not env_tool_names
+
+    # Text-based envs don't need a tool parser (they send raw text as "message")
+    if env_config is not None and actor.tool_parser is None and not is_text_env:
+        raise ValueError(
+            "Environment requires a tool parser. Use a vllm_* parser type "
+            "(e.g., tool_parser_type='vllm_qwen') when configuring environments."
+        )
     if is_text_env:
         env_tool_names = {"message"}
     all_allowed_tools = env_tool_names | regular_tool_names
