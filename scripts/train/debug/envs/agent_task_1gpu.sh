@@ -22,7 +22,7 @@ echo "Starting AgentTask environment training (1 GPU)..."
 
 cd "$REPO_ROOT"
 uv run python open_instruct/grpo_fast.py \
-    --dataset_mixer_list data/agent_task_test/dataset.jsonl 1.0 \
+    --dataset_mixer_list hamishivi/agent-task-combined 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 4096 \
