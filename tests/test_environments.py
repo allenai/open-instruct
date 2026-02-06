@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from open_instruct.environments import ENV_REGISTRY, EnvironmentState, StepResult, ToolCall, get_env_class
 from open_instruct.environments.agent_task import AgentTaskEnv
-from open_instruct.environments.backends import ExecutionResult
+from open_instruct.environments.backends import DaytonaBackend, ExecutionResult, create_backend
 from open_instruct.environments.base import RLEnvironment
 from open_instruct.environments.examples import CounterEnv, GuessNumberEnv
 from open_instruct.environments.sandbox_lm import SandboxLMEnv, _truncate_output
@@ -533,3 +533,157 @@ class TestAgentTaskEnv:
             assert any("/workspace" in c and ".sandbox_cwd" in c for c in commands)
 
         run_async(_test())
+
+
+# ---------------------------------------------------------------------------
+# DaytonaBackend tests (mocked SDK)
+# ---------------------------------------------------------------------------
+class TestDaytonaBackend:
+    """Tests for the Daytona sandbox backend with mocked SDK."""
+
+    def test_create_backend_daytona(self):
+        backend = create_backend("daytona", image="python:3.12")
+        assert isinstance(backend, DaytonaBackend)
+        assert backend._image == "python:3.12"
+
+    @patch("open_instruct.environments.backends.HAS_DAYTONA", True)
+    @patch("open_instruct.environments.backends.Daytona")
+    @patch("open_instruct.environments.backends.DaytonaConfig")
+    def test_start(self, mock_config_cls, mock_daytona_cls):
+        mock_client = MagicMock()
+        mock_sandbox = MagicMock()
+        mock_daytona_cls.return_value = mock_client
+        mock_client.create.return_value = mock_sandbox
+
+        backend = DaytonaBackend(image="python:3.12", api_key="test-key")
+        backend.start()
+
+        mock_config_cls.assert_called_once_with(api_key="test-key")
+        mock_daytona_cls.assert_called_once_with(mock_config_cls.return_value)
+        mock_client.create.assert_called_once_with(image="python:3.12")
+        assert backend._sandbox is mock_sandbox
+
+    @patch("open_instruct.environments.backends.HAS_DAYTONA", True)
+    @patch("open_instruct.environments.backends.Daytona")
+    def test_start_no_config(self, mock_daytona_cls):
+        mock_client = MagicMock()
+        mock_daytona_cls.return_value = mock_client
+        mock_client.create.return_value = MagicMock()
+
+        backend = DaytonaBackend()
+        backend.start()
+
+        # No config args → Daytona() called with no arguments
+        mock_daytona_cls.assert_called_once_with()
+
+    def test_start_import_error(self):
+        with patch("open_instruct.environments.backends.HAS_DAYTONA", False):
+            backend = DaytonaBackend()
+            try:
+                backend.start()
+                assert False, "Expected ImportError"
+            except ImportError:
+                pass
+
+    def test_run_command(self):
+        backend = DaytonaBackend()
+        mock_sandbox = MagicMock()
+        mock_response = MagicMock()
+        mock_response.result = "hello world"
+        mock_response.exit_code = 0
+        mock_sandbox.process.exec.return_value = mock_response
+        backend._sandbox = mock_sandbox
+
+        result = backend.run_command("echo hello world")
+        assert isinstance(result, ExecutionResult)
+        assert result.stdout == "hello world"
+        assert result.exit_code == 0
+        mock_sandbox.process.exec.assert_called_once_with(command="echo hello world")
+
+    def test_run_command_not_started(self):
+        backend = DaytonaBackend()
+        try:
+            backend.run_command("echo hi")
+            assert False, "Expected RuntimeError"
+        except RuntimeError:
+            pass
+
+    def test_run_code(self):
+        backend = DaytonaBackend()
+        mock_sandbox = MagicMock()
+        mock_response = MagicMock()
+        mock_response.result = "42"
+        mock_response.exit_code = 0
+        mock_sandbox.process.code_run.return_value = mock_response
+        backend._sandbox = mock_sandbox
+
+        result = backend.run_code("print(42)")
+        assert isinstance(result, ExecutionResult)
+        assert result.stdout == "42"
+        assert result.exit_code == 0
+        mock_sandbox.process.code_run.assert_called_once_with(code="print(42)")
+
+    def test_write_file_str(self):
+        backend = DaytonaBackend()
+        mock_sandbox = MagicMock()
+        backend._sandbox = mock_sandbox
+
+        backend.write_file("/workspace/test.py", "print('hi')")
+        mock_sandbox.fs.create_folder.assert_called_once_with(path="/workspace")
+        mock_sandbox.fs.upload_file.assert_called_once_with(
+            file=b"print('hi')", remote_path="/workspace/test.py"
+        )
+
+    def test_write_file_bytes(self):
+        backend = DaytonaBackend()
+        mock_sandbox = MagicMock()
+        backend._sandbox = mock_sandbox
+
+        content = b"\x89PNG\r\n"
+        backend.write_file("/workspace/image.png", content)
+        mock_sandbox.fs.upload_file.assert_called_once_with(
+            file=content, remote_path="/workspace/image.png"
+        )
+
+    def test_write_file_not_started(self):
+        backend = DaytonaBackend()
+        try:
+            backend.write_file("/test.py", "x")
+            assert False, "Expected RuntimeError"
+        except RuntimeError:
+            pass
+
+    def test_read_file(self):
+        backend = DaytonaBackend()
+        mock_sandbox = MagicMock()
+        mock_sandbox.fs.download_file.return_value = b"file content"
+        backend._sandbox = mock_sandbox
+
+        result = backend.read_file("/workspace/test.py")
+        assert result == "file content"
+        mock_sandbox.fs.download_file.assert_called_once_with(remote_path="/workspace/test.py")
+
+    def test_read_file_str_return(self):
+        backend = DaytonaBackend()
+        mock_sandbox = MagicMock()
+        mock_sandbox.fs.download_file.return_value = "already a string"
+        backend._sandbox = mock_sandbox
+
+        result = backend.read_file("/workspace/test.py")
+        assert result == "already a string"
+
+    def test_close(self):
+        backend = DaytonaBackend()
+        mock_sandbox = MagicMock()
+        backend._sandbox = mock_sandbox
+        backend._daytona = MagicMock()
+
+        backend.close()
+        mock_sandbox.delete.assert_called_once()
+        assert backend._sandbox is None
+        assert backend._daytona is None
+
+    def test_close_not_started(self):
+        backend = DaytonaBackend()
+        # Should not raise
+        backend.close()

@@ -22,6 +22,15 @@ except ImportError:
     DockerRuntime = None
     HAS_LLM_IN_SANDBOX = False
 
+try:
+    from daytona import Daytona, DaytonaConfig
+
+    HAS_DAYTONA = True
+except ImportError:
+    Daytona = None
+    DaytonaConfig = None
+    HAS_DAYTONA = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -261,12 +270,132 @@ class DockerBackend(SandboxBackend):
             self._runtime = None
 
 
+class DaytonaBackend(SandboxBackend):
+    """
+    Daytona cloud sandbox backend.
+
+    Uses the Daytona SDK for code execution in cloud sandboxes.
+    Requires DAYTONA_API_KEY environment variable or explicit api_key.
+
+    Features:
+    - Cloud-based sandbox isolation
+    - Full OS capabilities
+    - File I/O and shell execution
+    """
+
+    def __init__(
+        self,
+        image: str = "ubuntu:24.04",
+        api_key: str | None = None,
+        api_url: str | None = None,
+        target: str | None = None,
+        timeout: int = 300,
+        resources: dict | None = None,
+    ):
+        """
+        Initialize Daytona backend.
+
+        Args:
+            image: Container image to use (default: ubuntu:24.04)
+            api_key: Daytona API key (default: from DAYTONA_API_KEY env var)
+            api_url: Daytona API URL (optional)
+            target: Daytona target (optional)
+            timeout: Sandbox timeout in seconds (default: 300)
+            resources: Resource configuration dict (optional)
+        """
+        self._image = image
+        self._api_key = api_key
+        self._api_url = api_url
+        self._target = target
+        self._timeout = timeout
+        self._resources = resources
+        self._sandbox = None
+        self._daytona = None
+
+    def start(self) -> None:
+        """Initialize the Daytona sandbox."""
+        if not HAS_DAYTONA:
+            raise ImportError("daytona not installed. Run: pip install daytona")
+
+        config_kwargs = {}
+        if self._api_key is not None:
+            config_kwargs["api_key"] = self._api_key
+        if self._api_url is not None:
+            config_kwargs["api_url"] = self._api_url
+        if self._target is not None:
+            config_kwargs["target"] = self._target
+
+        config = DaytonaConfig(**config_kwargs) if config_kwargs else None
+
+        logger.info(f"Starting Daytona sandbox (image={self._image}, timeout={self._timeout})")
+        self._daytona = Daytona(config) if config else Daytona()
+
+        create_kwargs = {"image": self._image}
+        if self._resources is not None:
+            create_kwargs["resources"] = self._resources
+
+        self._sandbox = self._daytona.create(**create_kwargs)
+        logger.info("Daytona sandbox started")
+
+    def run_code(self, code: str, language: str = "python") -> ExecutionResult:
+        """Execute code in the Daytona sandbox."""
+        if self._sandbox is None:
+            raise RuntimeError("Sandbox not started. Call start() first.")
+
+        response = self._sandbox.process.code_run(code=code)
+        return ExecutionResult(
+            stdout=response.result or "", stderr=getattr(response, "stderr", "") or "", exit_code=response.exit_code
+        )
+
+    def run_command(self, command: str) -> ExecutionResult:
+        """Execute a shell command in the Daytona sandbox."""
+        if self._sandbox is None:
+            raise RuntimeError("Sandbox not started. Call start() first.")
+
+        response = self._sandbox.process.exec(command=command)
+        return ExecutionResult(
+            stdout=response.result or "", stderr=getattr(response, "stderr", "") or "", exit_code=response.exit_code
+        )
+
+    def write_file(self, path: str, content: str | bytes) -> None:
+        """Write a file to the Daytona sandbox."""
+        if self._sandbox is None:
+            raise RuntimeError("Sandbox not started. Call start() first.")
+
+        # Create parent directories
+        parent = "/".join(path.split("/")[:-1])
+        if parent:
+            self._sandbox.fs.create_folder(path=parent)
+
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        self._sandbox.fs.upload_file(file=content, remote_path=path)
+
+    def read_file(self, path: str) -> str:
+        """Read a file from the Daytona sandbox."""
+        if self._sandbox is None:
+            raise RuntimeError("Sandbox not started. Call start() first.")
+
+        data = self._sandbox.fs.download_file(remote_path=path)
+        if isinstance(data, bytes):
+            return data.decode("utf-8")
+        return data
+
+    def close(self) -> None:
+        """Delete the Daytona sandbox."""
+        if self._sandbox is not None:
+            logger.info("Closing Daytona sandbox")
+            self._sandbox.delete()
+            self._sandbox = None
+            self._daytona = None
+
+
 def create_backend(backend_type: str, **kwargs) -> SandboxBackend:
     """
     Factory function to create a sandbox backend.
 
     Args:
-        backend_type: "e2b" or "docker"
+        backend_type: "e2b", "docker", or "daytona"
         **kwargs: Backend-specific arguments
 
     Returns:
@@ -276,5 +405,7 @@ def create_backend(backend_type: str, **kwargs) -> SandboxBackend:
         return E2BBackend(**kwargs)
     elif backend_type == "docker":
         return DockerBackend(**kwargs)
+    elif backend_type == "daytona":
+        return DaytonaBackend(**kwargs)
     else:
-        raise ValueError(f"Unknown backend type: {backend_type}. Must be 'e2b' or 'docker'")
+        raise ValueError(f"Unknown backend type: {backend_type}. Must be 'e2b', 'docker', or 'daytona'")
