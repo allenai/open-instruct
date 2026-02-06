@@ -178,31 +178,31 @@ def get_batch_logps(
 ) -> torch.Tensor:
     assert logits.shape[:-1] == labels.shape
 
-    actual_len = cu_seq_lens[-1].item()
-    if logits.shape[1] > actual_len:
-        logits = logits[:, :actual_len, :]
-        labels = labels[:, :actual_len]
-
-    # - we are going to get crossings at labels / logits
-    #   cont batch boundaries, but we assume that the
-    #   loss mask == True at those places
     labels = labels[:, 1:].clone()
     logits = logits[:, :-1, :]
     loss_mask = labels != -100
 
-    # dummy token; we'll ignore the losses on these tokens later
-    labels[labels == -100] = 0
+    labels = labels.masked_fill(~loss_mask, 0)
 
-    # there is a labels, logits shift operation above
     cu_seq_lens = cu_seq_lens.clone() - 1
     cu_seq_lens[0] = 0
 
-    splits = cu_seq_lens.diff().tolist()
     per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
 
-    return torch.concat(
-        [
-            ((ps * mask).sum(-1) / mask.sum(-1) if average_log_prob else (ps * mask).sum(-1))
-            for ps, mask in zip(torch.split(per_token_logps, splits, dim=-1), torch.split(loss_mask, splits, dim=-1))
-        ]
-    )
+    num_seqs = cu_seq_lens.shape[0] - 1
+    seq_len = per_token_logps.shape[1]
+    positions = torch.arange(seq_len, device=cu_seq_lens.device)
+    segment_ids = (positions.unsqueeze(0) >= cu_seq_lens[:-1].unsqueeze(1)).sum(0) - 1
+    segment_ids = segment_ids.clamp(0, num_seqs - 1)
+
+    masked_logps = (per_token_logps * loss_mask.float()).squeeze(0)
+    mask_float = loss_mask.float().squeeze(0)
+
+    segment_sums = torch.zeros(num_seqs, device=masked_logps.device, dtype=masked_logps.dtype)
+    segment_sums.scatter_add_(0, segment_ids, masked_logps)
+
+    if average_log_prob:
+        segment_counts = torch.zeros(num_seqs, device=mask_float.device, dtype=mask_float.dtype)
+        segment_counts.scatter_add_(0, segment_ids, mask_float)
+        return segment_sums / segment_counts
+    return segment_sums
