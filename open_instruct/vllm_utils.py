@@ -568,6 +568,7 @@ class LLMRayActor:
         *args,
         tool_actors: list[ray.actor.ActorHandle] | None = None,
         tool_parser_type: str = "legacy",
+        tool_definitions: list[dict] | None = None,
         max_tool_calls: int = 5,
         mask_tool_use: bool = True,
         over_limit_penalty: float | None = None,
@@ -583,6 +584,7 @@ class LLMRayActor:
         **kwargs,
     ):
         assert_threaded_actor(self)
+        self._tool_definitions = tool_definitions
         self._init_config(
             tool_actors,
             max_tool_calls,
@@ -666,8 +668,9 @@ class LLMRayActor:
         self._process_future = self.executor.submit(self.process_from_queue)
 
     def _init_tool_parser(self, tool_parser_type: str) -> None:
-        # Get tool definitions from tool actors if they exist
-        _tool_definitions = None
+        # Get tool definitions from tool actors, or fall back to globally-provided definitions
+        # (env-only setups have no tool_actors but still need definitions for parsing)
+        _tool_definitions = self._tool_definitions
         if self.tool_actors:
             _tool_definitions = ray.get([actor.get_openai_tool_definitions.remote() for actor in self.tool_actors])
 
@@ -1203,6 +1206,7 @@ def create_vllm_engines(
     pg: PlacementGroup | None = None,
     tool_actors: list[ray.actor.ActorHandle] | None = None,
     tool_parser_type: str = "legacy",
+    tool_definitions: list[dict] | None = None,
     max_tool_calls: int = 5,
     mask_tool_use: bool = True,
     over_limit_penalty: float | None = None,
@@ -1290,6 +1294,7 @@ def create_vllm_engines(
                 actor_manager=actor_manager,
                 tool_actors=tool_actors,
                 tool_parser_type=tool_parser_type,
+                tool_definitions=tool_definitions,
                 max_tool_calls=max_tool_calls,
                 mask_tool_use=mask_tool_use,
                 over_limit_penalty=over_limit_penalty,

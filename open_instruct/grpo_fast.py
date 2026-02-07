@@ -1244,6 +1244,7 @@ def create_model_and_optimizer(
     generation_config,
     data_prep_actor_state: dict | None = None,
     tool_actors: list[ray.actor.ActorHandle] | None = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
     tools_config: ToolsConfig | None = None,
     base_env_config: dict | None = None,
 ) -> tuple[
@@ -1327,6 +1328,7 @@ def create_model_and_optimizer(
         pg=pg if args.single_gpu_mode else None,
         tool_actors=tool_actors,
         tool_parser_type=tools_config.tool_parser_type if tools_config else "legacy",
+        tool_definitions=tool_definitions,
         max_tool_calls=tools_config.max_tool_calls if tools_config else 5,
         mask_tool_use=streaming_config.mask_tool_use,
         over_limit_penalty=env_config.over_limit_penalty if env_config and env_config.enabled else None,
@@ -2275,6 +2277,7 @@ def main(
             generation_configs["train"],
             data_prep_actor_state,
             tool_actors,
+            tool_definitions,
             tools_config,
             base_env_config,
         )
