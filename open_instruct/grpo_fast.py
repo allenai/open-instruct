@@ -1115,6 +1115,7 @@ def setup_datasets(
     transform_fn_args = [
         {
             "system_prompt_override": system_prompt_override,
+            "user_prompt_transform": streaming_config.user_prompt_transform,
             "tool_definitions": tool_definitions,
             "pass_tools_to_chat_template": pass_tools_to_chat_template,
         },
