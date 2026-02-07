@@ -556,13 +556,18 @@ def add_prompt_to_generator(
     index = example["index"]
 
     # Merge base env_config with per-sample env_config.
-    # Only apply base_env_config to samples that have their own env_config,
-    # so non-env samples (env_config=None) don't get routed to environments.
+    # Three cases:
+    # 1. Sample has env_config → merge with base (sample overrides base)
+    # 2. Sample has no env_config but base has env_name → use base as-is
+    #    (non-self-describing datasets like Dolci-RLZero-Math-7B with --env_name)
+    # 3. Sample has no env_config and base has no env_name → None (non-env sample)
     env_config = None
     sample_env_config = example.get(ENV_CONFIG_KEY)
     if sample_env_config is not None:
         env_config = dict(base_env_config) if base_env_config else {}
         env_config.update(sample_env_config)
+    elif base_env_config and base_env_config.get("env_name"):
+        env_config = dict(base_env_config)
 
     param_prompt_Q.put(
         data_types.PromptRequest(
