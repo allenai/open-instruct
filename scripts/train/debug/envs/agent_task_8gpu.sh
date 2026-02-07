@@ -68,7 +68,6 @@ uv run python mason.py \
     --env_max_steps 30 \
     --env_timeout 300 \
     --tool_parser_type vllm_hermes \
-    --no_filter_zero_std_samples \
     --active_sampling \
     --dataset_skip_cache \
     --rollouts_save_path /output/rollouts \

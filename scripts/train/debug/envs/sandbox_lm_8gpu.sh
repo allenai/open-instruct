@@ -71,7 +71,6 @@ uv run python mason.py \
     --env_timeout 120 \
     --tool_parser_type vllm_hermes \
     --system_prompt_override_file scripts/train/debug/envs/sandbox_lm_system_prompt.txt \
-    --no_filter_zero_std_samples \
     --active_sampling \
     --rollouts_save_path /output/rollouts \
     --output_dir /output \
