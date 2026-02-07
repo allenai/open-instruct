@@ -1,6 +1,6 @@
 #!/bin/bash
 
-EXP_NAME="qwen3_4b_it_deepmath"
+EXP_NAME="qwen25_05b_it_gsm8k"
 MODEL_NAME_OR_PATH=" Qwen/Qwen2.5-0.5B-Instruct"
 DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
 
@@ -11,7 +11,7 @@ LOCAL_EVAL_SPLITS="test"
 
 # BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="michaeln/open_instruct"
-cluster=ai2/saturn
+cluster=ai2/triton
 
 # Check if the first argument starts with the value of $BEAKER_NAME
 # if [[ "$1" == "$BEAKER_USER"* ]]; then
@@ -33,7 +33,9 @@ uv run mason.py \
     --gpus 1 \
     --budget ai2/oe-adapt \
     -- source configs/beaker_configs/ray_node_setup.sh \
-\&\& uv run open_instruct/grpo_fast.py \
+\&\& uv run --active open_instruct/grpo_fast.py \
+    --output_dir results \
+    --run_name test \
     --exp_name ${EXP_NAME} \
     --beta 0.0 \
     --async_steps 4 \
@@ -57,28 +59,27 @@ uv run mason.py \
     --user_prompt_transform "{prompt}\n\nPlease reason step by step, and put your final answer within \\boxed{{}}." \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 512000 \
+    --total_episodes 256 \
     --deepspeed_stage 2 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 100 \
+    --local_eval_every 1 \
     --save_freq 200 \
-    --checkpoint_state_freq 200 \
     --gradient_checkpointing \
     --vllm_enable_prefix_caching \
-    --single_gpu_mode \
-    --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.3 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
     --clip_higher 0.28 \
     --mask_truncated_completions False \
     --load_ref_policy False \
     --eval_on_step_0 True \
+    --eval_pass_at_k 4 \
     --with_tracking \
-    --keep_last_n_checkpoints -1 \
     --push_to_hub False $@
+
+    # --checkpoint_state_freq 200 \
+    # --keep_last_n_checkpoints -1 \
 
     # --eval_priority normal \
     # --try_launch_beaker_eval_jobs_on_weka True \

@@ -1112,6 +1112,9 @@ def setup_datasets(
         with open(streaming_config.system_prompt_override_file) as f:
             system_prompt_override = f.read().strip()
         logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
+    elif streaming_config.system_prompt_override is not None:
+        system_prompt_override = streaming_config.system_prompt_override
+        logger.info(f"System prompt overriden to:\n#####\n{system_prompt_override}\n#####\n")
 
     transform_fn_args = [
         {
@@ -1389,7 +1392,7 @@ def create_generation_configs(
         seed=args.seed,
         logprobs=1,
     )
-    eval_generation_config = dataclasses.replace(generation_config, n=1)
+    eval_generation_config = dataclasses.replace(generation_config, n=args.eval_pass_at_k)
     return {"train": generation_config, "eval": eval_generation_config}
 
 
@@ -1993,6 +1996,7 @@ def run_training(
             and eval_data_loader is not None
             and (args.eval_on_step_0 or training_step > 1)
         ):
+            print("EVAL DATALOADING")
             if not last_eval_collected:
                 logger.warning(
                     "[Main Thread] ⚠️ Previous eval round was not fully collected and may be included in future evals. "
