@@ -145,7 +145,13 @@ class TrainingConfig:
     max_train_steps: int | None = None
     """If set, overrides the number of training steps. Otherwise, num_epochs is used."""
     activation_memory_budget: float = 1.0
-    """Memory budget for activation checkpointing (0.0-1.0). 1.0 disables checkpointing (default), values < 1.0 enable budget-mode checkpointing. See: https://pytorch.org/blog/activation-checkpointing-techniques/."""
+    """Memory budget for activation checkpointing (0.0-1.0).
+
+    A practical "just turn it on" default is `0.5` (somewhat arbitrary, but works well in practice):
+    any value < 1.0 enables budget-mode checkpointing. Higher values use more memory and are
+    typically faster; lower values use less memory and are typically slower, so use the highest
+    value your hardware can support. See: https://pytorch.org/blog/activation-checkpointing-techniques/.
+    """
     use_8bit_optimizer: bool = False
     """Use 8bit optimizer from bitsandbytes."""
     dpo_use_paged_optimizer: bool = False
@@ -156,8 +162,6 @@ class TrainingConfig:
     """Tensor parallelism degree. Default 1 (disabled)."""
     context_parallel_degree: int = 1
     """Context parallelism degree. Default 1 (disabled)."""
-    pipeline_parallel_degree: int = 1
-    """Pipeline parallelism degree. Default 1 (disabled)."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
     compile_model: bool = True
@@ -582,6 +586,14 @@ def build_reference_logprobs_cache(
 
     model.train()
     cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
+
+    cache_mem_bytes = sum(t.numel() * t.element_size() for t in cache.tensors.values())
+    cache_mem_gib = cache_mem_bytes / (1024**3)
+    if device.type == "cuda":
+        cache_mem_pct = 100 * cache_mem_bytes / torch.cuda.get_device_properties(device).total_memory
+        logger.info(f"Reference logprobs cached, using {cache_mem_gib:.2f} GiB of GPU RAM ({cache_mem_pct:.1f}%).")
+    else:
+        logger.info(f"Reference logprobs cached, using {cache_mem_gib:.2f} GiB of RAM.")
 
     if is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
