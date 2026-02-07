@@ -319,6 +319,7 @@ class StreamingDataLoaderConfig:
     dataset_mixer_list_splits: list[str] = field(default_factory=lambda: ["train"])
     dataset_mixer_eval_list_splits: list[str] = field(default_factory=lambda: ["test"])
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_max_length_filter_v1"])
+    user_prompt_transform: str | None = None
     dataset_cache_mode: Literal["hf", "local"] = "local"
     dataset_local_cache_dir: str = "local_dataset_cache"
     dataset_config_hash: str | None = None
