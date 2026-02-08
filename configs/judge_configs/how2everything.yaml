@@ -7,22 +7,17 @@ tasks:
       beaker: ai2/pytorch2.0.0-cuda11.8-python3.10
     hostNetworking: true
     command: ["/bin/sh", "-c"]
-    envVars: [
-      { name: "HF_TOKEN", secret: "yapeic_HF_TOKEN" }
-    ]
     arguments:
       [
         "pip install vllm && \
-          VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve yapeichang/distill_judge_qwen3-8b_sft_v6 \
-            --revision distill_judge_qwen3-8b_sft_v6__8__1762751165 \
+          VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve how2everything/how2judge \
             --tensor-parallel-size 1 \
             --max-model-len 32768 \
             --override-generation-config \"{\\\"temperature\\\": 0.0, \\\"max_new_tokens\\\": 4096}\" \
             --trust-remote-code \
-            --port 8006 \
+            --port 8002 \
             --enforce-eager \
-            --hf-token $HF_TOKEN \
-            --chat-template '/weka/oe-adapt-default/hamishi/qwen_no_think_config.jinja'"
+            --chat-template 'qwen3-no-thinking.jinja'"
       ]
     datasets:
       - mountPath: /weka/oe-adapt-default

@@ -1043,57 +1043,6 @@ class CodeVerifier(VerifierFunction):
         return CodeVerifierConfig
 
 
-class ProcedureFormatVerifier(VerifierFunction):
-    """
-    THIS IS FOR JUDGE DISTILLATION (we never actually trained any reasoning judges)
-    Verifier for procedures, check whether the format matches the schema.
-    """
-
-    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
-        super().__init__("procedure_format", verifier_config=verifier_config, weight=1.0)
-
-    class FailureAllNoLabelStep(BaseModel):
-        failure: str
-        L1_steps: list[int]
-        L2_steps: list[int]
-
-    class FailureAllNoLabel(BaseModel):
-        critical_failures: list["ProcedureFormatVerifier.FailureAllNoLabelStep"]
-
-    def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
-    ) -> VerificationResult:
-        answer_string = prediction.split("</think>")[-1].split("<|im_end|>")[0].strip()
-        try:
-            failure_all_no_label = self.FailureAllNoLabel.model_validate_json(answer_string)
-        except Exception as e:
-            return VerificationResult(score=0.0)
-        return VerificationResult(score=1.0)
-
-
-class ProcedureBinaryVerifier(VerifierFunction):
-    """
-    THIS IS FOR JUDGE DISTILLATION (we never actually trained any reasoning judges)
-    Verifier for procedures, check whether the binary fail / no fail judgment matches.
-    """
-    
-    def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
-        super().__init__("procedure_binary", verifier_config=verifier_config, weight=1.0)
-
-    def __call__(
-        self, tokenized_prediction: list[int], prediction: str, label: str, query: str | None = None
-    ) -> VerificationResult:
-        answer_string = prediction.split("</think>")[-1].split("<|im_end|>")[0].strip()
-        try:
-            label_obj = json.loads(label) if isinstance(label, str) else label
-        except Exception:
-            return VerificationResult(score=0.0)
-        try:
-            answer_obj = json.loads(answer_string)
-        except Exception:
-            return VerificationResult(score=0.0)
-
-
 @dataclass
 class ProcedureStepLengthConfig(VerifierConfig):
     """
