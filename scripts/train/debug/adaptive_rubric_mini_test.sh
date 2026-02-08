@@ -1,6 +1,31 @@
 #!/bin/bash
-# Mini test script for adaptive rubrics without search tools
-# Run on H100: ssh h100-xxx "cd /checkpoint/comem/rulin/open-instruct && bash scripts/train/debug/adaptive_rubric_mini_test.sh"
+# ==========================================================================
+# End-to-end test script for adaptive rubrics (single GPU, no search tools)
+#
+# Prerequisites:
+#   - 1x GPU with >=40 GB memory (H100, A100, etc.)
+#   - OPENAI_API_KEY set for rubric scoring (or AZURE_API_KEY)
+#   - Python environment with open-instruct dependencies installed
+#
+# Usage:
+#   # 1. Set your API key:
+#   export OPENAI_API_KEY=your_key
+#
+#   # 2. Run locally on a GPU node:
+#   bash scripts/train/debug/adaptive_rubric_mini_test.sh
+#
+#   # 3. Or run via Beaker:
+#   ./scripts/train/build_image_and_launch.sh scripts/train/debug/adaptive_rubric_mini_test.sh
+#
+# What this tests:
+#   - GRPO training with adaptive rubric rewards enabled
+#   - RubricVerifier scoring via LLM judge (gpt-4.1-mini)
+#   - Rubric buffer initialization and update across steps
+#   - Static rubrics as persistent rubrics
+#   - Single-GPU mode with DeepSpeed stage 3 + vLLM
+#
+# Expected runtime: ~8-10 minutes on a single H100/A100.
+# ==========================================================================
 
 set -e
 
@@ -8,18 +33,23 @@ model_path=Qwen/Qwen3-0.6B
 dataset_list="rl-research/dr-tulu-rl-data 1.0"
 exp_name="adaptive-rubric-mini-test"
 
-# Environment setup
+# ---- Environment setup ----
 export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-export RUBRIC_JUDGE_MODEL=gpt-4.1-mini
-export PYTHONPATH=/checkpoint/comem/rulin/open-instruct:$PYTHONPATH
-# Disable flash attention to avoid incompatibility
 export VLLM_ATTENTION_BACKEND=FLASHINFER
 export VLLM_USE_V1=0
+export VLLM_ALLOW_INSECURE_SERIALIZATION=1
+export RUBRIC_JUDGE_MODEL=gpt-4.1-mini
+
+# Set PYTHONPATH to repo root (auto-detect from script location)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 
 # Check for API key
-if [ -z "$OPENAI_API_KEY" ]; then
-    echo "WARNING: OPENAI_API_KEY not set - rubric scoring will fail"
-    echo "Set it with: export OPENAI_API_KEY=your_key"
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$AZURE_API_KEY" ]; then
+    echo "WARNING: Neither OPENAI_API_KEY nor AZURE_API_KEY is set."
+    echo "Rubric scoring will return 0 for all samples (training still runs)."
+    echo "Set one with: export OPENAI_API_KEY=your_key"
 fi
 
 echo "=============================================="
@@ -28,6 +58,7 @@ echo "=============================================="
 echo "Model: ${model_path}"
 echo "Dataset: ${dataset_list}"
 echo "Exp name: ${exp_name}"
+echo "Repo root: ${REPO_ROOT}"
 echo "=============================================="
 
 python3 open_instruct/grpo_fast.py \
