@@ -4,14 +4,14 @@
 Usage:
     # From the repo root:
     python -m open_instruct.search_rewards.utils.test_all
-    
+
     # Or directly:
     python open_instruct/search_rewards/utils/test_all.py
 """
 
+import os
 import subprocess
 import sys
-import os
 
 # Get the directory containing this script and repo root
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,12 +27,8 @@ def run_test_file(test_file: str) -> bool:
     # Run the test file directly, setting PYTHONPATH to include repo root
     env = os.environ.copy()
     env["PYTHONPATH"] = _REPO_ROOT + ":" + env.get("PYTHONPATH", "")
-    
-    result = subprocess.run(
-        [sys.executable, test_file],
-        env=env,
-        capture_output=False,
-    )
+
+    result = subprocess.run([sys.executable, test_file], env=env, capture_output=False)
     return result.returncode == 0
 
 

@@ -4,23 +4,24 @@
 Usage:
     # From the repo root:
     python -m open_instruct.search_rewards.utils.test_run_utils
-    
+
     # Or directly:
     python open_instruct/search_rewards/utils/test_run_utils.py
 """
 
 import asyncio
-import json
 import os
 import sys
 
 # Ensure the repo root is in the Python path
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+_REPO_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 # Import only the JSON extraction function at module level (doesn't need litellm)
-from open_instruct.search_rewards.utils.run_utils import extract_json_from_response
+from open_instruct.search_rewards.utils.run_utils import extract_json_from_response  # noqa: E402
 
 
 def test_extract_json_from_response():
@@ -72,7 +73,8 @@ def test_extract_json_from_response():
 def _check_litellm_available():
     """Check if litellm is available."""
     try:
-        import litellm  # noqa: F401
+        import litellm  # noqa: F401, PLC0415
+
         return True
     except ImportError:
         return False
@@ -99,16 +101,13 @@ async def test_run_litellm_async():
         return True
 
     # Import here since we've verified litellm is available
-    from open_instruct.search_rewards.utils.run_utils import run_litellm_async
+    from open_instruct.search_rewards.utils.run_utils import run_litellm_async  # noqa: PLC0415
 
     model = os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4.1-mini")
     print(f"  Using model: {model}")
 
     response = await run_litellm_async(
-        model_name=model,
-        user_prompt="What is 2+2? Answer with just the number.",
-        temperature=0,
-        max_tokens=10,
+        model_name=model, user_prompt="What is 2+2? Answer with just the number.", temperature=0, max_tokens=10
     )
     print(f"  Response: {response}")
     assert response.strip() in ["4", "4."], f"Expected '4', got '{response}'"
@@ -135,16 +134,13 @@ def test_run_litellm_sync():
         return True
 
     # Import here since we've verified litellm is available
-    from open_instruct.search_rewards.utils.run_utils import run_litellm
+    from open_instruct.search_rewards.utils.run_utils import run_litellm  # noqa: PLC0415
 
     model = os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4.1-mini")
     print(f"  Using model: {model}")
 
     response = run_litellm(
-        model_name=model,
-        user_prompt="What is 3+3? Answer with just the number.",
-        temperature=0,
-        max_tokens=10,
+        model_name=model, user_prompt="What is 3+3? Answer with just the number.", temperature=0, max_tokens=10
     )
     print(f"  Response: {response}")
     assert response.strip() in ["6", "6."], f"Expected '6', got '{response}'"

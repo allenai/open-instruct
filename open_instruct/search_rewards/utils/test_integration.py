@@ -30,8 +30,8 @@ if __name__ == "__main__":
 
 async def run_integration_test():
     """Run the full integration test."""
-    from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig
-    from open_instruct.search_rewards.utils.rubric_utils import (
+    from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig  # noqa: PLC0415
+    from open_instruct.search_rewards.utils.rubric_utils import (  # noqa: PLC0415
         _generate_instance_wise_adaptive_rubrics,
         initialize_rubric_buffer,
         update_ground_truths_with_adaptive_rubrics,
@@ -98,8 +98,7 @@ async def run_integration_test():
     print("-" * 50)
 
     rubric_buffer = initialize_rubric_buffer(
-        [json.dumps(gt) for gt in base_ground_truths],
-        use_static_rubrics_as_persistent=True,
+        [json.dumps(gt) for gt in base_ground_truths], use_static_rubrics_as_persistent=True
     )
 
     for query, buffer_entry in rubric_buffer.items():
@@ -140,10 +139,7 @@ async def run_integration_test():
                     "positive_rubrics": [{"description": "Clear explanation", "title": "Clarity"}],
                     "negative_rubrics": [],
                 },
-                {
-                    "positive_rubrics": [],
-                    "negative_rubrics": [{"description": "Too vague", "title": "Vagueness"}],
-                },
+                {"positive_rubrics": [], "negative_rubrics": [{"description": "Too vague", "title": "Vagueness"}]},
             ]
     else:
         print("  ⚠️ No API credentials - using mock adaptive rubrics")
@@ -198,9 +194,7 @@ async def run_integration_test():
     print("-" * 50)
 
     if has_api:
-        config = RubricVerifierConfig(
-            rubric_judge_model=os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4.1-mini"),
-        )
+        config = RubricVerifierConfig(rubric_judge_model=os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4.1-mini"))
         verifier = RubricVerifier(config)
 
         print("  Scoring responses against rubrics...")
@@ -208,10 +202,7 @@ async def run_integration_test():
             gt_obj = json.loads(gt[0])
             try:
                 result = await verifier.async_call(
-                    tokenized_prediction=[1, 2, 3],
-                    prediction=response,
-                    label=gt_obj,
-                    query=gt_obj["query"],
+                    tokenized_prediction=[1, 2, 3], prediction=response, label=gt_obj, query=gt_obj["query"]
                 )
                 print(f"  Response {i + 1}: Score = {result.score:.3f}")
                 print(f"    Response: {response[:60]}...")
@@ -232,7 +223,9 @@ async def run_integration_test():
     print(f"  - Processed {len(base_ground_truths)} unique prompts")
     print(f"  - Generated {len(adaptive_rubrics)} sets of adaptive rubrics")
     print(f"  - Updated {len(updated_ground_truths)} ground truths")
-    print(f"  - Rubric buffer now has {sum(len(b['active_rubrics']) for b in updated_buffer.values())} total active rubrics")
+    print(
+        f"  - Rubric buffer now has {sum(len(b['active_rubrics']) for b in updated_buffer.values())} total active rubrics"
+    )
 
     if has_api:
         print("\n✅ Full integration test completed with live API calls")
@@ -250,11 +243,11 @@ def main():
         return 0 if result else 1
     except Exception as e:
         print(f"\n❌ Integration test failed with error: {e}")
-        import traceback
+        import traceback  # noqa: PLC0415
+
         traceback.print_exc()
         return 1
 
 
 if __name__ == "__main__":
     exit(main())
-

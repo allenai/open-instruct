@@ -13,7 +13,9 @@ import os
 import sys
 
 # Ensure the repo root is in the Python path
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+_REPO_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
@@ -21,7 +23,8 @@ if _REPO_ROOT not in sys.path:
 def _check_numpy_available():
     """Check if numpy is available."""
     try:
-        import numpy  # noqa: F401
+        import numpy  # noqa: F401, PLC0415
+
         return True
     except ImportError:
         return False
@@ -30,7 +33,8 @@ def _check_numpy_available():
 def _check_litellm_available():
     """Check if litellm is available."""
     try:
-        import litellm  # noqa: F401
+        import litellm  # noqa: F401, PLC0415
+
         return True
     except ImportError:
         return False
@@ -47,7 +51,7 @@ def test_rubric_verifier_config():
         print("   Install with: pip install numpy")
         return True
 
-    from open_instruct.ground_truth_utils import RubricVerifierConfig
+    from open_instruct.ground_truth_utils import RubricVerifierConfig  # noqa: PLC0415
 
     # Test default config
     config = RubricVerifierConfig()
@@ -58,9 +62,7 @@ def test_rubric_verifier_config():
 
     # Test custom config
     config2 = RubricVerifierConfig(
-        rubric_judge_model="gpt-4.1-mini",
-        rubric_judge_max_tokens=1024,
-        rubric_judge_temperature=0.5,
+        rubric_judge_model="gpt-4.1-mini", rubric_judge_max_tokens=1024, rubric_judge_temperature=0.5
     )
     assert config2.rubric_judge_model == "gpt-4.1-mini"
     assert config2.rubric_judge_max_tokens == 1024
@@ -80,7 +82,7 @@ def test_rubric_verifier_creation():
         print("⚠️  Skipping - numpy is not installed")
         return True
 
-    from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig
+    from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig  # noqa: PLC0415
 
     config = RubricVerifierConfig()
     verifier = RubricVerifier(config)
@@ -122,27 +124,22 @@ async def test_rubric_verifier_scoring():
         print("   Set OPENAI_API_KEY or AZURE_API_KEY to run this test")
         return True
 
-    from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig
+    from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig  # noqa: PLC0415
 
-    config = RubricVerifierConfig(
-        rubric_judge_model=os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4.1-mini"),
-    )
+    config = RubricVerifierConfig(rubric_judge_model=os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4.1-mini"))
     verifier = RubricVerifier(config)
 
     # Test case 1: Good response
     prediction_good = "The capital of France is Paris. Paris is a major European city."
-    label_good = json.dumps({
-        "query": "What is the capital of France?",
-        "rubrics": [
-            {"description": "Correctly identifies Paris as the capital of France", "weight": 1.0},
-        ]
-    })
+    label_good = json.dumps(
+        {
+            "query": "What is the capital of France?",
+            "rubrics": [{"description": "Correctly identifies Paris as the capital of France", "weight": 1.0}],
+        }
+    )
 
     result_good = await verifier.async_call(
-        tokenized_prediction=[],
-        prediction=prediction_good,
-        label=label_good,
-        query="What is the capital of France?",
+        tokenized_prediction=[], prediction=prediction_good, label=label_good, query="What is the capital of France?"
     )
 
     print(f"  Good response score: {result_good.score}")
@@ -152,10 +149,7 @@ async def test_rubric_verifier_scoring():
     # Test case 2: Bad response
     prediction_bad = "The capital of France is London."
     result_bad = await verifier.async_call(
-        tokenized_prediction=[],
-        prediction=prediction_bad,
-        label=label_good,
-        query="What is the capital of France?",
+        tokenized_prediction=[], prediction=prediction_bad, label=label_good, query="What is the capital of France?"
     )
 
     print(f"  Bad response score: {result_bad.score}")
@@ -163,14 +157,16 @@ async def test_rubric_verifier_scoring():
     print("  ✅ Test 2: Bad response scores low")
 
     # Test case 3: Multiple rubrics with weights
-    label_multi = json.dumps({
-        "query": "Explain photosynthesis briefly.",
-        "rubrics": [
-            {"description": "Mentions that plants use sunlight", "weight": 1.0},
-            {"description": "Mentions carbon dioxide", "weight": 0.5},
-            {"description": "Mentions oxygen production", "weight": 0.5},
-        ]
-    })
+    label_multi = json.dumps(
+        {
+            "query": "Explain photosynthesis briefly.",
+            "rubrics": [
+                {"description": "Mentions that plants use sunlight", "weight": 1.0},
+                {"description": "Mentions carbon dioxide", "weight": 0.5},
+                {"description": "Mentions oxygen production", "weight": 0.5},
+            ],
+        }
+    )
     prediction_multi = "Photosynthesis is the process by which plants use sunlight to convert carbon dioxide and water into glucose and oxygen."
 
     result_multi = await verifier.async_call(
@@ -198,31 +194,22 @@ async def test_rubric_verifier_edge_cases():
         print("⚠️  Skipping - numpy is not installed")
         return True
 
-    from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig
+    from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig  # noqa: PLC0415
 
     config = RubricVerifierConfig()
     verifier = RubricVerifier(config)
 
     # Test case 1: Empty rubrics
-    label_empty = json.dumps({
-        "query": "Test question",
-        "rubrics": []
-    })
+    label_empty = json.dumps({"query": "Test question", "rubrics": []})
     result_empty = await verifier.async_call(
-        tokenized_prediction=[],
-        prediction="Some response",
-        label=label_empty,
-        query="Test question",
+        tokenized_prediction=[], prediction="Some response", label=label_empty, query="Test question"
     )
     assert result_empty.score == 0.0, "Empty rubrics should return 0"
     print("  ✅ Test 1: Empty rubrics handled correctly")
 
     # Test case 2: Invalid JSON label
     result_invalid = await verifier.async_call(
-        tokenized_prediction=[],
-        prediction="Some response",
-        label="not valid json",
-        query="Test question",
+        tokenized_prediction=[], prediction="Some response", label="not valid json", query="Test question"
     )
     assert result_invalid.score == 0.0, "Invalid JSON should return 0"
     print("  ✅ Test 2: Invalid JSON handled correctly")

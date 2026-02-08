@@ -21,7 +21,7 @@ def _get_litellm():
     """Lazily import and configure litellm."""
     global _litellm
     if _litellm is None:
-        import litellm
+        import litellm  # noqa: PLC0415
 
         # Configure LiteLLM to drop unsupported parameters instead of raising errors
         litellm.drop_params = True
@@ -76,12 +76,7 @@ def extract_json_from_response(response: str) -> dict[str, Any] | None:
     return None
 
 
-def run_litellm(
-    model_name: str,
-    user_prompt: str,
-    system_prompt: str | None = None,
-    **chat_kwargs,
-) -> str:
+def run_litellm(model_name: str, user_prompt: str, system_prompt: str | None = None, **chat_kwargs) -> str:
     """
     Run litellm for the given model.
     We assume that the right env vars are set for the model.
@@ -110,21 +105,14 @@ def run_litellm(
 
     # Prepare messages
     msgs = (
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
+        [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
         if system_prompt is not None
         else [{"role": "user", "content": user_prompt}]
     )
 
     # Create chat completion
     try:
-        response = litellm.completion(
-            messages=msgs,
-            model=model_name,
-            **chat_kwargs,
-        )
+        response = litellm.completion(messages=msgs, model=model_name, **chat_kwargs)
     except Exception:
         # if we get an error, return an empty string
         return ""
@@ -169,10 +157,7 @@ async def run_litellm_async(
         msgs = messages
     else:
         msgs = (
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ]
+            [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
             if system_prompt is not None
             else [{"role": "user", "content": user_prompt}]
         )
@@ -185,11 +170,7 @@ async def run_litellm_async(
         semaphore = _get_litellm_semaphore()
         async with semaphore:
             # Create chat completion
-            response = await litellm.acompletion(
-                messages=msgs,
-                model=model_name,
-                **chat_kwargs,
-            )
+            response = await litellm.acompletion(messages=msgs, model=model_name, **chat_kwargs)
     except Exception as e:
         # if we get an error, return an empty string
         logger.warning(f"Error in run_litellm_async: {e}")

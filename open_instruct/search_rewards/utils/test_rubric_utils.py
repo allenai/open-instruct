@@ -4,7 +4,7 @@
 Usage:
     # From the repo root:
     python -m open_instruct.search_rewards.utils.test_rubric_utils
-    
+
     # Or directly:
     python open_instruct/search_rewards/utils/test_rubric_utils.py
 """
@@ -17,11 +17,13 @@ import sys
 import tempfile
 
 # Ensure the repo root is in the Python path
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+_REPO_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from open_instruct.search_rewards.utils.rubric_utils import (
+from open_instruct.search_rewards.utils.rubric_utils import (  # noqa: E402
     initialize_rubric_buffer,
     save_adaptive_rubric_cache_safe,
     update_ground_truths_with_adaptive_rubrics,
@@ -31,7 +33,8 @@ from open_instruct.search_rewards.utils.rubric_utils import (
 def _check_litellm_available():
     """Check if litellm is available."""
     try:
-        import litellm  # noqa: F401
+        import litellm  # noqa: F401, PLC0415
+
         return True
     except ImportError:
         return False
@@ -45,20 +48,24 @@ def test_initialize_rubric_buffer():
 
     # Create mock ground truths list (the function takes ground_truths directly)
     ground_truths = [
-        json.dumps({
-            "query": "What is the capital of France?",
-            "rubrics": [
-                {"description": "Correctly identifies Paris", "weight": 1.0},
-                {"description": "Provides context about France", "weight": 0.5},
-            ]
-        }),
-        json.dumps({
-            "query": "Explain photosynthesis.",
-            "rubrics": [
-                {"description": "Mentions chlorophyll", "weight": 1.0},
-                {"description": "Explains light absorption", "weight": 1.0},
-            ]
-        }),
+        json.dumps(
+            {
+                "query": "What is the capital of France?",
+                "rubrics": [
+                    {"description": "Correctly identifies Paris", "weight": 1.0},
+                    {"description": "Provides context about France", "weight": 0.5},
+                ],
+            }
+        ),
+        json.dumps(
+            {
+                "query": "Explain photosynthesis.",
+                "rubrics": [
+                    {"description": "Mentions chlorophyll", "weight": 1.0},
+                    {"description": "Explains light absorption", "weight": 1.0},
+                ],
+            }
+        ),
     ]
 
     # Test with static rubrics as persistent
@@ -114,21 +121,14 @@ def test_update_ground_truths_with_adaptive_rubrics():
             "positive_rubrics": [{"description": "Positive1", "title": "P1"}],
             "negative_rubrics": [{"description": "Negative1", "title": "N1"}],
         },
-        {
-            "question": "Q2",
-            "positive_rubrics": [{"description": "Positive2", "title": "P2"}],
-            "negative_rubrics": [],
-        },
+        {"question": "Q2", "positive_rubrics": [{"description": "Positive2", "title": "P2"}], "negative_rubrics": []},
     ]
 
     num_samples_per_prompt_rollout = 2
 
     # Test without rubric buffer
     updated_gts, rate, avg_gt, avg_ar, avg_active_buf, buffer, skipped = update_ground_truths_with_adaptive_rubrics(
-        ground_truths.copy(),
-        all_adaptive_rubrics,
-        num_samples_per_prompt_rollout,
-        rubric_buffer=None,
+        ground_truths.copy(), all_adaptive_rubrics, num_samples_per_prompt_rollout, rubric_buffer=None
     )
 
     # Verify results
@@ -154,10 +154,7 @@ def test_update_ground_truths_with_adaptive_rubrics():
     # Test with None (skipped) adaptive rubrics
     adaptive_with_none = [None, all_adaptive_rubrics[1]]
     updated_gts2, rate2, _, _, _, _, skipped2 = update_ground_truths_with_adaptive_rubrics(
-        ground_truths.copy(),
-        adaptive_with_none,
-        num_samples_per_prompt_rollout,
-        rubric_buffer=None,
+        ground_truths.copy(), adaptive_with_none, num_samples_per_prompt_rollout, rubric_buffer=None
     )
 
     assert skipped2 == 2, f"Expected 2 skipped, got {skipped2}"  # None affects 2 samples
@@ -178,10 +175,7 @@ def test_save_adaptive_rubric_cache_safe():
 
     test_data = {
         "decoded_responses": ["Response 1", "Response 2"],
-        "ground_truths": [
-            json.dumps({"query": "Q1", "rubrics": []}),
-            json.dumps({"query": "Q2", "rubrics": []}),
-        ],
+        "ground_truths": [json.dumps({"query": "Q1", "rubrics": []}), json.dumps({"query": "Q2", "rubrics": []})],
         "all_adaptive_rubrics": [
             {"positive_rubrics": [], "negative_rubrics": []},
             {"positive_rubrics": [], "negative_rubrics": []},
@@ -193,18 +187,14 @@ def test_save_adaptive_rubric_cache_safe():
     }
 
     # Save cache
-    cache_path = save_adaptive_rubric_cache_safe(
-        cache_dir=cache_dir,
-        training_step=1,
-        **test_data,
-    )
+    cache_path = save_adaptive_rubric_cache_safe(cache_dir=cache_dir, training_step=1, **test_data)
 
     # Verify file was created
     assert os.path.exists(cache_path), f"Cache file not created: {cache_path}"
     print(f"  ✅ Test 1: Cache file created at {cache_path}")
 
     # Verify file contents
-    with open(cache_path, "r") as f:
+    with open(cache_path) as f:
         loaded_data = json.load(f)
 
     assert loaded_data["training_step"] == 1
@@ -213,11 +203,7 @@ def test_save_adaptive_rubric_cache_safe():
     print("  ✅ Test 2: Cache contents are correct")
 
     # Test multiple saves don't conflict
-    cache_path2 = save_adaptive_rubric_cache_safe(
-        cache_dir=cache_dir,
-        training_step=2,
-        **test_data,
-    )
+    cache_path2 = save_adaptive_rubric_cache_safe(cache_dir=cache_dir, training_step=2, **test_data)
     assert os.path.exists(cache_path2)
     assert cache_path != cache_path2
     print("  ✅ Test 3: Multiple saves create unique files")
@@ -249,7 +235,9 @@ async def test_generate_instance_wise_adaptive_rubrics():
         return True
 
     # Import here since we've verified litellm is available
-    from open_instruct.search_rewards.utils.rubric_utils import generate_instance_wise_adaptive_rubrics
+    from open_instruct.search_rewards.utils.rubric_utils import (  # noqa: PLC0415
+        generate_instance_wise_adaptive_rubrics,
+    )
 
     # Test data
     question = "What is the capital of France?"
@@ -258,19 +246,14 @@ async def test_generate_instance_wise_adaptive_rubrics():
         "Paris is the capital.",
         "France's capital city is Paris, which has been the capital since the 10th century.",
     ]
-    existing_rubrics = json.dumps([
-        {"description": "Correctly identifies Paris as the capital", "weight": 1.0}
-    ])
+    existing_rubrics = json.dumps([{"description": "Correctly identifies Paris as the capital", "weight": 1.0}])
 
     model = os.environ.get("RUBRIC_GENERATION_MODEL", "gpt-4.1-mini")
     print(f"  Using model: {model}")
 
     # Call the function
     result = await generate_instance_wise_adaptive_rubrics(
-        question=question,
-        response_list=response_list,
-        existing_rubrics=existing_rubrics,
-        model_name=model,
+        question=question, response_list=response_list, existing_rubrics=existing_rubrics, model_name=model
     )
 
     print(f"  Result: {json.dumps(result, indent=2)}")
@@ -297,7 +280,9 @@ def main():
     results.append(("save_adaptive_rubric_cache_safe", test_save_adaptive_rubric_cache_safe()))
 
     # Tests that require litellm + API
-    results.append(("generate_instance_wise_adaptive_rubrics", asyncio.run(test_generate_instance_wise_adaptive_rubrics())))
+    results.append(
+        ("generate_instance_wise_adaptive_rubrics", asyncio.run(test_generate_instance_wise_adaptive_rubrics()))
+    )
 
     # Summary
     print("\n" + "=" * 60)

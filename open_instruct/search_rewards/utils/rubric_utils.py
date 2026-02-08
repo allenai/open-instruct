@@ -1,6 +1,7 @@
 """Utility functions for adaptive rubric generation and management."""
 
 import asyncio
+import contextlib
 import fcntl
 import json
 import os
@@ -113,10 +114,7 @@ Generate only the most impactful, non-redundant rubrics revealing meaningful qua
 
 
 async def generate_instance_wise_adaptive_rubrics(
-    question: str,
-    response_list: list[str],
-    existing_rubrics: str | None = None,
-    model_name: str | None = None,
+    question: str, response_list: list[str], existing_rubrics: str | None = None, model_name: str | None = None
 ) -> dict[str, Any] | None:
     """Generate adaptive rubrics for a single question based on multiple responses.
 
@@ -142,10 +140,7 @@ async def generate_instance_wise_adaptive_rubrics(
     prompt = INSTANCE_WISE_RUBRIC_GENERATION_PROMPT + prompt_suffix
 
     try:
-        resp = await run_litellm_async(
-            model_name=model_name,
-            user_prompt=prompt,
-        )
+        resp = await run_litellm_async(model_name=model_name, user_prompt=prompt)
 
         obj = extract_json_from_response(resp)
         logger.debug(f"Generated instance-wise adaptive rubrics: {obj}")
@@ -290,10 +285,7 @@ def update_ground_truths_with_adaptive_rubrics(
 
         # Handle the case where ground_truth is wrapped in a list
         is_wrapped_in_list = isinstance(ground_truth, list)
-        if is_wrapped_in_list:
-            ground_truth_str = ground_truth[0]
-        else:
-            ground_truth_str = ground_truth
+        ground_truth_str = ground_truth[0] if is_wrapped_in_list else ground_truth
 
         ground_truth_obj = json.loads(ground_truth_str)
         query = ground_truth_obj["query"]
@@ -333,9 +325,9 @@ def update_ground_truths_with_adaptive_rubrics(
             ground_truth_obj["rubrics"] = (
                 rubric_buffer[query]["persistent_rubrics"] + rubric_buffer[query]["active_rubrics"]
             )
-            ground_truth_obj["rubrics_types"] = ["persistent"] * len(
-                rubric_buffer[query]["persistent_rubrics"]
-            ) + ["adaptive"] * len(rubric_buffer[query]["active_rubrics"])
+            ground_truth_obj["rubrics_types"] = ["persistent"] * len(rubric_buffer[query]["persistent_rubrics"]) + [
+                "adaptive"
+            ] * len(rubric_buffer[query]["active_rubrics"])
         else:
             logger.debug(f"No buffer found for query {query}, using newly generated rubrics")
             # Keep original rubrics and append newly generated adaptive rubrics
@@ -373,7 +365,9 @@ def update_ground_truths_with_adaptive_rubrics(
     # Handle empty lists to avoid division by zero
     valid_adaptive_rubric_rate = valid_adaptive_rubric_rate / len(ground_truths) if len(ground_truths) > 0 else 0.0
     avg_num_ground_truths = sum(num_ground_truths) / len(num_ground_truths) if len(num_ground_truths) > 0 else 0.0
-    avg_num_adaptive_rubrics = sum(num_adaptive_rubrics) / len(num_adaptive_rubrics) if len(num_adaptive_rubrics) > 0 else 0.0
+    avg_num_adaptive_rubrics = (
+        sum(num_adaptive_rubrics) / len(num_adaptive_rubrics) if len(num_adaptive_rubrics) > 0 else 0.0
+    )
     avg_num_active_buffer_rubrics = (
         sum(num_active_buffer_rubrics) / len(num_active_buffer_rubrics) if num_active_buffer_rubrics else 0.0
     )
@@ -475,18 +469,13 @@ def save_adaptive_rubric_cache_safe(
     except Exception as e:
         # Clean up temp file if something went wrong
         if os.path.exists(temp_path):
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(temp_path)
-            except OSError:
-                pass
         logger.error(f"Failed to save adaptive rubric cache: {e}")
         raise
 
 
-def initialize_rubric_buffer(
-    ground_truths: list,
-    use_static_rubrics_as_persistent: bool = True,
-) -> dict[str, Any]:
+def initialize_rubric_buffer(ground_truths: list, use_static_rubrics_as_persistent: bool = True) -> dict[str, Any]:
     """Initialize rubric buffer from ground truths.
 
     Args:
@@ -525,5 +514,3 @@ def initialize_rubric_buffer(
                 }
 
     return rubric_buffer
-
-

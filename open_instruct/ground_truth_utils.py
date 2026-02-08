@@ -955,7 +955,10 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
         self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
     ) -> VerificationResult:
         """Score response against all rubrics in the ground truth."""
-        from open_instruct.search_rewards.utils.run_utils import extract_json_from_response, run_litellm_async
+        from open_instruct.search_rewards.utils.run_utils import (  # noqa: PLC0415
+            extract_json_from_response,
+            run_litellm_async,
+        )
 
         # Parse the ground truth
         if isinstance(label, str):
