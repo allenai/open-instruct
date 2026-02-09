@@ -338,7 +338,18 @@ class DaytonaBackend(SandboxBackend):
         self._daytona = Daytona(config) if config else Daytona()
 
         params = CreateSandboxFromImageParams(image=self._image)
-        self._sandbox = self._daytona.create(params, timeout=self._timeout)
+        for attempt in range(3):
+            try:
+                self._sandbox = self._daytona.create(params, timeout=self._timeout)
+                break
+            except Exception as e:
+                if attempt < 2:
+                    logger.warning(f"Daytona create attempt {attempt + 1} failed: {e}. Retrying...")
+                    import time
+
+                    time.sleep(2**attempt)
+                else:
+                    raise
         logger.info("Daytona sandbox started")
 
     def run_code(self, code: str, language: str = "python") -> ExecutionResult:
