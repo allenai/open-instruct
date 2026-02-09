@@ -26,6 +26,7 @@ from litellm import acompletion
 
 from open_instruct import context_window_checker, logger_utils
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
+from open_instruct.rubrics import RUBRIC_SCORING_PROMPT
 from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async
 from open_instruct.IFEvalG import instructions_registry
 from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
@@ -943,10 +944,12 @@ class RubricVerifier(VerifierFunction):
     - "rubrics": List of rubric dicts with "description" and "weight" keys
 
     Returns weighted average of rubric scores.
+
+    Environment Variables:
+        RUBRIC_JUDGE_MODEL: Override the LLM model used for rubric scoring.
+            Defaults to RubricVerifierConfig.rubric_judge_model ("gpt-4.1").
     """
 
-    RUBRIC_SCORING_PROMPT = """You will be given a question someone asked (in <question></question> tags) and the corresponding response (in <response></response> tags) given to them by an assistant. You will then be given a specific criterion of the response to evaluate (in <criterion></criterion> tags).
-Return a score on a scale of 0 to 2 indicating how appropriate the response is based on the given criterion. Judge only the specified aspect(s), not any other qualities of the answer. Output JSON in the format: {{"score": x}}."""
 
     def __init__(self, verifier_config: RubricVerifierConfig) -> None:
         super().__init__("rubric", verifier_config=verifier_config, weight=1.0)
@@ -985,7 +988,7 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
                 model_name = os.environ.get("RUBRIC_JUDGE_MODEL", self.config.rubric_judge_model)
                 resp = await run_litellm_async(
                     model_name=model_name,
-                    system_prompt=self.RUBRIC_SCORING_PROMPT,
+                    system_prompt=RUBRIC_SCORING_PROMPT,
                     user_prompt=user_prompt,
                     temperature=self.config.rubric_judge_temperature,
                     max_tokens=self.config.rubric_judge_max_tokens,
