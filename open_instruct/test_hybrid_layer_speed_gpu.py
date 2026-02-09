@@ -14,7 +14,8 @@ import time
 import unittest
 
 import torch
-from transformers import AutoConfig, AutoModelForCausalLM
+from transformers import AutoModelForCausalLM
+from transformers.models.olmo3.configuration_olmo3 import Olmo3Config
 from transformers.models.olmo3_5_hybrid import modeling_olmo3_5_hybrid
 from transformers.models.olmo3_5_hybrid.configuration_olmo3_5_hybrid import Olmo3_5HybridConfig
 
@@ -41,9 +42,27 @@ HYBRID_CONFIG_KWARGS = {
     "linear_allow_neg_eigval": True,
 }
 
+OLMO3_CONFIG_KWARGS = {
+    "vocab_size": 100278,
+    "hidden_size": 4096,
+    "intermediate_size": 11008,
+    "num_hidden_layers": 32,
+    "num_attention_heads": 32,
+    "num_key_value_heads": 32,
+    "hidden_act": "silu",
+    "max_position_embeddings": 65536,
+    "rms_norm_eps": 1e-06,
+    "tie_word_embeddings": False,
+    "rope_theta": 500000,
+}
+
 
 def _build_hybrid_config():
     return Olmo3_5HybridConfig(**HYBRID_CONFIG_KWARGS)
+
+
+def _build_olmo3_config():
+    return Olmo3Config(**OLMO3_CONFIG_KWARGS)
 
 
 def _time_forward_backward(layer, hidden_states, num_warmup=3, num_iters=10, **kwargs):
@@ -150,7 +169,7 @@ class TestHybridLayerSpeed(unittest.TestCase):
         del hybrid_model
         torch.cuda.empty_cache()
 
-        olmo3_config = AutoConfig.from_pretrained("allenai/OLMo-3-7B-0225")
+        olmo3_config = _build_olmo3_config()
         olmo3_model = AutoModelForCausalLM.from_config(
             olmo3_config, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2"
         ).to(device)
