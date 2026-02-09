@@ -160,10 +160,3 @@ dmypy.json
 cache/
 local_dataset_cache/
 scratch/
-
-open_instruct/rl-rag-eval/
-output_toy_rag_survey_analysis/
-outputs/
-rl-rag-mcp/
-output_analysis/
-local_scripts/
