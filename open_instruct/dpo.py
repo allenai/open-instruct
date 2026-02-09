@@ -274,7 +274,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     dataset.set_format(type="pt")  # Must be after shuffle (shuffle resets format)
 
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
-    dp_world_size = world_size
+    dp_world_size = world_size // args.tensor_parallel_degree
 
     logger_utils.setup_logger(rank=dp_rank)
 
