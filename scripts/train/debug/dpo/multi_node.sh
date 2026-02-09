@@ -2,12 +2,12 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=allenai/OLMo-2-1124-7B
 LR=1e-6
-EXP_NAME=olmo2-7b-DPO-debug-16k-packing-bs4-noshard-budget02-${LR}
+EXP_NAME=olmo2-7b-DPO-debug-16k-packing-bs4-noshard-budget015-${LR}
 
 uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --description "Binary search: bs=4, no shard_degree, activation_memory_budget=0.2" \
+    --description "Binary search: bs=4, no shard_degree, activation_memory_budget=0.15" \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
@@ -43,7 +43,7 @@ uv run python mason.py \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
-    --activation_memory_budget 0.2 \
+    --activation_memory_budget 0.15 \
     --profiling \
     --with_tracking \
     --push_to_hub false \
