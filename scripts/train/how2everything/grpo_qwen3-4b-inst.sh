@@ -21,9 +21,9 @@ python open_instruct/grpo_fast.py \
     --num_samples_per_prompt_rollout 8 \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list how2everything/how2train_rl_100k 1.0 \
+    --dataset_mixer_list how2everything/how2train 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list how2everything/how2train_rl_100k 16 \
+    --dataset_mixer_eval_list how2everything/how2train 16 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 1024 \
     --response_length 2048 \

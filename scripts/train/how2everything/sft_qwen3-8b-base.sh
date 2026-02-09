@@ -20,7 +20,7 @@ accelerate launch \
     --tokenizer_revision main \
     --use_slow_tokenizer False \
     --dataset_transform_fn sft_qwen3_tokenize_and_truncate_no_thinking_v1 sft_tulu_filter_v1 \
-    --dataset_mixer_list how2everything/how2train_sft_100k 1.0 \
+    --dataset_mixer_list how2everything/how2train 1.0 \
     --clean_checkpoints_at_end false \
     --output_dir output/sft_qwen3-8b-base \
     --max_seq_length 8192 \
