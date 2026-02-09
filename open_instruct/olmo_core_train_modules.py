@@ -118,11 +118,7 @@ class DPOTrainModule(TransformerTrainModule):
             assert token_count is not None
             self.record_metric("train/token_count", token_count, reduce_type=None)
 
-            if "_wasted_tokens_from_truncation" in batch:
-                # TODO: switch to wasted_sequences_from_truncation — we care about avg sequences wasted, not tokens
-                self.record_metric(
-                    "train/wasted_tokens_from_truncation", batch["_wasted_tokens_from_truncation"], ReduceType.sum
-                )
+            if "_sequences_dropped" in batch:
                 self.record_metric("train/sequences_dropped", batch["_sequences_dropped"], ReduceType.sum)
                 total_seqs = batch["_sequences_dropped"] + batch["_num_valid_seqs"]
                 if total_seqs > 0:
