@@ -23,12 +23,12 @@ do
             --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
             --num_nodes 4 \
             --budget ai2/oe-adapt \
-            --gpus 8 -- torchrun \
-            --nnodes=4 \
-            --node_rank=\$BEAKER_REPLICA_RANK \
-            --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
-            --master_port=29400 \
-            --nproc_per_node=8 \
+            --gpus 8 -- accelerate launch \
+            --mixed_precision bf16 \
+            --num_processes 8 \
+            --use_deepspeed \
+            --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+            --deepspeed_multinode_launcher standard \
             open_instruct/dpo_tune_cache.py \
             --exp_name "$EXP_NAME" \
             --model_name_or_path "$MODEL_NAME" \
@@ -46,7 +46,6 @@ do
             --max_seq_length 16384 \
             --per_device_train_batch_size 1 \
             --gradient_accumulation_steps 4 \
-            --zero_stage 3 \
             --zero_hpz_partition_size 1 \
             --learning_rate "$LR" \
             --lr_scheduler_type linear \
