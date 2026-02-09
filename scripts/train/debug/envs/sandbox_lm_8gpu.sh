@@ -32,6 +32,7 @@ uv run python mason.py \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
+       --secret DAYTONA_API_KEY=hamishivi_DAYTONA_API_KEY \
        --budget ai2/oe-adapt \
        --gpus 8 \
        --no_auto_dataset_cache \
@@ -65,7 +66,7 @@ uv run python mason.py \
     --save_traces \
     --apply_verifiable_reward true \
     --env_name sandbox_lm \
-    --env_backend docker \
+    --env_backend daytona \
     --env_pool_size 8 \
     --env_max_steps 30 \
     --env_timeout 120 \
