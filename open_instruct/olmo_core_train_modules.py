@@ -66,8 +66,11 @@ class DPOLMHead(LMHead):
 
         per_token_logps = local_logps.view(B, -1)
         if self.tp_enabled:
-            logps_dt = DTensor.from_local(per_token_logps, self._tp_mesh, (Shard(1),))
-            per_token_logps = logps_dt.redistribute(placements=(Replicate(),)).to_local()
+            per_token_logps = (
+                DTensor.from_local(per_token_logps, self._tp_mesh, (Shard(1),))
+                .redistribute(placements=(Replicate(),))
+                .to_local()
+            )
         return LMOutputWithLoss(logits=None, loss=per_token_logps, ce_loss=per_token_logps.detach(), z_loss=None)
 
 

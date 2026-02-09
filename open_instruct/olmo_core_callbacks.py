@@ -219,10 +219,14 @@ class PerfCallback(Callback):
             wall_clock_per_step = self._wall_clock_step_start - self._prev_wall_clock_step_start
             self.trainer.record_metric("perf/wall_clock_per_step", wall_clock_per_step, reduce_type=None)
             if wall_clock_per_step > 0:
-                data_loading_pct = 100 * self._batch_load_time / wall_clock_per_step
-                self.trainer.record_metric("perf/data_loading_pct", data_loading_pct, reduce_type=None)
-                step_overhead_pct = 100 * (wall_clock_per_step - seconds_per_step) / wall_clock_per_step
-                self.trainer.record_metric("perf/step_overhead_pct", step_overhead_pct, reduce_type=None)
+                self.trainer.record_metric(
+                    "perf/data_loading_pct", 100 * self._batch_load_time / wall_clock_per_step, reduce_type=None
+                )
+                self.trainer.record_metric(
+                    "perf/step_overhead_pct",
+                    100 * (wall_clock_per_step - seconds_per_step) / wall_clock_per_step,
+                    reduce_type=None,
+                )
 
         cuda_sync_ms = (interval_end - host_end) * 1000
         host_step_time_ms = (host_end - self._pre_step_time) * 1000

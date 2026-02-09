@@ -947,9 +947,12 @@ def separate_forward(
         ).logits.to(torch.float32)
         chosen_aux_loss = None
 
-    chosen_per_token_logps = calculate_per_token_logps(chosen_logits, chosen_batch["labels"])
-    chosen_logps = _get_batch_logps(chosen_per_token_logps, chosen_batch["labels"], average_log_prob=average_log_prob)
-    del chosen_batch, chosen_logits, chosen_per_token_logps
+    chosen_logps = _get_batch_logps(
+        calculate_per_token_logps(chosen_logits, chosen_batch["labels"]),
+        chosen_batch["labels"],
+        average_log_prob=average_log_prob,
+    )
+    del chosen_batch, chosen_logits
     if output_router_logits:
         del chosen_outputs
     torch.cuda.empty_cache()
@@ -970,11 +973,12 @@ def separate_forward(
         ).logits.to(torch.float32)
         rejected_aux_loss = None
 
-    rejected_per_token_logps = calculate_per_token_logps(rejected_logits, rejected_batch["labels"])
     rejected_logps = _get_batch_logps(
-        rejected_per_token_logps, rejected_batch["labels"], average_log_prob=average_log_prob
+        calculate_per_token_logps(rejected_logits, rejected_batch["labels"]),
+        rejected_batch["labels"],
+        average_log_prob=average_log_prob,
     )
-    del rejected_batch, rejected_logits, rejected_per_token_logps
+    del rejected_batch, rejected_logits
     if output_router_logits:
         del rejected_outputs
     torch.cuda.empty_cache()
