@@ -4,10 +4,6 @@ import torch
 import torch.nn.functional as F
 from transformers import DefaultDataCollator
 
-from open_instruct import logger_utils
-
-logger = logger_utils.setup_logger(__name__)
-
 PAD_VALUES: dict[str, int] = {"labels": -100, "attention_mask": 0, "position_ids": 0, "seq_idx": -1}
 
 
@@ -116,11 +112,6 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
                     num_valid_seqs = valid_mask.sum().item() - 1
                     sequences_dropped = len(features) - num_valid_seqs
                     if sequences_dropped > 0:
-                        logger.warning(
-                            f"Truncation dropped {sequences_dropped} sequences "
-                            f"(packed {len(features)} sequences into {current_len} tokens, "
-                            f"truncated to {self.max_seq_length}, {num_valid_seqs} sequences remain)"
-                        )
                         cu_seq_lens_tensor = cu_seq_lens_tensor[valid_mask]
                     ret["cu_seq_lens_q"] = ret["cu_seq_lens_k"] = cu_seq_lens_tensor
             elif current_len < self.max_seq_length:

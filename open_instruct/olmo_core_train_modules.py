@@ -22,7 +22,7 @@ from olmo_core.train.train_module.transformer import config as transformer_confi
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, dpo_utils, grpo_utils, logger_utils, model_utils, utils
+from open_instruct import data_types, dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator, utils
 from open_instruct.rl_utils import masked_mean
 
 logger = logger_utils.setup_logger(__name__)
@@ -52,19 +52,12 @@ class DPOLMHead(LMHead):
         if labels is None:
             return super().forward(x, labels=labels)
 
-        B = x.shape[0]
         h = self.norm(x) if self.norm is not None else x
         logits = self.w_out(h)
 
-        local_logits = dist_utils.get_local_tensor(logits).to(torch.float32)
+        local_logits = dist_utils.get_local_tensor(logits)
         local_labels = dist_utils.get_local_tensor(labels)
-        shifted_labels = torch.full_like(local_labels, ignore_index)
-        shifted_labels[:, :-1] = local_labels[:, 1:]
-        safe = shifted_labels.clamp(min=0)
-        mask = (shifted_labels != ignore_index).float()
-        local_logps = torch.gather(local_logits.log_softmax(-1), 2, safe.unsqueeze(2)).squeeze(2) * mask
-
-        per_token_logps = local_logps.view(B, -1)
+        per_token_logps = padding_free_collator.calculate_per_token_logps(local_logits, local_labels)
         if self.tp_enabled:
             per_token_logps = (
                 DTensor.from_local(per_token_logps, self._tp_mesh, (Shard(1),))

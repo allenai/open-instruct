@@ -17,6 +17,7 @@ from transformers import (
 
 from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dataset_transformation import sft_tulu_tokenize_and_truncate_v1
+from open_instruct.olmo_core_train_modules import DPOLMHead
 from open_instruct.padding_free_collator import (
     TensorDataCollatorWithFlattening,
     TensorDataCollatorWithFlatteningDPO,
@@ -296,3 +297,39 @@ class TestDPOPackingIndices(unittest.TestCase):
         per_token_logps = calculate_per_token_logps(logits, labels)
         result = get_batch_logps(per_token_logps, labels, cu_seq_lens, average_log_prob=True)
         self.assertFalse(torch.isnan(result).any(), f"NaN found in result: {result}")
+
+
+class TestDPOLMHead(unittest.TestCase):
+    def test_forward_matches_calculate_per_token_logps(self):
+        torch.manual_seed(42)
+        d_model = 16
+        vocab_size = 32
+        seq_len = 10
+        batch_size = 2
+
+        head = DPOLMHead(d_model=d_model, vocab_size=vocab_size, bias=False)
+        x = torch.randn(batch_size, seq_len, d_model)
+        labels = torch.randint(0, vocab_size, (batch_size, seq_len))
+        labels[0, -2:] = -100
+
+        output = head(x, labels=labels)
+
+        with torch.no_grad():
+            h = head.norm(x) if head.norm is not None else x
+            raw_logits = head.w_out(h)
+            expected = calculate_per_token_logps(raw_logits, labels)
+
+        torch.testing.assert_close(output.loss, expected)
+
+    def test_forward_without_labels_returns_logits(self):
+        torch.manual_seed(42)
+        d_model = 16
+        vocab_size = 32
+        seq_len = 10
+
+        head = DPOLMHead(d_model=d_model, vocab_size=vocab_size, bias=False)
+        x = torch.randn(1, seq_len, d_model)
+
+        output = head(x, labels=None)
+        self.assertIsInstance(output, torch.Tensor)
+        self.assertEqual(output.shape, (1, seq_len, vocab_size))
