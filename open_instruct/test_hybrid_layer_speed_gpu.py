@@ -95,22 +95,7 @@ class TestHybridLayerSpeed(unittest.TestCase):
         batch_size = 1
         seq_len = 2048
 
-        hybrid_config = AutoConfig.from_pretrained("allenai/OLMo-3.5-7B-Hybrid-February-2026", trust_remote_code=True)
-        hybrid_model = AutoModelForCausalLM.from_config(
-            hybrid_config, trust_remote_code=True, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2"
-        ).to(device)
-
-        olmo3_config = AutoConfig.from_pretrained("allenai/OLMo-3-7B-0225")
-        olmo3_model = AutoModelForCausalLM.from_config(
-            olmo3_config, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2"
-        ).to(device)
-
-        input_ids = torch.randint(
-            0, min(hybrid_config.vocab_size, olmo3_config.vocab_size), (batch_size, seq_len), device=device
-        )
-        labels = input_ids.clone()
-
-        def time_model(model, num_warmup=2, num_iters=5):
+        def time_model(model, input_ids, labels, num_warmup=2, num_iters=5):
             for _ in range(num_warmup):
                 out = model(input_ids=input_ids, labels=labels)
                 out.loss.backward()
@@ -130,8 +115,24 @@ class TestHybridLayerSpeed(unittest.TestCase):
             times.sort()
             return times[len(times) // 2]
 
-        hybrid_time = time_model(hybrid_model)
-        olmo3_time = time_model(olmo3_model)
+        hybrid_config = AutoConfig.from_pretrained("allenai/OLMo-3.5-7B-Hybrid-February-2026", trust_remote_code=True)
+        hybrid_model = AutoModelForCausalLM.from_config(
+            hybrid_config, trust_remote_code=True, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2"
+        ).to(device)
+        input_ids = torch.randint(0, hybrid_config.vocab_size, (batch_size, seq_len), device=device)
+        hybrid_time = time_model(hybrid_model, input_ids, input_ids.clone())
+        del hybrid_model
+        torch.cuda.empty_cache()
+
+        olmo3_config = AutoConfig.from_pretrained("allenai/OLMo-3-7B-0225")
+        olmo3_model = AutoModelForCausalLM.from_config(
+            olmo3_config, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2"
+        ).to(device)
+        input_ids = torch.randint(0, olmo3_config.vocab_size, (batch_size, seq_len), device=device)
+        olmo3_time = time_model(olmo3_model, input_ids, input_ids.clone())
+        del olmo3_model
+        torch.cuda.empty_cache()
+
         speedup = hybrid_time / olmo3_time
 
         logger.info(
