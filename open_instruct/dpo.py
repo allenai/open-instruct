@@ -27,7 +27,7 @@ from olmo_core.train.train_module.transformer import config as transformer_confi
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2, PerfCallback
-from open_instruct.olmo_core_train_modules import DPOTrainModule
+from open_instruct.olmo_core_train_modules import DPOLMHead, DPOTrainModule
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
@@ -102,6 +102,7 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
         config_name_for_lookup, vocab_size, attn_backend=attn_backend
     )
     model = model_config.build(init_device="cpu")
+    model.lm_head.__class__ = DPOLMHead
 
     return model, model_config
 

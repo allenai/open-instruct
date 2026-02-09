@@ -5,57 +5,88 @@ OLMo-core's native training infrastructure.
 """
 
 import math
+from functools import partial
 from typing import Any
 
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict as dist_cp_sd
+from olmo_core.distributed import utils as dist_utils
+from olmo_core.nn.lm_head import LMHead, LMOutputWithLoss
 from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
 from olmo_core.optim.scheduler import Scheduler
+from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import TransformerTrainModule
 from olmo_core.train.train_module.transformer import config as transformer_config
+from torch.distributed.tensor import DTensor, Replicate, Shard
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator, utils
+from open_instruct import data_types, dpo_utils, grpo_utils, logger_utils, model_utils, utils
 from open_instruct.rl_utils import masked_mean
 
 logger = logger_utils.setup_logger(__name__)
 
 
-def split_batch_dpo(batch: dict[str, Any], num_microbatch_instances: int) -> list[dict[str, Any]]:
-    """Split a DPO batch into micro-batches using chosen_input_ids as the reference."""
-    if num_microbatch_instances <= 0:
-        raise RuntimeError("microbatch size is too small!")
+class DPOLMHead(LMHead):
+    """LM head that returns per-token log-probabilities for DPO training.
 
-    batch_size = batch["chosen_input_ids"].shape[0]
-    if batch_size <= num_microbatch_instances:
-        return [batch]
+    All DTensor handling happens inside this module (which is torch.compiled),
+    avoiding DTensor/compile backward incompatibilities in the DPO loss code.
+    Returns per-token logps with the same semantics as calculate_per_token_logps:
+    output[i] = log p(labels[i+1] | logits[i]), with label shifting done internally.
+    """
 
-    micro_batches = {k: v.split(num_microbatch_instances, dim=0) for k, v in batch.items() if k != "input_ids"}
+    def forward(
+        self,
+        x: torch.Tensor,
+        *,
+        labels: torch.Tensor | None = None,
+        ignore_index: int = -100,
+        loss_reduction: str = "mean",
+        z_loss_multiplier: float | None = None,
+        loss_div_factor: torch.Tensor | float | None = None,
+        return_logits: bool | None = None,
+        logits_to_keep: int | torch.Tensor = 0,
+    ) -> torch.Tensor | LMOutputWithLoss:
+        if labels is None:
+            return super().forward(x, labels=labels)
 
-    return [
-        {key: value[i] for key, value in micro_batches.items()} for i in range(len(micro_batches["chosen_input_ids"]))
-    ]
+        B = x.shape[0]
+        h = self.norm(x) if self.norm is not None else x
+        logits = self.w_out(h)
+
+        local_logits = dist_utils.get_local_tensor(logits).to(torch.float32)
+        local_labels = dist_utils.get_local_tensor(labels)
+        shifted_labels = torch.full_like(local_labels, ignore_index)
+        shifted_labels[:, :-1] = local_labels[:, 1:]
+        safe = shifted_labels.clamp(min=0)
+        mask = (shifted_labels != ignore_index).float()
+        local_logps = torch.gather(local_logits.log_softmax(-1), 2, safe.unsqueeze(2)).squeeze(2) * mask
+
+        per_token_logps = local_logps.view(B, -1)
+        if self.tp_enabled:
+            logps_dt = DTensor.from_local(per_token_logps, self._tp_mesh, (Shard(1),))
+            per_token_logps = logps_dt.redistribute(placements=(Replicate(),)).to_local()
+        return LMOutputWithLoss(logits=None, loss=per_token_logps, ce_loss=per_token_logps.detach(), z_loss=None)
 
 
 class DPOTrainModule(TransformerTrainModule):
     """Training module for DPO with OLMo-core's Trainer.
 
     Subclasses TransformerTrainModule to inherit:
-    - optim_step with proper gradient clipping and scheduler support
+    - optim_step with proper gradient clipping
     - zero_grads
     - eval_batch and eval_batch_spec
     - num_flops_per_token
     - state_dict/load_state_dict via dist_cp_sd
-    - _train_microbatch_context for FSDP/DDP sync control
     """
 
     def __init__(
         self,
         model: Transformer,
         optim: OptimConfig,
-        sample_microbatch_size: int,
+        rank_microbatch_size: int,
         max_sequence_length: int,
         dpo_config: dpo_utils.ExperimentConfig,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
@@ -69,11 +100,10 @@ class DPOTrainModule(TransformerTrainModule):
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
     ) -> None:
-        rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length * 2
         super().__init__(
             model=model,
             optim=optim,
-            rank_microbatch_size=rank_microbatch_size_tokens,
+            rank_microbatch_size=rank_microbatch_size,
             max_sequence_length=max_sequence_length,
             dp_config=dp_config,
             tp_config=tp_config,
@@ -87,98 +117,49 @@ class DPOTrainModule(TransformerTrainModule):
             state_dict_load_opts=state_dict_load_opts,
         )
 
-        self.sample_microbatch_size = sample_microbatch_size
         self.dpo_config = dpo_config
         self.reference_cache: model_utils.TensorCache | None = None
 
-        self._metrics: dict[str, torch.Tensor] = {
-            k: torch.tensor(0.0, device=device)
-            for k in ["loss", "chosen_logps", "rejected_logps", "chosen_rewards", "rejected_rewards", "accuracy"]
-        }
-        if dpo_config.load_balancing_loss:
-            self._metrics["aux_loss"] = torch.tensor(0.0, device=device)
-
-        if dpo_config.concatenated_forward or dpo_config.packing:
+        if dpo_config.packing:
+            self._forward_fn = partial(dpo_utils.concatenated_forward_olmo, packing=True)
+        elif dpo_config.concatenated_forward:
             self._forward_fn = dpo_utils.concatenated_forward_olmo
         else:
             self._forward_fn = dpo_utils.separate_forward_olmo
-        self._forward_kwargs: dict[str, Any] = {}
-        if dpo_config.packing:
-            self._forward_kwargs["packing"] = True
 
     def pre_train(self):
+        # Override to skip batch size validation from TransformerTrainModule.
+        # DPO processes 2x sequences per batch (chosen + rejected), so the parent's
+        # validation (global_batch_size % rank_microbatch_size == 0) would fail.
         pass
 
-    def _compute_microbatch_loss(self, micro_batch: dict[str, Any]) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
+        self.model.train()
+
         policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
             self.model,
-            micro_batch,
+            batch,
             average_log_prob=self.dpo_config.loss_type.is_average_loss,
             output_router_logits=self.dpo_config.load_balancing_loss,
-            **self._forward_kwargs,
         )
 
         losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
             self.dpo_config,
-            micro_batch,
+            batch,
             policy_chosen_logps,
             policy_rejected_logps,
             self.reference_cache if self.dpo_config.loss_type.needs_reference_model else None,
         )
 
         loss = losses.mean()
+
         if self.dpo_config.load_balancing_loss and aux_loss is not None:
             loss = loss + self.dpo_config.load_balancing_weight * aux_loss
 
-        step_metrics: dict[str, torch.Tensor] = {
-            "loss": loss,
-            "chosen_logps": policy_chosen_logps.mean(),
-            "rejected_logps": policy_rejected_logps.mean(),
-            "chosen_rewards": chosen_rewards.mean(),
-            "rejected_rewards": rejected_rewards.mean(),
-            "accuracy": (chosen_rewards > rejected_rewards).float().mean(),
-        }
-        if aux_loss is not None and "aux_loss" in self._metrics:
-            step_metrics["aux_loss"] = aux_loss
-
-        return loss, step_metrics
-
-    def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
-        self.model.train()
-
-        micro_batches = split_batch_dpo(batch, self.sample_microbatch_size)
-        num_micro_batches = len(micro_batches)
-        device = batch["chosen_input_ids"].device
-        total_tokens = padding_free_collator.get_num_tokens(batch)
-
-        for v in self._metrics.values():
-            v.zero_()
-
-        for micro_batch_idx, micro_batch in enumerate(micro_batches):
-            with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
-                loss, step_metrics = self._compute_microbatch_loss(micro_batch)
-                micro_tokens = padding_free_collator.get_num_tokens(micro_batch)
-                weight = micro_tokens / total_tokens
-                for k, v in step_metrics.items():
-                    self._metrics[k] += v.detach() * micro_tokens
-                (loss * weight).backward()
-
-        self.model.post_batch(dry_run=dry_run)
-
         if not dry_run:
-            metric_keys = sorted(self._metrics.keys())
-            local_sums_list = [torch.tensor(total_tokens, dtype=torch.float32, device=device)] + [
-                self._metrics[k] for k in metric_keys
-            ]
-            local_sums = torch.stack(local_sums_list)
-            dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
-
-            global_total_tokens = local_sums[0]
-            global_metrics = {k: local_sums[i + 1] / global_total_tokens for i, k in enumerate(metric_keys)}
-
-            self.record_metric("train/loss", global_metrics["loss"].item(), reduce_type=None)
-            self.record_metric("train/logps_chosen", global_metrics["chosen_logps"].item(), reduce_type=None)
-            self.record_metric("train/logps_rejected", global_metrics["rejected_logps"].item(), reduce_type=None)
+            self.record_metric("train/loss", loss.detach(), ReduceType.mean)
+            self.record_metric("train/logps_chosen", policy_chosen_logps.mean().detach(), ReduceType.mean)
+            self.record_metric("train/logps_rejected", policy_rejected_logps.mean().detach(), ReduceType.mean)
             token_count = self.trainer.data_loader.global_num_tokens_in_batch(batch)
             assert token_count is not None
             self.record_metric("train/token_count", token_count, reduce_type=None)
@@ -191,21 +172,17 @@ class DPOTrainModule(TransformerTrainModule):
                 self.record_metric("train/sequences_dropped_pct", batch["_sequences_dropped_pct"], ReduceType.mean)
 
             if self.dpo_config.loss_type.computes_reward_metrics:
-                margin = global_metrics["chosen_rewards"] - global_metrics["rejected_rewards"]
-                self.record_metric("train/rewards_chosen", global_metrics["chosen_rewards"].item(), reduce_type=None)
-                self.record_metric(
-                    "train/rewards_rejected", global_metrics["rejected_rewards"].item(), reduce_type=None
-                )
-                self.record_metric(
-                    "train/rewards_average",
-                    ((global_metrics["chosen_rewards"] + global_metrics["rejected_rewards"]) / 2).item(),
-                    reduce_type=None,
-                )
-                self.record_metric("train/rewards_accuracy", global_metrics["accuracy"].item(), reduce_type=None)
-                self.record_metric("train/rewards_margin", margin.item(), reduce_type=None)
+                accuracy = (chosen_rewards > rejected_rewards).float().mean()
+                margin = (chosen_rewards - rejected_rewards).mean()
+                self.record_metric("train/rewards_chosen", chosen_rewards.mean().detach(), ReduceType.mean)
+                self.record_metric("train/rewards_rejected", rejected_rewards.mean().detach(), ReduceType.mean)
+                self.record_metric("train/rewards_accuracy", accuracy.detach(), ReduceType.mean)
+                self.record_metric("train/rewards_margin", margin.detach(), ReduceType.mean)
 
-            if "aux_loss" in global_metrics:
-                self.record_metric("train/aux_loss", global_metrics["aux_loss"].item(), reduce_type=None)
+            if self.dpo_config.load_balancing_loss and aux_loss is not None:
+                self.record_metric("train/aux_loss", aux_loss.detach(), ReduceType.mean)
+
+        loss.backward()
 
 
 class GRPOTrainModule(TransformerTrainModule):
