@@ -16,8 +16,34 @@ import unittest
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM
 from transformers.models.olmo3_5_hybrid import modeling_olmo3_5_hybrid
+from transformers.models.olmo3_5_hybrid.configuration_olmo3_5_hybrid import Olmo3_5HybridConfig
 
 logger = logging.getLogger(__name__)
+
+HYBRID_CONFIG_KWARGS = {
+    "vocab_size": 100352,
+    "hidden_size": 3840,
+    "intermediate_size": 11008,
+    "num_hidden_layers": 32,
+    "num_attention_heads": 30,
+    "num_key_value_heads": 30,
+    "hidden_act": "silu",
+    "max_position_embeddings": 32768,
+    "rms_norm_eps": 1e-06,
+    "tie_word_embeddings": False,
+    "layer_types": ["linear_attention", "linear_attention", "linear_attention", "full_attention"] * 8,
+    "linear_num_key_heads": 30,
+    "linear_num_value_heads": 30,
+    "linear_key_head_dim": 96,
+    "linear_value_head_dim": 192,
+    "linear_conv_kernel_dim": 4,
+    "linear_use_gate": True,
+    "linear_allow_neg_eigval": True,
+}
+
+
+def _build_hybrid_config():
+    return Olmo3_5HybridConfig(**HYBRID_CONFIG_KWARGS)
 
 
 def _time_forward_backward(layer, hidden_states, num_warmup=3, num_iters=10, **kwargs):
@@ -49,7 +75,7 @@ def _time_forward_backward(layer, hidden_states, num_warmup=3, num_iters=10, **k
 @unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA GPU")
 class TestHybridLayerSpeed(unittest.TestCase):
     def test_linear_attention_slower_than_full_attention(self):
-        config = AutoConfig.from_pretrained("allenai/OLMo-3.5-7B-Hybrid-February-2026", trust_remote_code=True)
+        config = _build_hybrid_config()
 
         device = torch.device("cuda")
 
@@ -115,7 +141,7 @@ class TestHybridLayerSpeed(unittest.TestCase):
             times.sort()
             return times[len(times) // 2]
 
-        hybrid_config = AutoConfig.from_pretrained("allenai/OLMo-3.5-7B-Hybrid-February-2026", trust_remote_code=True)
+        hybrid_config = _build_hybrid_config()
         hybrid_model = AutoModelForCausalLM.from_config(
             hybrid_config, trust_remote_code=True, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2"
         ).to(device)
