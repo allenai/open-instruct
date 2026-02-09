@@ -275,7 +275,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     tp_degree = args.tensor_parallel_degree
     global_rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
     dp_rank = global_rank // tp_degree
-    is_main_process = dp_rank == 0
+    is_main_process = global_rank == 0
 
     dataset = _load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
     dataset = dataset.shuffle(seed=args.seed)
@@ -284,7 +284,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
     dp_world_size = world_size // args.tensor_parallel_degree
 
-    logger_utils.setup_logger(rank=dp_rank)
+    logger_utils.setup_logger(rank=global_rank)
 
     beaker_config = utils.setup_experiment_paths(args, is_main_process)
 
