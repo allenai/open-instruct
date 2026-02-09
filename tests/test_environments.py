@@ -659,7 +659,7 @@ class TestDaytonaBackend:
         assert isinstance(result, ExecutionResult)
         assert result.stdout == "hello world"
         assert result.exit_code == 0
-        mock_sandbox.process.exec.assert_called_once_with(command="echo hello world")
+        mock_sandbox.process.exec.assert_called_once_with("echo hello world")
 
     def test_run_command_not_started(self):
         backend = DaytonaBackend()
@@ -690,9 +690,8 @@ class TestDaytonaBackend:
         backend._sandbox = mock_sandbox
 
         backend.write_file("/workspace/test.py", "print('hi')")
-        mock_sandbox.fs.create_folder.assert_called_once_with(path="/workspace")
         mock_sandbox.fs.upload_file.assert_called_once_with(
-            file=b"print('hi')", remote_path="/workspace/test.py"
+            b"print('hi')", "/workspace/test.py"
         )
 
     def test_write_file_bytes(self):
@@ -703,7 +702,7 @@ class TestDaytonaBackend:
         content = b"\x89PNG\r\n"
         backend.write_file("/workspace/image.png", content)
         mock_sandbox.fs.upload_file.assert_called_once_with(
-            file=content, remote_path="/workspace/image.png"
+            content, "/workspace/image.png"
         )
 
     def test_write_file_not_started(self):
@@ -722,7 +721,7 @@ class TestDaytonaBackend:
 
         result = backend.read_file("/workspace/test.py")
         assert result == "file content"
-        mock_sandbox.fs.download_file.assert_called_once_with(remote_path="/workspace/test.py")
+        mock_sandbox.fs.download_file.assert_called_once_with("/workspace/test.py")
 
     def test_read_file_str_return(self):
         backend = DaytonaBackend()
@@ -736,11 +735,12 @@ class TestDaytonaBackend:
     def test_close(self):
         backend = DaytonaBackend()
         mock_sandbox = MagicMock()
+        mock_daytona = MagicMock()
         backend._sandbox = mock_sandbox
-        backend._daytona = MagicMock()
+        backend._daytona = mock_daytona
 
         backend.close()
-        mock_sandbox.delete.assert_called_once()
+        mock_daytona.delete.assert_called_once_with(mock_sandbox)
         assert backend._sandbox is None
         assert backend._daytona is None
 

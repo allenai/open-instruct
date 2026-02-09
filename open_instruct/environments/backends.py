@@ -335,11 +335,7 @@ class DaytonaBackend(SandboxBackend):
         logger.info(f"Starting Daytona sandbox (image={self._image}, timeout={self._timeout})")
         self._daytona = Daytona(config) if config else Daytona()
 
-        create_kwargs = {"image": self._image}
-        if self._resources is not None:
-            create_kwargs["resources"] = self._resources
-
-        self._sandbox = self._daytona.create(**create_kwargs)
+        self._sandbox = self._daytona.create(image=self._image)
         logger.info("Daytona sandbox started")
 
     def run_code(self, code: str, language: str = "python") -> ExecutionResult:
@@ -357,7 +353,7 @@ class DaytonaBackend(SandboxBackend):
         if self._sandbox is None:
             raise RuntimeError("Sandbox not started. Call start() first.")
 
-        response = self._sandbox.process.exec(command=command)
+        response = self._sandbox.process.exec(command)
         return ExecutionResult(
             stdout=response.result or "", stderr=getattr(response, "stderr", "") or "", exit_code=response.exit_code
         )
@@ -367,21 +363,16 @@ class DaytonaBackend(SandboxBackend):
         if self._sandbox is None:
             raise RuntimeError("Sandbox not started. Call start() first.")
 
-        # Create parent directories
-        parent = "/".join(path.split("/")[:-1])
-        if parent:
-            self._sandbox.fs.create_folder(path=parent)
-
         if isinstance(content, str):
             content = content.encode("utf-8")
-        self._sandbox.fs.upload_file(file=content, remote_path=path)
+        self._sandbox.fs.upload_file(content, path)
 
     def read_file(self, path: str) -> str:
         """Read a file from the Daytona sandbox."""
         if self._sandbox is None:
             raise RuntimeError("Sandbox not started. Call start() first.")
 
-        data = self._sandbox.fs.download_file(remote_path=path)
+        data = self._sandbox.fs.download_file(path)
         if isinstance(data, bytes):
             return data.decode("utf-8")
         return data
@@ -390,7 +381,7 @@ class DaytonaBackend(SandboxBackend):
         """Delete the Daytona sandbox."""
         if self._sandbox is not None:
             logger.info("Closing Daytona sandbox")
-            self._sandbox.delete()
+            self._daytona.delete(self._sandbox)
             self._sandbox = None
             self._daytona = None
 

@@ -11,7 +11,7 @@ ai2-olmo-core==2.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux
 aiofiles==24.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   crawl4ai
-    #   daytona-sdk
+    #   daytona
 aiohappyeyeballs==2.6.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via aiohttp
 aiohttp==3.13.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -185,16 +185,16 @@ datasets==4.5.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or
     # via
     #   dr-agent
     #   open-instruct
-daytona-api-client==0.139.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via daytona-sdk
-daytona-api-client-async==0.139.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via daytona-sdk
-daytona-sdk==0.139.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+daytona==0.139.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
+daytona-api-client==0.139.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via daytona
+daytona-api-client-async==0.139.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via daytona
 daytona-toolbox-api-client==0.139.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via daytona-sdk
+    # via daytona
 daytona-toolbox-api-client-async==0.139.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via daytona-sdk
+    # via daytona
 debugpy==1.8.19 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
 decorator==5.2.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -204,7 +204,7 @@ decorator==5.2.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
 deepspeed==0.18.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
 deprecated==1.3.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via daytona-sdk
+    # via daytona
 depyf==0.20.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
 dill==0.4.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -253,7 +253,7 @@ email-validator==2.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'lin
     #   fastapi
     #   pydantic
 environs==14.5.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via daytona-sdk
+    # via daytona
 exceptiongroup==1.3.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via fastmcp
 execnet==2.1.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -390,7 +390,7 @@ httpx==0.28.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     #   cohere
     #   crawl4ai
     #   datasets
-    #   daytona-sdk
+    #   daytona
     #   e2b
     #   e2b-code-interpreter
     #   fastapi
@@ -572,7 +572,7 @@ multidict==6.7.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   aiohttp
     #   yarl
 multipart==1.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via daytona-sdk
+    # via daytona
 multiprocess==0.70.17 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   datasets
@@ -716,7 +716,7 @@ nvidia-nvtx-cu12==12.9.79 ; platform_machine == 'x86_64' and sys_platform == 'li
 nvitop==1.6.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
 obstore==0.8.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via daytona-sdk
+    # via daytona
 omegaconf==2.0.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   ai2-olmo-core
@@ -909,9 +909,9 @@ pydantic==2.12.5 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   cohere
     #   compressed-tensors
     #   crawl4ai
+    #   daytona
     #   daytona-api-client
     #   daytona-api-client-async
-    #   daytona-sdk
     #   daytona-toolbox-api-client
     #   daytona-toolbox-api-client-async
     #   deepspeed
@@ -1217,7 +1217,7 @@ tokenizers==0.22.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux')
     #   transformers
     #   vllm
 toml==0.10.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
-    # via daytona-sdk
+    # via daytona
 torch==2.9.1 ; sys_platform == 'darwin'
     # via
     #   accelerate
@@ -1398,7 +1398,7 @@ wcwidth==0.5.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or 
     # via prompt-toolkit
 websockets==15.0.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
-    #   daytona-sdk
+    #   daytona
     #   uvicorn
 werkzeug==3.1.5 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via

@@ -856,6 +856,30 @@ wheels = [
 ]
 
 [[package]]
+name = "daytona"
+version = "0.139.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiofiles", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "daytona-api-client", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "daytona-api-client-async", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "daytona-toolbox-api-client", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "daytona-toolbox-api-client-async", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "deprecated", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "environs", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "httpx", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "multipart", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "obstore", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "pydantic", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "toml", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "websockets", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ad/0c/0af1e99b2c2aa965ba8543d2a83b84499987b0e05552ff74c178de0c11ef/daytona-0.139.0.tar.gz", hash = "sha256:4f12550b47fe876809fffc4737518a8ab505d853e976ee9c2408b58e13e5f38d", size = 116090, upload-time = "2026-02-03T14:40:30.647Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/81/f4/2d0c5637ce9a448b94ce356a76fcd2c9f33d0a5c59d17bfa9b35961bac47/daytona-0.139.0-py3-none-any.whl", hash = "sha256:2f871d9a96e75ed623a6600e9a4da771cf4d93cde7cefe2257491d523a6fe679", size = 144250, upload-time = "2026-02-03T14:40:29.128Z" },
+]
+
+[[package]]
 name = "daytona-api-client"
 version = "0.139.0"
 source = { registry = "https://pypi.org/simple" }
@@ -885,30 +909,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cd/8b/32ea5ecec33c00605784ebcaf25cdd6349eb4b6ddb93e82ca97004a9a12a/daytona_api_client_async-0.139.0.tar.gz", hash = "sha256:2160e306240e4879051becfe963a82f7c64d3d99cc0080a08f89d4f1fba16611", size = 134993, upload-time = "2026-02-03T14:39:50.661Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2f/66/1915b7bdbae6a611c34a4fc38329a306108c8f3f0a714fb4c0835a58d911/daytona_api_client_async-0.139.0-py3-none-any.whl", hash = "sha256:0d12b98c26f27c700f8ba55d3b337fc9da8da0d3fdd46dc189be03d448c1cc7f", size = 378304, upload-time = "2026-02-03T14:39:49.095Z" },
-]
-
-[[package]]
-name = "daytona-sdk"
-version = "0.139.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "aiofiles", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "daytona-api-client", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "daytona-api-client-async", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "daytona-toolbox-api-client", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "daytona-toolbox-api-client-async", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "deprecated", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "environs", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "httpx", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "multipart", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "obstore", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "pydantic", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "toml", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "websockets", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/52/83/0f699bc70460ae0700579f260f3ed2796eaf1673892cf58402971147328e/daytona_sdk-0.139.0.tar.gz", hash = "sha256:be74364f11e1092e11364715a41dad0fa752feff3f8dd95262fff7e429d4f332", size = 116112, upload-time = "2026-02-03T14:40:34.136Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f8/a3/fdeff4d93e7267d5f1b9d63c88eb3d5f9d291513235c819672cae6ae8162/daytona_sdk-0.139.0-py3-none-any.whl", hash = "sha256:c539a54f5b110497e3105ccdf3337cae081868c8cbbfa41b15a3a51afe061e58", size = 144768, upload-time = "2026-02-03T14:40:32.667Z" },
 ]
 
 [[package]]
@@ -2994,7 +2994,7 @@ dependencies = [
     { name = "backoff", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "bitsandbytes", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "datasets", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "daytona-sdk", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "daytona", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "debugpy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "deepspeed", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "docker", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -3061,7 +3061,7 @@ requires-dist = [
     { name = "backoff", specifier = ">=2.2.1" },
     { name = "bitsandbytes", marker = "sys_platform != 'darwin'", specifier = ">=0.44.1" },
     { name = "datasets", specifier = ">=4.0.0" },
-    { name = "daytona-sdk", specifier = ">=0.10.0" },
+    { name = "daytona", specifier = ">=0.10.0" },
     { name = "debugpy", specifier = ">=1.8.13" },
     { name = "deepspeed", specifier = ">=0.18.3" },
     { name = "docker", specifier = ">=7.0.0" },
