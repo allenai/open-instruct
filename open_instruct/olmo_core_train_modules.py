@@ -119,6 +119,7 @@ class DPOTrainModule(TransformerTrainModule):
             self.record_metric("train/token_count", token_count, reduce_type=None)
 
             if "_wasted_tokens_from_truncation" in batch:
+                # TODO: switch to wasted_sequences_from_truncation — we care about avg sequences wasted, not tokens
                 self.record_metric(
                     "train/wasted_tokens_from_truncation", batch["_wasted_tokens_from_truncation"], ReduceType.sum
                 )
