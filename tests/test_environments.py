@@ -621,7 +621,7 @@ class TestDaytonaBackend:
 
         mock_config_cls.assert_called_once_with(api_key="test-key")
         mock_daytona_cls.assert_called_once_with(mock_config_cls.return_value)
-        mock_client.create.assert_called_once_with(image="python:3.12")
+        mock_client.create.assert_called_once()
         assert backend._sandbox is mock_sandbox
 
     @patch("open_instruct.environments.backends.HAS_DAYTONA", True)

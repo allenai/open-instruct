@@ -322,6 +322,8 @@ class DaytonaBackend(SandboxBackend):
         if not HAS_DAYTONA:
             raise ImportError("daytona not installed. Run: pip install daytona")
 
+        from daytona import CreateSandboxFromImageParams
+
         config_kwargs = {}
         if self._api_key is not None:
             config_kwargs["api_key"] = self._api_key
@@ -335,7 +337,8 @@ class DaytonaBackend(SandboxBackend):
         logger.info(f"Starting Daytona sandbox (image={self._image}, timeout={self._timeout})")
         self._daytona = Daytona(config) if config else Daytona()
 
-        self._sandbox = self._daytona.create(image=self._image)
+        params = CreateSandboxFromImageParams(image=self._image)
+        self._sandbox = self._daytona.create(params, timeout=self._timeout)
         logger.info("Daytona sandbox started")
 
     def run_code(self, code: str, language: str = "python") -> ExecutionResult:
