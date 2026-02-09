@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-import torch
 from olmo_core.distributed.utils import get_rank
 from olmo_core.train.callbacks.callback import Callback
 from olmo_core.train.callbacks.comet import CometCallback
@@ -138,9 +137,7 @@ class PerfCallback(Callback):
     _batch_load_time: float = field(default=0.0, repr=False)
     _wall_clock_step_start: float = field(default=0.0, repr=False)
     _prev_wall_clock_step_start: float = field(default=0.0, repr=False)
-    _pre_step_time: float = field(default=0.0, repr=False)
-    _prev_pre_step_time: float = field(default=0.0, repr=False)
-    _prev_post_step_end: float = field(default=0.0, repr=False)
+    _interval_num_sequences: int = field(default=0, repr=False)
 
     def pre_train(self) -> None:
         self._start_time = time.perf_counter()
@@ -148,6 +145,7 @@ class PerfCallback(Callback):
         self._total_tokens_processed = 0
         self._mfu_sum = 0.0
         self._last_step = 0
+        self._interval_num_sequences = 0
 
     def pre_load_batch(self) -> None:
         self._batch_load_start = time.perf_counter()
@@ -155,9 +153,15 @@ class PerfCallback(Callback):
         self._wall_clock_step_start = self._batch_load_start
 
     def pre_step(self, batch: dict[str, Any]) -> None:
-        del batch
         self._batch_load_time = time.perf_counter() - self._batch_load_start
         self._step_start_time = time.perf_counter()
+        if "chosen_cu_seq_lens_k" in batch:
+            num_seqs = (len(batch["chosen_cu_seq_lens_k"]) - 1) + (len(batch["rejected_cu_seq_lens_k"]) - 1)
+        elif "cu_seq_lens_k" in batch:
+            num_seqs = len(batch["cu_seq_lens_k"]) - 1
+        else:
+            num_seqs = self.per_device_train_batch_size * 2
+        self._interval_num_sequences += num_seqs * self.num_training_gpus
 
     def post_step(self) -> None:
         if self.step % self.trainer.metrics_collect_interval != 0:
@@ -170,8 +174,6 @@ class PerfCallback(Callback):
             return
         total_tokens_step = int(token_count_metric.item())
 
-        host_end = time.perf_counter()
-        torch.cuda.synchronize()
         interval_end = time.perf_counter()
         training_time = interval_end - self._interval_start_time
         total_time_elapsed = interval_end - self._start_time
@@ -181,13 +183,7 @@ class PerfCallback(Callback):
         tokens_per_second_avg = self._total_tokens_processed / total_time_elapsed
 
         logging_steps = self.trainer.metrics_collect_interval
-        num_sequences = (
-            self.per_device_train_batch_size
-            * self.num_training_gpus
-            * self.gradient_accumulation_steps
-            * logging_steps
-            * 2  # * 2 for chosen + rejected
-        )
+        num_sequences = self._interval_num_sequences
         avg_sequence_length = total_tokens_step / num_sequences if num_sequences > 0 else 0
 
         mfu_result = self.model_dims.approximate_learner_utilization(
@@ -207,6 +203,9 @@ class PerfCallback(Callback):
         self.trainer.record_metric("perf/seconds_per_step", seconds_per_step, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second", tokens_per_second, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second_avg", tokens_per_second_avg, reduce_type=None)
+        self.trainer.record_metric(
+            "perf/tokens_per_second_per_gpu", tokens_per_second / self.num_training_gpus, reduce_type=None
+        )
         self.trainer.record_metric("perf/total_tokens", self._total_tokens_processed, reduce_type=None)
         self.trainer.record_metric("perf/data_loading_seconds", self._batch_load_time, reduce_type=None)
 
@@ -219,26 +218,6 @@ class PerfCallback(Callback):
                 step_overhead_pct = 100 * (wall_clock_per_step - seconds_per_step) / wall_clock_per_step
                 self.trainer.record_metric("perf/step_overhead_pct", step_overhead_pct, reduce_type=None)
 
-        cuda_sync_ms = (interval_end - host_end) * 1000
-        host_step_time_ms = (host_end - self._pre_step_time) * 1000
-        step_time_ms = (interval_end - self._pre_step_time) * 1000
-        self.trainer.record_metric("perf/cuda_sync_ms", cuda_sync_ms, reduce_type=None)
-        self.trainer.record_metric("perf/host_step_time_ms", host_step_time_ms, reduce_type=None)
-        self.trainer.record_metric("perf/step_time_ms", step_time_ms, reduce_type=None)
-        if self._prev_pre_step_time > 0:
-            cycle_time_ms = (self._pre_step_time - self._prev_pre_step_time) * 1000
-            overhead_ms = cycle_time_ms - step_time_ms
-            step_pct = step_time_ms / cycle_time_ms * 100 if cycle_time_ms > 0 else 0
-            self.trainer.record_metric("perf/cycle_time_ms", cycle_time_ms, reduce_type=None)
-            self.trainer.record_metric("perf/overhead_ms", overhead_ms, reduce_type=None)
-            self.trainer.record_metric("perf/step_pct", step_pct, reduce_type=None)
-
-        if self._prev_post_step_end > 0:
-            post_to_preload_ms = (self._batch_load_start - self._prev_post_step_end) * 1000
-            load_to_prestep_ms = (self._pre_step_time - self._batch_load_start) * 1000
-            self.trainer.record_metric("perf/post_to_preload_ms", post_to_preload_ms, reduce_type=None)
-            self.trainer.record_metric("perf/load_to_prestep_ms", load_to_prestep_ms, reduce_type=None)
-
         self._interval_start_time = interval_end
+        self._interval_num_sequences = 0
         self._last_step = self.step
-        self._prev_post_step_end = time.perf_counter()
