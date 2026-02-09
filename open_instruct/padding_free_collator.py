@@ -160,6 +160,7 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
         result = {
             "_wasted_tokens_from_truncation": chosen_wasted + rejected_wasted,
             "_sequences_dropped": max(chosen_dropped, rejected_dropped),
+            "_num_valid_seqs": num_valid,
         }
         for k in chosen_features:
             result["chosen_" + k] = chosen_features[k]
