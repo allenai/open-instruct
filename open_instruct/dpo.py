@@ -143,6 +143,9 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
     checkpointing_steps = int(args.checkpointing_steps)
     trainer_callbacks["checkpointer"] = CheckpointerCallback(save_interval=checkpointing_steps, save_async=False)
     model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
+    # TODO(finbarr): MFU and TPS metrics should be reported per physical GPU so that
+    # results are comparable across different parallelism strategies. Currently uses
+    # dp_world_size which excludes TP GPUs, overestimating MFU when TP > 1.
     trainer_callbacks["perf"] = PerfCallback(
         model_dims=model_dims,
         per_device_train_batch_size=args.per_device_train_batch_size,
