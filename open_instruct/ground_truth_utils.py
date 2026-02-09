@@ -982,6 +982,10 @@ class RubricVerifier(VerifierFunction):
             description = rubric.get("description") or rubric.get("rubric_item") or rubric.get("Ingredient", "")
             weight = rubric.get("weight", 1.0)
 
+            if not description:
+                logger.warning("Rubric with empty description found, skipping.")
+                return 0.0, 0.0
+
             user_prompt = f"<question>{question}</question>\n<response>{prediction}</response>\n<criterion>{description}</criterion>"
 
             try:

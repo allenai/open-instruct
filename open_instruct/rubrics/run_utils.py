@@ -70,7 +70,6 @@ def extract_json_from_response(response: str) -> dict[str, Any] | None:
                     # Try next { position
                     json_start = response.find("{", json_start + 1)
                     continue
-        break
 
     logger.warning(f"Could not decode JSON from response: {repr(response)}")
     return None
