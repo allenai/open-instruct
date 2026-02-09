@@ -46,6 +46,7 @@ from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
+from transformers.utils.import_utils import is_flash_linear_attention_available
 
 from open_instruct import dpo_utils, logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
@@ -350,6 +351,13 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     model = load_model()
     logger.info("=============model loaded")
     print_gpu_stats(init_gpu_memory)
+
+    if model.config.model_type == "olmo3_5_hybrid" and not is_flash_linear_attention_available():
+        raise ImportError(
+            "flash-linear-attention (fla) is required for hybrid models but is not installed. "
+            "Without it, linear attention layers fall back to a slow PyTorch implementation. "
+            "Install with: pip install flash-linear-attention"
+        )
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
