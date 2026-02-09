@@ -488,6 +488,26 @@ def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) ->
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
+def _get_batch_stats(batch: dict) -> tuple[int, int, list[int], list[int]]:
+    """Extract token count, example count, and per-example lengths from a DPO batch.
+
+    Returns:
+        (batch_tokens, batch_size, chosen_lengths, rejected_lengths)
+    """
+    batch_size = len(batch["index"])
+    if "chosen_cu_seq_lens_k" in batch:
+        chosen_cu = batch["chosen_cu_seq_lens_k"]
+        rejected_cu = batch["rejected_cu_seq_lens_k"]
+        batch_tokens = chosen_cu[-1].item() + rejected_cu[-1].item()
+        chosen_lengths = (chosen_cu[1:] - chosen_cu[:-1]).tolist()
+        rejected_lengths = (rejected_cu[1:] - rejected_cu[:-1]).tolist()
+    else:
+        batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
+        chosen_lengths = [batch["chosen_input_ids"].shape[1]] * batch_size
+        rejected_lengths = [batch["rejected_input_ids"].shape[1]] * batch_size
+    return batch_tokens, batch_size, chosen_lengths, rejected_lengths
+
+
 def build_reference_logprobs_cache(
     model: torch.nn.Module,
     dataloader: torch.utils.data.DataLoader,
@@ -556,24 +576,9 @@ def build_reference_logprobs_cache(
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
 
-            bs = len(batch["index"])
-            if "chosen_cu_seq_lens_k" in batch:
-                chosen_actual = batch["chosen_cu_seq_lens_k"][-1].item()
-                rejected_actual = batch["rejected_cu_seq_lens_k"][-1].item()
-                batch_tokens = chosen_actual + rejected_actual
-            else:
-                batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
+            batch_tokens, batch_size, chosen_lengths, rejected_lengths = _get_batch_stats(batch)
             total_tokens += batch_tokens
-            total_examples += bs
-
-            if "chosen_cu_seq_lens_k" in batch:
-                chosen_cu = batch["chosen_cu_seq_lens_k"]
-                rejected_cu = batch["rejected_cu_seq_lens_k"]
-                chosen_lengths = (chosen_cu[1:] - chosen_cu[:-1]).tolist()
-                rejected_lengths = (rejected_cu[1:] - rejected_cu[:-1]).tolist()
-            else:
-                chosen_lengths = [batch["chosen_input_ids"].shape[1]] * bs
-                rejected_lengths = [batch["rejected_input_ids"].shape[1]] * bs
+            total_examples += batch_size
             pbar.set_postfix(
                 {
                     "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
