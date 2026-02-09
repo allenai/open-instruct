@@ -631,7 +631,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     # single all reduce to save time, avoiding per metric all reduce
                     global_metrics_tensor = accelerator.reduce(local_metrics.metrics, reduction="mean")
                     global_metrics_tensor /= args.gradient_accumulation_steps * args.logging_steps
-                    global_metrics_tensor[local_metrics.names2idx["token_count"]] *= accelerator.num_processes
+                    global_metrics_tensor[local_metrics.names2idx["token_count"]] *= (
+                        accelerator.num_processes * args.gradient_accumulation_steps * args.logging_steps
+                    )
                     global_metrics = {
                         name: global_metrics_tensor[index].item() for name, index in local_metrics.names2idx.items()
                     }
