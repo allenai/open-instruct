@@ -138,6 +138,8 @@ class PerfCallback(Callback):
     _wall_clock_step_start: float = field(default=0.0, repr=False)
     _prev_wall_clock_step_start: float = field(default=0.0, repr=False)
     _interval_num_sequences: int = field(default=0, repr=False)
+    _pre_step_time: float = field(default=0.0, repr=False)
+    _prev_pre_step_time: float = field(default=0.0, repr=False)
 
     def pre_train(self) -> None:
         self._start_time = time.perf_counter()
@@ -146,6 +148,11 @@ class PerfCallback(Callback):
         self._mfu_sum = 0.0
         self._last_step = 0
         self._interval_num_sequences = 0
+
+    def pre_load_batch(self) -> None:
+        self._batch_load_start = time.perf_counter()
+        self._prev_wall_clock_step_start = self._wall_clock_step_start
+        self._wall_clock_step_start = self._batch_load_start
 
     def pre_load_batch(self) -> None:
         self._batch_load_start = time.perf_counter()
