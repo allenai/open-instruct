@@ -21,6 +21,10 @@ do
             --no_auto_dataset_cache \
             --env OLMO_SHARED_FS=1 \
             --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+            --env NCCL_IB_HCA=^=mlx5_bond_0 \
+            --env NCCL_SOCKET_IFNAME=ib \
+            --env TORCH_NCCL_AVOID_RECORD_STREAMS=1 \
+            --env TORCH_DIST_INIT_BARRIER=1 \
             --num_nodes 4 \
             --budget ai2/oe-adapt \
             --gpus 8 -- accelerate launch \
