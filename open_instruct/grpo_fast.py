@@ -304,6 +304,10 @@ class Args:
     code_max_execution_time: float = 1.0
     """the max execution time to use for the code verifier"""
 
+    # -- random rewards (baseline)
+    apply_random_rewards: bool = False
+    """whether to replace verifiable rewards with random 0/1 rewards (0.5 probability each). Useful as a sanity-check baseline."""
+
     # -- non stop penalty
     non_stop_penalty: bool = False
     """whether to penalize responses which did not finish generation"""
@@ -2690,7 +2694,22 @@ if __name__ == "__main__":
                 metrics["objective/avg_num_subsampled_answers_for_adaptive_rubric"] = sum(num_subsampled_answers_list) / len(num_subsampled_answers_list) if num_subsampled_answers_list else 0
                 
                 
-        if args.apply_verifiable_reward:
+        if args.apply_random_rewards:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🎲 Applying random rewards"):
+                import random as _random
+                verifiable_rewards = [
+                    args.verification_reward * float(_random.random() < 0.5)
+                    for _ in range(len(decoded_responses))
+                ]
+                per_func_rewards = [{"random_rewards": r} for r in verifiable_rewards]
+                log_values = {}
+                for i in range(len(verifiable_rewards)):
+                    scores[i] = verifiable_rewards[i]
+                np_verifiable_rewards = np.array(verifiable_rewards)
+                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
+                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
+
+        elif args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
                 verifiable_rewards, per_func_rewards, log_values = await apply_verifiable_reward(
                     reward_fn_mapping,

@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 import string
 import weakref
@@ -1312,6 +1313,25 @@ class RLRAGToyCaseMultiDatasetMultiplicativeVerifier(VerifierFunction):
             score=result["score"],
             log_values=result["log_values"],
         )
+
+
+class RandomRewardsVerifier(VerifierFunction):
+    """
+    Verifier that assigns random 0/1 rewards with 0.5 probability.
+    Useful as a baseline to test whether the training pipeline is working,
+    since random rewards should not lead to meaningful learning.
+    Works for both short-form and long-form questions.
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("random_rewards", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+    ) -> VerificationResult:
+        score = float(random.random() < 0.5)
+        return VerificationResult(score=score)
+
 
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """
