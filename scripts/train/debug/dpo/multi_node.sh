@@ -43,6 +43,7 @@ uv run python mason.py \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
+    --activation_memory_budget 0.1 \
     --no_compile_model \
     --profiling \
     --with_tracking \

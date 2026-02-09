@@ -369,12 +369,20 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         reduce_dtype=DType.float32,
         wrapping_strategy=transformer_config.TransformerDataParallelWrappingStrategy.blocks,
     )
-    ac_config = (
-        transformer_config.TransformerActivationCheckpointingConfig(
+    if args.activation_memory_budget < 1.0 and args.compile_model:
+        ac_config = transformer_config.TransformerActivationCheckpointingConfig(
             mode=transformer_config.TransformerActivationCheckpointingMode.budget,
             activation_memory_budget=args.activation_memory_budget,
         )
-        if args.activation_memory_budget < 1.0 and args.compile_model
+    elif args.activation_memory_budget < 1.0:
+        ac_config = transformer_config.TransformerActivationCheckpointingConfig(
+            mode=transformer_config.TransformerActivationCheckpointingMode.full
+        )
+    else:
+        ac_config = None
+    tp_config = (
+        transformer_config.TransformerTensorParallelConfig(degree=args.tensor_parallel_degree)
+        if args.tensor_parallel_degree > 1
         else None
     )
 
