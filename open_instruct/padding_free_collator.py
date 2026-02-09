@@ -233,8 +233,7 @@ def get_batch_logps(
     num_seqs = cu_seq_lens.shape[0] - 1
     seq_len = per_token_logps.shape[1]
     positions = torch.arange(seq_len, device=cu_seq_lens.device)
-    segment_ids = (positions.unsqueeze(0) >= cu_seq_lens[:-1].unsqueeze(1)).sum(0) - 1
-    segment_ids = segment_ids.clamp(0, num_seqs - 1)
+    segment_ids = torch.bucketize(positions, cu_seq_lens[1:], right=True).clamp(max=num_seqs - 1)
 
     masked_logps = (per_token_logps * loss_mask.float()).squeeze(0)
     mask_float = loss_mask.float().squeeze(0)
@@ -245,5 +244,5 @@ def get_batch_logps(
     if average_log_prob:
         segment_counts = torch.zeros(num_seqs, device=mask_float.device, dtype=mask_float.dtype)
         segment_counts.scatter_add_(0, segment_ids, mask_float)
-        return segment_sums / segment_counts
+        return segment_sums / segment_counts.clamp(min=1)
     return segment_sums

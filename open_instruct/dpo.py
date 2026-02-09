@@ -312,6 +312,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     # With packing, use smaller batch size (half) to avoid truncation when packing long sequences.
     cache_batch_multiplier = 0.5 if args.packing else 4
     cache_batch_size = int(args.per_device_train_batch_size * cache_batch_multiplier * dp_world_size)
+    cache_batch_size = max(cache_batch_size, dp_world_size)
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=cache_batch_size,

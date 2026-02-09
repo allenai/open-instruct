@@ -245,6 +245,20 @@ class TestDPOPackingIndices(unittest.TestCase):
             missing_chosen.tolist(), [3, 7, 11, 15], "Expected the last index in each batch to be truncated"
         )
 
+    def test_average_log_prob_all_masked_segment(self):
+        """Test that average_log_prob=True doesn't produce NaN when a segment has all -100 labels."""
+        vocab_size = 100
+        seq_len = 20
+        logits = torch.randn(1, seq_len, vocab_size)
+        labels = torch.ones(1, seq_len, dtype=torch.long)
+        labels[0, 5:10] = -100
+        cu_seq_lens = torch.tensor([0, 5, 10, 20])
+
+        result = get_batch_logps(logits, labels, cu_seq_lens, average_log_prob=True)
+
+        self.assertEqual(result.shape[0], 3)
+        self.assertFalse(torch.isnan(result).any(), f"Got NaN in result: {result}")
+
     def test_concatenated_cu_seq_lens_with_padding(self):
         """Test that cu_seq_lens correctly accounts for padding in concatenation."""
         collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=500)

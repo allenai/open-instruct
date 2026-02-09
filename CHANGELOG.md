@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- New perf metrics in PerfCallback: total_tokens, data_loading_seconds, data_loading_pct, wall_clock_per_step, step_overhead_pct (https://github.com/allenai/open-instruct/pull/1457).
+- New perf metrics in PerfCallback: total_tokens, data_loading_seconds, data_loading_pct, wall_clock_per_step, step_overhead_pct (https://github.com/allenai/open-instruct/pull/1466).
 - Warning when eval prompts are queuing up (new eval round starts before the previous one completes) (https://github.com/allenai/open-instruct/pull/1461).
 - OLMo 3 tokenizer settings documentation covering chat template decisions for Instruct and Think models (https://github.com/allenai/open-instruct/pull/1455).
 - torch.compile support for OLMo-core DPO training (https://github.com/allenai/open-instruct/pull/1445).
@@ -24,7 +24,7 @@ All notable changes to this project will be documented in this file.
 - Changed default wandb x-axis from `episode` to `training_step` for grpo_fast (https://github.com/allenai/open-instruct/pull/1437).
 
 ### Fixed
-- Fixed MFU calculation to count LM head FLOPs per token (https://github.com/allenai/open-instruct/pull/1457).
+- Fixed MFU calculation to count LM head FLOPs per token (https://github.com/allenai/open-instruct/pull/1466).
 - Fixed training hang when `inflight_updates` is disabled by waiting for weight sync to complete before health check (https://github.com/allenai/open-instruct/pull/1454).
 - Fixed evaluation responses being lost on timeout in grpo_fast by requeuing partial results (https://github.com/allenai/open-instruct/pull/1439).
 - Beaker Experiment Launch now passes (https://github.com/allenai/open-instruct/pull/1424#pullrequestreview-3708034780).
