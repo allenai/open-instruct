@@ -270,6 +270,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         Raises:
             ValueError: If no input_ids tensors are found in the batch.
         """
+        # attention_mask is 1 for all non-padding tokens, and 0 otherwise.
+        # Using sum() excludes padding tokens from the count.
         if "attention_mask" in batch:
             num_tokens = batch["attention_mask"].sum().item()
         elif "chosen_cu_seq_lens_k" in batch:

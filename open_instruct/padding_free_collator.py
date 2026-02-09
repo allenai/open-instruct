@@ -132,6 +132,7 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
 @dataclass
 class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
     def __call__(self, features, return_tensors=None, separator_id=None):
+        # call the original collator on chosen and rejected separately, then combine
         def filter_batch(match_string, features):
             return [{k.replace(match_string, ""): v for k, v in f.items() if match_string in k} for f in features]
 
@@ -219,12 +220,17 @@ def get_batch_logps(
 ) -> torch.Tensor:
     assert logits.shape[:-1] == labels.shape
 
+    # - we are going to get crossings at labels / logits
+    #   cont batch boundaries, but we assume that the
+    #   loss mask == True at those places
     labels = labels[:, 1:].clone()
     logits = logits[:, :-1, :]
     loss_mask = labels != -100
 
+    # dummy token; we'll ignore the losses on these tokens later
     labels = labels.masked_fill(~loss_mask, 0)
 
+    # there is a labels, logits shift operation above
     cu_seq_lens = cu_seq_lens.clone() - 1
     cu_seq_lens[0] = 0
 

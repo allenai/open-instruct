@@ -1627,7 +1627,7 @@ def maybe_evaluate(
         True if evaluation results were successfully collected, False otherwise.
     """
     if eval_dataset is None:
-        return True
+        return True  # No eval to do, so consider it "successful"
 
     try:
         # timeout 0.01 if this is not the last training step
