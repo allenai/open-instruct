@@ -2,12 +2,12 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=allenai/OLMo-2-1124-7B
 LR=1e-6
-EXP_NAME=olmo2-7b-DPO-debug-16k-packing-bs4-noshard-budget01-${LR}
+EXP_NAME=olmo2-7b-DPO-debug-16k-packing-bs16-noshard-budget01-${LR}
 
 uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --description "Verify: bs=4, no shard_degree, activation_memory_budget=0.1" \
+    --description "Verify: bs=16, no shard_degree, activation_memory_budget=0.1" \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
@@ -29,7 +29,7 @@ uv run python mason.py \
     --model_name_or_path "$MODEL_NAME" \
     --chat_template_name olmo \
     --max_seq_length 16384 \
-    --per_device_train_batch_size 4 \
+    --per_device_train_batch_size 16 \
     --packing \
     --gradient_accumulation_steps 1 \
     --learning_rate "$LR" \
