@@ -18,6 +18,7 @@ from open_instruct.rubrics.run_utils import extract_json_from_response, run_lite
 
 logger = logger_utils.setup_logger(__name__)
 
+
 async def generate_instance_wise_evolving_rubrics(
     question: str, response_list: list[str], existing_rubrics: str | None = None, model_name: str | None = None
 ) -> dict[str, Any] | None:
