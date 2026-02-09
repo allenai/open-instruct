@@ -7,7 +7,7 @@ EXP_NAME=olmo2-7b-DPO-debug-16k-packing-bs16-tp2-${LR}
 uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --description "2 node DPO run with OLMo2-7B, 16k seq len, bs=16 (packing + compile)." \
+    --description "2 node DPO run with OLMo2-7B, 16k seq len, bs=16 (packing, TP=2, no compile)." \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
@@ -43,7 +43,7 @@ uv run python mason.py \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
-    --activation_memory_budget 0.1 \
+    --no_compile_model \
     --profiling \
     --with_tracking \
     --push_to_hub false \
