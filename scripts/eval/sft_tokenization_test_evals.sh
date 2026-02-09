@@ -16,10 +16,16 @@ BASE_PATH="/weka/oe-adapt-default/nathanl/checkpoints"
 # /weka/oe-adapt-default/nathanl/checkpoints/HYBRID_INSTRUCT_SFT_8e-5/step3256-hf
 # /weka/oe-adapt-default/nathanl/checkpoints/HYBRID_INSTRUCT_SFT_5e-5/step3256-hf
 
+# YARN MODELS:
+# /weka/oe-adapt-default/nathanl/checkpoints/HYBRID_SFT_YARN_LR5e-5/step46412-hf
+# /weka/oe-adapt-default/nathanl/checkpoints/HYBRID_SFT_YARN_LR2.5e-5/step46412-hf
+
 MODELS=(
     # "TEST_HYBRIC_SFT_LARGER_LR1e-4"
-    "TEST_HYBRIC_SFT_LARGER_LR5e-5"
-    "TEST_HYBRIC_SFT_LARGER_LR2.5e-5"
+    # "TEST_HYBRIC_SFT_LARGER_LR5e-5"
+    # "TEST_HYBRIC_SFT_LARGER_LR2.5e-5"
+    "HYBRID_SFT_YARN_LR5e-5"
+    "HYBRID_SFT_YARN_LR2.5e-5"
     # "TEST_HYBRIC_SFT_LARGER_LR4.5e-5_seed42"
     # "TEST_HYBRIC_SFT_LARGER_LR1e-5"
     # "HYBRID_INSTRUCT_SFT_8e-5"
@@ -29,7 +35,7 @@ MODELS=(
 for MODEL in "${MODELS[@]}"; do
     # THINK MODELS
     GCS_PATH="${BASE_PATH}/${MODEL}/step46412-hf-tokenizer-fix"
-    MODEL_NAME="tokenizer-vllm-fixes-0207-${MODEL}"
+    MODEL_NAME="0208-${MODEL}"
 
     # INSTRUCT MODELS
     # GCS_PATH="${BASE_PATH}/${MODEL}/step3256-hf"
