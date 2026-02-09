@@ -1,9 +1,14 @@
 """GPU benchmark: compare forward+backward speed of GatedDeltaNet vs FlashAttention layers.
 
-Verifies the hypothesis that the hybrid model's linear attention layers
-(GatedDeltaNet) are slower per step than standard full attention layers
-(FlashAttention-2), explaining the ~3.5x training slowdown observed in
-hybrid DPO runs.
+Compares per-layer and full-model speed between the hybrid model (OLMo 3.5
+Hybrid, GatedDeltaNet linear attention) and standard OLMo3 (FlashAttention-2).
+
+Findings:
+- Individual linear attention layers ARE slower than full attention layers.
+- The full hybrid model is roughly comparable to OLMo3 (the hybrid's smaller
+  hidden_size 3840 vs 4096 offsets the slower linear attention layers).
+- The ~3.5x training slowdown in hybrid DPO runs is NOT caused by model
+  architecture; it likely comes from distributed training overhead.
 
 Run on Beaker GPU nodes:
     uv run pytest open_instruct/test_hybrid_layer_speed_gpu.py -v -s
@@ -135,7 +140,7 @@ class TestHybridLayerSpeed(unittest.TestCase):
             f"full={full_time * 1000:.1f}ms)",
         )
 
-    def test_hybrid_model_slower_than_standard_olmo3(self):
+    def test_hybrid_model_comparable_to_standard_olmo3(self):
         device = torch.device("cuda")
         batch_size = 1
         seq_len = 2048
@@ -178,18 +183,17 @@ class TestHybridLayerSpeed(unittest.TestCase):
         del olmo3_model
         torch.cuda.empty_cache()
 
-        speedup = hybrid_time / olmo3_time
+        ratio = hybrid_time / olmo3_time
 
         logger.info(
             "Full model fwd+bwd (seq_len=%d) | OLMo3: %.1fms | Hybrid: %.1fms | hybrid/olmo3 ratio: %.2fx",
             seq_len,
             olmo3_time * 1000,
             hybrid_time * 1000,
-            speedup,
+            ratio,
         )
-        self.assertGreater(
-            speedup, 1.0, f"Expected hybrid model to be slower than OLMo3, but got ratio {speedup:.2f}x"
-        )
+        self.assertGreater(ratio, 0.5, f"Hybrid model unexpectedly >2x faster than OLMo3: ratio {ratio:.2f}x")
+        self.assertLess(ratio, 2.0, f"Hybrid model unexpectedly >2x slower than OLMo3: ratio {ratio:.2f}x")
 
 
 if __name__ == "__main__":
