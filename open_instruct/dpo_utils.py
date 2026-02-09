@@ -46,12 +46,11 @@ from open_instruct.dataset_transformation import (
     load_dataset_configs,
 )
 from open_instruct.model_utils import log_softmax_and_gather
+from open_instruct.padding_free_collator import PAD_VALUES, pad_to_length
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
 logger = logger_utils.setup_logger(__name__)
-
-PAD_VALUES: dict[str, int] = {"labels": -100, "attention_mask": 0}
 
 
 def config_to_json_serializable(obj: object) -> object:

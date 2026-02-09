@@ -2,7 +2,7 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=allenai/OLMo-2-1124-7B
 LR=1e-6
-EXP_NAME=olmo2-7b-DPO-debug-16k-packing-bs16-${LR}
+EXP_NAME=olmo2-7b-DPO-debug-16k-packing-bs16-tp2-${LR}
 
 uv run python mason.py \
     --cluster ai2/saturn \
@@ -48,6 +48,7 @@ uv run python mason.py \
     --with_tracking \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \
-    --shard_degree 8 \
+    --shard_degree 4 \
     --num_replicas 2 \
+    --tensor_parallel_degree 2 \
     --try_auto_save_to_beaker false

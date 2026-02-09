@@ -188,6 +188,7 @@ class DPOTrainModule(TransformerTrainModule):
                     "train/wasted_tokens_from_truncation", batch["_wasted_tokens_from_truncation"], ReduceType.sum
                 )
                 self.record_metric("train/sequences_dropped", batch["_sequences_dropped"], ReduceType.sum)
+                self.record_metric("train/sequences_dropped_pct", batch["_sequences_dropped_pct"], ReduceType.mean)
 
             if self.dpo_config.loss_type.computes_reward_metrics:
                 margin = global_metrics["chosen_rewards"] - global_metrics["rejected_rewards"]
