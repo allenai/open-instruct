@@ -154,11 +154,6 @@ class PerfCallback(Callback):
         self._prev_wall_clock_step_start = self._wall_clock_step_start
         self._wall_clock_step_start = self._batch_load_start
 
-    def pre_load_batch(self) -> None:
-        self._batch_load_start = time.perf_counter()
-        self._prev_wall_clock_step_start = self._wall_clock_step_start
-        self._wall_clock_step_start = self._batch_load_start
-
     def pre_step(self, batch: dict[str, Any]) -> None:
         self._batch_load_time = time.perf_counter() - self._batch_load_start
         self._step_start_time = time.perf_counter()
