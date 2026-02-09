@@ -275,6 +275,21 @@ class DockerBackend(SandboxBackend):
             self._container = None
 
 
+def _daytona_retry(fn, *args, max_retries: int = 3, **kwargs):
+    """Call a Daytona SDK function with retry on transient errors."""
+    import time
+
+    for attempt in range(max_retries):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Daytona call {fn.__qualname__} attempt {attempt + 1} failed: {e}. Retrying...")
+                time.sleep(2**attempt)
+            else:
+                raise
+
+
 class DaytonaBackend(SandboxBackend):
     """
     Daytona cloud sandbox backend.
@@ -286,6 +301,7 @@ class DaytonaBackend(SandboxBackend):
     - Cloud-based sandbox isolation
     - Full OS capabilities
     - File I/O and shell execution
+    - Automatic retry on transient errors
     """
 
     def __init__(
@@ -338,18 +354,7 @@ class DaytonaBackend(SandboxBackend):
         self._daytona = Daytona(config) if config else Daytona()
 
         params = CreateSandboxFromImageParams(image=self._image)
-        for attempt in range(3):
-            try:
-                self._sandbox = self._daytona.create(params, timeout=self._timeout)
-                break
-            except Exception as e:
-                if attempt < 2:
-                    logger.warning(f"Daytona create attempt {attempt + 1} failed: {e}. Retrying...")
-                    import time
-
-                    time.sleep(2**attempt)
-                else:
-                    raise
+        self._sandbox = _daytona_retry(self._daytona.create, params, timeout=self._timeout)
         logger.info("Daytona sandbox started")
 
     def run_code(self, code: str, language: str = "python") -> ExecutionResult:
@@ -357,7 +362,7 @@ class DaytonaBackend(SandboxBackend):
         if self._sandbox is None:
             raise RuntimeError("Sandbox not started. Call start() first.")
 
-        response = self._sandbox.process.code_run(code=code)
+        response = _daytona_retry(self._sandbox.process.code_run, code=code)
         return ExecutionResult(
             stdout=response.result or "", stderr=getattr(response, "stderr", "") or "", exit_code=response.exit_code
         )
@@ -367,7 +372,7 @@ class DaytonaBackend(SandboxBackend):
         if self._sandbox is None:
             raise RuntimeError("Sandbox not started. Call start() first.")
 
-        response = self._sandbox.process.exec(command)
+        response = _daytona_retry(self._sandbox.process.exec, command)
         return ExecutionResult(
             stdout=response.result or "", stderr=getattr(response, "stderr", "") or "", exit_code=response.exit_code
         )
@@ -379,14 +384,14 @@ class DaytonaBackend(SandboxBackend):
 
         if isinstance(content, str):
             content = content.encode("utf-8")
-        self._sandbox.fs.upload_file(content, path)
+        _daytona_retry(self._sandbox.fs.upload_file, content, path)
 
     def read_file(self, path: str) -> str:
         """Read a file from the Daytona sandbox."""
         if self._sandbox is None:
             raise RuntimeError("Sandbox not started. Call start() first.")
 
-        data = self._sandbox.fs.download_file(path)
+        data = _daytona_retry(self._sandbox.fs.download_file, path)
         if isinstance(data, bytes):
             return data.decode("utf-8")
         return data
@@ -395,7 +400,8 @@ class DaytonaBackend(SandboxBackend):
         """Delete the Daytona sandbox."""
         if self._sandbox is not None:
             logger.info("Closing Daytona sandbox")
-            self._daytona.delete(self._sandbox)
+            with contextlib.suppress(Exception):
+                self._daytona.delete(self._sandbox)
             self._sandbox = None
             self._daytona = None
 
