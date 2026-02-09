@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==========================================================================
-# End-to-end test script for adaptive rubrics (single GPU, no search tools)
+# End-to-end test script for evolving rubrics (single GPU, no search tools)
 #
 # Prerequisites:
 #   - 1x GPU with >=40 GB memory (H100, A100, etc.)
@@ -12,16 +12,15 @@
 #   export OPENAI_API_KEY=your_key
 #
 #   # 2. Run locally on a GPU node:
-#   bash scripts/train/debug/adaptive_rubric_mini_test.sh
+#   bash scripts/train/debug/evolving_rubric_mini_test.sh
 #
 #   # 3. Or run via Beaker:
-#   ./scripts/train/build_image_and_launch.sh scripts/train/debug/adaptive_rubric_mini_test.sh
+#   ./scripts/train/build_image_and_launch.sh scripts/train/debug/evolving_rubric_mini_test.sh
 #
 # What this tests:
-#   - GRPO training with adaptive rubric rewards enabled
+#   - GRPO training with evolving rubric rewards enabled
 #   - RubricVerifier scoring via LLM judge (gpt-4.1-mini)
 #   - Rubric buffer initialization and update across steps
-#   - Static rubrics as persistent rubrics
 #   - Single-GPU mode with DeepSpeed stage 3 + vLLM
 #
 # Expected runtime: ~8-10 minutes on a single H100/A100.
@@ -31,7 +30,7 @@ set -e
 
 model_path=Qwen/Qwen3-0.6B
 dataset_list="rl-research/dr-tulu-rl-data 1.0"
-exp_name="adaptive-rubric-mini-test"
+exp_name="evolving-rubric-mini-test"
 
 # ---- Environment setup ----
 export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
@@ -53,7 +52,7 @@ if [ -z "$OPENAI_API_KEY" ] && [ -z "$AZURE_API_KEY" ]; then
 fi
 
 echo "=============================================="
-echo "Starting Adaptive Rubric Mini Training Test"
+echo "Starting Evolving Rubric Mini Training Test"
 echo "=============================================="
 echo "Model: ${model_path}"
 echo "Dataset: ${dataset_list}"
@@ -71,16 +70,14 @@ python3 open_instruct/grpo_fast.py \
     --num_epochs 1 \
     --learning_rate 5e-7 \
     --per_device_train_batch_size 1 \
-    --output_dir /tmp/adaptive_rubric_test_output \
+    --output_dir /tmp/evolving_rubric_test_output \
     --kl_estimator 3 \
     --dataset_mixer_list ${dataset_list} \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list rl-research/dr-tulu-rl-data 8 \
     --dataset_mixer_eval_list_splits train \
-    --apply_adaptive_rubric_reward true \
-    --normalize_rubric_scores false \
+    --apply_evolving_rubric_reward true \
     --use_rubric_buffer true \
-    --use_static_rubrics_as_persistent_rubrics true \
     --max_active_rubrics 5 \
     --max_prompt_token_length 512 \
     --response_length 1024 \
@@ -109,9 +106,9 @@ python3 open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --max_tool_calls 0 \
     --only_reward_good_outputs False \
-    2>&1 | tee /tmp/adaptive_rubric_test.log
+    2>&1 | tee /tmp/evolving_rubric_test.log
 
 echo "=============================================="
-echo "Test completed! Log saved to /tmp/adaptive_rubric_test.log"
+echo "Test completed! Log saved to /tmp/evolving_rubric_test.log"
 echo "=============================================="
 
