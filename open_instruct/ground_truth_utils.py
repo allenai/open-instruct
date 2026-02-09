@@ -26,6 +26,7 @@ from litellm import acompletion
 
 from open_instruct import context_window_checker, logger_utils
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
+from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async
 from open_instruct.IFEvalG import instructions_registry
 from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
 from open_instruct.math_utils import (
@@ -955,12 +956,6 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
         self, tokenized_prediction: list[int], prediction: str, label: Any, query: str | None = None
     ) -> VerificationResult:
         """Score response against all rubrics in the ground truth."""
-        from open_instruct.search_rewards.utils.run_utils import (  # noqa: PLC0415
-            extract_json_from_response,
-            run_litellm_async,
-        )
-
-        # Parse the ground truth
         if isinstance(label, str):
             try:
                 label = json.loads(label)
@@ -1024,12 +1019,12 @@ Return a score on a scale of 0 to 2 indicating how appropriate the response is b
     ) -> VerificationResult:
         """Synchronous wrapper for async_call."""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                raise RuntimeError("Cannot call synchronous method from async context. Use async_call instead.")
-            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+            asyncio.get_running_loop()
+            raise RuntimeError("Cannot call synchronous method from async context. Use async_call instead.")
         except RuntimeError:
-            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+            # No loop is running, which is expected for a sync call
+            pass
+        return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
 
     @classmethod
     def get_config_class(cls) -> type:

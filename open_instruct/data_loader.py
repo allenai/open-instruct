@@ -364,23 +364,15 @@ class StreamingDataLoaderConfig:
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
-    # Adaptive rubric reward
-    apply_adaptive_rubric_reward: bool = False
-    """Whether to generate and apply adaptive rubrics for reward computation."""
-    use_full_responses_for_adaptive_rubric: bool = True
-    """Whether to use full responses (vs extracted answers) for adaptive rubric generation."""
-    normalize_rubric_scores: bool = False
-    """Whether to normalize rubric scores within each rollout group."""
+    # Evolving rubric reward
+    apply_evolving_rubric_reward: bool = False
+    """Whether to generate and apply evolving rubrics for reward computation."""
     use_rubric_buffer: bool = False
     """Whether to maintain a buffer of rubrics across training steps."""
     max_active_rubrics: int = 5
-    """Maximum number of active adaptive rubrics per query."""
-    use_static_rubrics_as_persistent_rubrics: bool = True
-    """Whether to use static/ground-truth rubrics as persistent rubrics in the buffer."""
-    cache_adaptive_rubric_data_dir: str | None = None
-    """Directory to cache adaptive rubric generation data for debugging/analysis."""
-    save_adaptive_rubrics: bool = False
-    """Whether to save adaptive rubric data to output directory."""
+    """Maximum number of active evolving rubrics per query."""
+    cache_evolving_rubric_data_dir: str | None = None
+    """Directory to cache evolving rubric generation data for debugging/analysis. If set, rubric data will be saved."""
 
     # Rollout saving
     save_traces: bool = False
@@ -419,7 +411,7 @@ class StreamingDataLoaderConfig:
             self.apply_verifiable_reward
             or self.apply_r1_style_format_reward
             or self.non_stop_penalty
-            or self.apply_adaptive_rubric_reward
+            or self.apply_evolving_rubric_reward
         ), "At least one reward must be applied!"
 
         if self.stop_strings is None:
