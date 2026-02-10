@@ -1,12 +1,47 @@
 from dataclasses import dataclass
+from typing import Any, cast
 
 import torch
-import torch.nn.functional as F
 from transformers import DefaultDataCollator
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, tensor_utils
 
 logger = logger_utils.setup_logger(__name__)
+
+
+def _truncate_to_max_length(
+    max_seq_length: int,
+    input_ids: torch.Tensor,
+    labels: torch.Tensor,
+    position_ids: torch.Tensor | None,
+    seq_idx: torch.Tensor | None,
+    cu_seq_lens: torch.Tensor | None,
+    num_features: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None, int, int]:
+    current_len = input_ids.shape[1]
+    input_ids = input_ids[:, :max_seq_length]
+    labels = labels[:, :max_seq_length]
+    if position_ids is not None:
+        position_ids = position_ids[:, :max_seq_length]
+    if seq_idx is not None:
+        seq_idx = seq_idx[:, :max_seq_length]
+
+    num_valid_seqs = num_features
+    sequences_dropped = 0
+    if cu_seq_lens is not None:
+        cu_seq_lens = cu_seq_lens.clamp_max_(max_seq_length)
+        valid_mask = torch.cat([torch.tensor([True], device=cu_seq_lens.device), cu_seq_lens[1:] > cu_seq_lens[:-1]])
+        num_valid_seqs = int(valid_mask.sum().item()) - 1
+        sequences_dropped = num_features - num_valid_seqs
+        if sequences_dropped > 0:
+            logger.warning(
+                f"Truncation dropped {sequences_dropped} sequences "
+                f"(packed {num_features} sequences into {current_len} tokens, "
+                f"truncated to {max_seq_length}, {num_valid_seqs} sequences remain)"
+            )
+            cu_seq_lens = cu_seq_lens[valid_mask]
+
+    return input_ids, labels, position_ids, seq_idx, cu_seq_lens, num_valid_seqs, sequences_dropped
 
 
 @dataclass
@@ -82,38 +117,37 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         if self.max_seq_length is not None:
             current_len = input_ids_tensor.shape[1]
             if current_len > self.max_seq_length:
-                input_ids_tensor = input_ids_tensor[:, : self.max_seq_length]
-                labels_tensor = labels_tensor[:, : self.max_seq_length]
-                if position_ids_tensor is not None:
-                    position_ids_tensor = position_ids_tensor[:, : self.max_seq_length]
-                if seq_idx_tensor is not None:
-                    seq_idx_tensor = seq_idx_tensor[:, : self.max_seq_length]
-                if self.return_flash_attn_kwargs:
-                    cu_seq_lens_tensor = ret["cu_seq_lens_q"].clamp_max_(self.max_seq_length)
-                    valid_mask = torch.cat(
-                        [
-                            torch.tensor([True], device=cu_seq_lens_tensor.device),
-                            cu_seq_lens_tensor[1:] > cu_seq_lens_tensor[:-1],
-                        ]
-                    )
-                    num_valid_seqs = valid_mask.sum().item() - 1
-                    sequences_dropped = len(features) - num_valid_seqs
-                    if sequences_dropped > 0:
-                        logger.warning(
-                            f"Truncation dropped {sequences_dropped} sequences "
-                            f"(packed {len(features)} sequences into {current_len} tokens, "
-                            f"truncated to {self.max_seq_length}, {num_valid_seqs} sequences remain)"
-                        )
-                        cu_seq_lens_tensor = cu_seq_lens_tensor[valid_mask]
+                cu_seq_lens_tensor: torch.Tensor | None = (
+                    cast(torch.Tensor, ret["cu_seq_lens_q"]) if self.return_flash_attn_kwargs else None
+                )
+                (
+                    input_ids_tensor,
+                    labels_tensor,
+                    position_ids_tensor,
+                    seq_idx_tensor,
+                    cu_seq_lens_tensor,
+                    num_valid_seqs,
+                    sequences_dropped,
+                ) = _truncate_to_max_length(
+                    self.max_seq_length,
+                    input_ids_tensor,
+                    labels_tensor,
+                    position_ids_tensor,
+                    seq_idx_tensor,
+                    cu_seq_lens_tensor,
+                    len(features),
+                )
+                if cu_seq_lens_tensor is not None:
                     ret["cu_seq_lens_q"] = ret["cu_seq_lens_k"] = cu_seq_lens_tensor
             elif current_len < self.max_seq_length:
-                pad_len = self.max_seq_length - current_len
-                input_ids_tensor = F.pad(input_ids_tensor, (0, pad_len), value=0)
-                labels_tensor = F.pad(labels_tensor, (0, pad_len), value=-100)
+                input_ids_tensor = tensor_utils.pad_to_length(input_ids_tensor, self.max_seq_length, pad_value=0)
+                labels_tensor = tensor_utils.pad_to_length(labels_tensor, self.max_seq_length, pad_value=-100)
                 if position_ids_tensor is not None:
-                    position_ids_tensor = F.pad(position_ids_tensor, (0, pad_len), value=0)
+                    position_ids_tensor = tensor_utils.pad_to_length(
+                        position_ids_tensor, self.max_seq_length, pad_value=0
+                    )
                 if seq_idx_tensor is not None:
-                    seq_idx_tensor = F.pad(seq_idx_tensor, (0, pad_len), value=-1)
+                    seq_idx_tensor = tensor_utils.pad_to_length(seq_idx_tensor, self.max_seq_length, pad_value=-1)
 
         ret["input_ids"] = input_ids_tensor
         ret["labels"] = labels_tensor
@@ -124,6 +158,23 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         if seq_idx_tensor is not None:
             ret["seq_idx"] = seq_idx_tensor
         return ret
+
+
+def _align_dpo_seq_counts(chosen_features: dict[str, Any], rejected_features: dict[str, Any]) -> tuple[int, int]:
+    chosen_valid = chosen_features.pop("_num_valid_seqs")
+    rejected_valid = rejected_features.pop("_num_valid_seqs")
+    chosen_dropped = chosen_features.pop("_sequences_dropped")
+    rejected_dropped = rejected_features.pop("_sequences_dropped")
+    num_valid = min(chosen_valid, rejected_valid)
+
+    if num_valid < chosen_valid and "cu_seq_lens_q" in chosen_features:
+        chosen_features["cu_seq_lens_q"] = chosen_features["cu_seq_lens_q"][: num_valid + 1]
+        chosen_features["cu_seq_lens_k"] = chosen_features["cu_seq_lens_k"][: num_valid + 1]
+    if num_valid < rejected_valid and "cu_seq_lens_q" in rejected_features:
+        rejected_features["cu_seq_lens_q"] = rejected_features["cu_seq_lens_q"][: num_valid + 1]
+        rejected_features["cu_seq_lens_k"] = rejected_features["cu_seq_lens_k"][: num_valid + 1]
+
+    return num_valid, max(chosen_dropped, rejected_dropped)
 
 
 @dataclass
@@ -140,20 +191,9 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
             filter_batch("rejected_", features), return_tensors=return_tensors, separator_id=separator_id
         )
 
-        chosen_valid = chosen_features.pop("_num_valid_seqs")
-        rejected_valid = rejected_features.pop("_num_valid_seqs")
-        chosen_dropped = chosen_features.pop("_sequences_dropped")
-        rejected_dropped = rejected_features.pop("_sequences_dropped")
-        num_valid = min(chosen_valid, rejected_valid)
+        num_valid, sequences_dropped = _align_dpo_seq_counts(chosen_features, rejected_features)
 
-        if num_valid < chosen_valid and "cu_seq_lens_q" in chosen_features:
-            chosen_features["cu_seq_lens_q"] = chosen_features["cu_seq_lens_q"][: num_valid + 1]
-            chosen_features["cu_seq_lens_k"] = chosen_features["cu_seq_lens_k"][: num_valid + 1]
-        if num_valid < rejected_valid and "cu_seq_lens_q" in rejected_features:
-            rejected_features["cu_seq_lens_q"] = rejected_features["cu_seq_lens_q"][: num_valid + 1]
-            rejected_features["cu_seq_lens_k"] = rejected_features["cu_seq_lens_k"][: num_valid + 1]
-
-        result = {"_sequences_dropped": max(chosen_dropped, rejected_dropped), "_num_valid_seqs": num_valid}
+        result = {"_sequences_dropped": sequences_dropped, "_num_valid_seqs": num_valid}
         for k in chosen_features:
             result["chosen_" + k] = chosen_features[k]
         for k in rejected_features:

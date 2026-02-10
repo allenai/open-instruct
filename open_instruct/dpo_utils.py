@@ -38,7 +38,7 @@ from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, model_utils, utils
+from open_instruct import logger_utils, model_utils, tensor_utils, utils
 from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
@@ -858,14 +858,15 @@ def concatenated_inputs(batch: dict[str, list | torch.Tensor]) -> dict[str, torc
         if k.startswith("chosen") and isinstance(v, torch.Tensor):
             pad_value = -100 if "labels" in k else 0
             concatenated_key = k.replace("chosen", "concatenated")
-            concatenated_batch[concatenated_key] = pad_to_length(v, max_length, pad_value=pad_value)
+            concatenated_batch[concatenated_key] = tensor_utils.pad_to_length(v, max_length, pad_value=pad_value)
     for k in batch:
         v = batch[k]
         if k.startswith("rejected") and isinstance(v, torch.Tensor):
             pad_value = -100 if "labels" in k else 0
             concatenated_key = k.replace("rejected", "concatenated")
             concatenated_batch[concatenated_key] = torch.cat(
-                (concatenated_batch[concatenated_key], pad_to_length(v, max_length, pad_value=pad_value)), dim=0
+                (concatenated_batch[concatenated_key], tensor_utils.pad_to_length(v, max_length, pad_value=pad_value)),
+                dim=0,
             )
     return concatenated_batch
 
@@ -1082,13 +1083,6 @@ def separate_forward_olmo(
     return chosen_logps, rejected_logps, None
 
 
-def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float) -> torch.Tensor:
-    """Right-pad a tensor to a specified length along the last dimension."""
-    if tensor.size(-1) >= length:
-        return tensor
-    return torch.nn.functional.pad(tensor, (0, length - tensor.size(-1)), value=pad_value)
-
-
 @dataclass
 class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
     """
@@ -1127,7 +1121,7 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
             for key in ["input_ids", "attention_mask", "labels"]:
                 full_key = f"{prefix}{key}"
                 pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
-                result[full_key] = pad_to_length(result[full_key], max_len, pad_value)
+                result[full_key] = tensor_utils.pad_to_length(result[full_key], max_len, pad_value)
         result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
         result["attention_mask"] = torch.cat(
             [result["chosen_attention_mask"], result["rejected_attention_mask"]], dim=0
