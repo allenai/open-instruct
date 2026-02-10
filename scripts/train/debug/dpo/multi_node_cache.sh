@@ -19,7 +19,7 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/dpo_tune_cache.py \
-    --exp_name dpo-cache-multinode-checkpoint-test \
+    --exp_name "dpo-cache-multinode-checkpoint-test-$(date +%s)" \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --tokenizer_name Qwen/Qwen3-0.6B \
     --use_flash_attn false \

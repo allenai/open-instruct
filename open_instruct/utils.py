@@ -1339,8 +1339,7 @@ def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig |
 
     Modifies args in-place. Returns BeakerRuntimeConfig if on Beaker.
     """
-    if getattr(args, "add_seed_and_date_to_exp_name", False):
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.exp_name = f"{args.exp_name}__{args.seed}"
     args.output_dir = os.path.join(args.output_dir, args.exp_name)
 
     if dist.is_initialized():
