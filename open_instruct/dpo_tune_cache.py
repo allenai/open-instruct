@@ -30,7 +30,6 @@ import pathlib
 import random
 import shutil
 import time
-from torch import profiler as torch_profiler
 from datetime import timedelta
 
 import datasets
@@ -44,6 +43,7 @@ from accelerate.utils import DeepSpeedPlugin, InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
+from torch import profiler as torch_profiler
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
@@ -578,8 +578,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         else:
             active_dataloader = train_dataloader
         # we need to average the log probs for simpo loss
-        micro_step = 0
-        for batch in active_dataloader:
+        for micro_step, batch in enumerate(active_dataloader):
             should_profile = (
                 args.profile_every_n_steps > 0
                 and completed_steps > 0
@@ -633,7 +632,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                 if accelerator.is_main_process:
                     key_averages = prof.key_averages().table(sort_by="cuda_time_total", row_limit=30)
                     logger.info(f"Profiler summary (step {completed_steps}):\n{key_averages}")
-            micro_step += 1
 
             # We keep track of the loss at each logged step
             with torch.no_grad():
@@ -683,9 +681,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                         * 2
                     )
 
-                    step_tokens_per_second = total_tokens_step / training_time
+                    step_tokens_per_second = total_tokens_step / training_time / accelerator.num_processes
                     total_time_elapsed = time.perf_counter() - start_time
-                    total_tokens_per_second = total_tokens_processed / total_time_elapsed
+                    total_tokens_per_second = total_tokens_processed / total_time_elapsed / accelerator.num_processes
 
                     metrics_to_log = {
                         "training_step": completed_steps,
