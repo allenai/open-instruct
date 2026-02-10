@@ -2113,16 +2113,26 @@ def main(
 
     checkpoint_state = None
     data_prep_actor_state = None
-    if args.checkpoint_state_dir and os.path.exists(args.checkpoint_state_dir):
+    checkpoint_path = None
+    if args.checkpoint_state_dir:
         checkpoint_path = os.path.join(args.checkpoint_state_dir, "global_0", "state.pt")
-        if os.path.exists(checkpoint_path):
-            checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-            logger.info(f"Loaded checkpoint state from {checkpoint_path}")
-            data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")
-            if data_prep_actor_state:
-                # Use trainer's authoritative training_step for DataPreparationActor.
-                # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
-                data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
+    utils.ensure_beaker_restart_has_checkpoint(
+        checkpoint_path if checkpoint_path and os.path.exists(checkpoint_path) else None,
+        checkpoint_name="GRPO checkpoint state",
+    )
+    if (
+        args.checkpoint_state_dir
+        and os.path.exists(args.checkpoint_state_dir)
+        and checkpoint_path
+        and os.path.exists(checkpoint_path)
+    ):
+        checkpoint_state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        logger.info(f"Loaded checkpoint state from {checkpoint_path}")
+        data_prep_actor_state = checkpoint_state.get("data_prep_actor_state")
+        if data_prep_actor_state:
+            # Use trainer's authoritative training_step for DataPreparationActor.
+            # iter_dataloader state may be ahead but that's ok (prompts are shuffled, training is stochastic)
+            data_prep_actor_state["training_step"] = checkpoint_state.get("training_step", 0)
 
     (policy_group, vllm_engines, resume_training_step, episode, actor_manager, model_dims, _data_prep_actor) = (
         create_model_and_optimizer(

@@ -936,6 +936,37 @@ def is_beaker_job() -> bool:
     return "BEAKER_JOB_ID" in os.environ
 
 
+def get_beaker_run_number() -> int:
+    """Return the current Beaker run number, defaulting to 1 if unavailable."""
+    run_number = os.environ.get("BEAKER_RUN_NUMBER")
+    if run_number is None:
+        return 1
+    try:
+        parsed = int(run_number)
+    except ValueError:
+        logger.warning(f"Invalid BEAKER_RUN_NUMBER={run_number!r}; assuming run number 1.")
+        return 1
+    if parsed < 1:
+        logger.warning(f"Unexpected BEAKER_RUN_NUMBER={run_number!r}; assuming run number 1.")
+        return 1
+    return parsed
+
+
+def ensure_beaker_restart_has_checkpoint(checkpoint_path: str | None, checkpoint_name: str = "checkpoint") -> None:
+    """Ensure Beaker restarts (run number > 1) have a checkpoint to resume from."""
+    if not is_beaker_job():
+        return
+    run_number = get_beaker_run_number()
+    if run_number <= 1:
+        return
+    if checkpoint_path:
+        return
+    raise RuntimeError(
+        f"Beaker run number is {run_number}, but no {checkpoint_name} was found. "
+        "Refusing to restart without a checkpoint."
+    )
+
+
 def get_beaker_experiment_info(experiment_id: str) -> dict | None:
     get_experiment_command = f"beaker experiment get {experiment_id} --format json"
     process = subprocess.Popen(["bash", "-c", get_experiment_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)

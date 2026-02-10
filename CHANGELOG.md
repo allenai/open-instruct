@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - Changed default wandb x-axis from `episode` to `training_step` for grpo_fast (https://github.com/allenai/open-instruct/pull/1437).
 
 ### Fixed
+- Added restart safety checks for Beaker run number > 1 to require existing checkpoints in DPO and GRPO training entrypoints (https://github.com/allenai/open-instruct/pull/1462).
 - Fixed MFU calculation to count LM head FLOPs per token (https://github.com/allenai/open-instruct/pull/1457).
 - Fixed training hang when `inflight_updates` is disabled by waiting for weight sync to complete before health check (https://github.com/allenai/open-instruct/pull/1454).
 - Fixed evaluation responses being lost on timeout in grpo_fast by requeuing partial results (https://github.com/allenai/open-instruct/pull/1439).
