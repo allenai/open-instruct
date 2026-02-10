@@ -172,8 +172,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     if is_beaker_job():
         args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     beaker_config = None
-    if accelerator.is_main_process and is_beaker_job():
+    if is_beaker_job() and accelerator.is_main_process:
         beaker_config = maybe_get_beaker_config()
+
     if args.push_to_hub and accelerator.is_main_process:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -228,7 +229,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # Make one log on every process with the configuration for debugging.
     logger_utils.setup_logger()
-    logger.info(accelerator.state)
+    if accelerator.is_main_process:
+        logger.info(accelerator.state)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
         transformers.utils.logging.set_verbosity_info()
@@ -369,7 +371,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     if args.use_lora:
         if args.use_qlora:
             model = prepare_model_for_kbit_training(
-                model, use_gradient_checkpointing=args.activation_memory_budget < 1.0
+                model, use_gradient_checkpointing=args.activation_memory_budget < 1
             )
 
         logger.info("Initializing LORA model...")
@@ -383,7 +385,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
-    elif args.activation_memory_budget < 1.0:
+    elif args.activation_memory_budget < 1:
         logger.info(f"Enabling gradient checkpointing (activation_memory_budget={args.activation_memory_budget})")
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
@@ -768,9 +770,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
         )
 
-    # remove all checkpoints to save space
     if accelerator.is_main_process:
-        clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
+        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
     if (
         args.try_auto_save_to_beaker

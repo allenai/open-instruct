@@ -1325,6 +1325,7 @@ def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig |
 
     Modifies args in-place. Returns BeakerRuntimeConfig if on Beaker.
     """
+    args.exp_name = f"{args.exp_name}__{args.seed}"
     args.output_dir = os.path.join(args.output_dir, args.exp_name)
 
     if dist.is_initialized():
@@ -1925,8 +1926,8 @@ class ModelDims:
                     self.attn_flops(L, L, sliding_window=self.sliding_window) + self.mlp_flops(L)
                 )
 
-            # Always include a single LM head after prefill (next-token logits)
-            total += FLOP_PER_MAC * self.hidden_size * self.vocab_size
+            # LM head is applied to each token position during training
+            total += L * FLOP_PER_MAC * self.hidden_size * self.vocab_size
 
         return total
 
