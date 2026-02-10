@@ -635,26 +635,26 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     logger.info(f"Profiler summary (step {completed_steps}):\n{key_averages}")
             micro_step += 1
 
-                # We keep track of the loss at each logged step
-                with torch.no_grad():
-                    local_metrics["train_loss"] += loss
-                    if args.loss_type.computes_reward_metrics:
-                        average_rewards = ((chosen_rewards + rejected_rewards) / 2).mean()
-                        accuracy = (chosen_rewards > rejected_rewards).float().mean()
-                        margin = (chosen_rewards - rejected_rewards).mean()
-                        local_metrics["rewards/chosen"] += chosen_rewards.mean()
-                        local_metrics["rewards/rejected"] += rejected_rewards.mean()
-                        local_metrics["rewards/average"] += average_rewards
-                        local_metrics["rewards/accuracy"] += accuracy
-                        local_metrics["rewards/margin"] += margin
-                    local_metrics["logps/chosen"] += policy_chosen_logps.mean()
-                    local_metrics["logps/rejected"] += policy_rejected_logps.mean()
-                    if args.load_balancing_loss:
-                        local_metrics["aux_loss"] += weighted_aux_loss
+            # We keep track of the loss at each logged step
+            with torch.no_grad():
+                local_metrics["train_loss"] += loss
+                if args.loss_type.computes_reward_metrics:
+                    average_rewards = ((chosen_rewards + rejected_rewards) / 2).mean()
+                    accuracy = (chosen_rewards > rejected_rewards).float().mean()
+                    margin = (chosen_rewards - rejected_rewards).mean()
+                    local_metrics["rewards/chosen"] += chosen_rewards.mean()
+                    local_metrics["rewards/rejected"] += rejected_rewards.mean()
+                    local_metrics["rewards/average"] += average_rewards
+                    local_metrics["rewards/accuracy"] += accuracy
+                    local_metrics["rewards/margin"] += margin
+                local_metrics["logps/chosen"] += policy_chosen_logps.mean()
+                local_metrics["logps/rejected"] += policy_rejected_logps.mean()
+                if args.load_balancing_loss:
+                    local_metrics["aux_loss"] += weighted_aux_loss
 
-                    chosen_lengths = (batch["chosen_labels"] != -100).sum(dim=1)
-                    rejected_lengths = (batch["rejected_labels"] != -100).sum(dim=1)
-                    local_metrics["token_count"] += chosen_lengths.sum() + rejected_lengths.sum()
+                chosen_lengths = (batch["chosen_labels"] != -100).sum(dim=1)
+                rejected_lengths = (batch["rejected_labels"] != -100).sum(dim=1)
+                local_metrics["token_count"] += chosen_lengths.sum() + rejected_lengths.sum()
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
