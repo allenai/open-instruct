@@ -442,9 +442,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     num_training_steps = len(data_loader) * args.num_epochs
     optim, scheduler = _setup_optimizer_and_scheduler(args, model, num_training_steps)
 
-    for group in optim.param_groups:
-        group["lr"] = 0.0
-
     max_grad_norm = args.max_grad_norm if args.max_grad_norm > 0 else None
     train_module = DPOTrainModule(
         model=model,
@@ -462,7 +459,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.max_train_steps is not None:
         max_duration = train.Duration.steps(args.max_train_steps)
     else:
-        max_duration = train.Duration.epochs(args.num_epochs)
+        max_duration = train.Duration.steps(num_training_steps)
 
     trainer = train.TrainerConfig(
         save_folder=args.output_dir,
