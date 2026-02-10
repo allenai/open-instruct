@@ -1,7 +1,15 @@
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 from transformers import DefaultDataCollator
+
+
+def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float) -> torch.Tensor:
+    """Right-pad a tensor to a specified length along the last dimension."""
+    if tensor.size(-1) >= length:
+        return tensor
+    return torch.nn.functional.pad(tensor, (0, length - tensor.size(-1)), value=pad_value)
 
 
 @dataclass
@@ -22,6 +30,8 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
     return_position_ids: bool = True
     return_seq_idx: bool = True
     separator_id: int = -100
+    pad_to_max_length: int | None = None
+    pad_token_id: int = 0
 
     def __call__(self, features, return_tensors=None, separator_id=None):
         if return_tensors is None:
@@ -36,7 +46,7 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         if self.return_seq_idx:
             seq_idx = []
         is_labels_provided = "labels" in features[0]
-        ret = {"input_ids": [], "labels": []}
+        ret: dict[str, Any] = {"input_ids": [], "labels": []}
         separator = torch.tensor(
             [separator_id], dtype=features[0]["input_ids"].dtype, device=features[0]["input_ids"].device
         )
@@ -68,6 +78,16 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
             ret["seq_idx"] = torch.cat(seq_idx, dim=0)[None]
         ret["input_ids"] = torch.cat(ret["input_ids"], dim=0)[None]
         ret["labels"] = torch.cat(ret["labels"], dim=0)[None]
+
+        if self.pad_to_max_length is not None:
+            length = self.pad_to_max_length
+            ret["input_ids"] = pad_to_length(ret["input_ids"], length, self.pad_token_id)
+            ret["labels"] = pad_to_length(ret["labels"], length, -100)
+            if "position_ids" in ret:
+                ret["position_ids"] = pad_to_length(ret["position_ids"], length, 0)
+            if "seq_idx" in ret:
+                ret["seq_idx"] = pad_to_length(ret["seq_idx"], length, -1)
+
         return ret
 
 

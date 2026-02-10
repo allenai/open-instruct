@@ -48,6 +48,7 @@ from open_instruct.dataset_transformation import (
 from open_instruct.model_utils import log_softmax_and_gather
 from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
 from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
+from open_instruct.padding_free_collator import pad_to_length
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -1070,13 +1071,6 @@ def separate_forward_olmo(
     torch.cuda.empty_cache()
 
     return chosen_logps, rejected_logps, None
-
-
-def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float) -> torch.Tensor:
-    """Right-pad a tensor to a specified length along the last dimension."""
-    if tensor.size(-1) >= length:
-        return tensor
-    return torch.nn.functional.pad(tensor, (0, length - tensor.size(-1)), value=pad_value)
 
 
 @dataclass

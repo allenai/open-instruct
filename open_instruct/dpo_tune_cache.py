@@ -414,7 +414,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
     # DataLoaders creation:
     if args.packing:
         accelerator.print("Using packing/padding-free collation")
-        collate_fn = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
+        collate_fn = TensorDataCollatorWithFlatteningDPO(
+            return_position_ids=True,
+            return_flash_attn_kwargs=True,
+            pad_to_max_length=args.max_seq_length,
+            pad_token_id=tokenizer.pad_token_id or 0,
+        )
     else:
         collate_fn = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
 
