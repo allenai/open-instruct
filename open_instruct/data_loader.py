@@ -366,9 +366,8 @@ class StreamingDataLoaderConfig:
 
     # Evolving rubric reward
     apply_evolving_rubric_reward: bool = False
-    """Whether to generate and apply evolving rubrics for reward computation."""
-    use_rubric_buffer: bool = False
-    """Whether to maintain a buffer of rubrics across training steps."""
+    """Whether to generate and apply evolving rubrics for reward computation.
+    When enabled, a rubric buffer is automatically maintained across training steps."""
     max_active_rubrics: int = 5
     """Maximum number of active evolving rubrics per query."""
     cache_evolving_rubric_data_dir: str | None = None

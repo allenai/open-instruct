@@ -77,7 +77,6 @@ python3 open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list rl-research/dr-tulu-rl-data 8 \
     --dataset_mixer_eval_list_splits train \
     --apply_evolving_rubric_reward true \
-    --use_rubric_buffer true \
     --max_active_rubrics 5 \
     --max_prompt_token_length 512 \
     --response_length 1024 \
