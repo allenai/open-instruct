@@ -5,7 +5,6 @@ LR=1e-6
 EXP_NAME=hybrid-7b-DPO-cache-debug-16k-zero3-${LR}
 
 uv run python mason.py \
-    --cluster ai2/saturn \
     --cluster ai2/jupiter \
     --description "2 node DPO cache, hybrid model, 16k seq, ZeRO-3." \
     --workspace ai2/open-instruct-dev \
