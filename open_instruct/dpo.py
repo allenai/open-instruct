@@ -283,6 +283,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     beaker_config = utils.setup_experiment_paths(args, is_main_process)
 
+    existing_checkpoint = utils.get_last_checkpoint(args.output_dir) if os.path.isdir(args.output_dir) else None
+    utils.ensure_beaker_restart_has_checkpoint(existing_checkpoint, checkpoint_name="DPO checkpoint")
+
     if is_main_process:
         os.makedirs(args.output_dir, exist_ok=True)
     if distributed_utils.is_distributed():

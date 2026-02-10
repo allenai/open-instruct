@@ -58,6 +58,7 @@ from open_instruct.utils import (
     ArgumentParserPlus,
     ModelDims,
     clean_last_n_checkpoints,
+    ensure_beaker_restart_has_checkpoint,
     get_last_checkpoint_path,
     get_wandb_tags,
     is_beaker_job,
@@ -494,6 +495,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # Potentially load in the weights and states from a previous save
     last_checkpoint_path = get_last_checkpoint_path(args)
+    ensure_beaker_restart_has_checkpoint(last_checkpoint_path, checkpoint_name="DPO checkpoint")
     resume_step = None
     if last_checkpoint_path:
         accelerator.print(f"Resumed from checkpoint: {last_checkpoint_path}")

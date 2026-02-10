@@ -154,6 +154,29 @@ def setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, initial_descrip
     return mock_client, mock_spec, description_history
 
 
+class TestBeakerRunNumber(unittest.TestCase):
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_get_beaker_run_number_defaults_to_1(self):
+        self.assertEqual(utils.get_beaker_run_number(), 1)
+
+    @mock.patch.dict(os.environ, {"BEAKER_RUN_NUMBER": "3"}, clear=True)
+    def test_get_beaker_run_number_reads_env(self):
+        self.assertEqual(utils.get_beaker_run_number(), 3)
+
+    @mock.patch.dict(os.environ, {"BEAKER_RUN_NUMBER": "abc"}, clear=True)
+    def test_get_beaker_run_number_invalid_defaults_to_1(self):
+        self.assertEqual(utils.get_beaker_run_number(), 1)
+
+    @mock.patch.dict(os.environ, {"BEAKER_JOB_ID": "job-1", "BEAKER_RUN_NUMBER": "2"}, clear=True)
+    def test_ensure_beaker_restart_has_checkpoint_raises_when_missing(self):
+        with self.assertRaisesRegex(RuntimeError, "no test checkpoint was found"):
+            utils.ensure_beaker_restart_has_checkpoint(None, checkpoint_name="test checkpoint")
+
+    @mock.patch.dict(os.environ, {"BEAKER_JOB_ID": "job-1", "BEAKER_RUN_NUMBER": "2"}, clear=True)
+    def test_ensure_beaker_restart_has_checkpoint_accepts_existing(self):
+        utils.ensure_beaker_restart_has_checkpoint("/tmp/step_10", checkpoint_name="test checkpoint")
+
+
 class TestBeakerDescription(unittest.TestCase):
     """Test the beaker description update function."""
 
