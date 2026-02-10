@@ -165,10 +165,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # ------------------------------------------------------------
     # Set up runtime variables
-    if args.add_seed_and_date_to_exp_name:
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    else:
-        args.exp_name = args.exp_name
     if not args.do_not_randomize_output_dir:
         args.output_dir = os.path.join(args.output_dir, args.exp_name)
     logger.info("using the output directory: %s", args.output_dir)
@@ -745,7 +741,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
                     with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                         f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-                    if accelerator.is_local_main_process:
+                    if accelerator.is_main_process:
                         clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
                     accelerator.wait_for_everyone()
 
@@ -760,7 +756,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
             with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                 f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-            if accelerator.is_local_main_process:
+            if accelerator.is_main_process:
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
 
@@ -770,7 +766,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         )
 
     # remove all checkpoints to save space
-    if accelerator.is_local_main_process:
+    if accelerator.is_main_process:
         clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
 
     if (
