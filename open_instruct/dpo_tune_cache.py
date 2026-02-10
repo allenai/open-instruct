@@ -30,6 +30,7 @@ import pathlib
 import random
 import shutil
 import time
+from torch import profiler as torch_profiler
 from datetime import timedelta
 
 import datasets
@@ -581,10 +582,27 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         else:
             active_dataloader = train_dataloader
         # we need to average the log probs for simpo loss
+        micro_step = 0
         for batch in active_dataloader:
+            should_profile = (
+                args.profile_every_n_steps > 0
+                and completed_steps > 0
+                and completed_steps % args.profile_every_n_steps == 0
+                and micro_step % args.gradient_accumulation_steps == 0
+            )
+            profile_ctx = (
+                torch_profiler.profile(
+                    activities=[torch_profiler.ProfilerActivity.CPU, torch_profiler.ProfilerActivity.CUDA],
+                    record_shapes=True,
+                    with_stack=True,
+                )
+                if should_profile
+                else contextlib.nullcontext()
+            )
+
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
-            with accelerator.accumulate(model):
+            with profile_ctx as prof, accelerator.accumulate(model):
                 policy_chosen_logps, policy_rejected_logps, aux_loss = args.forward_fn(
                     model,
                     batch,
@@ -609,6 +627,17 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()
+
+            if should_profile:
+                trace_dir = os.path.join(args.output_dir or ".", "profiler_traces")
+                os.makedirs(trace_dir, exist_ok=True)
+                trace_path = os.path.join(trace_dir, f"step_{completed_steps}_rank_{accelerator.process_index}.json")
+                prof.export_chrome_trace(trace_path)
+                logger.info(f"Exported profiler trace to {trace_path}")
+                if accelerator.is_main_process:
+                    key_averages = prof.key_averages().table(sort_by="cuda_time_total", row_limit=30)
+                    logger.info(f"Profiler summary (step {completed_steps}):\n{key_averages}")
+            micro_step += 1
 
                 # We keep track of the loss at each logged step
                 with torch.no_grad():

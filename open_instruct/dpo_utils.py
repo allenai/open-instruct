@@ -166,6 +166,8 @@ class TrainingConfig:
     """FSDP shard degree. None means auto-detect."""
     num_replicas: int | None = None
     """Number of FSDP replicas. None means auto-detect."""
+    profile_every_n_steps: int = 0
+    """Profile one training step every N steps with torch.profiler. 0 disables profiling."""
 
 
 @dataclass
