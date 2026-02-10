@@ -826,7 +826,7 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
     if keep_last_n_checkpoints >= 0 and len(checkpoints) > keep_last_n_checkpoints:
         for checkpoint in checkpoints[: len(checkpoints) - keep_last_n_checkpoints]:
             logger.info(f"Removing checkpoint {checkpoint}")
-            shutil.rmtree(os.path.join(output_dir, checkpoint))
+            shutil.rmtree(os.path.join(output_dir, checkpoint), ignore_errors=True)
     logger.info("Remaining files:" + str(os.listdir(output_dir)))
 
 
@@ -847,7 +847,7 @@ def clean_last_n_checkpoints_deepspeed(output_dir: str, keep_last_n_checkpoints:
             print(f"Removing checkpoint {checkpoint}")
             checkpoint_path = os.path.join(output_dir, checkpoint)
             if os.path.isdir(checkpoint_path):
-                shutil.rmtree(checkpoint_path)
+                shutil.rmtree(checkpoint_path, ignore_errors=True)
             elif os.path.isfile(checkpoint_path):
                 os.remove(checkpoint_path)
 
