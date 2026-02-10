@@ -108,10 +108,10 @@ class DPOTrainModule(TrainModule):
         if self.max_grad_norm is not None:
             grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
             self.trainer.record_metric("total grad norm", grad_norm, reduce_type=None, namespace="optim")
+        self.optim.step()
         for group_idx, group in enumerate(self.optim.param_groups):
             new_lr = self.scheduler.set_lr(group, self.trainer)
             self.trainer.record_metric(f"LR (group {group_idx})", new_lr, namespace="optim")
-        self.optim.step()
 
     def num_flops_per_token(self, seq_len: int) -> int:
         return self.model.num_flops_per_token(seq_len)
