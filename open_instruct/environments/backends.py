@@ -353,7 +353,11 @@ class DaytonaBackend(SandboxBackend):
         logger.info(f"Starting Daytona sandbox (image={self._image}, timeout={self._timeout})")
         self._daytona = Daytona(config) if config else Daytona()
 
-        params = CreateSandboxFromImageParams(image=self._image)
+        params = CreateSandboxFromImageParams(
+            image=self._image,
+            auto_stop_interval=10,  # minutes — auto-stop if idle (leak protection)
+            auto_archive_interval=0,  # don't archive, just stop
+        )
         self._sandbox = _daytona_retry(self._daytona.create, params, timeout=self._timeout)
         logger.info("Daytona sandbox started")
 

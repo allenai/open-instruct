@@ -357,3 +357,7 @@ class SandboxLMEnv(RLEnvironment):
         if self._backend is not None:
             self._backend.close()
             self._backend = None
+
+    async def shutdown(self) -> None:
+        """Clean up backend on actor shutdown."""
+        await self.close()
