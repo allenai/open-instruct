@@ -18,6 +18,7 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     --env 'TORCH_LOGS=graph_breaks,recompiles' \
+    --env TRITON_PRINT_AUTOTUNING=1 \
     --gpus 8 -- torchrun \
     --nnodes=2 \
     --node_rank=\$BEAKER_REPLICA_RANK \
@@ -43,6 +44,7 @@ uv run python mason.py \
     --loss_type dpo_norm \
     --beta 5 \
     --activation_memory_budget 0.5 \
+    --packing \
     --with_tracking \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false

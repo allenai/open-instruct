@@ -18,12 +18,13 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    --gpus 8 -- torchrun \
-    --nnodes=2 \
-    --node_rank=\$BEAKER_REPLICA_RANK \
-    --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
-    --master_port=29400 \
-    --nproc_per_node=8 \
+    --env TRITON_PRINT_AUTOTUNING=1 \
+    --gpus 8 -- accelerate launch \
+    --mixed_precision bf16 \
+    --num_processes 8 \
+    --use_deepspeed \
+    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_multinode_launcher standard \
     open_instruct/dpo_tune_cache.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
@@ -43,6 +44,6 @@ uv run python mason.py \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
+    --packing \
     --activation_memory_budget 0.5 \
-    --zero_stage 3 \
     --with_tracking
