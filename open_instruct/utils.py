@@ -826,7 +826,7 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
     if keep_last_n_checkpoints >= 0 and len(checkpoints) > keep_last_n_checkpoints:
         for checkpoint in checkpoints[: len(checkpoints) - keep_last_n_checkpoints]:
             logger.info(f"Removing checkpoint {checkpoint}")
-            shutil.rmtree(os.path.join(output_dir, checkpoint))
+            shutil.rmtree(os.path.join(output_dir, checkpoint), ignore_errors=True)
     logger.info("Remaining files:" + str(os.listdir(output_dir)))
 
 
@@ -847,7 +847,7 @@ def clean_last_n_checkpoints_deepspeed(output_dir: str, keep_last_n_checkpoints:
             print(f"Removing checkpoint {checkpoint}")
             checkpoint_path = os.path.join(output_dir, checkpoint)
             if os.path.isdir(checkpoint_path):
-                shutil.rmtree(checkpoint_path)
+                shutil.rmtree(checkpoint_path, ignore_errors=True)
             elif os.path.isfile(checkpoint_path):
                 os.remove(checkpoint_path)
 
@@ -1339,8 +1339,7 @@ def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig |
 
     Modifies args in-place. Returns BeakerRuntimeConfig if on Beaker.
     """
-    if getattr(args, "add_seed_and_date_to_exp_name", False):
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.exp_name = f"{args.exp_name}__{args.seed}"
     args.output_dir = os.path.join(args.output_dir, args.exp_name)
 
     if dist.is_initialized():

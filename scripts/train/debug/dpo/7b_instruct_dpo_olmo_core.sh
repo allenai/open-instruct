@@ -2,7 +2,7 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
 LR=1e-6
-EXP_NAME=olmo3-7b-DPO-olmo-core-8k-${LR}
+EXP_NAME=olmo3-7b-DPO-olmo-core-8k-${LR}-$(date +%s)
 
 uv run python mason.py \
     --cluster ai2/saturn \
