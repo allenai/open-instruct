@@ -1,5 +1,6 @@
 """SandboxLM environment — mirrors llm-in-sandbox tools (execute_bash + str_replace_editor)."""
 
+import contextlib
 import shlex
 
 from open_instruct import logger_utils
@@ -136,6 +137,21 @@ class SandboxLMEnv(RLEnvironment):
     # Reset
     # ------------------------------------------------------------------
     async def reset(self, task_id: str | None = None, **kwargs) -> StepResult:
+        last_error = None
+        for attempt in range(3):
+            try:
+                return self._do_reset(task_id, **kwargs)
+            except Exception as e:
+                last_error = e
+                logger.warning(f"SandboxLMEnv.reset attempt {attempt + 1} failed: {e}. Retrying...")
+                # Backend may be stale — force close before retry
+                if self._backend is not None:
+                    with contextlib.suppress(Exception):
+                        self._backend.close()
+                    self._backend = None
+        raise last_error  # type: ignore[misc]
+
+    def _do_reset(self, task_id: str | None = None, **kwargs) -> StepResult:
         # Tear down previous sandbox if any
         if self._backend is not None:
             self._backend.close()
