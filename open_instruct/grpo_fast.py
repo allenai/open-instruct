@@ -75,7 +75,7 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
-from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, PreTrainedModel, PreTrainedTokenizer, get_scheduler
+from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import logger_utils, vllm_utils
@@ -326,14 +326,13 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.ref_policy_checkpoint_path = model_path
                         logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
 
-                # Save value model path to load later (after value model is initialized)
+                # Save value model dir path to load later (after value model is initialized)
                 self.value_model_checkpoint_path = None
                 if args.use_value_model and states.get("value_model_saved", False):
                     value_model_dir = os.path.join(args.checkpoint_state_dir, "value_model")
-                    model_path = os.path.join(value_model_dir, "pytorch_model.bin")
-                    if os.path.exists(model_path):
-                        self.value_model_checkpoint_path = model_path
-                        logger.info(f"{self.rank=}: Will load value model from {model_path}")
+                    if os.path.exists(os.path.join(value_model_dir, "value_model.bin")):
+                        self.value_model_checkpoint_path = value_model_dir
+                        logger.info(f"{self.rank=}: Will load value model from {value_model_dir}")
 
                 logger.info(
                     f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
@@ -426,18 +425,21 @@ class PolicyTrainerRayProcess(RayProcess):
         model_config: ModelConfig,
         ds_config: dict | None,
     ) -> None:
-        """Initialize a separate value model for PPO training."""
+        """Initialize a separate value model for PPO training.
+
+        Uses AutoModelForCausalLM (for broad architecture support) with a separate
+        value head linear layer that projects hidden states to scalar values.
+        """
         logger.info(f"{self.rank=}: Initializing value model")
 
         # Check if we should load from checkpoint
         checkpoint_path = getattr(self, "value_model_checkpoint_path", None)
 
-        # Load a separate value model
+        # Load as CausalLM for broad architecture support (e.g. Olmo3 doesn't support SequenceClassification)
         value_model_path = args.value_model_name_or_path or model_config.model_name_or_path
-        self.value_model = AutoModelForSequenceClassification.from_pretrained(
+        self.value_model = AutoModelForCausalLM.from_pretrained(
             value_model_path,
             revision=model_config.model_revision if args.value_model_name_or_path is None else None,
-            num_labels=1,
             torch_dtype=torch.bfloat16,
             attn_implementation=model_config.attn_implementation,
             use_cache=False,
@@ -445,21 +447,28 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.value_model)
 
-        # Initialize the value head with small weights for stable training (if not loading from checkpoint)
-        if checkpoint_path is None and hasattr(self.value_model, "score"):
-            hidden_size = self.value_model.config.hidden_size
-            std = 1.0 / (hidden_size + 1) ** 0.5
-            torch.nn.init.normal_(self.value_model.score.weight, mean=0.0, std=std)
-            if self.value_model.score.bias is not None:
-                torch.nn.init.zeros_(self.value_model.score.bias)
+        # Add a value head: linear projection from hidden_size -> 1
+        hidden_size = self.value_model.config.hidden_size
+        self.value_head = torch.nn.Linear(hidden_size, 1, dtype=torch.bfloat16)
+
+        # Initialize with small weights for stable training
+        std = 1.0 / (hidden_size + 1) ** 0.5
+        torch.nn.init.normal_(self.value_head.weight, mean=0.0, std=std)
+        torch.nn.init.zeros_(self.value_head.bias)
 
         # Load from checkpoint if available
         if checkpoint_path is not None:
-            state_dict = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
-            self.value_model.load_state_dict(state_dict)
+            model_state = torch.load(
+                os.path.join(checkpoint_path, "value_model.bin"), map_location=self.device, weights_only=True
+            )
+            self.value_model.load_state_dict(model_state)
+            head_path = os.path.join(checkpoint_path, "value_head.bin")
+            if os.path.exists(head_path):
+                head_state = torch.load(head_path, map_location=self.device, weights_only=True)
+                self.value_head.load_state_dict(head_state)
             logger.info(f"{self.rank=}: Loaded value model from checkpoint {checkpoint_path}")
 
-        # Initialize with DeepSpeed for efficient training
+        # Initialize backbone with DeepSpeed for efficient training (sharding etc.)
         if ds_config is not None:
             self.value_model, *_ = deepspeed.initialize(
                 model=self.value_model,
@@ -468,7 +477,23 @@ class PolicyTrainerRayProcess(RayProcess):
                 mpu=self.mpu,
             )
         self.value_model.eval()
-        logger.info(f"{self.rank=}: Loaded value model from {value_model_path}")
+
+        # Value head stays on device (small, not sharded)
+        self.value_head = self.value_head.to(self.device)
+        self.value_head_optimizer = torch.optim.AdamW(
+            self.value_head.parameters(),
+            lr=args.learning_rate,
+        )
+
+        # Load value head optimizer state from checkpoint if available
+        if checkpoint_path is not None:
+            optimizer_path = os.path.join(checkpoint_path, "value_head_optimizer.bin")
+            if os.path.exists(optimizer_path):
+                optimizer_state = torch.load(optimizer_path, map_location=self.device, weights_only=True)
+                self.value_head_optimizer.load_state_dict(optimizer_state)
+                logger.info(f"{self.rank=}: Loaded value head optimizer from checkpoint")
+
+        logger.info(f"{self.rank=}: Loaded value model from {value_model_path} (hidden_size={hidden_size})")
 
     def forward_value(
         self,
@@ -512,7 +537,7 @@ class PolicyTrainerRayProcess(RayProcess):
             )
             # Get last hidden states and project through value head
             last_hidden = output.hidden_states[-1]
-            values = self.value_model.score(last_hidden).squeeze(-1)
+            values = self.value_head(last_hidden).squeeze(-1)
 
             # Zero out values at non-response positions
             values = values * response_mask.float()
@@ -1109,10 +1134,24 @@ class PolicyTrainerRayProcess(RayProcess):
                     if not is_value_warmup:
                         self.model.backward(policy_loss)
 
+                    # Value head backward (value head is not part of DeepSpeed model)
+                    if self.args.use_value_model and value_loss_BT is not None:
+                        value_loss = masked_mean(
+                            value_loss_BT[:, 1:],
+                            response_mask_BT,
+                            None,
+                            loss_denominator,
+                        ) * self.args.value_loss_coef
+                        value_loss.backward()
+
                     if (local_step + 1) % accumulation_steps == 0:
                         # During value warmup, skip policy optimizer step
                         if not is_value_warmup:
                             self.model.step()
+                        # Step the value head optimizer
+                        if self.args.use_value_model and hasattr(self, "value_head_optimizer"):
+                            self.value_head_optimizer.step()
+                            self.value_head_optimizer.zero_grad()
 
                     # Compute total loss for logging
                     if self.args.use_value_model and value_loss_BT is not None:
@@ -1197,10 +1236,18 @@ class PolicyTrainerRayProcess(RayProcess):
             os.makedirs(value_model_dir, exist_ok=True)
 
             if self.rank == 0 and self.value_model is not None:
-                # Save the value model
+                # Save the value model backbone
                 model_to_save = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
-                torch.save(model_to_save.state_dict(), os.path.join(value_model_dir, "pytorch_model.bin"))
-                logger.info(f"Saved value model to {value_model_dir}")
+                torch.save(model_to_save.state_dict(), os.path.join(value_model_dir, "value_model.bin"))
+                # Save the value head and its optimizer
+                if self.value_head is not None:
+                    torch.save(self.value_head.state_dict(), os.path.join(value_model_dir, "value_head.bin"))
+                if hasattr(self, "value_head_optimizer"):
+                    torch.save(
+                        self.value_head_optimizer.state_dict(),
+                        os.path.join(value_model_dir, "value_head_optimizer.bin"),
+                    )
+                logger.info(f"Saved value model + head to {value_model_dir}")
 
             client_state["value_model_saved"] = True
 
