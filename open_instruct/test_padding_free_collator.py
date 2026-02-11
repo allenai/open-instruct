@@ -17,7 +17,7 @@ from transformers import (
 
 from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dataset_transformation import sft_tulu_tokenize_and_truncate_v1
-from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening, TensorDataCollatorWithFlatteningDPO
+from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 
 try:
     import mamba_ssm  # noqa
@@ -168,95 +168,3 @@ class TestPaddingFree(unittest.TestCase):
         pf_grads = {n: p.grad for n, p in pf_model.named_parameters()}
         for k, g in grads.items():
             torch.testing.assert_close(g, pf_grads[k])
-
-
-def _make_dpo_features(chosen_len, rejected_len, num_features=2):
-    """Create simple DPO features with known lengths."""
-    features = []
-    for _ in range(num_features):
-        features.append(
-            {
-                "chosen_input_ids": torch.arange(1, chosen_len + 1),
-                "chosen_labels": torch.arange(1, chosen_len + 1),
-                "rejected_input_ids": torch.arange(1, rejected_len + 1),
-                "rejected_labels": torch.arange(1, rejected_len + 1),
-            }
-        )
-    return features
-
-
-class TestPaddingFreeMaxLengthPadding(unittest.TestCase):
-    def test_pad_to_max_length_pads_correctly(self):
-        features = _make_dpo_features(chosen_len=5, rejected_len=7, num_features=2)
-        target_length = 32
-        pad_token_id = 99
-
-        collator = TensorDataCollatorWithFlatteningDPO(
-            return_position_ids=True,
-            return_flash_attn_kwargs=True,
-            pad_to_max_length=target_length,
-            pad_token_id=pad_token_id,
-        )
-        batch = collator(features)
-
-        for prefix in ("chosen_", "rejected_"):
-            self.assertEqual(batch[f"{prefix}input_ids"].shape, (1, target_length))
-            self.assertEqual(batch[f"{prefix}labels"].shape, (1, target_length))
-            self.assertEqual(batch[f"{prefix}position_ids"].shape, (1, target_length))
-            self.assertEqual(batch[f"{prefix}seq_idx"].shape, (1, target_length))
-
-            input_ids = batch[f"{prefix}input_ids"][0]
-            labels = batch[f"{prefix}labels"][0]
-            position_ids = batch[f"{prefix}position_ids"][0]
-            seq_idx_vals = batch[f"{prefix}seq_idx"][0]
-
-            cu_seq_lens = batch[f"{prefix}cu_seq_lens_q"]
-            real_len = cu_seq_lens[-1].item()
-
-            self.assertTrue((input_ids[real_len:] == pad_token_id).all())
-            self.assertTrue((labels[real_len:] == -100).all())
-            self.assertTrue((position_ids[real_len:] == 0).all())
-            self.assertTrue((seq_idx_vals[real_len:] == -1).all())
-
-    def test_pad_to_max_length_no_op_when_exact(self):
-        features = _make_dpo_features(chosen_len=5, rejected_len=5, num_features=1)
-        collator_no_pad = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
-        unpadded = collator_no_pad(features)
-        concat_len = unpadded["chosen_input_ids"].shape[-1]
-
-        collator_exact = TensorDataCollatorWithFlatteningDPO(
-            return_position_ids=True, return_flash_attn_kwargs=True, pad_to_max_length=concat_len
-        )
-        padded = collator_exact(features)
-
-        for prefix in ("chosen_", "rejected_"):
-            torch.testing.assert_close(padded[f"{prefix}input_ids"], unpadded[f"{prefix}input_ids"])
-            torch.testing.assert_close(padded[f"{prefix}labels"], unpadded[f"{prefix}labels"])
-
-    def test_pad_to_max_length_none_no_padding(self):
-        features = _make_dpo_features(chosen_len=5, rejected_len=7, num_features=2)
-
-        collator = TensorDataCollatorWithFlatteningDPO(
-            return_position_ids=True, return_flash_attn_kwargs=True, pad_to_max_length=None
-        )
-        batch = collator(features)
-
-        for prefix in ("chosen_", "rejected_"):
-            cu_seq_lens = batch[f"{prefix}cu_seq_lens_q"]
-            expected_len = cu_seq_lens[-1].item()
-            self.assertEqual(batch[f"{prefix}input_ids"].shape[-1], expected_len)
-
-    def test_pad_to_max_length_cu_seq_lens_unchanged(self):
-        features = _make_dpo_features(chosen_len=5, rejected_len=7, num_features=2)
-
-        collator_no_pad = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
-        collator_padded = TensorDataCollatorWithFlatteningDPO(
-            return_position_ids=True, return_flash_attn_kwargs=True, pad_to_max_length=64
-        )
-
-        batch_no_pad = collator_no_pad(features)
-        batch_padded = collator_padded(features)
-
-        for prefix in ("chosen_", "rejected_"):
-            torch.testing.assert_close(batch_padded[f"{prefix}cu_seq_lens_q"], batch_no_pad[f"{prefix}cu_seq_lens_q"])
-            self.assertEqual(batch_padded[f"{prefix}max_length_q"], batch_no_pad[f"{prefix}max_length_q"])

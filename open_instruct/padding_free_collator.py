@@ -1,15 +1,7 @@
 from dataclasses import dataclass
-from typing import Any
 
 import torch
 from transformers import DefaultDataCollator
-
-
-def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float) -> torch.Tensor:
-    """Right-pad a tensor to a specified length along the last dimension."""
-    if tensor.size(-1) >= length:
-        return tensor
-    return torch.nn.functional.pad(tensor, (0, length - tensor.size(-1)), value=pad_value)
 
 
 @dataclass
@@ -30,8 +22,6 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
     return_position_ids: bool = True
     return_seq_idx: bool = True
     separator_id: int = -100
-    pad_to_max_length: int | None = None
-    pad_token_id: int = 0
 
     def __call__(self, features, return_tensors=None, separator_id=None):
         if return_tensors is None:
@@ -46,7 +36,7 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         if self.return_seq_idx:
             seq_idx = []
         is_labels_provided = "labels" in features[0]
-        ret: dict[str, Any] = {"input_ids": [], "labels": []}
+        ret = {"input_ids": [], "labels": []}
         separator = torch.tensor(
             [separator_id], dtype=features[0]["input_ids"].dtype, device=features[0]["input_ids"].device
         )
@@ -78,16 +68,6 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
             ret["seq_idx"] = torch.cat(seq_idx, dim=0)[None]
         ret["input_ids"] = torch.cat(ret["input_ids"], dim=0)[None]
         ret["labels"] = torch.cat(ret["labels"], dim=0)[None]
-
-        if self.pad_to_max_length is not None:
-            length = self.pad_to_max_length
-            ret["input_ids"] = pad_to_length(ret["input_ids"], length, self.pad_token_id)
-            ret["labels"] = pad_to_length(ret["labels"], length, -100)
-            if "position_ids" in ret:
-                ret["position_ids"] = pad_to_length(ret["position_ids"], length, 0)
-            if "seq_idx" in ret:
-                ret["seq_idx"] = pad_to_length(ret["seq_idx"], length, -1)
-
         return ret
 
 
@@ -126,14 +106,7 @@ def concatenated_inputs(
         else:
             rejected_features[k.replace("rejected_", "")] = batch[k]
 
-    # Strip padding before concatenating so cu_seq_lens offsets stay valid.
-    for feats in (chosen_features, rejected_features):
-        if "cu_seq_lens_k" in feats:
-            real_len = feats["cu_seq_lens_k"][-1].item()
-            for key in ("input_ids", "labels", "position_ids", "seq_idx"):
-                if key in feats:
-                    feats[key] = feats[key][:, :real_len]
-
+    # - need to return chosen
     ret = {f"{tag}input_ids": torch.cat([chosen_features["input_ids"], rejected_features["input_ids"]], dim=-1)}
     if "labels" in chosen_features:
         ret[f"{tag}labels"] = torch.cat([chosen_features["labels"], rejected_features["labels"]], dim=-1)
@@ -178,20 +151,14 @@ def get_batch_logps(
     #   loss mask == True at those places
     labels = labels[:, 1:].clone()
     logits = logits[:, :-1, :]
-
-    # there is a labels, logits shift operation above
-    cu_seq_lens = cu_seq_lens.clone() - 1
-    cu_seq_lens[0] = 0
-
-    # Truncate to real content length (discard padding beyond cu_seq_lens).
-    real_len = cu_seq_lens[-1].item()
-    labels = labels[:, :real_len]
-    logits = logits[:, :real_len, :]
-
     loss_mask = labels != -100
 
     # dummy token; we'll ignore the losses on these tokens later
     labels[labels == -100] = 0
+
+    # there is a labels, logits shift operation above
+    cu_seq_lens = cu_seq_lens.clone() - 1
+    cu_seq_lens[0] = 0
 
     splits = cu_seq_lens.diff().tolist()
     per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)

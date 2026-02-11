@@ -1016,6 +1016,7 @@ def concatenated_forward_olmo(
     else:
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
+    logger.info("Model forward: input_ids shape=%s", concatenated_batch["concatenated_input_ids"].shape)
     logits = model(concatenated_batch["concatenated_input_ids"]).to(torch.float32)
 
     if not packing:
