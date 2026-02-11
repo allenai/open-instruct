@@ -311,8 +311,8 @@ class StreamingDataLoaderConfig:
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
 
-    # PPO with Value Model
-    use_value_model: bool = False
+    # PPO with Value Model - synced from ExperimentConfig, not a CLI argument
+    use_value_model: bool = field(default=False, init=False)
     """When True, pass raw rewards to the trainer for GAE computation with value model.
     Advantages will still be computed for logging but won't be used for training."""
 
