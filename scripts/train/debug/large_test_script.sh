@@ -37,7 +37,9 @@ uv run python mason.py \
         --response_length 4096 \
         --pack_length 20480 \
         --model_name_or_path allenai/Olmo-3-1025-7B \
+	--trust_remote_code \
 	--add_bos \
+	--vllm_enforce_eager \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
         --stop_strings "</answer>" \
