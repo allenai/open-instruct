@@ -8,12 +8,11 @@ uv run python mason.py \
     --cluster ai2/jupiter \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
-    --workspace ai2/open-instruct-dev \
-    --priority urgent \
+    --workspace ai2/tulu-thinker \
+    --priority high \
     --preemptible \
     --num_nodes 1 \
-    --description "PPO with value model test (8 GPU, SP=2)" \
-    --timeout 1h \
+    --description "PPO with value model test" \
     --max_retries 0 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
@@ -38,7 +37,6 @@ uv run python mason.py \
     --response_length 2048 \
     --pack_length 4096 \
     --model_name_or_path Qwen/Qwen2.5-1.5B \
-    --chat_template_name tulu \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 1024 \
@@ -61,6 +59,11 @@ uv run python mason.py \
     --vf_clip_range 0.2 \
     --gamma 1.0 \
     --gae_lambda 0.95 \
+    --decoupled_gae \
+    --length_adaptive_gae \
+    --length_adaptive_gae_alpha 0.05 \
+    --positive_example_lm_loss \
+    --positive_example_lm_loss_coef 0.1 \
     --loss_fn dapo \
-    --clip_higher 0.2 \
+    --clip_higher 0.28 \
     --push_to_hub False

@@ -760,6 +760,8 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.args.use_value_model and "value_loss" in loss_stats_B:
             self.local_metrics["loss/value_avg"] = (loss_stats_B["value_loss"] * weights).sum()
             self.local_metrics["value/clipfrac_avg"] = (loss_stats_B["vf_clipfrac"] * weights).sum()
+        if self.args.positive_example_lm_loss and "positive_lm_loss" in loss_stats_B:
+            self.local_metrics["loss/positive_lm_avg"] = (loss_stats_B["positive_lm_loss"] * weights).sum()
 
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
         self.local_metrics["_token_count"] = total_valid_tokens
@@ -836,12 +838,18 @@ class PolicyTrainerRayProcess(RayProcess):
         device = token_counts_per_sample.device
 
         # For PPO with value model: compute value estimates and GAE advantages
+        # Supports VAPO-style decoupled GAE and length-adaptive GAE
+        # Reference: https://arxiv.org/abs/2504.05118
         values_BT: list[torch.Tensor] = []
         old_values_BT: list[torch.Tensor] = []
         returns_BT: list[torch.Tensor] = []
         gae_advantages_BT: list[torch.Tensor] = []
+        policy_lambda_used: float = self.args.gae_lambda  # For logging
         if self.args.use_value_model:
-            from open_instruct.rl_utils import calculate_advantages_packed
+            from open_instruct.rl_utils import calculate_advantages_packed, calculate_advantages_packed_vapo
+            
+            use_vapo_gae = self.args.decoupled_gae or self.args.length_adaptive_gae
+            
             with Timer("Value Model Computation", noop=self.rank != 0):
                 for i in range(num_samples):
                     # Compute value estimates for this batch
@@ -879,15 +887,31 @@ class PolicyTrainerRayProcess(RayProcess):
                         response_masks_np = data_BT.response_masks[i].cpu().numpy()
                         chunk_len = None
 
-                    # Compute GAE on full sequence
-                    advantages_np, returns_np = calculate_advantages_packed(
-                        values_np,
-                        rewards_np,
-                        self.args.gamma,
-                        self.args.gae_lambda,
-                        dones_np,
-                        response_masks_np,
-                    )
+                    if use_vapo_gae:
+                        # VAPO-style GAE with decoupled lambda for policy and critic
+                        # Critic uses lambda=1.0 for unbiased MC returns
+                        # Policy uses smaller/adaptive lambda for faster convergence
+                        advantages_np, returns_np, policy_lambda_used = calculate_advantages_packed_vapo(
+                            values_np,
+                            rewards_np,
+                            self.args.gamma,
+                            dones_np,
+                            response_masks_np,
+                            lam_policy=self.args.gae_lambda,
+                            lam_critic=1.0,  # Always use 1.0 for critic (unbiased)
+                            length_adaptive=self.args.length_adaptive_gae,
+                            length_adaptive_alpha=self.args.length_adaptive_gae_alpha,
+                        )
+                    else:
+                        # Standard GAE (same lambda for policy and critic)
+                        advantages_np, returns_np = calculate_advantages_packed(
+                            values_np,
+                            rewards_np,
+                            self.args.gamma,
+                            self.args.gae_lambda,
+                            dones_np,
+                            response_masks_np,
+                        )
 
                     # Convert to tensors
                     advantages = torch.tensor(advantages_np, device=device, dtype=torch.float32)
@@ -900,6 +924,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     gae_advantages_BT.append(advantages)
                     returns_BT.append(returns)
+                
+                # Log the policy lambda used (useful for length-adaptive GAE)
+                if use_vapo_gae:
+                    self.local_metrics["vapo/policy_lambda"] = policy_lambda_used
 
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
@@ -916,6 +944,8 @@ class PolicyTrainerRayProcess(RayProcess):
             if self.args.use_value_model:
                 loss_stats_B["value_loss"] = torch.zeros(num_samples, device=device)
                 loss_stats_B["vf_clipfrac"] = torch.zeros(num_samples, device=device)
+                if self.args.positive_example_lm_loss:
+                    loss_stats_B["positive_lm_loss"] = torch.zeros(num_samples, device=device)
             for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
@@ -1082,6 +1112,35 @@ class PolicyTrainerRayProcess(RayProcess):
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
                     policy_loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
 
+                    # VAPO Positive Example LM Loss (Self-Imitation Learning)
+                    # Add NLL loss on correct/positive examples to improve sample efficiency
+                    # Reference: https://arxiv.org/abs/2504.05118 Section 4.3
+                    positive_lm_loss = torch.tensor(0.0, device=policy_loss.device)
+                    if self.args.positive_example_lm_loss and self.args.use_value_model:
+                        # Check if this sample has positive reward (sum of rewards > 0)
+                        # For verifiable rewards, positive means the answer was correct
+                        sample_reward = data_BT.rewards[i].sum(dim=-1)  # Sum across sequence
+                        positive_mask = (sample_reward > 0).float()  # (batch_size,)
+                        
+                        if positive_mask.sum() > 0:
+                            # Compute NLL loss on response tokens for positive samples
+                            # new_logprobs_BT is already computed above
+                            nll_loss_BT = -new_logprobs_BT  # Negative log probs
+                            
+                            # Mask to only include positive samples and response tokens
+                            positive_response_mask = response_mask_BT * positive_mask.unsqueeze(-1)
+                            
+                            if positive_response_mask.sum() > 0:
+                                positive_lm_loss = masked_mean(
+                                    nll_loss_BT, positive_response_mask, None, positive_response_mask.sum()
+                                )
+                                # Scale by coefficient and world size
+                                positive_lm_loss = positive_lm_loss * self.args.positive_example_lm_loss_coef
+                                positive_lm_loss = positive_lm_loss * (self.args.world_size // self.args.sequence_parallel_size)
+
+                    # Combine policy loss with positive example LM loss
+                    total_policy_loss = policy_loss + positive_lm_loss
+
                     # we already took world size into account via the tokens
                     # but deepspeed will try to average over ranks, so multiply back
                     # up, adjusting for the sequence parallel size (adjust by dp world size).
@@ -1089,7 +1148,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
-                    self.model.backward(policy_loss)
+                    self.model.backward(total_policy_loss)
 
                     # Handle value head backward separately when using shared backbone
                     # (value head is not part of DeepSpeed model)
@@ -1137,6 +1196,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         if self.args.use_value_model and value_loss_BT is not None:
                             loss_stats_B["value_loss"][i] = masked_mean(value_loss_BT[:, 1:], response_mask_BT)
                             loss_stats_B["vf_clipfrac"][i] = masked_mean(vf_clipfrac_BT[:, 1:], response_mask_BT)
+                        if self.args.positive_example_lm_loss and positive_lm_loss.item() > 0:
+                            loss_stats_B["positive_lm_loss"][i] = positive_lm_loss.detach()
 
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():

@@ -103,7 +103,8 @@ class ExperimentConfig:
     temperature: float = field(default=1.0, init=False)
     """RUNTIME VALUE: Temperature for sampling, set from streaming_config."""
 
-    # PPO with Value Model
+    # PPO with Value Model (VAPO-style)
+    # Reference: https://arxiv.org/abs/2504.05118
     use_value_model: bool = False
     """Whether to use a learned value model for PPO-style training with GAE advantage estimation.
     When True, advantages are computed using GAE with value model predictions instead of 
@@ -118,10 +119,25 @@ class ExperimentConfig:
     gamma: float = 1.0
     """Discount factor for GAE advantage estimation."""
     gae_lambda: float = 0.95
-    """Lambda parameter for GAE advantage estimation."""
+    """Lambda parameter for GAE advantage estimation (used for policy if decoupled_gae=False)."""
     separate_value_model: bool = False
     """If True, use a completely separate model for value estimation (doubles memory).
     If False, share the base model with the policy and only add a separate value head."""
+
+    # VAPO-specific parameters
+    decoupled_gae: bool = False
+    """If True, use different lambda values for critic (1.0) vs policy (gae_lambda or length-adaptive).
+    This helps with value model learning in long-CoT tasks by using unbiased returns for critic updates."""
+    length_adaptive_gae: bool = False
+    """If True, adaptively set lambda for policy GAE based on sequence length: lambda = 1 - 1/(alpha * length).
+    This balances bias-variance tradeoff for sequences of varying lengths."""
+    length_adaptive_gae_alpha: float = 0.05
+    """Alpha parameter for length-adaptive GAE. Higher values give higher lambda (more bias, less variance)."""
+    positive_example_lm_loss: bool = False
+    """If True, add NLL loss on correct/positive examples (self-imitation learning).
+    This improves sample efficiency when positive rewards are sparse."""
+    positive_example_lm_loss_coef: float = 0.1
+    """Coefficient for the positive example LM loss."""
 
     # Ray
     single_gpu_mode: bool = False

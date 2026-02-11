@@ -413,14 +413,109 @@ def calculate_advantages_packed(
         nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
         delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
         lastgaelam = delta + gamma * lam * lastgaelam * nonterminal * nonquery
-        # print(
-        #     f"t: {t}, rewards: {rewards[:, t]}, nextvalues: {nextvalues}, nonterminal: {nonterminal}, "
-        #     f"delta: {delta}, lastgaelam: {lastgaelam}"
-        # )
         advantages_reversed.append(lastgaelam)
     advantages = np.stack(advantages_reversed[::-1], axis=1)
     returns = advantages + values
     return advantages, returns
+
+
+def calculate_length_adaptive_lambda(response_length: int, alpha: float = 0.05) -> float:
+    """Calculate length-adaptive lambda for GAE based on VAPO paper.
+    
+    Formula: lambda = 1 - 1/(alpha * length)
+    
+    This ensures that the sum of lambda coefficients is proportional to sequence length,
+    providing better bias-variance tradeoff for sequences of varying lengths.
+    
+    Reference: https://arxiv.org/abs/2504.05118 Section 4.2
+    
+    Args:
+        response_length: Length of the response sequence
+        alpha: Hyperparameter controlling bias-variance tradeoff (default 0.05)
+        
+    Returns:
+        Lambda value for GAE computation
+    """
+    # Clamp to avoid division by zero and ensure lambda is in valid range
+    effective_length = max(response_length, 1)
+    lam = 1.0 - 1.0 / (alpha * effective_length)
+    # Clamp lambda to [0, 0.999] to ensure valid GAE computation
+    return max(0.0, min(0.999, lam))
+
+
+def calculate_advantages_packed_vapo(
+    values: np.ndarray,
+    rewards: np.ndarray,
+    gamma: float,
+    dones: np.ndarray,
+    response_masks: np.ndarray,
+    lam_policy: float = 0.95,
+    lam_critic: float = 1.0,
+    length_adaptive: bool = False,
+    length_adaptive_alpha: float = 0.05,
+):
+    """VAPO-style GAE with decoupled lambda for policy and critic.
+    
+    Implements decoupled GAE from VAPO paper where:
+    - Critic uses lambda=1.0 for unbiased Monte Carlo returns
+    - Policy uses a smaller lambda (fixed or length-adaptive) for faster convergence
+    
+    Reference: https://arxiv.org/abs/2504.05118 Section 4.1-4.2
+    
+    Args:
+        values: Value predictions, shape (batch, seq_len)
+        rewards: Rewards, shape (batch, seq_len)
+        gamma: Discount factor
+        dones: Done flags indicating sequence boundaries, shape (batch, seq_len)
+        response_masks: Mask for response tokens (1 for response, 0 for query/padding)
+        lam_policy: Lambda for policy GAE (ignored if length_adaptive=True)
+        lam_critic: Lambda for critic GAE (typically 1.0)
+        length_adaptive: If True, compute length-adaptive lambda for policy
+        length_adaptive_alpha: Alpha parameter for length-adaptive lambda
+        
+    Returns:
+        Tuple of (policy_advantages, critic_returns, policy_lambda_used)
+        - policy_advantages: Advantages for policy updates
+        - critic_returns: Target returns for critic updates (computed with lam_critic)
+        - policy_lambda_used: The actual lambda used for policy (useful for logging)
+    """
+    response_masks = response_masks.clip(0, 1)
+    dones = dones.clip(0, 1)
+    gen_length = values.shape[1]
+    
+    # Calculate effective response length for length-adaptive GAE
+    if length_adaptive:
+        # Use the actual response length (sum of response_masks) for each sequence
+        # For simplicity, use the average across the batch
+        avg_response_length = response_masks.sum(axis=1).mean()
+        lam_policy = calculate_length_adaptive_lambda(int(avg_response_length), length_adaptive_alpha)
+    
+    # Compute critic returns with lam_critic (typically 1.0 for unbiased MC returns)
+    lastgaelam_critic = 0
+    advantages_reversed_critic = []
+    for t in reversed(range(gen_length)):
+        nonterminal = 1 - dones[:, t]
+        nonquery = response_masks[:, t]
+        nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
+        delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
+        lastgaelam_critic = delta + gamma * lam_critic * lastgaelam_critic * nonterminal * nonquery
+        advantages_reversed_critic.append(lastgaelam_critic)
+    advantages_critic = np.stack(advantages_reversed_critic[::-1], axis=1)
+    critic_returns = advantages_critic + values
+    
+    # Compute policy advantages with lam_policy (smaller for faster convergence)
+    lastgaelam_policy = 0
+    advantages_reversed_policy = []
+    for t in reversed(range(gen_length)):
+        nonterminal = 1 - dones[:, t]
+        nonquery = response_masks[:, t]
+        nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
+        delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
+        lastgaelam_policy = delta + gamma * lam_policy * lastgaelam_policy * nonterminal * nonquery
+        advantages_reversed_policy.append(lastgaelam_policy)
+    policy_advantages = np.stack(advantages_reversed_policy[::-1], axis=1)
+    
+    return policy_advantages, critic_returns, lam_policy
 
 
 def masked_mean(
