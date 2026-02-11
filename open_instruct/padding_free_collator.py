@@ -213,9 +213,13 @@ def _align_dpo_seq_counts(chosen_features: dict[str, Any], rejected_features: di
     if num_valid < chosen_valid and "cu_seq_lens_q" in chosen_features:
         chosen_features["cu_seq_lens_q"] = chosen_features["cu_seq_lens_q"][: num_valid + 1]
         chosen_features["cu_seq_lens_k"] = chosen_features["cu_seq_lens_k"][: num_valid + 1]
+        boundary = chosen_features["cu_seq_lens_k"][-1].item()
+        chosen_features["labels"][:, boundary:] = -100
     if num_valid < rejected_valid and "cu_seq_lens_q" in rejected_features:
         rejected_features["cu_seq_lens_q"] = rejected_features["cu_seq_lens_q"][: num_valid + 1]
         rejected_features["cu_seq_lens_k"] = rejected_features["cu_seq_lens_k"][: num_valid + 1]
+        boundary = rejected_features["cu_seq_lens_k"][-1].item()
+        rejected_features["labels"][:, boundary:] = -100
 
     return num_valid, max(chosen_dropped, rejected_dropped)
 

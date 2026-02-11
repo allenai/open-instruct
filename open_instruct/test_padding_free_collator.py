@@ -326,6 +326,32 @@ class TestDPOPackingIndices(unittest.TestCase):
         self.assertEqual(result.shape[0], 3)
         self.assertFalse(torch.isnan(result).any(), f"Got NaN in result: {result}")
 
+    def test_asymmetric_truncation_masks_labels(self):
+        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=250)
+        features = _make_dpo_features(num_samples=4, chosen_lengths=[100], rejected_lengths=[50], start_index=0)
+
+        batch = collator(features)
+        num_valid = batch["_num_valid_seqs"]
+
+        chosen_cu = batch["chosen_cu_seq_lens_k"]
+        rejected_cu = batch["rejected_cu_seq_lens_k"]
+        self.assertEqual(len(chosen_cu), num_valid + 1)
+        self.assertEqual(len(rejected_cu), num_valid + 1)
+
+        chosen_boundary = chosen_cu[-1].item()
+        chosen_labels = batch["chosen_labels"]
+        self.assertTrue(
+            (chosen_labels[:, chosen_boundary:] == -100).all(),
+            "Labels beyond chosen boundary should be masked to -100",
+        )
+
+        concat_batch, bs = concatenated_inputs(batch)
+        logits = torch.randn(1, concat_batch["concatenated_input_ids"].shape[1], 100)
+        logps = get_batch_logps(
+            logits, concat_batch["concatenated_labels"], concat_batch["concatenated_cu_seq_lens_k"]
+        )
+        self.assertEqual(len(logps), 2 * bs)
+
     def test_concatenated_cu_seq_lens_with_padding(self):
         collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=500)
         features = _make_dpo_features(num_samples=2, chosen_lengths=[50], rejected_lengths=[50], start_index=0)
