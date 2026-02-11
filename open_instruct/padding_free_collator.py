@@ -171,14 +171,20 @@ def get_batch_logps(
     #   loss mask == True at those places
     labels = labels[:, 1:].clone()
     logits = logits[:, :-1, :]
-    loss_mask = labels != -100
-
-    # dummy token; we'll ignore the losses on these tokens later
-    labels[labels == -100] = 0
 
     # there is a labels, logits shift operation above
     cu_seq_lens = cu_seq_lens.clone() - 1
     cu_seq_lens[0] = 0
+
+    # Truncate to real content length (discard padding beyond cu_seq_lens).
+    real_len = cu_seq_lens[-1].item()
+    labels = labels[:, :real_len]
+    logits = logits[:, :real_len, :]
+
+    loss_mask = labels != -100
+
+    # dummy token; we'll ignore the losses on these tokens later
+    labels[labels == -100] = 0
 
     splits = cu_seq_lens.diff().tolist()
     per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
