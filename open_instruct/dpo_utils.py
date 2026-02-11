@@ -893,6 +893,8 @@ def concatenated_forward(
         for k, v in concatenated_batch.items()
         if k.startswith("concatenated_") and not k.endswith("labels")
     }
+    shapes = {k: tuple(v.shape) for k, v in inputs.items() if hasattr(v, "shape")}
+    logger.info("Model forward: %s", shapes)
     if output_router_logits:
         outputs = model(**inputs, output_router_logits=True)
         logits = outputs.logits.to(torch.float32)
@@ -1016,7 +1018,6 @@ def concatenated_forward_olmo(
     else:
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
-    logger.info("Model forward: input_ids shape=%s", concatenated_batch["concatenated_input_ids"].shape)
     logits = model(concatenated_batch["concatenated_input_ids"]).to(torch.float32)
 
     if not packing:
