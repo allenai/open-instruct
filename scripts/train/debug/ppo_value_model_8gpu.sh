@@ -1,7 +1,7 @@
 #!/bin/bash
 # VAPO (Value-model-based Augmented PPO) test script
 # Matches rlzero_seqlen.sh configuration but with VAPO value model
-# Uses 4 nodes x 8 GPUs = 32 GPUs, 16k seqlen, no sequence parallelism
+# Uses 4 nodes (2 learner nodes + 2 vLLM nodes), 16k seqlen, no sequence parallelism
 # Reference: https://arxiv.org/abs/2504.05118
 
 DDMM=$(date +"%d%m")
@@ -49,7 +49,7 @@ uv run python mason.py \
     --temperature 1.0 \
     --total_episodes 512256 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 8 8 \
+    --num_learners_per_node 8 8 0 0 \
     --sequence_parallel_size 1 \
     --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
