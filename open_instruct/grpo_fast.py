@@ -957,11 +957,11 @@ class PolicyTrainerRayProcess(RayProcess):
                 
                 # Log the policy lambda used (useful for length-adaptive GAE)
                 if use_vapo_gae:
-                    self.local_metrics["vapo/policy_lambda"] = policy_lambda_used
+                    self.local_metrics["value/policy_lambda"] = policy_lambda_used
 
         # Log value warmup status
         if self.args.use_value_model and self.args.value_warmup_steps > 0:
-            self.local_metrics["vapo/value_warmup"] = 1.0 if is_value_warmup else 0.0
+            self.local_metrics["value/warmup"] = 1.0 if is_value_warmup else 0.0
 
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
