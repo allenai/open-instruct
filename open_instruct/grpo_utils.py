@@ -133,11 +133,6 @@ class ExperimentConfig:
     This balances bias-variance tradeoff for sequences of varying lengths."""
     length_adaptive_gae_alpha: float = 0.05
     """Alpha parameter for length-adaptive GAE. Higher values give higher lambda (more bias, less variance)."""
-    positive_example_lm_loss: bool = False
-    """If True, add NLL loss on correct/positive examples (self-imitation learning).
-    This improves sample efficiency when positive rewards are sparse."""
-    positive_example_lm_loss_coef: float = 0.1
-    """Coefficient for the positive example LM loss."""
 
     # Ray
     single_gpu_mode: bool = False

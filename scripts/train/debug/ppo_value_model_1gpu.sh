@@ -66,7 +66,5 @@ uv run python mason.py \
     --decoupled_gae \
     --length_adaptive_gae \
     --length_adaptive_gae_alpha 0.05 \
-    --positive_example_lm_loss \
-    --positive_example_lm_loss_coef 0.1 \
     --loss_fn dapo \
     --clip_higher 0.28
