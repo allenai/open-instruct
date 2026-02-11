@@ -60,7 +60,7 @@ echo "Exp name: ${exp_name}"
 echo "Repo root: ${REPO_ROOT}"
 echo "=============================================="
 
-python3 open_instruct/grpo_fast.py \
+uv run python open_instruct/grpo_fast.py \
     --exp_name ${exp_name} \
     --wandb_project_name rl-rag \
     --beta 0.001 \

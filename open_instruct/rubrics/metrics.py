@@ -7,8 +7,6 @@ Provides functions to compute and log:
 - Rubric buffer filtering (deactivating uninformative rubrics).
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 import numpy as np
