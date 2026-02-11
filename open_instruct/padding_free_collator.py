@@ -65,6 +65,62 @@ def _fit_to_max_length(
     return PackedTensors(input_ids, labels, position_ids, seq_idx, cu_seq_lens, num_features, 0)
 
 
+def _collect_flattened_features(
+    features: list[dict[str, Any]],
+    separator_id: int,
+    return_flash_attn_kwargs: bool,
+    return_position_ids: bool,
+    return_seq_idx: bool,
+) -> tuple[dict[str, Any], list[torch.Tensor] | None, list[torch.Tensor] | None, list[int] | None, int]:
+    """
+    Flatten a list of example dicts into concatenated tensors plus optional
+    metadata used for padding-free training.
+    """
+    is_labels_provided = "labels" in features[0]
+    ret: dict[str, Any] = {"input_ids": [], "labels": []}
+    pos_ids: list[torch.Tensor] | None = [] if return_position_ids else None
+    seq_idx: list[torch.Tensor] | None = [] if return_seq_idx else None
+    cu_seq_lens: list[int] | None = [0] if return_flash_attn_kwargs else None
+    max_length = 0
+
+    separator = torch.tensor(
+        [separator_id], dtype=features[0]["input_ids"].dtype, device=features[0]["input_ids"].device
+    )
+    for s_idx, item in enumerate(features):
+        input_ids = item["input_ids"]
+        ret["input_ids"].append(input_ids)
+
+        # Labels are next-token shifted: insert a separator, then drop the first token.
+        label_source = item["labels"] if is_labels_provided else input_ids
+        ret["labels"].append(separator)
+        ret["labels"].append(label_source[1:])
+
+        if return_flash_attn_kwargs and cu_seq_lens is not None:
+            cu_seq_lens.append(cu_seq_lens[-1] + len(input_ids))
+            max_length = max(max_length, len(input_ids))
+        if return_position_ids and pos_ids is not None:
+            pos_ids.append(torch.arange(input_ids.numel(), device=input_ids.device))
+        if return_seq_idx and seq_idx is not None:
+            seq_idx.append(torch.full_like(input_ids, s_idx, dtype=torch.int32))
+
+    return ret, pos_ids, seq_idx, cu_seq_lens, max_length
+
+
+def _filter_feature_dicts(features: list[dict[str, Any]], match_string: str) -> list[dict[str, Any]]:
+    return [{k.replace(match_string, ""): v for k, v in f.items() if match_string in k} for f in features]
+
+
+def _split_prefixed_batch(batch: dict[str, list | torch.Tensor]) -> tuple[dict[str, Any], dict[str, Any]]:
+    chosen_features: dict[str, Any] = {}
+    rejected_features: dict[str, Any] = {}
+    for k in batch:
+        if k.startswith("chosen_"):
+            chosen_features[k.removeprefix("chosen_")] = batch[k]
+        elif k.startswith("rejected_"):
+            rejected_features[k.removeprefix("rejected_")] = batch[k]
+    return chosen_features, rejected_features
+
+
 @dataclass
 class TensorDataCollatorWithFlattening(DefaultDataCollator):
     """
@@ -94,42 +150,25 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
             return_tensors = self.return_tensors
         if separator_id is None:
             separator_id = self.separator_id
-        if self.return_flash_attn_kwargs:
-            cu_seq_lens = [0]
-            max_length = 0
-        if self.return_position_ids:
-            pos_ids = []
-        if self.return_seq_idx:
-            seq_idx = []
-        is_labels_provided = "labels" in features[0]
-        ret = {"input_ids": [], "labels": []}
-        separator = torch.tensor(
-            [separator_id], dtype=features[0]["input_ids"].dtype, device=features[0]["input_ids"].device
-        )
-        for s_idx, item in enumerate(features):
-            input_ids = item["input_ids"]
-            ret["input_ids"].append(input_ids)
-            label_source = item["labels"] if is_labels_provided else input_ids
-            ret["labels"].append(separator)
-            ret["labels"].append(label_source[1:])
-            if self.return_flash_attn_kwargs:
-                cu_seq_lens.append(cu_seq_lens[-1] + len(input_ids))
-                max_length = max(max_length, len(input_ids))
-            if self.return_position_ids:
-                pos_ids.append(torch.arange(input_ids.numel(), device=input_ids.device))
-            if self.return_seq_idx:
-                seq_idx.append(torch.full_like(input_ids, s_idx, dtype=torch.int32))
 
-        if self.return_flash_attn_kwargs:
+        ret, pos_ids, seq_idx, cu_seq_lens, max_length = _collect_flattened_features(
+            features=features,
+            separator_id=separator_id,
+            return_flash_attn_kwargs=self.return_flash_attn_kwargs,
+            return_position_ids=self.return_position_ids,
+            return_seq_idx=self.return_seq_idx,
+        )
+
+        if self.return_flash_attn_kwargs and cu_seq_lens is not None:
             ret["cu_seq_lens_q"] = ret["cu_seq_lens_k"] = torch.tensor(
                 cu_seq_lens, dtype=torch.int32, device=features[0]["input_ids"].device
             )
             ret["max_length_q"] = ret["max_length_k"] = max_length
         position_ids_tensor = None
         seq_idx_tensor = None
-        if self.return_position_ids:
+        if self.return_position_ids and pos_ids is not None:
             position_ids_tensor = torch.cat(pos_ids, dim=0)[None]
-        if self.return_seq_idx:
+        if self.return_seq_idx and seq_idx is not None:
             seq_idx_tensor = torch.cat(seq_idx, dim=0)[None]
         input_ids_tensor = torch.cat(ret["input_ids"], dim=0)[None]
         labels_tensor = torch.cat(ret["labels"], dim=0)[None]
@@ -185,14 +224,11 @@ def _align_dpo_seq_counts(chosen_features: dict[str, Any], rejected_features: di
 class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
     def __call__(self, features, return_tensors=None, separator_id=None):
         # call the original collator on chosen and rejected separately, then combine
-        def filter_batch(match_string, features):
-            return [{k.replace(match_string, ""): v for k, v in f.items() if match_string in k} for f in features]
-
         chosen_features = super().__call__(
-            filter_batch("chosen_", features), return_tensors=return_tensors, separator_id=separator_id
+            _filter_feature_dicts(features, "chosen_"), return_tensors=return_tensors, separator_id=separator_id
         )
         rejected_features = super().__call__(
-            filter_batch("rejected_", features), return_tensors=return_tensors, separator_id=separator_id
+            _filter_feature_dicts(features, "rejected_"), return_tensors=return_tensors, separator_id=separator_id
         )
 
         num_valid, sequences_dropped = _align_dpo_seq_counts(chosen_features, rejected_features)
@@ -211,12 +247,7 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
 def concatenated_inputs(
     batch: dict[str, list | torch.Tensor], tag: str = "concatenated_"
 ) -> tuple[dict[str, torch.Tensor], int]:
-    chosen_features, rejected_features = {}, {}
-    for k in batch:
-        if k.startswith("chosen_"):
-            chosen_features[k.removeprefix("chosen_")] = batch[k]
-        elif k.startswith("rejected_"):
-            rejected_features[k.removeprefix("rejected_")] = batch[k]
+    chosen_features, rejected_features = _split_prefixed_batch(batch)
 
     ret = {f"{tag}input_ids": torch.cat([chosen_features["input_ids"], rejected_features["input_ids"]], dim=-1)}
     if "labels" in chosen_features:
