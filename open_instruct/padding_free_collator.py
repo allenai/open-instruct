@@ -126,7 +126,14 @@ def concatenated_inputs(
         else:
             rejected_features[k.replace("rejected_", "")] = batch[k]
 
-    # - need to return chosen
+    # Strip padding before concatenating so cu_seq_lens offsets stay valid.
+    for feats in (chosen_features, rejected_features):
+        if "cu_seq_lens_k" in feats:
+            real_len = feats["cu_seq_lens_k"][-1].item()
+            for key in ("input_ids", "labels", "position_ids", "seq_idx"):
+                if key in feats:
+                    feats[key] = feats[key][:, :real_len]
+
     ret = {f"{tag}input_ids": torch.cat([chosen_features["input_ids"], rejected_features["input_ids"]], dim=-1)}
     if "labels" in chosen_features:
         ret[f"{tag}labels"] = torch.cat([chosen_features["labels"], rejected_features["labels"]], dim=-1)

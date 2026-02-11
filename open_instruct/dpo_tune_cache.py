@@ -603,11 +603,12 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             )
 
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
-            logger.info(
-                f"Step {completed_steps} micro_step {micro_step}: "
-                f"chosen={tuple(batch['chosen_input_ids'].shape)}, "
-                f"rejected={tuple(batch['rejected_input_ids'].shape)}"
-            )
+            if accelerator.is_main_process:
+                logger.info(
+                    f"Step {completed_steps} micro_step {micro_step}: "
+                    f"chosen={tuple(batch['chosen_input_ids'].shape)}, "
+                    f"rejected={tuple(batch['rejected_input_ids'].shape)}"
+                )
             # dpo forward pass & loss
             with profile_ctx as prof, accelerator.accumulate(model):
                 policy_chosen_logps, policy_rejected_logps, aux_loss = args.forward_fn(
@@ -729,10 +730,10 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     metrics_to_log["perf/tokens_per_second_step"] = step_tokens_per_second
                     metrics_to_log["perf/tokens_per_second_total"] = total_tokens_per_second
 
-                    logger.info(logger_str)
                     if args.with_tracking:
                         accelerator.log(metrics_to_log, step=completed_steps)
                     if accelerator.is_main_process:
+                        logger.info(logger_str)
                         maybe_update_beaker_description(
                             current_step=completed_steps,
                             total_steps=args.max_train_steps,

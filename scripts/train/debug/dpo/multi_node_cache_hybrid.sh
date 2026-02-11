@@ -45,4 +45,5 @@ uv run python mason.py \
     --beta 5 \
     --packing \
     --activation_memory_budget 0.5 \
+    --no_try_auto_save_to_beaker \
     --with_tracking
