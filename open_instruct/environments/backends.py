@@ -238,14 +238,18 @@ class DockerBackend(SandboxBackend):
         finally:
             self.run_command(f"rm -f {filename}")
 
+    _MAX_OUTPUT_BYTES = 1_000_000  # 1MB — prevent OOM from huge command output
+
     def run_command(self, command: str) -> ExecutionResult:
         """Execute a shell command in the Docker container."""
         if self._container is None:
             raise RuntimeError("Container not started. Call start() first.")
 
         exit_code, output = self._container.exec_run(["bash", "-c", command], demux=True)
-        stdout = (output[0] or b"").decode("utf-8", errors="replace") if output else ""
-        stderr = (output[1] or b"").decode("utf-8", errors="replace") if output else ""
+        stdout_raw = (output[0] or b"") if output else b""
+        stderr_raw = (output[1] or b"") if output else b""
+        stdout = stdout_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+        stderr = stderr_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
         return ExecutionResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
 
     def write_file(self, path: str, content: str | bytes) -> None:

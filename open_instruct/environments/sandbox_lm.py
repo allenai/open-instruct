@@ -152,17 +152,16 @@ class SandboxLMEnv(RLEnvironment):
         raise last_error  # type: ignore[misc]
 
     def _do_reset(self, task_id: str | None = None, **kwargs) -> StepResult:
-        # Tear down previous sandbox if any
+        # Tear down previous container but reuse the backend object
         if self._backend is not None:
             self._backend.close()
-
-        # Build backend kwargs
-        kwargs = dict(self._backend_kwargs)
-        if self._backend_type == "e2b":
-            kwargs.setdefault("timeout", self._timeout)
-
-        self._backend = create_backend(self._backend_type, **kwargs)
-        self._backend.start()
+            self._backend.start()
+        else:
+            bkwargs = dict(self._backend_kwargs)
+            if self._backend_type == "e2b":
+                bkwargs.setdefault("timeout", self._timeout)
+            self._backend = create_backend(self._backend_type, **bkwargs)
+            self._backend.start()
         self._step_count = 0
 
         # Setup env (mirrors DockerRuntime.setup_env minus Tsinghua mirror)
