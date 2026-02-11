@@ -29,9 +29,8 @@ def _truncate_to_max_length(
     num_valid_seqs = num_features
     sequences_dropped = 0
     if cu_seq_lens is not None:
-        cu_seq_lens = cu_seq_lens.clamp_max_(max_seq_length)
-        valid_mask = torch.cat([torch.tensor([True], device=cu_seq_lens.device), cu_seq_lens[1:] > cu_seq_lens[:-1]])
-        num_valid_seqs = int(valid_mask.sum().item()) - 1
+        cu_seq_lens = torch.unique_consecutive(cu_seq_lens.clamp_max_(max_seq_length))
+        num_valid_seqs = len(cu_seq_lens) - 1
         sequences_dropped = num_features - num_valid_seqs
         if sequences_dropped > 0:
             logger.warning(
@@ -39,9 +38,24 @@ def _truncate_to_max_length(
                 f"(packed {num_features} sequences into {current_len} tokens, "
                 f"truncated to {max_seq_length}, {num_valid_seqs} sequences remain)"
             )
-            cu_seq_lens = cu_seq_lens[valid_mask]
 
     return input_ids, labels, position_ids, seq_idx, cu_seq_lens, num_valid_seqs, sequences_dropped
+
+
+def _pad_to_max_length(
+    max_seq_length: int,
+    input_ids: torch.Tensor,
+    labels: torch.Tensor,
+    position_ids: torch.Tensor | None,
+    seq_idx: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+    input_ids = tensor_utils.pad_to_length(input_ids, max_seq_length, pad_value=0)
+    labels = tensor_utils.pad_to_length(labels, max_seq_length, pad_value=-100)
+    if position_ids is not None:
+        position_ids = tensor_utils.pad_to_length(position_ids, max_seq_length, pad_value=0)
+    if seq_idx is not None:
+        seq_idx = tensor_utils.pad_to_length(seq_idx, max_seq_length, pad_value=-1)
+    return input_ids, labels, position_ids, seq_idx
 
 
 @dataclass
@@ -88,12 +102,9 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         for s_idx, item in enumerate(features):
             input_ids = item["input_ids"]
             ret["input_ids"].append(input_ids)
-            if is_labels_provided:
-                ret["labels"].append(separator)
-                ret["labels"].append(item["labels"][1:])
-            else:
-                ret["labels"].append(separator)
-                ret["labels"].append(input_ids[1:])
+            label_source = item["labels"] if is_labels_provided else input_ids
+            ret["labels"].append(separator)
+            ret["labels"].append(label_source[1:])
             if self.return_flash_attn_kwargs:
                 cu_seq_lens.append(cu_seq_lens[-1] + len(input_ids))
                 max_length = max(max_length, len(input_ids))
@@ -144,14 +155,9 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
                 if cu_seq_lens_tensor is not None:
                     ret["cu_seq_lens_q"] = ret["cu_seq_lens_k"] = cu_seq_lens_tensor
             elif current_len < self.max_seq_length:
-                input_ids_tensor = tensor_utils.pad_to_length(input_ids_tensor, self.max_seq_length, pad_value=0)
-                labels_tensor = tensor_utils.pad_to_length(labels_tensor, self.max_seq_length, pad_value=-100)
-                if position_ids_tensor is not None:
-                    position_ids_tensor = tensor_utils.pad_to_length(
-                        position_ids_tensor, self.max_seq_length, pad_value=0
-                    )
-                if seq_idx_tensor is not None:
-                    seq_idx_tensor = tensor_utils.pad_to_length(seq_idx_tensor, self.max_seq_length, pad_value=-1)
+                input_ids_tensor, labels_tensor, position_ids_tensor, seq_idx_tensor = _pad_to_max_length(
+                    self.max_seq_length, input_ids_tensor, labels_tensor, position_ids_tensor, seq_idx_tensor
+                )
 
         ret["input_ids"] = input_ids_tensor
         ret["labels"] = labels_tensor
@@ -208,18 +214,16 @@ class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
         return result
 
 
-# - dpo concatenation  for padding free
 def concatenated_inputs(
     batch: dict[str, list | torch.Tensor], tag: str = "concatenated_"
 ) -> tuple[dict[str, torch.Tensor], int]:
     chosen_features, rejected_features = {}, {}
     for k in batch:
         if k.startswith("chosen_"):
-            chosen_features[k.replace("chosen_", "")] = batch[k]
-        else:
-            rejected_features[k.replace("rejected_", "")] = batch[k]
+            chosen_features[k.removeprefix("chosen_")] = batch[k]
+        elif k.startswith("rejected_"):
+            rejected_features[k.removeprefix("rejected_")] = batch[k]
 
-    # - need to return chosen
     ret = {f"{tag}input_ids": torch.cat([chosen_features["input_ids"], rejected_features["input_ids"]], dim=-1)}
     if "labels" in chosen_features:
         ret[f"{tag}labels"] = torch.cat([chosen_features["labels"], rejected_features["labels"]], dim=-1)
@@ -250,7 +254,6 @@ def concatenated_inputs(
     return ret, len(chosen_features["cu_seq_lens_k"]) - 1
 
 
-# for dpo - padding free
 def get_batch_logps(
     logits: torch.Tensor, labels: torch.Tensor, cu_seq_lens: torch.Tensor, average_log_prob: bool = False
 ) -> torch.Tensor:
