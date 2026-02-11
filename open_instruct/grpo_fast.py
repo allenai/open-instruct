@@ -764,12 +764,29 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
         self.local_metrics["_token_count"] = total_valid_tokens
 
-    def step(self):
+    def step(self, training_step: int = 1):
         """Execute one training step: fetch data from the dataloader and train on it.
+
+        Args:
+            training_step: Current training step number. Used to determine if we're in
+                          value warmup phase (training_step <= value_warmup_steps).
+                          During warmup, only the value model is updated, policy is frozen.
 
         Returns:
             Tuple of (metrics_list, array_metrics) from training.
         """
+        # VAPO Value Warmup: During warmup steps, only train value model, freeze policy
+        # Reference: https://arxiv.org/abs/2504.05118 Section 4.1
+        is_value_warmup = (
+            self.args.use_value_model
+            and self.args.value_warmup_steps > 0
+            and training_step <= self.args.value_warmup_steps
+        )
+        if is_value_warmup and self.rank == 0:
+            logger.info(
+                f"[Value Warmup] Step {training_step}/{self.args.value_warmup_steps} - "
+                "Training value model only, policy frozen"
+            )
         batch_data = next(self.dataloader)
         data_BT = batch_data["batch"]
         if len(data_BT) == 0:
@@ -926,6 +943,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 # Log the policy lambda used (useful for length-adaptive GAE)
                 if use_vapo_gae:
                     self.local_metrics["vapo/policy_lambda"] = policy_lambda_used
+
+        # Log value warmup status
+        if self.args.use_value_model and self.args.value_warmup_steps > 0:
+            self.local_metrics["vapo/value_warmup"] = 1.0 if is_value_warmup else 0.0
 
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
@@ -1115,10 +1136,14 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()
-                    self.model.backward(policy_loss)
+
+                    # During value warmup, skip policy backward/step (policy is frozen)
+                    if not is_value_warmup:
+                        self.model.backward(policy_loss)
 
                     # Handle value head backward separately when using shared backbone
                     # (value head is not part of DeepSpeed model)
+                    # Note: During value warmup, we still train the value model
                     if self.args.use_value_model and value_loss_BT is not None:
                         value_loss = masked_mean(
                             value_loss_BT[:, 1:],
@@ -1132,8 +1157,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         # For separate_value_model, the value model isn't trained in this loop
 
                     if (local_step + 1) % accumulation_steps == 0:
-                        self.model.step()
+                        # During value warmup, skip policy optimizer step
+                        if not is_value_warmup:
+                            self.model.step()
                         # Step the value head optimizer if using shared backbone
+                        # Note: This still runs during value warmup
                         if self.args.use_value_model and not self.args.separate_value_model:
                             self.value_head_optimizer.step()
                             self.value_head_optimizer.zero_grad()
@@ -1928,7 +1956,7 @@ def one_training_step(
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
         results, _ = ray_get_with_progress(
-            [policy_group.models[i].step.remote() for i in range(args.world_size)],
+            [policy_group.models[i].step.remote(training_step) for i in range(args.world_size)],
             desc=f"Running training step {training_step}",
         )
         metrics, array_metrics = zip(*results)
