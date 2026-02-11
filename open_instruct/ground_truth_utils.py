@@ -950,7 +950,6 @@ class RubricVerifier(VerifierFunction):
             Defaults to RubricVerifierConfig.rubric_judge_model ("gpt-4.1").
     """
 
-
     def __init__(self, verifier_config: RubricVerifierConfig) -> None:
         super().__init__("rubric", verifier_config=verifier_config, weight=1.0)
         self.config = verifier_config
