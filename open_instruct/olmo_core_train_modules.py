@@ -13,7 +13,6 @@ import torch.distributed.checkpoint.state_dict as dist_cp_sd
 from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
 from olmo_core.optim.scheduler import Scheduler
-from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import TransformerTrainModule
 from olmo_core.train.train_module.transformer import config as transformer_config
 from transformers import PreTrainedTokenizer
@@ -165,33 +164,43 @@ class DPOTrainModule(TransformerTrainModule):
                 ).float()
                 weight = micro_tokens / total_tokens
                 for k, v in step_metrics.items():
-                    self._metrics[k] += v.detach() * weight
+                    self._metrics[k] += v.detach() * micro_tokens
                 (loss * weight).backward()
 
         self.model.post_batch(dry_run=dry_run)
 
         if not dry_run:
-            self.record_metric("train/loss", self._metrics["loss"], ReduceType.mean)
-            self.record_metric("train/logps_chosen", self._metrics["chosen_logps"], ReduceType.mean)
-            self.record_metric("train/logps_rejected", self._metrics["rejected_logps"], ReduceType.mean)
+            metric_keys = sorted(self._metrics.keys())
+            local_sums_list = [total_tokens] + [self._metrics[k] for k in metric_keys]
+            local_sums = torch.stack(local_sums_list)
+            dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
+
+            global_total_tokens = local_sums[0]
+            global_metrics = {k: local_sums[i + 1] / global_total_tokens for i, k in enumerate(metric_keys)}
+
+            self.record_metric("train/loss", global_metrics["loss"].item(), reduce_type=None)
+            self.record_metric("train/logps_chosen", global_metrics["chosen_logps"].item(), reduce_type=None)
+            self.record_metric("train/logps_rejected", global_metrics["rejected_logps"].item(), reduce_type=None)
             token_count = self.trainer.data_loader.global_num_tokens_in_batch(batch)
             assert token_count is not None
             self.record_metric("train/token_count", token_count, reduce_type=None)
 
             if self.dpo_config.loss_type.computes_reward_metrics:
-                margin = self._metrics["chosen_rewards"] - self._metrics["rejected_rewards"]
-                self.record_metric("train/rewards_chosen", self._metrics["chosen_rewards"], ReduceType.mean)
-                self.record_metric("train/rewards_rejected", self._metrics["rejected_rewards"], ReduceType.mean)
+                margin = global_metrics["chosen_rewards"] - global_metrics["rejected_rewards"]
+                self.record_metric("train/rewards_chosen", global_metrics["chosen_rewards"].item(), reduce_type=None)
+                self.record_metric(
+                    "train/rewards_rejected", global_metrics["rejected_rewards"].item(), reduce_type=None
+                )
                 self.record_metric(
                     "train/rewards_average",
-                    (self._metrics["chosen_rewards"] + self._metrics["rejected_rewards"]) / 2,
-                    ReduceType.mean,
+                    ((global_metrics["chosen_rewards"] + global_metrics["rejected_rewards"]) / 2).item(),
+                    reduce_type=None,
                 )
-                self.record_metric("train/rewards_accuracy", self._metrics["accuracy"], ReduceType.mean)
-                self.record_metric("train/rewards_margin", margin, ReduceType.mean)
+                self.record_metric("train/rewards_accuracy", global_metrics["accuracy"].item(), reduce_type=None)
+                self.record_metric("train/rewards_margin", margin.item(), reduce_type=None)
 
-            if "aux_loss" in self._metrics:
-                self.record_metric("train/aux_loss", self._metrics["aux_loss"], ReduceType.mean)
+            if "aux_loss" in global_metrics:
+                self.record_metric("train/aux_loss", global_metrics["aux_loss"].item(), reduce_type=None)
 
 
 class GRPOTrainModule(TransformerTrainModule):
