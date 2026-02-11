@@ -283,15 +283,18 @@ class DockerBackend(SandboxBackend):
         return output.decode("utf-8", errors="replace") if isinstance(output, bytes) else output
 
     def reset(self) -> None:
-        """Reset the container by cleaning the filesystem (reuses the container)."""
+        """Reset the container by cleaning the filesystem and killing processes."""
         if self._container is None:
             self.start()
             return
+        # Kill leftover user processes (ignore PID 1 and this shell), then clean filesystem
         self._container.exec_run(
             [
                 "bash",
                 "-c",
-                "rm -rf /testbed /workspace /output /logs /root/prompt.txt /tmp/.sandbox_* && mkdir -p /tmp",
+                "pkill -9 -u root -o -1 2>/dev/null || true; "
+                "rm -rf /testbed /workspace /output /logs /root/prompt.txt /tmp/.sandbox_* /tmp/code_* /tmp/setup.sh; "
+                "mkdir -p /tmp",
             ]
         )
 
@@ -432,13 +435,15 @@ class DaytonaBackend(SandboxBackend):
         return data
 
     def reset(self) -> None:
-        """Reset the sandbox by cleaning the filesystem (reuses the sandbox)."""
+        """Reset the sandbox by cleaning the filesystem and killing processes."""
         if self._sandbox is None:
             self.start()
             return
         _daytona_retry(
             self._sandbox.process.exec,
-            "rm -rf /testbed /workspace /output /logs /root/prompt.txt /tmp/.sandbox_* && mkdir -p /tmp",
+            "pkill -9 -u root -o -1 2>/dev/null || true; "
+            "rm -rf /testbed /workspace /output /logs /root/prompt.txt /tmp/.sandbox_* /tmp/code_* /tmp/setup.sh; "
+            "mkdir -p /tmp",
         )
 
     def close(self) -> None:
