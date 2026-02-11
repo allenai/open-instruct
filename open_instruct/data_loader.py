@@ -1151,7 +1151,7 @@ class DataPreparationActor:
                         for pos_idx in torch.where(eos_positions)[0]:
                             seq_idx = packed_mask[pos_idx].item()  # Get the sequence index from response mask
                             if seq_idx > 0:
-                                reward_tensor[pos_idx] = lookup_rewards[seq_idx]
+                                reward_tensor[pos_idx] = float(lookup_rewards[seq_idx])
                     packed_rewards.append(reward_tensor)
                 packed_sequences.rewards = packed_rewards
 
