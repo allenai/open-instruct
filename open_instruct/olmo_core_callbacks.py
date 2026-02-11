@@ -160,8 +160,10 @@ class PerfCallback(Callback):
         self._pre_step_time = time.perf_counter()
         self._step_start_time = self._pre_step_time
         if "chosen_cu_seq_lens_k" in batch:
+            # cu_seq_lens has num_seqs + 1 elements (includes leading 0), so subtract 1.
             num_seqs = (len(batch["chosen_cu_seq_lens_k"]) - 1) + (len(batch["rejected_cu_seq_lens_k"]) - 1)
         elif "cu_seq_lens_k" in batch:
+            # cu_seq_lens has num_seqs + 1 elements (includes leading 0), so subtract 1.
             num_seqs = len(batch["cu_seq_lens_k"]) - 1
         else:
             num_seqs = self.per_device_train_batch_size * 2

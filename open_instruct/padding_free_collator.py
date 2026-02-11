@@ -56,6 +56,10 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
 
     The `input_ids` and `labels` from separate examples are concatenated together into a tensor of
     batch size 1, with additional information included in the batch to demarcate example boundaries.
+
+    `cu_seq_lens` (cumulative sequence lengths) stores the boundary offsets of each packed sequence,
+    including a leading 0. For example, 3 sequences of lengths 5, 3, 7 give cu_seq_lens = [0, 5, 8, 15],
+    so len(cu_seq_lens) == num_seqs + 1.
     """
 
     return_flash_attn_kwargs: bool = True
@@ -237,6 +241,7 @@ def concatenated_inputs(
         )
 
     if "seq_idx" in chosen_features:
+        # cu_seq_lens has num_seqs + 1 elements (includes leading 0), so subtract 1.
         chosen_num_seqs = len(chosen_features["cu_seq_lens_k"]) - 1
         ret[f"{tag}seq_idx"] = torch.cat(
             [chosen_features["seq_idx"], rejected_features["seq_idx"] + chosen_num_seqs], dim=-1

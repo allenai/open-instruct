@@ -121,9 +121,8 @@ class DPOTrainModule(TransformerTrainModule):
             if "_sequences_dropped" in batch:
                 self.record_metric("train/sequences_dropped", batch["_sequences_dropped"], ReduceType.sum)
                 total_seqs = batch["_sequences_dropped"] + batch["_num_valid_seqs"]
-                if total_seqs > 0:
-                    dropped_pct = batch["_sequences_dropped"] / total_seqs * 100
-                    self.record_metric("train/sequences_dropped_pct", dropped_pct, ReduceType.mean)
+                dropped_pct = batch["_sequences_dropped"] / total_seqs * 100
+                self.record_metric("train/sequences_dropped_pct", dropped_pct, ReduceType.mean)
 
             if self.dpo_config.loss_type.computes_reward_metrics:
                 accuracy = (chosen_rewards > rejected_rewards).float().mean()
