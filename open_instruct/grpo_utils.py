@@ -120,8 +120,8 @@ class ExperimentConfig:
     """Discount factor for GAE advantage estimation."""
     gae_lambda: float = 0.95
     """Lambda parameter for GAE advantage estimation (used for policy if decoupled_gae=False)."""
-    separate_value_model: bool = False
-    """If True, use a completely separate model for value estimation (doubles memory).
+    separate_value_model: bool = True
+    """If True (default), use a completely separate model for value estimation.
     If False, share the base model with the policy and only add a separate value head."""
 
     # VAPO-specific parameters
