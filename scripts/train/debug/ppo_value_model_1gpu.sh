@@ -9,8 +9,8 @@ export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 python open_instruct/grpo_fast.py \
     --exp_name vapo_1gpu_test \
     --beta 0.0 \
-    --num_samples_per_prompt_rollout 4 \
-    --num_unique_prompts_rollout 8 \
+    --num_samples_per_prompt_rollout 2 \
+    --num_unique_prompts_rollout 4 \
     --num_mini_batches 1 \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
@@ -21,7 +21,7 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list_splits train train \
     --max_prompt_token_length 512 \
     --response_length 1024 \
-    --pack_length 2048 \
+    --pack_length 4096 \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --chat_template_name tulu \
     --non_stop_penalty False \
