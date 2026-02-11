@@ -104,6 +104,7 @@ python3 open_instruct/grpo_fast.py \
     --try_launch_beaker_eval_jobs_on_weka False \
     --gradient_checkpointing \
     --max_tool_calls 0 \
+    --remap_verifier general_rubric=rubric \
     --only_reward_good_outputs False \
     2>&1 | tee /tmp/evolving_rubric_test.log
 
