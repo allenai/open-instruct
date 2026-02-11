@@ -21,9 +21,8 @@ import unittest
 
 from open_instruct.ground_truth_utils import RubricVerifier, RubricVerifierConfig
 from open_instruct.rubrics.metrics import (
-    aggregate_rubric_key_metrics,
-    compute_generation_metrics,
-    compute_rubric_key_stats,
+    compute_rubric_count_metrics,
+    compute_rubric_reward_metrics,
     filter_rubric_buffer,
 )
 from open_instruct.rubrics.rubric_utils import (
@@ -527,70 +526,54 @@ class TestRubricVerifierScoring(unittest.TestCase):
 # =============================================================================
 
 
-class TestComputeGenerationMetrics(unittest.TestCase):
-    """Test suite for compute_generation_metrics."""
+class TestComputeRubricRewardMetrics(unittest.TestCase):
+    """Test suite for compute_rubric_reward_metrics."""
 
-    def test_basic_metrics(self):
-        """Test that generation metrics are computed correctly."""
-        metrics = compute_generation_metrics(
-            valid_evolving_rubric_rate=0.8,
-            avg_num_ground_truths=3.0,
-            avg_num_evolving_rubrics=2.5,
-            avg_num_active_buffer_rubrics=4.0,
-            skipped_count=2,
-        )
-        self.assertEqual(metrics["objective/valid_evolving_rubric_rate"], 0.8)
-        self.assertEqual(metrics["objective/avg_num_ground_truths"], 3.0)
-        self.assertEqual(metrics["objective/avg_num_evolving_rubrics"], 2.5)
-        self.assertEqual(metrics["objective/avg_num_active_buffer_rubrics"], 4.0)
-        self.assertEqual(metrics["objective/skipped_evolving_rubrics"], 2.0)
+    def test_split_by_type(self):
+        """Test that rewards are correctly split by rubric type."""
+        per_rubric_scores = [
+            [(0.8, 1.0), (0.6, 1.0), (0.4, -1.0)],  # response 1
+            [(0.5, 1.0), (0.9, 1.0)],  # response 2
+        ]
+        per_rubric_types = [["persistent", "evolving", "evolving"], ["persistent", "evolving"]]
+        metrics = compute_rubric_reward_metrics(per_rubric_scores, per_rubric_types)
+        self.assertIn("evolving_rubrics/avg_evolving_reward", metrics)
+        self.assertIn("evolving_rubrics/avg_persistent_reward", metrics)
+        # persistent: 0.8*1.0, 0.5*1.0 → mean = 0.65
+        self.assertAlmostEqual(metrics["evolving_rubrics/avg_persistent_reward"], 0.65)
+        # evolving: 0.6*1.0, 0.4*(-1.0), 0.9*1.0 → mean of [0.6, -0.4, 0.9] = 1.1/3
+        self.assertAlmostEqual(metrics["evolving_rubrics/avg_evolving_reward"], 1.1 / 3, places=5)
 
-    def test_zero_values(self):
-        """Test metrics with all zero values."""
-        metrics = compute_generation_metrics(0.0, 0.0, 0.0, 0.0, 0)
-        self.assertEqual(len(metrics), 5)
+    def test_empty_scores(self):
+        """Test with no rubric scores."""
+        metrics = compute_rubric_reward_metrics([], [])
+        self.assertEqual(metrics["evolving_rubrics/avg_evolving_reward"], 0.0)
+        self.assertEqual(metrics["evolving_rubrics/avg_persistent_reward"], 0.0)
+
+    def test_only_persistent(self):
+        """Test with only persistent rubrics."""
+        per_rubric_scores = [[(0.7, 1.0)]]
+        per_rubric_types = [["persistent"]]
+        metrics = compute_rubric_reward_metrics(per_rubric_scores, per_rubric_types)
+        self.assertAlmostEqual(metrics["evolving_rubrics/avg_persistent_reward"], 0.7)
+        self.assertEqual(metrics["evolving_rubrics/avg_evolving_reward"], 0.0)
+
+
+class TestComputeRubricCountMetrics(unittest.TestCase):
+    """Test suite for compute_rubric_count_metrics."""
+
+    def test_basic_counts(self):
+        """Test that count metrics are produced correctly."""
+        metrics = compute_rubric_count_metrics(avg_num_evolving_rubrics=2.5, avg_num_active_buffer_rubrics=4.0)
+        self.assertEqual(metrics["evolving_rubrics/num_new_rubrics"], 2.5)
+        self.assertEqual(metrics["evolving_rubrics/num_active_rubrics"], 4.0)
+
+    def test_zero_counts(self):
+        """Test with zero counts."""
+        metrics = compute_rubric_count_metrics(0.0, 0.0)
+        self.assertEqual(len(metrics), 2)
         for v in metrics.values():
             self.assertEqual(v, 0.0)
-
-
-class TestComputeRubricKeyStats(unittest.TestCase):
-    """Test suite for compute_rubric_key_stats."""
-
-    def test_basic_stats(self):
-        """Test per-key mean and std computation."""
-        scores = {"Q1::Title1": [1.0, 0.5, 0.0, 0.5], "Q2::Title2": [0.0, 0.0, 0.0, 0.0]}
-        stats = compute_rubric_key_stats(scores)
-        self.assertAlmostEqual(stats["Q1::Title1"]["mean"], 0.5)
-        self.assertGreater(stats["Q1::Title1"]["std"], 0.0)
-        self.assertEqual(stats["Q2::Title2"]["mean"], 0.0)
-        self.assertEqual(stats["Q2::Title2"]["std"], 0.0)
-
-    def test_empty_input(self):
-        """Test with empty input."""
-        stats = compute_rubric_key_stats({})
-        self.assertEqual(len(stats), 0)
-
-
-class TestAggregateRubricKeyMetrics(unittest.TestCase):
-    """Test suite for aggregate_rubric_key_metrics."""
-
-    def test_basic_aggregation(self):
-        """Test aggregation of rubric key stats."""
-        stats = {
-            "key1": {"mean": 0.5, "std": 0.2},
-            "key2": {"mean": 0.0, "std": 0.0},  # all-zero
-            "key3": {"mean": 0.8, "std": 0.0},  # same-value nonzero
-        }
-        metrics = aggregate_rubric_key_metrics(stats)
-        self.assertIn("rubric_keys/avg_mean", metrics)
-        self.assertIn("rubric_keys/avg_std", metrics)
-        self.assertAlmostEqual(metrics["rubric_keys/num_all_zero_rubrics_ratio"], 1 / 3)
-        self.assertAlmostEqual(metrics["rubric_keys/num_all_same_value_non_zero_rubrics_ratio"], 1 / 3)
-
-    def test_empty_stats(self):
-        """Test with empty stats."""
-        metrics = aggregate_rubric_key_metrics({})
-        self.assertEqual(len(metrics), 0)
 
 
 class TestFilterRubricBuffer(unittest.TestCase):
@@ -618,11 +601,10 @@ class TestFilterRubricBuffer(unittest.TestCase):
             "Q1::E2": {"mean": 0.2, "std": 0.0},  # zero std → deactivate
             "Q1::E3": {"mean": 0.8, "std": 0.1},
         }
-        metrics = filter_rubric_buffer(buffer, stats, max_active_rubrics=5)
+        filter_rubric_buffer(buffer, stats, max_active_rubrics=5)
         self.assertEqual(len(buffer["Q1"]["active_rubrics"]), 2)
         self.assertEqual(len(buffer["Q1"]["inactive_rubrics"]), 1)
         self.assertEqual(buffer["Q1"]["inactive_rubrics"][0]["title"], "E2")
-        self.assertEqual(metrics["rubric_buffer/deactivated_zero_std"], 1.0)
 
     def test_cap_active_rubrics(self):
         """Test that excess active rubrics are capped."""
@@ -632,17 +614,16 @@ class TestFilterRubricBuffer(unittest.TestCase):
             "Q1::E2": {"mean": 0.5, "std": 0.5},
             "Q1::E3": {"mean": 0.5, "std": 0.1},
         }
-        metrics = filter_rubric_buffer(buffer, stats, max_active_rubrics=2)
+        filter_rubric_buffer(buffer, stats, max_active_rubrics=2)
         # Should keep E2 (std=0.5) and E1 (std=0.3), move E3 (std=0.1)
         self.assertLessEqual(len(buffer["Q1"]["active_rubrics"]), 2)
-        self.assertGreater(metrics["rubric_buffer/deactivated_over_cap"], 0.0)
 
     def test_empty_buffer(self):
-        """Test with empty buffer."""
+        """Test with empty buffer — no crash."""
         buffer: dict = {}
         stats = {"Q1::E1": {"mean": 0.5, "std": 0.3}}
-        metrics = filter_rubric_buffer(buffer, stats, max_active_rubrics=5)
-        self.assertEqual(metrics["rubric_buffer/avg_active_rubrics"], 0.0)
+        filter_rubric_buffer(buffer, stats, max_active_rubrics=5)
+        # No assertions needed — just verifying it doesn't crash
 
     def test_no_changes_needed(self):
         """Test when all rubrics have good std and are under cap."""
@@ -652,10 +633,9 @@ class TestFilterRubricBuffer(unittest.TestCase):
             "Q1::E2": {"mean": 0.5, "std": 0.5},
             "Q1::E3": {"mean": 0.5, "std": 0.1},
         }
-        metrics = filter_rubric_buffer(buffer, stats, max_active_rubrics=10)
+        filter_rubric_buffer(buffer, stats, max_active_rubrics=10)
         self.assertEqual(len(buffer["Q1"]["active_rubrics"]), 3)
-        self.assertEqual(metrics["rubric_buffer/deactivated_zero_std"], 0.0)
-        self.assertEqual(metrics["rubric_buffer/deactivated_over_cap"], 0.0)
+        self.assertEqual(len(buffer["Q1"]["inactive_rubrics"]), 0)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,10 @@
-"""Metrics computation for evolving rubrics.
+"""Global metrics for evolving rubrics.
 
-Provides functions to:
-- Collect per-rubric-key statistics (mean, std) from scored rubrics.
-- Filter/prune the rubric buffer by deactivating low-signal rubrics.
-- Produce a metrics dict suitable for logging to wandb / console.
+Provides functions to compute and log:
+- Average reward from evolving rubrics vs persistent (static) rubrics.
+- Number of newly generated evolving rubrics per step.
+- Number of active rubrics in the buffer.
+- Rubric buffer filtering (deactivating uninformative rubrics).
 """
 
 from __future__ import annotations
@@ -17,97 +18,61 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 
-# ------------------------------------------------------------------
-# Generation-phase metrics (from update_ground_truths_with_evolving_rubrics)
-# ------------------------------------------------------------------
-
-
-def compute_generation_metrics(
-    valid_evolving_rubric_rate: float,
-    avg_num_ground_truths: float,
-    avg_num_evolving_rubrics: float,
-    avg_num_active_buffer_rubrics: float,
-    skipped_count: int,
+def compute_rubric_reward_metrics(
+    per_rubric_scores: list[list[tuple[float, float]]], per_rubric_types: list[list[str]]
 ) -> dict[str, float]:
-    """Build a metrics dict from the values returned by ``update_ground_truths_with_evolving_rubrics``.
+    """Compute average reward split by rubric type (evolving vs persistent).
 
     Args:
-        valid_evolving_rubric_rate: Fraction of prompts that received valid evolving rubrics.
-        avg_num_ground_truths: Mean number of ground-truth (persistent) rubrics per prompt.
+        per_rubric_scores: For each response, a list of ``(score, weight)`` tuples
+            — one per rubric that was scored.
+        per_rubric_types: For each response, a list of rubric type strings
+            (``"persistent"`` or ``"evolving"``) aligned with ``per_rubric_scores``.
+
+    Returns:
+        Dict with:
+        - ``evolving_rubrics/avg_evolving_reward``: mean weighted score from evolving rubrics.
+        - ``evolving_rubrics/avg_persistent_reward``: mean weighted score from persistent rubrics.
+    """
+    evolving_weighted_scores: list[float] = []
+    persistent_weighted_scores: list[float] = []
+
+    for scores, types in zip(per_rubric_scores, per_rubric_types):
+        for (score, weight), rtype in zip(scores, types):
+            weighted = score * weight
+            if rtype == "evolving":
+                evolving_weighted_scores.append(weighted)
+            else:
+                persistent_weighted_scores.append(weighted)
+
+    return {
+        "evolving_rubrics/avg_evolving_reward": float(np.mean(evolving_weighted_scores))
+        if evolving_weighted_scores
+        else 0.0,
+        "evolving_rubrics/avg_persistent_reward": float(np.mean(persistent_weighted_scores))
+        if persistent_weighted_scores
+        else 0.0,
+    }
+
+
+def compute_rubric_count_metrics(
+    avg_num_evolving_rubrics: float, avg_num_active_buffer_rubrics: float
+) -> dict[str, float]:
+    """Compute rubric count metrics for logging.
+
+    Args:
         avg_num_evolving_rubrics: Mean number of newly generated evolving rubrics per prompt.
         avg_num_active_buffer_rubrics: Mean number of active rubrics in the buffer per query.
-        skipped_count: Number of rubric generation attempts that returned None.
 
     Returns:
-        Dict of ``"objective/..."`` metric keys → float values.
+        Dict with:
+        - ``evolving_rubrics/num_new_rubrics``: newly generated evolving rubrics per prompt.
+        - ``evolving_rubrics/num_active_rubrics``: active rubrics in the buffer per query.
     """
     return {
-        "objective/valid_evolving_rubric_rate": valid_evolving_rubric_rate,
-        "objective/avg_num_ground_truths": avg_num_ground_truths,
-        "objective/avg_num_evolving_rubrics": avg_num_evolving_rubrics,
-        "objective/avg_num_active_buffer_rubrics": avg_num_active_buffer_rubrics,
-        "objective/skipped_evolving_rubrics": float(skipped_count),
+        "evolving_rubrics/num_new_rubrics": avg_num_evolving_rubrics,
+        "evolving_rubrics/num_active_rubrics": avg_num_active_buffer_rubrics,
     }
-
-
-# ------------------------------------------------------------------
-# Rubric-key-level statistics (computed from per-response rubric scores)
-# ------------------------------------------------------------------
-
-
-def compute_rubric_key_stats(rubric_scores_by_key: dict[str, list[float]]) -> dict[str, dict[str, float]]:
-    """Compute mean and standard deviation for each rubric key.
-
-    Args:
-        rubric_scores_by_key: Mapping from rubric key (e.g. ``query::title``)
-            to the list of scores that rubric received across responses.
-
-    Returns:
-        Mapping from rubric key to ``{"mean": …, "std": …}``.
-    """
-    stats: dict[str, dict[str, float]] = {}
-    for key, scores_list in rubric_scores_by_key.items():
-        arr = np.array(scores_list, dtype=np.float64)
-        stats[key] = {"mean": float(arr.mean()), "std": float(arr.std())}
-    return stats
-
-
-def aggregate_rubric_key_metrics(rubric_key_stats: dict[str, dict[str, float]]) -> dict[str, float]:
-    """Aggregate per-rubric-key stats into loggable summary metrics.
-
-    Metrics produced:
-    - ``rubric_keys/avg_mean``: Average of per-key means.
-    - ``rubric_keys/avg_std``: Average of per-key standard deviations.
-    - ``rubric_keys/num_all_zero_rubrics_ratio``: Fraction of keys with mean=0 and std=0.
-    - ``rubric_keys/num_all_same_value_non_zero_rubrics_ratio``: Fraction with mean>0 and std=0.
-
-    Args:
-        rubric_key_stats: Output of :func:`compute_rubric_key_stats`.
-
-    Returns:
-        Dict of ``"rubric_keys/..."`` metric keys → float values.
-    """
-    if not rubric_key_stats:
-        return {}
-
-    means = [s["mean"] for s in rubric_key_stats.values()]
-    stds = [s["std"] for s in rubric_key_stats.values()]
-    n = len(rubric_key_stats)
-
-    num_all_zero = sum(1 for s in rubric_key_stats.values() if s["mean"] == 0 and s["std"] == 0)
-    num_same_nonzero = sum(1 for s in rubric_key_stats.values() if s["mean"] > 0 and s["std"] == 0)
-
-    return {
-        "rubric_keys/avg_mean": float(np.mean(means)),
-        "rubric_keys/avg_std": float(np.mean(stds)),
-        "rubric_keys/num_all_zero_rubrics_ratio": num_all_zero / n,
-        "rubric_keys/num_all_same_value_non_zero_rubrics_ratio": num_same_nonzero / n,
-    }
-
-
-# ------------------------------------------------------------------
-# Rubric buffer filtering
-# ------------------------------------------------------------------
 
 
 def filter_rubric_buffer(
@@ -115,10 +80,10 @@ def filter_rubric_buffer(
     rubric_key_stats: dict[str, dict[str, float]],
     max_active_rubrics: int,
     create_rubric_key_fn: Any | None = None,
-) -> dict[str, float]:
+) -> None:
     """Prune the rubric buffer by deactivating low-signal evolving rubrics.
 
-    The pruning strategy (from the original implementation):
+    The pruning strategy:
     1. **Deactivate zero-std rubrics**: rubrics whose scores had zero variance
        across responses are uninformative and are moved to inactive.
     2. **Cap active rubrics**: if a query still exceeds ``max_active_rubrics``,
@@ -126,16 +91,10 @@ def filter_rubric_buffer(
 
     Args:
         rubric_buffer: Mutable mapping ``query → {active_rubrics, inactive_rubrics, persistent_rubrics}``.
-        rubric_key_stats: Per-rubric-key statistics from :func:`compute_rubric_key_stats`.
+        rubric_key_stats: Per-rubric-key statistics — mapping from key to ``{"mean": …, "std": …}``.
         max_active_rubrics: Maximum number of active evolving rubrics per query.
         create_rubric_key_fn: Optional callable ``(query, rubric) → str`` that produces
             the key used in ``rubric_key_stats``.  Defaults to ``f"{query}::{rubric['title']}"``.
-
-    Returns:
-        Dict of buffer-filtering metrics:
-        - ``rubric_buffer/deactivated_zero_std``: number moved due to zero std.
-        - ``rubric_buffer/deactivated_over_cap``: number moved due to cap.
-        - ``rubric_buffer/avg_active_rubrics``: mean active rubrics per query after filtering.
     """
     if create_rubric_key_fn is None:
 
@@ -186,13 +145,3 @@ def filter_rubric_buffer(
         logger.info(
             f"[Rubric buffer filtering] Deactivated {moved_zero_std} zero-std rubrics, {moved_cap} over-cap rubrics"
         )
-
-    # Compute average active rubrics
-    active_counts = [len(b["active_rubrics"]) for b in rubric_buffer.values()]
-    avg_active = float(np.mean(active_counts)) if active_counts else 0.0
-
-    return {
-        "rubric_buffer/deactivated_zero_std": float(moved_zero_std),
-        "rubric_buffer/deactivated_over_cap": float(moved_cap),
-        "rubric_buffer/avg_active_rubrics": avg_active,
-    }
