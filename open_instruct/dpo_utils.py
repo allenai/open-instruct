@@ -38,6 +38,7 @@ from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
 
+from open_instruct import data_loader as data_loader_lib
 from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
@@ -490,7 +491,7 @@ def compute_reference_cache_hash(args: ExperimentConfig, tc: TokenizerConfig) ->
 
 def build_reference_logprobs_cache(
     model: torch.nn.Module,
-    dataloader: torch.utils.data.DataLoader,
+    dataloader: torch.utils.data.DataLoader | data_loader_lib.HFDataLoader,
     average_log_prob: bool,
     forward_fn: Callable,
     full_dataset_size: int,
@@ -541,14 +542,41 @@ def build_reference_logprobs_cache(
     chosen_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
     rejected_tensor = torch.full((full_dataset_size,), float("-inf"), dtype=torch.float32, device=device)
 
+    supports_checkpointing = hasattr(dataloader, "state_dict") and hasattr(dataloader, "load_state_dict")
+
     total_tokens = 0
     total_examples = 0
     total_batches = len(dataloader)
     cache_start_time = time.perf_counter()
 
+    if dist.is_initialized():
+        batch_count = torch.tensor([total_batches], device=device, dtype=torch.int64)
+        min_count = batch_count.clone()
+        max_count = batch_count.clone()
+        dist.all_reduce(min_count, op=dist.ReduceOp.MIN)
+        dist.all_reduce(max_count, op=dist.ReduceOp.MAX)
+        if min_count.item() != max_count.item():
+            logger.warning(
+                "Batch count mismatch across ranks: min=%d, max=%d, local=%d",
+                min_count.item(),
+                max_count.item(),
+                total_batches,
+            )
+
+    partial_cache_path = cache_path.with_suffix(".partial.pt")
+    start_step = 0
+    if supports_checkpointing and partial_cache_path.exists():
+        logger.info("Loading partial reference logprobs cache from %s", partial_cache_path)
+        checkpoint = torch.load(partial_cache_path, map_location="cpu", weights_only=False)
+        chosen_tensor = checkpoint["chosen_logps"].to(device)
+        rejected_tensor = checkpoint["rejected_logps"].to(device)
+        dataloader.load_state_dict(checkpoint["dataloader_state"])
+        start_step = dataloader.batches_processed
+        logger.info("Resumed from step %d", start_step)
+
     with torch.no_grad():
         pbar = tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")
-        for batch_idx, batch in enumerate(pbar):
+        for step, batch in enumerate(pbar, start=start_step + 1):
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
@@ -558,6 +586,9 @@ def build_reference_logprobs_cache(
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
+
+            if supports_checkpointing:
+                dataloader.batches_processed += 1
 
             batch_tokens = batch["chosen_input_ids"].numel() + batch["rejected_input_ids"].numel()
             total_tokens += batch_tokens
@@ -574,10 +605,26 @@ def build_reference_logprobs_cache(
                     "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
                 }
             )
-            if is_main_process:
+            if is_main_process and (step == 1 or step == total_batches or step % 10 == 0):
                 utils.maybe_update_beaker_description(
-                    current_step=batch_idx, total_steps=total_batches, start_time=cache_start_time
+                    current_step=step, total_steps=total_batches, start_time=cache_start_time
                 )
+
+            if supports_checkpointing and step % 100 == 0:
+                if is_main_process:
+                    logger.info("Saving partial checkpoint at step %d", step)
+                    torch.save(
+                        {
+                            "chosen_logps": chosen_tensor.cpu(),
+                            "rejected_logps": rejected_tensor.cpu(),
+                            "dataloader_state": dataloader.state_dict(),
+                        },
+                        partial_cache_path,
+                    )
+                if dist.is_initialized():
+                    dist.barrier()
+
+    torch.cuda.empty_cache()
 
     if dist.is_initialized():
         dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
@@ -606,6 +653,9 @@ def build_reference_logprobs_cache(
     if is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
         cache.to_disk(cache_path)
+        if partial_cache_path.exists():
+            partial_cache_path.unlink()
+            logger.info("Deleted partial checkpoint %s", partial_cache_path)
 
     if dist.is_initialized():
         dist.barrier()

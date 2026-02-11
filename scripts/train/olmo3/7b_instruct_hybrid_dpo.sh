@@ -25,6 +25,7 @@ do
             --env NCCL_SOCKET_IFNAME=ib \
             --env TORCH_NCCL_AVOID_RECORD_STREAMS=1 \
             --env TORCH_DIST_INIT_BARRIER=1 \
+            --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=1800 \
 	    --env TRITON_PRINT_AUTOTUNING=1 \
             --num_nodes 4 \
             --budget ai2/oe-adapt \

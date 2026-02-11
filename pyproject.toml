@@ -60,6 +60,7 @@ torch = [
 ]
 vllm = { git = "https://github.com/yanhong-lbh/vllm", branch = "olmo-3.5-hybrid-clean" }
 transformers = { git = "https://github.com/yanhong-lbh/transformers", branch = "olmo-3.5-hybrid-clean" }
+flash-linear-attention = { git = "https://github.com/tyler-romero/flash-linear-attention", branch = "tyler/fewer-l2norm-recompilations" }
 
 [[tool.uv.index]]
 name = "pytorch-cu129"
