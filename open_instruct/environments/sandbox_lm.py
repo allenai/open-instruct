@@ -127,6 +127,7 @@ class SandboxLMEnv(RLEnvironment):
         self._timeout = timeout
         self._backend_kwargs = backend_kwargs
         self._backend: SandboxBackend | None = None
+        self._current_image: str | None = None
         self._step_count = 0
 
     @classmethod
@@ -152,28 +153,41 @@ class SandboxLMEnv(RLEnvironment):
         raise last_error  # type: ignore[misc]
 
     def _do_reset(self, task_id: str | None = None, **kwargs) -> StepResult:
-        # Tear down previous container but reuse the backend object
-        if self._backend is not None:
-            self._backend.close()
-            self._backend.start()
+        new_image = self._backend_kwargs.get("image")
+        can_reuse = self._backend is not None and (new_image is None or new_image == self._current_image)
+
+        if can_reuse:
+            # Reuse existing sandbox — just clean the filesystem (much faster than recreate)
+            self._backend.run_command(
+                "rm -rf /testbed /workspace /output /logs /root/prompt.txt /tmp/.sandbox_cwd /tmp/.sandbox_env "
+                "&& mkdir -p /testbed/input /testbed/output "
+                "&& cd /testbed && git init 2>/dev/null || true "
+                "&& echo /testbed > /tmp/.sandbox_cwd"
+            )
         else:
-            bkwargs = dict(self._backend_kwargs)
-            if self._backend_type == "e2b":
-                bkwargs.setdefault("timeout", self._timeout)
-            self._backend = create_backend(self._backend_type, **bkwargs)
-            self._backend.start()
+            # Need a new sandbox (first run or image changed)
+            if self._backend is not None:
+                self._backend.close()
+                self._backend.start()
+            else:
+                bkwargs = dict(self._backend_kwargs)
+                if self._backend_type == "e2b":
+                    bkwargs.setdefault("timeout", self._timeout)
+                self._backend = create_backend(self._backend_type, **bkwargs)
+                self._backend.start()
+            self._current_image = new_image
+
+            # Setup env (mirrors DockerRuntime.setup_env minus Tsinghua mirror)
+            self._backend.run_command("mkdir -p /testbed/input /testbed/output")
+            self._backend.run_command("cd /testbed && git init 2>/dev/null || true")
+
+            # Write stateful bash wrapper (only needed once per sandbox)
+            self._backend.write_file("/tmp/.sandbox_bash_wrapper.sh", _BASH_WRAPPER)
+            self._backend.run_command("chmod +x /tmp/.sandbox_bash_wrapper.sh")
+
+            # Init cwd state
+            self._backend.run_command("echo /testbed > /tmp/.sandbox_cwd")
         self._step_count = 0
-
-        # Setup env (mirrors DockerRuntime.setup_env minus Tsinghua mirror)
-        self._backend.run_command("mkdir -p /testbed/input /testbed/output")
-        self._backend.run_command("cd /testbed && git init 2>/dev/null || true")
-
-        # Write stateful bash wrapper
-        self._backend.write_file("/tmp/.sandbox_bash_wrapper.sh", _BASH_WRAPPER)
-        self._backend.run_command("chmod +x /tmp/.sandbox_bash_wrapper.sh")
-
-        # Init cwd state
-        self._backend.run_command("echo /testbed > /tmp/.sandbox_cwd")
 
         # Optionally write the prompt/task to a file in the sandbox
         if self._write_prompt_file and task_id:
