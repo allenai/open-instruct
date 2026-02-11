@@ -153,7 +153,8 @@ class SandboxLMEnv(RLEnvironment):
 
     def _do_reset(self, task_id: str | None = None, **kwargs) -> StepResult:
         if self._backend is not None:
-            self._backend.reset()
+            self._backend.close()
+            self._backend.start()
         else:
             bkwargs = dict(self._backend_kwargs)
             if self._backend_type == "e2b":

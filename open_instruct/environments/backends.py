@@ -52,15 +52,6 @@ class SandboxBackend(ABC):
         """Initialize the sandbox. Must be called before other operations."""
         pass
 
-    def reset(self) -> None:
-        """Reset the sandbox for a new episode.
-
-        Default: destroy and recreate. Backends may override to reuse
-        the sandbox (e.g., clean the filesystem instead of recreating).
-        """
-        self.close()
-        self.start()
-
     @abstractmethod
     def run_code(self, code: str, language: str = "python") -> ExecutionResult:
         """
@@ -282,22 +273,6 @@ class DockerBackend(SandboxBackend):
         exit_code, output = self._container.exec_run(["cat", path])
         return output.decode("utf-8", errors="replace") if isinstance(output, bytes) else output
 
-    def reset(self) -> None:
-        """Reset the container by cleaning the filesystem and killing processes."""
-        if self._container is None:
-            self.start()
-            return
-        # Kill leftover user processes (ignore PID 1 and this shell), then clean filesystem
-        self._container.exec_run(
-            [
-                "bash",
-                "-c",
-                "pkill -9 -u root -o -1 2>/dev/null || true; "
-                "rm -rf /testbed /workspace /output /logs /root/prompt.txt /tmp/.sandbox_* /tmp/code_* /tmp/setup.sh; "
-                "mkdir -p /tmp",
-            ]
-        )
-
     def close(self) -> None:
         """Stop and remove the Docker container."""
         if self._container is not None:
@@ -433,18 +408,6 @@ class DaytonaBackend(SandboxBackend):
         if isinstance(data, bytes):
             return data.decode("utf-8")
         return data
-
-    def reset(self) -> None:
-        """Reset the sandbox by cleaning the filesystem and killing processes."""
-        if self._sandbox is None:
-            self.start()
-            return
-        _daytona_retry(
-            self._sandbox.process.exec,
-            "pkill -9 -u root -o -1 2>/dev/null || true; "
-            "rm -rf /testbed /workspace /output /logs /root/prompt.txt /tmp/.sandbox_* /tmp/code_* /tmp/setup.sh; "
-            "mkdir -p /tmp",
-        )
 
     def close(self) -> None:
         """Delete the Daytona sandbox."""
