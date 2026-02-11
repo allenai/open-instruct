@@ -137,6 +137,9 @@ class ExperimentConfig:
     """Number of steps to train value model with frozen policy (VAPO value pretraining).
     During warmup, only the value model is updated using Monte Carlo returns.
     This reduces value model initialization bias before starting policy training."""
+    reset_optimizer_after_value_warmup: bool = False
+    """If True, reset the policy optimizer state after value warmup completes.
+    This can help prevent stale momentum/variance estimates from the warmup phase."""
 
     # Ray
     single_gpu_mode: bool = False

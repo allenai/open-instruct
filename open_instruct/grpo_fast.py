@@ -787,6 +787,21 @@ class PolicyTrainerRayProcess(RayProcess):
                 f"[Value Warmup] Step {training_step}/{self.args.value_warmup_steps} - "
                 "Training value model only, policy frozen"
             )
+
+        # Reset optimizer after value warmup ends (first step after warmup)
+        if (
+            self.args.use_value_model
+            and self.args.reset_optimizer_after_value_warmup
+            and training_step == self.args.value_warmup_steps + 1
+        ):
+            if self.rank == 0:
+                logger.info("[Value Warmup Complete] Resetting policy optimizer state")
+            # Reset optimizer state (momentum, variance estimates) by reinitializing
+            for param_group in self.model.optimizer.param_groups:
+                for p in param_group["params"]:
+                    state = self.model.optimizer.state.get(p, {})
+                    state.clear()
+
         batch_data = next(self.dataloader)
         data_BT = batch_data["batch"]
         if len(data_BT) == 0:
