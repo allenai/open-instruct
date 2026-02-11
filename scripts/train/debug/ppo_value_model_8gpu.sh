@@ -1,11 +1,11 @@
 #!/bin/bash
 # VAPO (Value-model-based Augmented PPO) test script
 # Matches rlzero_seqlen.sh configuration but with VAPO value model
-# Uses 4 nodes x 8 GPUs = 32 GPUs with sequence parallelism
+# Uses 4 nodes x 8 GPUs = 32 GPUs, 16k seqlen, no sequence parallelism
 # Reference: https://arxiv.org/abs/2504.05118
 
 DDMM=$(date +"%d%m")
-exp_name=vapo_${DDMM}_7b_rlzero_math_65k
+exp_name=vapo_${DDMM}_7b_rlzero_math_16k
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -41,8 +41,8 @@ uv run python mason.py \
     --dataset_mixer_eval_list allenai/Dolci-RLZero-Math-7B 16 \
     --dataset_mixer_eval_list_splits train train \
     --max_prompt_token_length 2048 \
-    --response_length 63488 \
-    --pack_length 65536 \
+    --response_length 14336 \
+    --pack_length 16384 \
     --model_name_or_path allenai/Olmo-3-1025-7B \
     --chat_template_name olmo_thinker_rlzero \
     --non_stop_penalty False \
@@ -50,7 +50,7 @@ uv run python mason.py \
     --total_episodes 512256 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 8 8 8 \
-    --sequence_parallel_size 4 \
+    --sequence_parallel_size 1 \
     --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
@@ -62,7 +62,7 @@ uv run python mason.py \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
-    --oe_eval_max_length 65536 \
+    --oe_eval_max_length 16384 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority normal \
     --eval_on_step_0 True \
