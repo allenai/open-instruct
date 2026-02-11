@@ -208,6 +208,7 @@ class DockerBackend(SandboxBackend):
         """
         self._image = image
         self._container = None
+        self._client = None
 
     def start(self) -> None:
         """Start the Docker container."""
@@ -215,8 +216,10 @@ class DockerBackend(SandboxBackend):
             raise ImportError("docker SDK not installed. Run: pip install docker")
 
         logger.info(f"Starting Docker container (image={self._image})")
-        client = docker_sdk.from_env()
-        self._container = client.containers.run(self._image, command="sleep infinity", detach=True, remove=True)
+        # Reuse client to avoid leaking connections across reset() calls
+        if self._client is None:
+            self._client = docker_sdk.from_env()
+        self._container = self._client.containers.run(self._image, command="sleep infinity", detach=True, remove=True)
         logger.info(f"Docker container started: {self._container.short_id}")
 
     def run_code(self, code: str, language: str = "python") -> ExecutionResult:
@@ -271,7 +274,9 @@ class DockerBackend(SandboxBackend):
         if self._container is not None:
             logger.info(f"Closing Docker container: {self._container.short_id}")
             with contextlib.suppress(Exception):
-                self._container.stop()
+                self._container.stop(timeout=5)
+            with contextlib.suppress(Exception):
+                self._container.kill()
             self._container = None
 
 
