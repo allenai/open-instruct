@@ -1183,9 +1183,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Compute total loss for logging
                     if self.args.use_value_model and value_loss_BT is not None:
-                        total_loss_BT = pg_kl_loss_BT + self.args.value_loss_coef * value_loss_BT[:, 1:]
+                        total_loss_BT = per_token_loss_BT + self.args.value_loss_coef * value_loss_BT[:, 1:]
                     else:
-                        total_loss_BT = pg_kl_loss_BT
+                        total_loss_BT = per_token_loss_BT
                     loss = masked_mean(total_loss_BT, response_mask_BT, None, loss_denominator)
                     local_step += 1
                     with torch.no_grad():
