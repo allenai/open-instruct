@@ -1,33 +1,12 @@
 #!/bin/bash
 # VAPO (Value-model-based Augmented PPO) single GPU test script
 # Scaled-down version of rlzero_seqlen.sh with VAPO value model
-# Uses 1 GPU for quick testing
+# Uses 1 GPU for quick local testing
 # Reference: https://arxiv.org/abs/2504.05118
 
-# Get the Beaker username to construct the image name
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 
-echo "Using Beaker image: $BEAKER_IMAGE"
-
-uv run python mason.py \
-    --cluster ai2/jupiter \
-    --cluster ai2/saturn \
-    --cluster ai2/ceres \
-    --image "$BEAKER_IMAGE" \
-    --description "VAPO test (1 GPU)" \
-    --pure_docker_mode \
-    --no-host-networking \
-    --workspace ai2/open-instruct-dev \
-    --priority urgent \
-    --num_nodes 1 \
-    --max_retries 0 \
-    --timeout 30m \
-    --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --budget ai2/oe-adapt \
-    --gpus 1 \
-    --no_auto_dataset_cache \
-    -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+python open_instruct/grpo_fast.py \
     --exp_name vapo_1gpu_test \
     --beta 0.0 \
     --num_samples_per_prompt_rollout 4 \
@@ -56,7 +35,6 @@ uv run python mason.py \
     --seed 1 \
     --local_eval_every 5 \
     --gradient_checkpointing \
-    --with_tracking \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.3 \
     --vllm_enforce_eager \
