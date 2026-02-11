@@ -31,12 +31,12 @@ uv run python mason.py \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
-       --env APPWORLD_ROOT=. \
+       --env UV_GIT_LFS=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --budget ai2/oe-adapt \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source configs/beaker_configs/ray_node_setup.sh \&\& uv run appworld download data \&\& python open_instruct/grpo_fast.py \
+       -- source configs/beaker_configs/ray_node_setup.sh \&\& uv run --extra appworld appworld install \&\& uv run --extra appworld appworld download data \&\& uv run --extra appworld python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/rlenv-appworld-nothink 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 4096 \

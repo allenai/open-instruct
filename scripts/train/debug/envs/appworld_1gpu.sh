@@ -11,26 +11,24 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
-export APPWORLD_ROOT="$REPO_ROOT"
+export UV_GIT_LFS=1 # for appworld data (git lfs files in package)
 
 echo "Starting AppWorld environment training (1 GPU)..."
 echo "Note: AppWorld has 733 tasks across 9 apps (Spotify, Amazon, Venmo, etc.)"
 
-cd "$REPO_ROOT"
-uv run python open_instruct/grpo_fast.py \
+uv run --extra appworld appworld install
+uv run --extra appworld appworld download data
+uv run --extra appworld python open_instruct/grpo_fast.py \
     --dataset_mixer_list hamishivi/rlenv-appworld-nothink 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --pack_length 16384 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 4 \
+    --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 2 \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --temperature 0.7 \
@@ -53,7 +51,9 @@ uv run python open_instruct/grpo_fast.py \
     --env_pool_size 4 \
     --env_max_steps 20 \
     --tool_parser_type vllm_hermes \
-    --no_filter_zero_std_samples \
+    --inflight_updates \
+    --async_steps 8 \
+    --rollouts_save_path ~/open-instruct/tmp/deletable_rollouts \
     --output_dir output/appworld_debug
 
 echo "Training complete!"
