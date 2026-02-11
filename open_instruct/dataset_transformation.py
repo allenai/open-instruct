@@ -1410,6 +1410,7 @@ def rlvr_tokenize_v3(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
     system_prompt_override: str | None = None,
+    user_prompt_transform: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
 ):
@@ -1434,6 +1435,14 @@ def rlvr_tokenize_v3(
                 tools_for_template = filtered_tools
         else:
             tools_for_template = tool_definitions
+
+    if user_prompt_transform:
+        for message in reversed(prompt):
+            if message.get("role") != "user":
+                continue
+            content = message.get("content") or ""
+            message["content"] = user_prompt_transform.format(prompt=content)
+            break
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
