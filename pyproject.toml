@@ -187,6 +187,10 @@ include = [
     "open_instruct/padding_free_collator.py",
     "open_instruct/rejection_sampling/prompt_templates.py",
     "open_instruct/rl_utils.py",
+    "open_instruct/rubrics/metrics.py",
+    "open_instruct/rubrics/prompts.py",
+    "open_instruct/rubrics/rubric_utils.py",
+    "open_instruct/rubrics/run_utils.py",
     "open_instruct/tools/tools.py",
     "open_instruct/tools/generic_mcp.py",
 ]

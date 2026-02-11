@@ -364,6 +364,15 @@ class StreamingDataLoaderConfig:
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
+    # Evolving rubric reward
+    apply_evolving_rubric_reward: bool = False
+    """Whether to generate and apply evolving rubrics for reward computation.
+    When enabled, a rubric buffer is automatically maintained across training steps."""
+    max_active_rubrics: int = 5
+    """Maximum number of active evolving rubrics per query."""
+    cache_evolving_rubric_data_dir: str | None = None
+    """Directory to cache evolving rubric generation data for debugging/analysis. If set, rubric data will be saved."""
+
     # Rollout saving
     save_traces: bool = False
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
@@ -397,9 +406,12 @@ class StreamingDataLoaderConfig:
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
 
-        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
-            "At least one reward must be applied!"
-        )
+        assert (
+            self.apply_verifiable_reward
+            or self.apply_r1_style_format_reward
+            or self.non_stop_penalty
+            or self.apply_evolving_rubric_reward
+        ), "At least one reward must be applied!"
 
         if self.stop_strings is None:
             self.stop_strings = []
