@@ -32,7 +32,9 @@ def compute_rubric_reward_metrics(
     Returns:
         Dict with:
         - ``evolving_rubrics/avg_evolving_reward``: mean weighted score from evolving rubrics.
+        - ``evolving_rubrics/std_evolving_reward``: std of weighted scores from evolving rubrics.
         - ``evolving_rubrics/avg_persistent_reward``: mean weighted score from persistent rubrics.
+        - ``evolving_rubrics/std_persistent_reward``: std of weighted scores from persistent rubrics.
     """
     evolving_weighted_scores: list[float] = []
     persistent_weighted_scores: list[float] = []
@@ -45,13 +47,14 @@ def compute_rubric_reward_metrics(
             else:
                 persistent_weighted_scores.append(weighted)
 
+    ev_arr = np.array(evolving_weighted_scores) if evolving_weighted_scores else np.array([])
+    ps_arr = np.array(persistent_weighted_scores) if persistent_weighted_scores else np.array([])
+
     return {
-        "evolving_rubrics/avg_evolving_reward": float(np.mean(evolving_weighted_scores))
-        if evolving_weighted_scores
-        else 0.0,
-        "evolving_rubrics/avg_persistent_reward": float(np.mean(persistent_weighted_scores))
-        if persistent_weighted_scores
-        else 0.0,
+        "evolving_rubrics/avg_evolving_reward": float(ev_arr.mean()) if ev_arr.size > 0 else 0.0,
+        "evolving_rubrics/std_evolving_reward": float(ev_arr.std()) if ev_arr.size > 0 else 0.0,
+        "evolving_rubrics/avg_persistent_reward": float(ps_arr.mean()) if ps_arr.size > 0 else 0.0,
+        "evolving_rubrics/std_persistent_reward": float(ps_arr.std()) if ps_arr.size > 0 else 0.0,
     }
 
 

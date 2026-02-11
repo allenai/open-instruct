@@ -538,17 +538,23 @@ class TestComputeRubricRewardMetrics(unittest.TestCase):
         per_rubric_types = [["persistent", "evolving", "evolving"], ["persistent", "evolving"]]
         metrics = compute_rubric_reward_metrics(per_rubric_scores, per_rubric_types)
         self.assertIn("evolving_rubrics/avg_evolving_reward", metrics)
+        self.assertIn("evolving_rubrics/std_evolving_reward", metrics)
         self.assertIn("evolving_rubrics/avg_persistent_reward", metrics)
+        self.assertIn("evolving_rubrics/std_persistent_reward", metrics)
         # persistent: 0.8*1.0, 0.5*1.0 → mean = 0.65
         self.assertAlmostEqual(metrics["evolving_rubrics/avg_persistent_reward"], 0.65)
+        self.assertGreater(metrics["evolving_rubrics/std_persistent_reward"], 0.0)
         # evolving: 0.6*1.0, 0.4*(-1.0), 0.9*1.0 → mean of [0.6, -0.4, 0.9] = 1.1/3
         self.assertAlmostEqual(metrics["evolving_rubrics/avg_evolving_reward"], 1.1 / 3, places=5)
+        self.assertGreater(metrics["evolving_rubrics/std_evolving_reward"], 0.0)
 
     def test_empty_scores(self):
         """Test with no rubric scores."""
         metrics = compute_rubric_reward_metrics([], [])
         self.assertEqual(metrics["evolving_rubrics/avg_evolving_reward"], 0.0)
+        self.assertEqual(metrics["evolving_rubrics/std_evolving_reward"], 0.0)
         self.assertEqual(metrics["evolving_rubrics/avg_persistent_reward"], 0.0)
+        self.assertEqual(metrics["evolving_rubrics/std_persistent_reward"], 0.0)
 
     def test_only_persistent(self):
         """Test with only persistent rubrics."""
@@ -556,7 +562,9 @@ class TestComputeRubricRewardMetrics(unittest.TestCase):
         per_rubric_types = [["persistent"]]
         metrics = compute_rubric_reward_metrics(per_rubric_scores, per_rubric_types)
         self.assertAlmostEqual(metrics["evolving_rubrics/avg_persistent_reward"], 0.7)
+        self.assertEqual(metrics["evolving_rubrics/std_persistent_reward"], 0.0)
         self.assertEqual(metrics["evolving_rubrics/avg_evolving_reward"], 0.0)
+        self.assertEqual(metrics["evolving_rubrics/std_evolving_reward"], 0.0)
 
 
 class TestComputeRubricCountMetrics(unittest.TestCase):
