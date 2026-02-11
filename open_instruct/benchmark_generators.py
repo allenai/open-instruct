@@ -421,7 +421,7 @@ def run_benchmark(
                 result = inference_results_Q.get(timeout=1.0)
                 warmup_results.append(result)
             except Empty:
-                if len(warmup_results) % 10 == 0:
+                if len(warmup_results) > 0 and len(warmup_results) % 10 == 0:
                     utils.ray_get_with_progress(
                         [engine.check_background_threads.remote() for engine in vllm_engines],
                         f"Health check ({len(warmup_results)}/{warmup_batch_size})",
@@ -459,7 +459,7 @@ def run_benchmark(
                 except Empty:
                     if time.time() > batch_deadline:
                         raise TimeoutError(f"Batch timed out, got {len(batch_results)}/{num_prompts}") from None
-                    if len(batch_results) % 10 == 0:
+                    if len(batch_results) > 0 and len(batch_results) % 10 == 0:
                         utils.ray_get_with_progress(
                             [engine.check_background_threads.remote() for engine in vllm_engines],
                             f"Health check ({len(batch_results)}/{num_prompts})",
