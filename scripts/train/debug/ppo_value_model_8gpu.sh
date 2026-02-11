@@ -1,7 +1,8 @@
 #!/bin/bash
-# Test script for PPO with value model feature in grpo_fast.py
-# Uses 8 GPUs (single node) with sequence parallelism to test SP + value model
-exp_name=ppo_value_model_8gpu_test
+# Test script for VAPO (Value-model-based Augmented PPO) in grpo_fast.py
+# Uses 8 GPUs (single node) with sequence parallelism
+# Reference: https://arxiv.org/abs/2504.05118
+exp_name=vapo_8gpu_test
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 uv run python mason.py \
@@ -12,7 +13,7 @@ uv run python mason.py \
     --priority high \
     --preemptible \
     --num_nodes 1 \
-    --description "PPO with value model test" \
+    --description "VAPO test (8 GPU, SP=2)" \
     --max_retries 0 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
@@ -59,6 +60,7 @@ uv run python mason.py \
     --vf_clip_range 0.2 \
     --gamma 1.0 \
     --gae_lambda 0.95 \
+    --value_warmup_steps 50 \
     --decoupled_gae \
     --length_adaptive_gae \
     --length_adaptive_gae_alpha 0.05 \

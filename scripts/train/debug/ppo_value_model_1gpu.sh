@@ -1,6 +1,7 @@
 #!/bin/bash
-# Test script for PPO with value model feature in grpo_fast.py
+# Test script for VAPO (Value-model-based Augmented PPO) in grpo_fast.py
 # Uses 1 GPU for quick testing with Qwen3-0.6B
+# Reference: https://arxiv.org/abs/2504.05118
 
 # Get the Beaker username to construct the image name
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
@@ -13,7 +14,7 @@ uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/ceres \
     --image "$BEAKER_IMAGE" \
-    --description "PPO with value model test (1 GPU)" \
+    --description "VAPO test (1 GPU)" \
     --pure_docker_mode \
     --no-host-networking \
     --workspace ai2/open-instruct-dev \
@@ -63,6 +64,7 @@ uv run python mason.py \
     --vf_clip_range 0.2 \
     --gamma 1.0 \
     --gae_lambda 0.95 \
+    --value_warmup_steps 50 \
     --decoupled_gae \
     --length_adaptive_gae \
     --length_adaptive_gae_alpha 0.05 \
