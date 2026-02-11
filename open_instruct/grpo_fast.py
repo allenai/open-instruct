@@ -427,15 +427,16 @@ class PolicyTrainerRayProcess(RayProcess):
     ) -> None:
         """Initialize a separate value model for PPO training.
 
-        Uses AutoModelForCausalLM (for broad architecture support) with a separate
-        value head linear layer that projects hidden states to scalar values.
+        Uses AutoModelForCausalLM and reuses the LM head to produce values.
+        A fixed token index is used to extract a scalar value from the logits
+        at each position, so no new parameters are introduced.
         """
         logger.info(f"{self.rank=}: Initializing value model")
 
         # Check if we should load from checkpoint
         checkpoint_path = getattr(self, "value_model_checkpoint_path", None)
 
-        # Load as CausalLM for broad architecture support (e.g. Olmo3 doesn't support SequenceClassification)
+        # Load as CausalLM - reuse the LM head as value head (no new parameters)
         value_model_path = args.value_model_name_or_path or model_config.model_name_or_path
         self.value_model = AutoModelForCausalLM.from_pretrained(
             value_model_path,
@@ -447,53 +448,39 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.value_model)
 
-        # Add a value head: linear projection from hidden_size -> 1
-        hidden_size = self.value_model.config.hidden_size
-        self.value_head = torch.nn.Linear(hidden_size, 1, dtype=torch.bfloat16)
+        # Use the token index for "score" in the LM head logits as the scalar value output.
+        # This avoids using index 0 which may have special meaning in some tokenizers.
+        self.value_token_idx = self.tokenizer.encode("score", add_special_tokens=False)[0]
+        logger.info(f"{self.rank=}: Using token '{self.tokenizer.decode([self.value_token_idx])}' (idx={self.value_token_idx}) as value output")
 
-        # Initialize with small weights for stable training
-        std = 1.0 / (hidden_size + 1) ** 0.5
-        torch.nn.init.normal_(self.value_head.weight, mean=0.0, std=std)
-        torch.nn.init.zeros_(self.value_head.bias)
-
-        # Load from checkpoint if available
+        # Load from checkpoint if available (checkpoint_path is a directory)
         if checkpoint_path is not None:
-            model_state = torch.load(
-                os.path.join(checkpoint_path, "value_model.bin"), map_location=self.device, weights_only=True
-            )
-            self.value_model.load_state_dict(model_state)
-            head_path = os.path.join(checkpoint_path, "value_head.bin")
-            if os.path.exists(head_path):
-                head_state = torch.load(head_path, map_location=self.device, weights_only=True)
-                self.value_head.load_state_dict(head_state)
-            logger.info(f"{self.rank=}: Loaded value model from checkpoint {checkpoint_path}")
+            model_file = os.path.join(checkpoint_path, "value_model.bin")
+            state_dict = torch.load(model_file, map_location=self.device, weights_only=True)
+            self.value_model.load_state_dict(state_dict)
+            logger.info(f"{self.rank=}: Loaded value model from checkpoint {model_file}")
 
-        # Initialize backbone with DeepSpeed for efficient training (sharding etc.)
+        # Initialize with DeepSpeed for training (with optimizer for ZeRO sharding + training)
         if ds_config is not None:
+            # Add optimizer config so the value model is trainable via DeepSpeed
+            value_train_ds_config = dict(ds_config)
+            value_train_ds_config["optimizer"] = {
+                "type": "AdamW",
+                "params": {
+                    "lr": args.learning_rate,
+                    "betas": [0.9, 0.999],
+                    "eps": 1e-8,
+                    "weight_decay": 0.0,
+                },
+            }
             self.value_model, *_ = deepspeed.initialize(
                 model=self.value_model,
-                config=ds_config,
+                config=value_train_ds_config,
                 dist_init_required=False,
                 mpu=self.mpu,
             )
-        self.value_model.eval()
-
-        # Value head stays on device (small, not sharded)
-        self.value_head = self.value_head.to(self.device)
-        self.value_head_optimizer = torch.optim.AdamW(
-            self.value_head.parameters(),
-            lr=args.learning_rate,
-        )
-
-        # Load value head optimizer state from checkpoint if available
-        if checkpoint_path is not None:
-            optimizer_path = os.path.join(checkpoint_path, "value_head_optimizer.bin")
-            if os.path.exists(optimizer_path):
-                optimizer_state = torch.load(optimizer_path, map_location=self.device, weights_only=True)
-                self.value_head_optimizer.load_state_dict(optimizer_state)
-                logger.info(f"{self.rank=}: Loaded value head optimizer from checkpoint")
-
-        logger.info(f"{self.rank=}: Loaded value model from {value_model_path} (hidden_size={hidden_size})")
+        self.value_model.train()
+        logger.info(f"{self.rank=}: Loaded value model from {value_model_path} (value_token_idx={self.value_token_idx})")
 
     def forward_value(
         self,
@@ -533,11 +520,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 input_ids=input_ids,
                 attention_mask=attention_mask.clamp(0, 1),
                 return_dict=True,
-                output_hidden_states=True,
             )
-            # Get last hidden states and project through value head
-            last_hidden = output.hidden_states[-1]
-            values = self.value_head(last_hidden).squeeze(-1)
+            # Use a fixed token index from the LM head logits as the scalar value
+            values = output.logits[:, :, self.value_token_idx]
 
             # Zero out values at non-response positions
             values = values * response_mask.float()
@@ -1134,7 +1119,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     if not is_value_warmup:
                         self.model.backward(policy_loss)
 
-                    # Value head backward (value head is not part of DeepSpeed model)
+                    # Value model backward (through DeepSpeed engine)
                     if self.args.use_value_model and value_loss_BT is not None:
                         value_loss = masked_mean(
                             value_loss_BT[:, 1:],
@@ -1142,16 +1127,15 @@ class PolicyTrainerRayProcess(RayProcess):
                             None,
                             loss_denominator,
                         ) * self.args.value_loss_coef
-                        value_loss.backward()
+                        self.value_model.backward(value_loss)
 
                     if (local_step + 1) % accumulation_steps == 0:
                         # During value warmup, skip policy optimizer step
                         if not is_value_warmup:
                             self.model.step()
-                        # Step the value head optimizer
-                        if self.args.use_value_model and hasattr(self, "value_head_optimizer"):
-                            self.value_head_optimizer.step()
-                            self.value_head_optimizer.zero_grad()
+                        # Step the value model optimizer
+                        if self.args.use_value_model:
+                            self.value_model.step()
 
                     # Compute total loss for logging
                     if self.args.use_value_model and value_loss_BT is not None:
@@ -1236,18 +1220,10 @@ class PolicyTrainerRayProcess(RayProcess):
             os.makedirs(value_model_dir, exist_ok=True)
 
             if self.rank == 0 and self.value_model is not None:
-                # Save the value model backbone
+                # Save the value model (LM head is part of the model, no separate head)
                 model_to_save = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
                 torch.save(model_to_save.state_dict(), os.path.join(value_model_dir, "value_model.bin"))
-                # Save the value head and its optimizer
-                if self.value_head is not None:
-                    torch.save(self.value_head.state_dict(), os.path.join(value_model_dir, "value_head.bin"))
-                if hasattr(self, "value_head_optimizer"):
-                    torch.save(
-                        self.value_head_optimizer.state_dict(),
-                        os.path.join(value_model_dir, "value_head_optimizer.bin"),
-                    )
-                logger.info(f"Saved value model + head to {value_model_dir}")
+                logger.info(f"Saved value model to {value_model_dir}")
 
             client_state["value_model_saved"] = True
 
