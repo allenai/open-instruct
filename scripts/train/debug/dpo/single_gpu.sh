@@ -29,6 +29,7 @@ uv run python mason.py \
     --logging_steps 1 \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --chat_template_name olmo \
+    --exp_name "dpo-single-gpu-debug-$(date +%s)" \
     --seed 123 \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \
