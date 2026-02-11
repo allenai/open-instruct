@@ -5,8 +5,9 @@
 # Reference: https://arxiv.org/abs/2504.05118
 
 export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 
-python open_instruct/grpo_fast.py \
+uv run python open_instruct/grpo_fast.py \
     --exp_name vapo_1gpu_test \
     --beta 0.0 \
     --async_steps 8 \
