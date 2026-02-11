@@ -369,7 +369,17 @@ class PolicyTrainerRayProcess(RayProcess):
         # Value model for PPO
         self.value_model = None
         if args.use_value_model:
-            self._init_value_model(args, model_config, ds_config if args.load_ref_policy else None)
+            # Always create a DeepSpeed config for the value model (even if ref policy is not loaded)
+            if args.load_ref_policy:
+                value_ds_config = ds_config
+            else:
+                value_ds_config, _ = get_eval_ds_config(
+                    offload=False,
+                    stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+                    bf16=True,
+                    per_device_train_batch_size=args.per_device_train_batch_size,
+                )
+            self._init_value_model(args, model_config, value_ds_config)
 
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
 
