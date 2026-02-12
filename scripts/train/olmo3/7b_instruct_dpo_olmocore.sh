@@ -11,7 +11,7 @@ do
         --no_auto_dataset_cache \
         --priority urgent \
         --preemptible \
-        --image $BEAKER_IMAGE --pure_docker_mode \
+        --image "$BEAKER_IMAGE" --pure_docker_mode \
         --env OLMO_SHARED_FS=1 \
         --env OMP_NUM_THREADS=8 \
         --env TORCH_LOGS=recompiles,graph_breaks \
