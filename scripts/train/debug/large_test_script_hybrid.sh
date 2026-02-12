@@ -13,9 +13,10 @@ uv run python mason.py \
 	--preemptible \
         --num_nodes 2 \
 	--description "Large (multi-node) test script." \
-        --timeout 1h \
+        --timeout 90m \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+        --env PYTHONUNBUFFERED=1 \
         --budget ai2/oe-adapt \
         --no_auto_dataset_cache \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
@@ -36,10 +37,10 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path allenai/Olmo-3-1025-7B \
-	--trust_remote_code \
-	--add_bos \
-	--vllm_enforce_eager \
+        --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h-long-context-drope/step23842-hf \
+        --trust_remote_code \
+        --add_bos \
+        --vllm_enforce_eager \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
         --stop_strings "</answer>" \

@@ -1072,23 +1072,12 @@ def maybe_update_beaker_description(
         )
         return
 
-    try:
-        client = beaker.Beaker.from_env()
-    except beaker.exceptions.BeakerConfigurationError as e:
-        logger.warning(f"Failed to initialize Beaker client: {e}")
-        return
+    client = beaker.Beaker.from_env()
 
-    try:
-        # Get the workload first (experiment_id is actually BEAKER_WORKLOAD_ID)
-        workload = client.workload.get(experiment_id)
-        # Then get the experiment spec from the workload
-        spec = client.experiment.get_spec(workload)
-    except (beaker.exceptions.BeakerExperimentNotFound, ValueError):
-        logger.warning(
-            f"Failed to get Beaker experiment with ID: {experiment_id}"
-            "This might be fine if you are e.g. running in an interactive job."
-        )
-        return
+    # Get the workload first (experiment_id is actually BEAKER_WORKLOAD_ID)
+    workload = client.workload.get(experiment_id)
+    # Then get the experiment spec from the workload
+    spec = client.experiment.get_spec(workload)
 
     if experiment_id not in original_descriptions:
         raw_description = spec.description or ""
@@ -1107,6 +1096,7 @@ def maybe_update_beaker_description(
         description_components.append(wandb_url)
 
     if current_step is not None:
+        logger.info(f"[Beaker] Updating description with progress: step {current_step}/{total_steps}")
         progress_pct = (current_step / total_steps) * 100
         elapsed_time = time.perf_counter() - start_time
 
@@ -1126,14 +1116,10 @@ def maybe_update_beaker_description(
         progress_bar = f"[{progress_pct:.1f}% complete (step {current_step}/{total_steps}), {time_label} {time_str}]"
         description_components.append(progress_bar)
     new_description = " ".join(description_components)
-    try:
-        # Update the workload description using the workload object we got earlier
-        client.workload.update(workload, description=new_description)
-    except requests.exceptions.HTTPError as e:
-        logger.warning(
-            f"Failed to update Beaker description due to HTTP error: {e}"
-            "Continuing without updating description - this is likely a temporary Beaker service issue"
-        )
+    # Update the workload description using the workload object we got earlier
+    logger.info(f"[Beaker] Setting description to: {new_description[:200]}...")
+    client.workload.update(workload, description=new_description)
+    logger.info("[Beaker] Description updated successfully")
 
 
 def sync_gs_bucket(src_path: str, dest_path: str) -> None:

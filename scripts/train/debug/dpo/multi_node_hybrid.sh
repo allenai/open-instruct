@@ -1,13 +1,13 @@
 #!/bin/bash
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
-MODEL_NAME=allenai/OLMo-2-1124-7B
+MODEL_NAME=/weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h-long-context-drope/step23842-hf
 LR=1e-6
-EXP_NAME=olmo2-7b-DPO-debug-16k-${LR}-$(date +%s)
+EXP_NAME=hybrid-7b-DPO-debug-16k-${LR}
 
 uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
-    --description "2 node DPO run with OLMo2-7B, 16k seq len." \
+    --description "2 node DPO run with hybrid model, 16k sequence length." \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
@@ -17,8 +17,6 @@ uv run python mason.py \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
-    --env 'TORCH_LOGS=graph_breaks,recompiles' \
-    --env TRITON_PRINT_AUTOTUNING=1 \
     --gpus 8 -- torchrun \
     --nnodes=2 \
     --node_rank=\$BEAKER_REPLICA_RANK \
@@ -28,6 +26,7 @@ uv run python mason.py \
     open_instruct/dpo.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
+    --trust_remote_code \
     --chat_template_name olmo \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
@@ -37,17 +36,13 @@ uv run python mason.py \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
     --num_epochs 1 \
-    --output_dir output/dpo_olmo2_debug_compile/ \
+    --output_dir output/dpo_hybrid_debug/ \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 1000 \
     --seed 123 \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
-    --activation_memory_budget 0.5 \
-    --packing \
+    --activation_memory_budget 0.1 \
     --with_tracking \
     --push_to_hub false \
-    --try_launch_beaker_eval_jobs false \
-    --shard_degree 8 \
-    --num_replicas 2 \
-    --try_auto_save_to_beaker false
+    --try_launch_beaker_eval_jobs false

@@ -285,6 +285,7 @@ class VLLMConfig:
     vllm_gpu_memory_utilization: float = 0.9
     vllm_enable_prefix_caching: bool = False
     vllm_top_p: float = 1.0
+    vllm_dtype: str = "bfloat16"
 
     def __post_init__(self):
         if os.environ.get("VLLM_USE_V1") == "0":

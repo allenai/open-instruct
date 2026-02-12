@@ -230,12 +230,16 @@ class PreferenceDatasetProcessor(DatasetProcessor):
     def tokenize(self, dataset: Union[Dataset, DatasetDict]):
         def tokenize_fn(row):
             row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
-                row[self.config.preference_chosen_key][:-1], add_generation_prompt=True
+                row[self.config.preference_chosen_key][:-1], add_generation_prompt=True, return_dict=False
             )
             row[ATTENTION_MASK_PROMPT_KEY] = [1] * len(row[INPUT_IDS_PROMPT_KEY])
-            row[INPUT_IDS_CHOSEN_KEY] = self.tokenizer.apply_chat_template(row[self.config.preference_chosen_key])
+            row[INPUT_IDS_CHOSEN_KEY] = self.tokenizer.apply_chat_template(
+                row[self.config.preference_chosen_key], return_dict=False
+            )
             row[ATTENTION_MASK_CHOSEN_KEY] = [1] * len(row[INPUT_IDS_CHOSEN_KEY])
-            row[INPUT_IDS_REJECTED_KEY] = self.tokenizer.apply_chat_template(row[self.config.preference_rejected_key])
+            row[INPUT_IDS_REJECTED_KEY] = self.tokenizer.apply_chat_template(
+                row[self.config.preference_rejected_key], return_dict=False
+            )
             row[ATTENTION_MASK_REJECTED_KEY] = [1] * len(row[INPUT_IDS_REJECTED_KEY])
             return row
 
@@ -282,8 +286,12 @@ class SFTDatasetProcessor(DatasetProcessor):
                 prompt = row[self.config.sft_messages_key]
             else:
                 prompt = row[self.config.sft_messages_key][:-1]
-            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
-            row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(row[self.config.sft_messages_key])
+            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
+                prompt, add_generation_prompt=True, return_dict=False
+            )
+            row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(
+                row[self.config.sft_messages_key], return_dict=False
+            )
             row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
             labels = copy.deepcopy(row[INPUT_IDS_KEY])
             if self.config.train_only_on_prompt:
@@ -328,8 +336,12 @@ class SFTGroundTruthDatasetProcessor(DatasetProcessor):
                 prompt = row[self.config.sft_messages_key]
             else:
                 prompt = row[self.config.sft_messages_key][:-1]
-            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
-            row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(row[self.config.sft_messages_key])
+            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
+                prompt, add_generation_prompt=True, return_dict=False
+            )
+            row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(
+                row[self.config.sft_messages_key], return_dict=False
+            )
             row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
             labels = copy.deepcopy(row[INPUT_IDS_KEY])
             if self.config.train_only_on_prompt:

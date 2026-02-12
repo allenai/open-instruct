@@ -1329,6 +1329,7 @@ def create_model_and_optimizer(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        vllm_dtype=vllm_config.vllm_dtype,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
@@ -1886,6 +1887,9 @@ def run_training(
     else:
         eval_data_loader = None
     training_start_time = time.perf_counter()  # Track overall training start time
+    logger.info(
+        f"[DEBUG] BEAKER_JOB_ID in env: {'BEAKER_JOB_ID' in os.environ}, BEAKER_WORKLOAD_ID: {os.environ.get('BEAKER_WORKLOAD_ID', 'NOT SET')}"
+    )
     maybe_update_beaker_description(
         current_step=resume_training_step - 1,
         total_steps=args.num_training_steps,
@@ -1990,12 +1994,14 @@ def run_training(
             actor_manager,
         )
 
+        logger.info(f"[DEBUG] About to update Beaker description for step {training_step}")
         maybe_update_beaker_description(
             current_step=training_step,
             total_steps=args.num_training_steps,
             start_time=training_start_time,
             wandb_url=wandb_url,
         )
+        logger.info(f"[DEBUG] Beaker description update completed for step {training_step}")
 
     if resume_training_step > args.num_training_steps:
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")

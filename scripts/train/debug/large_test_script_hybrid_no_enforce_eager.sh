@@ -1,6 +1,6 @@
 #!/bin/bash
-# Note: This was originally a script that Saurabh came up to run some experiments.
-# Finbarr has been using it a lot for testing, so we thought we'd check it in.
+# Same as large_test_script_hybrid.sh but WITHOUT --vllm_enforce_eager.
+# Tests whether the hybrid model can run GRPO without disabling CUDA graphs.
 num_prompts=25376
 exp_name=rlvr_ace_fn_and_og_ocr_stdio_from_base_with_perf_penalty
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
@@ -12,10 +12,11 @@ uv run python mason.py \
         --priority urgent \
 	--preemptible \
         --num_nodes 2 \
-	--description "Large (multi-node) test script." \
-        --timeout 1h \
+	--description "Large (multi-node) test script (hybrid, no enforce_eager)." \
+        --timeout 90m \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+        --env PYTHONUNBUFFERED=1 \
         --budget ai2/oe-adapt \
         --no_auto_dataset_cache \
         --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\&python open_instruct/grpo_fast.py \
@@ -36,10 +37,9 @@ uv run python mason.py \
         --max_prompt_token_length 2048 \
         --response_length 4096 \
         --pack_length 20480 \
-        --model_name_or_path allenai/Olmo-3-1025-7B \
-	--trust_remote_code \
-	--add_bos \
-	--vllm_enforce_eager \
+        --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/willm/linear-rnns/OLMo3.1-7B-6T-30h-long-context-drope/step23842-hf \
+        --trust_remote_code \
+        --add_bos \
         --chat_template_name tulu_thinker \
 	--inflight_updates True \
         --stop_strings "</answer>" \

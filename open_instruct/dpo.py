@@ -18,7 +18,6 @@ from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.attention.backend import has_flash_attn_3
-from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import CheckpointerCallback
@@ -104,7 +103,7 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
     model = model_config.build(init_device="cpu")
 
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
-    load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
+    olmo_core_utils.load_hf_model_weights(args.model_name_or_path, model.state_dict())
     model = model.to(device=device, dtype=torch.bfloat16)
 
     return model, model_config
@@ -247,8 +246,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
     ref_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
-    reference_cache_path = pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt"
-    logger.info(f"Reference logprobs cache path: {reference_cache_path}")
 
     if args.cache_dataset_only:
         dataset_transformation.get_cached_dataset_tulu(
@@ -337,7 +334,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         forward_kwargs=forward_kwargs,
         full_dataset_size=len(dataset),
         device=device,
-        cache_path=reference_cache_path,
+        cache_path=pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt",
         is_main_process=is_main_process,
         model_dims=utils.ModelDims.from_hf_config(args.model_name_or_path),
         use_lora=False,

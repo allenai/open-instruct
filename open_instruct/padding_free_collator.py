@@ -4,6 +4,13 @@ import torch
 from transformers import DefaultDataCollator
 
 
+def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float) -> torch.Tensor:
+    """Right-pad a tensor to a specified length along the last dimension."""
+    if tensor.size(-1) >= length:
+        return tensor
+    return torch.nn.functional.pad(tensor, (0, length - tensor.size(-1)), value=pad_value)
+
+
 @dataclass
 class TensorDataCollatorWithFlattening(DefaultDataCollator):
     """

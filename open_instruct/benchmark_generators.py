@@ -12,6 +12,7 @@ import csv
 import dataclasses
 import gc
 import json
+import logging
 import os
 import pathlib
 import threading
@@ -32,6 +33,7 @@ from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import PromptRequest
 from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers
 
+logging.getLogger("vllm").setLevel(logging.INFO)
 logger = logger_utils.setup_logger(__name__)
 
 
@@ -232,8 +234,8 @@ def setup_vllm_engines(
     """Set up vLLM engines and queues."""
     ray.init(ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"], "env_vars": dict(os.environ)})
 
-    param_prompt_Q = ray_queue.Queue(maxsize=10)
-    inference_results_Q = ray_queue.Queue(maxsize=10)
+    param_prompt_Q = ray_queue.Queue()
+    inference_results_Q = ray_queue.Queue()
 
     queues_to_monitor = {"Param Prompt Queue": param_prompt_Q, "Inference Results Queue": inference_results_Q}
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
@@ -364,12 +366,17 @@ def run_benchmark(
         f"Starting benchmark with 1 warmup batch + {num_batches - 1} main batches of size {streaming_config.num_unique_prompts_rollout}"
     )
 
-    # Create sampling parameters with 'n' for multiple samples per prompt
+    # Create sampling parameters with 'n' for multiple samples per prompt.
+    # With stop_strings: variable-length generation matching GRPO conditions.
+    # Without stop_strings: min_tokens = max_tokens for fixed-length benchmarking.
+    use_fixed_length = not streaming_config.stop_strings
     generation_config = vllm_utils.SamplingConfig(
         temperature=streaming_config.temperature,
         max_tokens=streaming_config.response_length,
+        min_tokens=streaming_config.response_length if use_fixed_length else 0,
         top_p=vllm_config.vllm_top_p,
         n=streaming_config.num_samples_per_prompt_rollout,
+        stop=streaming_config.stop_strings if streaming_config.stop_strings else [],
         seed=args.seed,
         logprobs=1,
     )
@@ -417,7 +424,7 @@ def run_benchmark(
                 result = inference_results_Q.get(timeout=1.0)
                 warmup_results.append(result)
             except Empty:
-                if len(warmup_results) % 10 == 0:
+                if len(warmup_results) > 0 and len(warmup_results) % 10 == 0:
                     utils.ray_get_with_progress(
                         [engine.check_background_threads.remote() for engine in vllm_engines],
                         f"Health check ({len(warmup_results)}/{warmup_batch_size})",
@@ -447,7 +454,7 @@ def run_benchmark(
             # Collect all results for this batch (one per prompt) using non-blocking polling
             num_prompts = streaming_config.num_unique_prompts_rollout
             batch_results = []
-            batch_deadline = time.time() + 1200
+            batch_deadline = time.time() + max(2400, streaming_config.response_length * 0.2)
             while len(batch_results) < num_prompts:
                 try:
                     result = inference_results_Q.get(timeout=1.0)
@@ -455,6 +462,11 @@ def run_benchmark(
                 except Empty:
                     if time.time() > batch_deadline:
                         raise TimeoutError(f"Batch timed out, got {len(batch_results)}/{num_prompts}") from None
+                    if len(batch_results) > 0 and len(batch_results) % 10 == 0:
+                        utils.ray_get_with_progress(
+                            [engine.check_background_threads.remote() for engine in vllm_engines],
+                            f"Health check ({len(batch_results)}/{num_prompts})",
+                        )
 
             # Simulate weight sync between batches
             weight_sync_time = simulate_weight_sync(actor_manager, vllm_engines, args)
