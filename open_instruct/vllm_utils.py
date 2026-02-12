@@ -1073,6 +1073,7 @@ def create_vllm_engines(
     train_dataset=None,
     eval_dataset=None,
     vllm_dtype: str = "bfloat16",
+    trust_remote_code: bool = False,
 ) -> list[ray.actor.ActorHandle]:
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     vllm_engines = []
@@ -1141,6 +1142,7 @@ def create_vllm_engines(
                 max_model_len=max_model_len,
                 generation_config="vllm",
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
+                trust_remote_code=trust_remote_code,
                 bundle_indices=bundle_indices,
                 num_gpus=0.2 if use_hybrid_engine else 1,
                 noset_visible_devices=ray_noset_visible_devices(),

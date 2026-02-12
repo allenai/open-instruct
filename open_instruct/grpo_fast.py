@@ -1330,6 +1330,7 @@ def create_model_and_optimizer(
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         vllm_dtype=vllm_config.vllm_dtype,
+        trust_remote_code=tc.trust_remote_code,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 

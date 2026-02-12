@@ -270,6 +270,7 @@ def setup_vllm_engines(
             verifier_functions=build_all_verifiers(args, streaming_config),
         ),
         train_dataset=dataset,
+        trust_remote_code=tokenizer_config.trust_remote_code,
     )
 
     logger.info("vLLM engines ready")
