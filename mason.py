@@ -16,7 +16,6 @@ import beaker
 import requests
 from rich.console import Console
 from rich.text import Text
-
 from transformers.utils import hub as transformers_hub
 
 console = Console()
