@@ -3,19 +3,11 @@
 # Define arrays for model names and paths
 PY="/opt/anaconda3/envs/python310/bin/python"
 MODEL_NAMES=(
-    "flexolmo-4x7b-olmo3_code_50b_sft-router_sft_0.05"
-    "flexolmo-4x7b-olmo3_code_50b_sft-router_sft_0.1"
-    "flexolmo-4x7b-olmo3_code_50b_sft-router_sft_0.25"
-    "flexolmo-4x7b-olmo3_code_50b_sft-router_sft_0.5"
-    "flexolmo-4x7b-olmo3_code_50b_sft-router_sft_0.75"
+    "flexolmo-4x7b-olmo3_code_50b_sft-router_sft_1.0"
 )
 
 MODEL_PATHS=(
-    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/flex2-7B-sft/flexolmo-4x7b-olmo3_code_50b_sft-router_sft_0.05/step56-hf"
-    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/flex2-7B-sft/flexolmo-4x7b-olmo3_code_50b_sft-router_sft_0.1/step112-hf"
-    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/flex2-7B-sft/flexolmo-4x7b-olmo3_code_50b_sft-router_sft_0.25/step280-hf"
-    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/flex2-7B-sft/flexolmo-4x7b-olmo3_code_50b_sft-router_sft_0.5/step562-hf"
-    "/weka/oe-training-default/ai2-llm/checkpoints/sanjaya/flex2-7B-sft/flexolmo-4x7b-olmo3_code_50b_sft-router_sft_0.75/step842-hf"
+    "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/flex2-7B-sft/flexolmo-4x7b-olmo3_code_50b_sft-router_sft_all_mixed/step1128-hf"
 )
 
 
