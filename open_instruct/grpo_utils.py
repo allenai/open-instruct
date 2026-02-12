@@ -114,6 +114,8 @@ class ExperimentConfig:
     base architecture as the policy but with a separate value head."""
     value_loss_coef: float = 0.5
     """Coefficient for the value function loss in the total loss."""
+    value_learning_rate: float | None = None
+    """Learning rate for the value model. If None, uses the same learning rate as the policy."""
     vf_clip_range: float = 0.2
     """Clipping range for value function updates. Set to 0 to disable value clipping."""
     gamma: float = 1.0

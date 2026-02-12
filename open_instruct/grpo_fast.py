@@ -485,7 +485,7 @@ class PolicyTrainerRayProcess(RayProcess):
             value_train_ds_config["optimizer"] = {
                 "type": "AdamW",
                 "params": {
-                    "lr": args.learning_rate,
+                    "lr": args.value_learning_rate or args.learning_rate,
                     "betas": [0.9, 0.999],
                     "eps": 1e-8,
                     "weight_decay": 0.0,

@@ -70,6 +70,7 @@ uv run python mason.py \
     --oe_eval_gpu_multiplier 4 \
     --use_value_model \
     --value_loss_coef 0.5 \
+    --value_learning_rate 2e-6 \
     --vf_clip_range 0.2 \
     --gamma 1.0 \
     --gae_lambda 0.95 \
