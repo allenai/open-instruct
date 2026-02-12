@@ -219,7 +219,9 @@ class DockerBackend(SandboxBackend):
         # Reuse client to avoid leaking connections across reset() calls
         if self._client is None:
             self._client = docker_sdk.from_env()
-        self._container = self._client.containers.run(self._image, command="sleep infinity", detach=True, remove=True)
+        self._container = self._client.containers.run(
+            self._image, command="sleep infinity", detach=True, remove=True, mem_limit="4g", memswap_limit="4g"
+        )
         logger.info(f"Docker container started: {self._container.short_id}")
 
     def run_code(self, code: str, language: str = "python") -> ExecutionResult:
