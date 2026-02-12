@@ -16,7 +16,7 @@ uv run python mason.py \
     --env 'TORCH_LOGS=graph_breaks,recompiles' \
     --gpus 1 -- torchrun --nproc_per_node=1 open_instruct/dpo.py \
     --model_name_or_path allenai/OLMo-2-0425-1B \
-    --tokenizer_name allenai/OLMo-2-0425-1B \
+    --tokenizer_name_or_path allenai/OLMo-2-0425-1B \
     --max_seq_length 1024 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
