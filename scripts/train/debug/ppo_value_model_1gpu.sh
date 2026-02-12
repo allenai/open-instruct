@@ -48,7 +48,7 @@ uv run python open_instruct/grpo_fast.py \
     --vf_clip_range 0.2 \
     --gamma 1.0 \
     --gae_lambda 0.95 \
-    --value_warmup_steps 50 \
+    --value_warmup_steps 150 \
     --reset_optimizer_after_value_warmup \
     --decoupled_gae \
     --length_adaptive_gae \
