@@ -2,7 +2,7 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
 LR=1e-6
-EXP_NAME=olmo3-7b-DPO-olmo-core-8k-${LR}
+EXP_NAME=olmo3-7b-DPO-olmo-core-8k-${LR}-$(date +%s)
 
 uv run python mason.py \
     --cluster ai2/saturn \
@@ -17,6 +17,7 @@ uv run python mason.py \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
+    --env 'TORCH_LOGS=graph_breaks,recompiles' \
     --gpus 8 -- torchrun \
     --nnodes=2 \
     --node_rank=\$BEAKER_REPLICA_RANK \
@@ -50,5 +51,6 @@ uv run python mason.py \
     --logging_steps 1 \
     --loss_type dpo_norm \
     --beta 5 \
-    --gradient_checkpointing \
-    --with_tracking
+    --activation_memory_budget 0.5 \
+    --with_tracking \
+    --push_to_hub false

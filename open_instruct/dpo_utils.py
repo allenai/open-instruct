@@ -51,6 +51,8 @@ from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_
 
 logger = logger_utils.setup_logger(__name__)
 
+PAD_VALUES: dict[str, int] = {"labels": -100, "attention_mask": 0}
+
 
 def config_to_json_serializable(obj: object) -> object:
     """Convert config object to JSON-serializable format."""
@@ -92,8 +94,6 @@ class TrackingConfig:
     """A unique name of this run"""
     seed: int = 42
     """Random seed for initialization and dataset shuffling."""
-    add_seed_and_date_to_exp_name: bool = True
-    """Append the seed and date to exp_name"""
 
 
 @dataclass
@@ -142,8 +142,14 @@ class TrainingConfig:
     """The scheduler type to use for learning rate adjustment."""
     max_train_steps: int | None = None
     """If set, overrides the number of training steps. Otherwise, num_epochs is used."""
-    gradient_checkpointing: bool = False
-    """Turn on gradient checkpointing. Saves memory but slows training."""
+    activation_memory_budget: float = 1.0
+    """Memory budget for activation checkpointing (0.0-1.0).
+
+    A practical "just turn it on" default is `0.5` (somewhat arbitrary, but works well in practice):
+    any value < 1.0 enables budget-mode checkpointing. Higher values use more memory and are
+    typically faster; lower values use less memory and are typically slower, so use the highest
+    value your hardware can support. See: https://pytorch.org/blog/activation-checkpointing-techniques/.
+    """
     use_8bit_optimizer: bool = False
     """Use 8bit optimizer from bitsandbytes."""
     dpo_use_paged_optimizer: bool = False
@@ -154,10 +160,14 @@ class TrainingConfig:
     """Tensor parallelism degree. Default 1 (disabled)."""
     context_parallel_degree: int = 1
     """Context parallelism degree. Default 1 (disabled)."""
-    pipeline_parallel_degree: int = 1
-    """Pipeline parallelism degree. Default 1 (disabled)."""
     cache_logprobs_only: bool = False
     """Exit after building the reference logprobs cache (for benchmarking)."""
+    compile_model: bool = True
+    """Whether to apply torch.compile to model blocks."""
+    shard_degree: int | None = None
+    """FSDP shard degree. None means auto-detect."""
+    num_replicas: int | None = None
+    """Number of FSDP replicas. None means auto-detect."""
 
 
 @dataclass
@@ -487,6 +497,7 @@ def build_reference_logprobs_cache(
     model_dims: utils.ModelDims,
     use_lora: bool = False,
     disable_adapter_context: Callable[[], contextlib.AbstractContextManager] | None = None,
+    forward_kwargs: dict | None = None,
 ) -> model_utils.TensorCache:
     """Build a TensorCache with reference logprobs by computing logprobs once for all samples.
 
@@ -536,9 +547,13 @@ def build_reference_logprobs_cache(
             batch_start = time.perf_counter()
             if use_lora and disable_adapter_context is not None:
                 with disable_adapter_context():
-                    chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+                    chosen_logps, rejected_logps, _ = forward_fn(
+                        model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
+                    )
             else:
-                chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=average_log_prob)
+                chosen_logps, rejected_logps, _ = forward_fn(
+                    model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
+                )
 
             chosen_tensor[batch["index"]] = chosen_logps
             rejected_tensor[batch["index"]] = rejected_logps
@@ -574,6 +589,14 @@ def build_reference_logprobs_cache(
 
     model.train()
     cache = model_utils.TensorCache(tensors={"chosen_logps": chosen_tensor, "rejected_logps": rejected_tensor})
+
+    cache_mem_bytes = sum(t.numel() * t.element_size() for t in cache.tensors.values())
+    cache_mem_gib = cache_mem_bytes / (1024**3)
+    if device.type == "cuda":
+        cache_mem_pct = 100 * cache_mem_bytes / torch.cuda.get_device_properties(device).total_memory
+        logger.info(f"Reference logprobs cached, using {cache_mem_gib:.2f} GiB of GPU RAM ({cache_mem_pct:.1f}%).")
+    else:
+        logger.info(f"Reference logprobs cached, using {cache_mem_gib:.2f} GiB of RAM.")
 
     if is_main_process:
         logger.info(f"Saving reference logprobs cache to {cache_path}")
@@ -1045,26 +1068,11 @@ def separate_forward_olmo(
     return chosen_logps, rejected_logps, None
 
 
-def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float, dim: int = -1) -> torch.Tensor:
-    """Pad a tensor to a specified length along a given dimension.
-
-    Args:
-        tensor: The input tensor to pad.
-        length: The target length for the specified dimension.
-        pad_value: The value to use for padding.
-        dim: The dimension along which to pad.
-
-    Returns:
-        The padded tensor, or the original tensor if already at least the target length.
-    """
-    if tensor.size(dim) >= length:
+def pad_to_length(tensor: torch.Tensor, length: int, pad_value: int | float) -> torch.Tensor:
+    """Right-pad a tensor to a specified length along the last dimension."""
+    if tensor.size(-1) >= length:
         return tensor
-    else:
-        pad_size = list(tensor.shape)
-        pad_size[dim] = length - tensor.size(dim)
-        return torch.cat(
-            [tensor, pad_value * torch.ones(*pad_size, dtype=tensor.dtype, device=tensor.device)], dim=dim
-        )
+    return torch.nn.functional.pad(tensor, (0, length - tensor.size(-1)), value=pad_value)
 
 
 @dataclass
@@ -1075,7 +1083,6 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
     """
 
     def __call__(self, features, return_tensors=None):
-        # call the original collator on chosen and rejected separately, then combine
         def filter_batch(match_string, features):
             filtered = []
             for f in features:
@@ -1102,15 +1109,13 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
         if "index" in features[0]:
             result["index"] = torch.tensor([f["index"] for f in features])
         max_len = max(result["chosen_input_ids"].shape[1], result["rejected_input_ids"].shape[1])
-        chosen_padded = torch.nn.functional.pad(
-            result["chosen_input_ids"],
-            (0, max_len - result["chosen_input_ids"].shape[1]),
-            value=self.tokenizer.pad_token_id,
+        for prefix in ["chosen_", "rejected_"]:
+            for key in ["input_ids", "attention_mask", "labels"]:
+                full_key = f"{prefix}{key}"
+                pad_value = PAD_VALUES.get(key, self.tokenizer.pad_token_id)
+                result[full_key] = pad_to_length(result[full_key], max_len, pad_value)
+        result["input_ids"] = torch.cat([result["chosen_input_ids"], result["rejected_input_ids"]], dim=0)
+        result["attention_mask"] = torch.cat(
+            [result["chosen_attention_mask"], result["rejected_attention_mask"]], dim=0
         )
-        rejected_padded = torch.nn.functional.pad(
-            result["rejected_input_ids"],
-            (0, max_len - result["rejected_input_ids"].shape[1]),
-            value=self.tokenizer.pad_token_id,
-        )
-        result["input_ids"] = torch.cat([chosen_padded, rejected_padded], dim=0)
         return result

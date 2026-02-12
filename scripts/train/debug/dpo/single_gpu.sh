@@ -13,6 +13,7 @@ uv run python mason.py \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
     --no_auto_dataset_cache \
+    --env 'TORCH_LOGS=graph_breaks,recompiles' \
     --gpus 1 -- torchrun --nproc_per_node=1 open_instruct/dpo.py \
     --model_name_or_path allenai/OLMo-2-0425-1B \
     --tokenizer_name allenai/OLMo-2-0425-1B \
@@ -28,6 +29,7 @@ uv run python mason.py \
     --logging_steps 1 \
     --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --chat_template_name olmo \
+    --exp_name "dpo-single-gpu-debug-$(date +%s)" \
     --seed 123 \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \

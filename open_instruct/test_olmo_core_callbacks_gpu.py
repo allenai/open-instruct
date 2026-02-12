@@ -57,7 +57,7 @@ mock_callback.Callback = MockCallback
 sys.modules["olmo_core.train.callbacks.comet"].CometCallback = type("CometCallback", (), {"priority": 100})
 sys.modules["olmo_core.train.callbacks.wandb"].WandBCallback = type("WandBCallback", (), {"priority": 100})
 
-from open_instruct.beaker_callback import BeakerCallbackV2  # noqa: E402
+from open_instruct.olmo_core_callbacks import BeakerCallbackV2  # noqa: E402
 
 for _key in _MOCKED_MODULES:
     if _original_modules[_key] is None:
@@ -84,7 +84,7 @@ class TestBeakerCallbackPreTrain(unittest.TestCase):
         callback._trainer = trainer_mock
 
         with (
-            patch("open_instruct.beaker_callback.get_rank", return_value=0),
+            patch("open_instruct.olmo_core_callbacks.get_rank", return_value=0),
             patch.dict("os.environ", {"BEAKER_WORKLOAD_ID": "test-workload-123"}),
             patch("subprocess.run") as mock_subprocess,
         ):
@@ -113,7 +113,7 @@ class TestBeakerCallbackPreTrain(unittest.TestCase):
         callback._trainer = trainer_mock
 
         with (
-            patch("open_instruct.beaker_callback.get_rank", return_value=0),
+            patch("open_instruct.olmo_core_callbacks.get_rank", return_value=0),
             patch.dict("os.environ", {"BEAKER_WORKLOAD_ID": "test-workload-123"}),
             patch("subprocess.run"),
             patch.object(callback, "_get_tracking_url", return_value="https://wandb.ai/test/run/123"),
@@ -131,7 +131,7 @@ class TestBeakerCallbackPreTrain(unittest.TestCase):
         trainer_mock = Mock()
         callback._trainer = trainer_mock
 
-        with patch("open_instruct.beaker_callback.get_rank", return_value=0):
+        with patch("open_instruct.olmo_core_callbacks.get_rank", return_value=0):
             callback.pre_train()
 
         self.assertFalse(os.path.exists(f"{self.temp_dir.name}/olmo-core"))
@@ -160,7 +160,7 @@ class TestBeakerCallbackPostStep(unittest.TestCase):
         callback._step = step
 
         with (
-            patch("open_instruct.beaker_callback.get_rank", return_value=0),
+            patch("open_instruct.olmo_core_callbacks.get_rank", return_value=0),
             patch.object(callback, "_update") as mock_update,
         ):
             callback.post_step()
@@ -180,7 +180,7 @@ class TestBeakerCallbackPostTrain(unittest.TestCase):
         callback._trainer = trainer_mock
 
         with (
-            patch("open_instruct.beaker_callback.get_rank", return_value=0),
+            patch("open_instruct.olmo_core_callbacks.get_rank", return_value=0),
             patch.object(callback, "_update") as mock_update,
         ):
             callback.post_train()

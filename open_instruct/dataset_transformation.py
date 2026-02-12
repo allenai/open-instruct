@@ -152,6 +152,9 @@ def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrai
 # Chat templates
 # note we added `{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}`
 # because we want the template to not output eos_token if `add_generation_prompt=True`
+#
+# For Olmo 3 tokenizer settings and chat template decisions, see:
+# docs/olmo3.md (https://allenai.github.io/open-instruct/olmo3/#tokenizer-settings)
 CHAT_TEMPLATES = {
     "simple_concat_with_space": (
         "{% for message in messages %}"
