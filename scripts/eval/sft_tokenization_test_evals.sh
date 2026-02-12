@@ -24,8 +24,10 @@ MODELS=(
     # "TEST_HYBRIC_SFT_LARGER_LR1e-4"
     # "TEST_HYBRIC_SFT_LARGER_LR5e-5"
     # "TEST_HYBRIC_SFT_LARGER_LR2.5e-5"
-    "HYBRID_SFT_YARN_LR5e-5"
-    "HYBRID_SFT_YARN_LR2.5e-5"
+    # "HYBRID_SFT_YARN_LR5e-5"
+    # "HYBRID_SFT_YARN_LR2.5e-5"
+    "ABLATE_HYBRID_THINK_SFT_0210_LR2.5e-5"
+    "ABLATE_HYBRID_THINK_SFT_0210_5e-5"
     # "TEST_HYBRIC_SFT_LARGER_LR4.5e-5_seed42"
     # "TEST_HYBRIC_SFT_LARGER_LR1e-5"
     # "HYBRID_INSTRUCT_SFT_8e-5"
@@ -34,8 +36,17 @@ MODELS=(
 
 for MODEL in "${MODELS[@]}"; do
     # THINK MODELS
-    GCS_PATH="${BASE_PATH}/${MODEL}/step46412-hf-tokenizer-fix"
-    MODEL_NAME="0208-${MODEL}"
+    # GCS_PATH="${BASE_PATH}/${MODEL}/step46412-hf-tokenizer-fix"
+    # MODEL_NAME="0208-${MODEL}"
+
+    # Think models -- yarn
+    GCS_PATH="${BASE_PATH}/${MODEL}/step43110-hf"
+    MODEL_NAME="0210-${MODEL}"
+
+    # Think models -- ablation
+    # GCS_PATH="${BASE_PATH}/${MODEL}/step46412-hf"
+    # MODEL_NAME="0208-${MODEL}"
+
 
     # INSTRUCT MODELS
     # GCS_PATH="${BASE_PATH}/${MODEL}/step3256-hf"
