@@ -238,8 +238,26 @@ def _align_dpo_seq_counts(chosen_features: dict[str, Any], rejected_features: di
 
 @dataclass
 class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
+    def _prefilter_features(self, features: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if self.max_seq_length is None:
+            return features
+        chosen_total = 0
+        rejected_total = 0
+        keep = 0
+        for f in features:
+            chosen_len = len(f["chosen_input_ids"])
+            rejected_len = len(f["rejected_input_ids"])
+            if keep > 0 and (
+                chosen_total + chosen_len > self.max_seq_length or rejected_total + rejected_len > self.max_seq_length
+            ):
+                break
+            chosen_total += chosen_len
+            rejected_total += rejected_len
+            keep += 1
+        return features[:keep]
+
     def __call__(self, features, return_tensors=None, separator_id=None):
-        # call the original collator on chosen and rejected separately, then combine
+        features = self._prefilter_features(features)
         chosen_features = super().__call__(
             _filter_feature_dicts(features, "chosen_"), return_tensors=return_tensors, separator_id=separator_id
         )

@@ -313,6 +313,45 @@ class TestDPOPackingIndices(unittest.TestCase):
         self.assertEqual(missing_chosen, expected_missing)
         self.assertEqual(missing_rejected, expected_missing)
 
+    def test_prefilter_keeps_complete_sequences(self):
+        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=150)
+        features = _make_dpo_features(num_samples=4, chosen_lengths=[100], rejected_lengths=[100], start_index=0)
+
+        batch = collator(features)
+
+        self.assertEqual(len(batch["index"]), 1)
+        self.assertEqual(batch["chosen_cu_seq_lens_k"][-1].item(), 100)
+        self.assertEqual(batch["rejected_cu_seq_lens_k"][-1].item(), 100)
+
+    def test_simulate_reference_cache_no_data_loss(self):
+        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=300)
+        num_total_samples = 16
+        all_features = _make_dpo_features(
+            num_samples=num_total_samples, chosen_lengths=[100], rejected_lengths=[100], start_index=0
+        )
+
+        chosen_tensor = torch.full((num_total_samples,), float("-inf"))
+        rejected_tensor = torch.full((num_total_samples,), float("-inf"))
+
+        batch_size = 1
+        for batch_start in range(0, num_total_samples, batch_size):
+            batch_features = all_features[batch_start : batch_start + batch_size]
+            batch = collator(batch_features)
+
+            concat_batch, bs = concatenated_inputs(batch)
+            logits = torch.randn(1, concat_batch["concatenated_input_ids"].shape[1], 100)
+            logps = get_batch_logps(
+                logits, concat_batch["concatenated_labels"], concat_batch["concatenated_cu_seq_lens_k"]
+            )
+
+            chosen_tensor[batch["index"]] = logps[:bs]
+            rejected_tensor[batch["index"]] = logps[bs:]
+
+        missing_chosen = torch.where(chosen_tensor == float("-inf"))[0].tolist()
+        missing_rejected = torch.where(rejected_tensor == float("-inf"))[0].tolist()
+        self.assertEqual(missing_chosen, [])
+        self.assertEqual(missing_rejected, [])
+
     def test_average_log_prob_all_masked_segment(self):
         vocab_size = 100
         seq_len = 20

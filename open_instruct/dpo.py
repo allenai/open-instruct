@@ -310,12 +310,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         device=device,
     )
     # 4x batch size: forward-only (no backward), so no activation storage needed.
-    # With packing, use smaller batch size (half) to avoid truncation when packing long sequences.
-    cache_batch_multiplier = 0.5 if args.packing else 4
-    cache_batch_size = int(args.per_device_train_batch_size * cache_batch_multiplier * dp_world_size)
-    # Clamp to at least 1 sample per rank: with batch_size=1 and packing,
-    # int(1 * 0.5 * 1) = 0, which would be invalid.
-    cache_batch_size = max(cache_batch_size, dp_world_size)
+    # With packing, use 1 example per rank so pre-filtering never drops examples
+    # (single examples always fit within max_seq_length after tokenization truncation).
+    cache_batch_size = dp_world_size if args.packing else int(args.per_device_train_batch_size * 4 * dp_world_size)
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=cache_batch_size,
