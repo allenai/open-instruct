@@ -67,7 +67,7 @@ uv run python mason.py \
     --apply_verifiable_reward true \
     --env_name sandbox_lm \
     --env_backend docker \
-    --env_pool_size 8 \
+    --env_pool_size 4 \
     --env_max_steps 30 \
     --env_timeout 120 \
     --tool_parser_type vllm_hermes \
