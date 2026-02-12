@@ -21,13 +21,13 @@ from olmo_core.nn.attention.backend import has_flash_attn_3
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
-from olmo_core.train.callbacks import CheckpointerCallback
+from olmo_core.train.callbacks import CheckpointerCallback, ProfilerCallback
 from olmo_core.train.train_module.transformer import config as transformer_config
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2, PerfCallback
-from open_instruct.olmo_core_train_modules import DPOTrainModule
+from open_instruct.olmo_core_train_modules import DPOLMHead, DPOTrainModule
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
@@ -102,6 +102,7 @@ def _setup_model(args: dpo_utils.ExperimentConfig, device: torch.device):
         config_name_for_lookup, vocab_size, attn_backend=attn_backend
     )
     model = model_config.build(init_device="cpu")
+    model.lm_head.__class__ = DPOLMHead
 
     logger.info(f"Loading HuggingFace weights from {args.model_name_or_path}")
     load_hf_model(args.model_name_or_path, model.state_dict(), work_dir=args.output_dir)
@@ -122,10 +123,15 @@ def _setup_scheduler(args: dpo_utils.ExperimentConfig, num_training_steps: int):
     return scheduler
 
 
-def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
+def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int, model):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
     trainer_callbacks: dict[str, callbacks.Callback] = {"beaker": BeakerCallbackV2(config=json_config)}
+    device_name = utils.get_device_name(torch.cuda.get_device_name(0))
+    device_peak_flops = int(utils.GPU_SPECS[device_name]["flops"])
+    trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback(
+        num_flops_per_token=model.num_flops_per_token(args.max_seq_length), device_peak_flops=device_peak_flops
+    )
     trainer_callbacks["gpu_memory"] = callbacks.GPUMemoryMonitorCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if slack_webhook_url:
@@ -142,12 +148,19 @@ def _setup_callbacks(args: dpo_utils.ExperimentConfig, dp_world_size: int):
     checkpointing_steps = int(args.checkpointing_steps)
     trainer_callbacks["checkpointer"] = CheckpointerCallback(save_interval=checkpointing_steps, save_async=False)
     model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
+    # TODO(finbarr): MFU and TPS metrics should be reported per physical GPU so that
+    # results are comparable across different parallelism strategies. Currently uses
+    # dp_world_size which excludes TP GPUs, overestimating MFU when TP > 1.
     trainer_callbacks["perf"] = PerfCallback(
         model_dims=model_dims,
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_training_gpus=dp_world_size,
     )
+    if args.profiling:
+        trainer_callbacks["profiler"] = ProfilerCallback(
+            skip_first=5, wait=1, warmup=2, active=3, repeat=1, profile_memory=True
+        )
     return trainer_callbacks
 
 
@@ -213,18 +226,6 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     if args.use_lora:
         raise ValueError("LoRA is not supported with OLMo-core DPO training. Use dpo_tune_cache.py instead.")
 
-    if args.packing and args.compile_model:
-        raise ValueError(
-            "packing and compile_model cannot be used together. "
-            "Packing creates variable-length batches which causes torch.compile to recompile on every batch. "
-            "Either disable packing or disable compile_model."
-        )
-
-    if args.tensor_parallel_degree > 1:
-        raise NotImplementedError(
-            "Tensor parallelism is not supported with DPO (DTensor view ops are incompatible with torch.compile)."
-        )
-
     if args.context_parallel_degree > 1:
         raise NotImplementedError(
             "Context parallelism is not supported with DPO (requires batch_shard_by_document integration)."
@@ -269,17 +270,19 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     train.prepare_training_environment(seed=args.seed)
 
-    dp_rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
-    is_main_process = dp_rank == 0
+    tp_degree = args.tensor_parallel_degree
+    global_rank = distributed_utils.get_rank() if distributed_utils.is_distributed() else 0
+    dp_rank = global_rank // tp_degree
+    is_main_process = global_rank == 0
 
     dataset = _load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
     dataset = dataset.shuffle(seed=args.seed)
     dataset.set_format(type="pt")  # Must be after shuffle (shuffle resets format)
 
     world_size = distributed_utils.get_world_size() if distributed_utils.is_distributed() else 1
-    dp_world_size = world_size
+    dp_world_size = world_size // tp_degree
 
-    logger_utils.setup_logger(rank=dp_rank)
+    logger_utils.setup_logger(rank=global_rank)
 
     beaker_config = utils.setup_experiment_paths(args, is_main_process)
 
@@ -294,7 +297,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
 
     if args.packing:
         logger.info("Using packing/padding-free collation")
-        collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
+        collator = TensorDataCollatorWithFlatteningDPO(
+            return_position_ids=True, return_flash_attn_kwargs=True, max_seq_length=args.max_seq_length
+        )
     else:
         collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
@@ -309,9 +314,14 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         work_dir=args.output_dir,
         collator=collator,
         device=device,
+        fs_local_rank=global_rank,
     )
     # 4x batch size: forward-only (no backward), so no activation storage needed.
-    cache_batch_size = args.per_device_train_batch_size * 4 * dp_world_size
+    # With packing, use smaller batch size (half) to avoid truncation when packing long sequences.
+    cache_batch_multiplier = 0.5 if args.packing else 4
+    cache_batch_size = max(
+        int(args.per_device_train_batch_size * cache_batch_multiplier * dp_world_size), dp_world_size
+    )
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=cache_batch_size,
@@ -322,6 +332,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         collator=collator,
         device=device,
         drop_last=False,
+        fs_local_rank=global_rank,
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
@@ -357,12 +368,20 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         reduce_dtype=DType.float32,
         wrapping_strategy=transformer_config.TransformerDataParallelWrappingStrategy.blocks,
     )
-    ac_config = (
-        transformer_config.TransformerActivationCheckpointingConfig(
+    if args.activation_memory_budget < 1.0 and args.compile_model:
+        ac_config = transformer_config.TransformerActivationCheckpointingConfig(
             mode=transformer_config.TransformerActivationCheckpointingMode.budget,
             activation_memory_budget=args.activation_memory_budget,
         )
-        if args.activation_memory_budget < 1.0 and args.compile_model
+    elif args.activation_memory_budget < 1.0:
+        ac_config = transformer_config.TransformerActivationCheckpointingConfig(
+            mode=transformer_config.TransformerActivationCheckpointingMode.full
+        )
+    else:
+        ac_config = None
+    tp_config = (
+        transformer_config.TransformerTensorParallelConfig(degree=args.tensor_parallel_degree)
+        if args.tensor_parallel_degree > 1
         else None
     )
 
@@ -373,6 +392,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         max_sequence_length=args.max_seq_length,
         dpo_config=args,
         dp_config=dp_config,
+        tp_config=tp_config,
         ac_config=ac_config,
         compile_model=args.compile_model,
         max_grad_norm=max_grad_norm,
@@ -393,7 +413,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
             dist.destroy_process_group()
         return
 
-    trainer_callbacks = _setup_callbacks(args, dp_world_size)
+    trainer_callbacks = _setup_callbacks(args, dp_world_size, train_module.model)
 
     trainer = train.TrainerConfig(
         save_folder=args.output_dir,
