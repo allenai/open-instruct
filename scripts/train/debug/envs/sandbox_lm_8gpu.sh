@@ -40,8 +40,8 @@ uv run python mason.py \
     --dataset_mixer_list allenai/Dolci-RLZero-Math-7B 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 16384 \
-    --pack_length 18432 \
+    --response_length 30720 \
+    --pack_length 32768 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 8 \
