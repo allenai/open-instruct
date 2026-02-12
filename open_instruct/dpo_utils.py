@@ -950,30 +950,6 @@ def concatenated_forward(
         if k.startswith("concatenated_") and not k.endswith("labels")
     }
 
-    input_ids = inputs["input_ids"]
-    attn_mask = inputs.get("attention_mask")
-    labels = concatenated_batch["concatenated_labels"]
-
-    embed_weight: torch.Tensor = model.model.embed_tokens.weight  # type: ignore[assignment,union-attr]
-    embed_sample = embed_weight.data[0, :5].detach().float().cpu()
-    embed_mean = embed_weight.detach().float().mean().cpu()
-    logger.info(
-        f"DEBUG [HF forward] "
-        f"embed_weight.shape={embed_weight.shape} "
-        f"embed_weight[0,:5]={embed_sample.tolist()} "
-        f"embed_weight.mean()={float(embed_mean):.6f}"
-    )
-
-    logger.info(
-        f"DEBUG [HF forward] "
-        f"input_ids.shape={input_ids.shape} "
-        f"input_ids[0,:10]={input_ids[0, :10].tolist()} "
-        f"attn_mask[0,:10]={attn_mask[0, :10].tolist() if attn_mask is not None else 'None'} "
-        f"labels[0,:10]={labels[0, :10].tolist()} "
-        f"chosen_input[445:450]={input_ids[0, 445:450].tolist()} "
-        f"rejected_input[445:450]={input_ids[1, 445:450].tolist()}"
-    )
-
     if output_router_logits:
         outputs = model(**inputs, output_router_logits=True)
         logits = outputs.logits.to(torch.float32)
@@ -981,26 +957,6 @@ def concatenated_forward(
     else:
         logits = model(**inputs).logits.to(torch.float32)
         aux_loss = None
-
-    label_mask_chosen = labels[0] != -100
-    label_mask_rejected = labels[1] != -100
-    first_label_pos_chosen = label_mask_chosen.nonzero()[0].item() if label_mask_chosen.any() else -1
-    last_label_pos_chosen = label_mask_chosen.nonzero()[-1].item() if label_mask_chosen.any() else -1
-    first_label_pos_rejected = label_mask_rejected.nonzero()[0].item() if label_mask_rejected.any() else -1
-    last_label_pos_rejected = label_mask_rejected.nonzero()[-1].item() if label_mask_rejected.any() else -1
-    logger.info(
-        f"DEBUG [HF forward] "
-        f"logits.shape={logits.shape} "
-        f"logits[0,0,:5]={logits[0, 0, :5].tolist()} "
-        f"logits[0,-1,:5]={logits[0, -1, :5].tolist()}"
-    )
-    logger.info(
-        f"DEBUG [HF forward] label positions: "
-        f"chosen=[{first_label_pos_chosen}, {last_label_pos_chosen}] "
-        f"rejected=[{first_label_pos_rejected}, {last_label_pos_rejected}] "
-        f"logits[0,{first_label_pos_chosen - 1},:5]={logits[0, int(first_label_pos_chosen) - 1, :5].tolist() if first_label_pos_chosen > 0 else 'N/A'} "
-        f"logits[1,{first_label_pos_rejected - 1},:5]={logits[1, int(first_label_pos_rejected) - 1, :5].tolist() if first_label_pos_rejected > 0 else 'N/A'}"
-    )
 
     if not packing:
         all_logps = _get_batch_logps(
@@ -1016,9 +972,6 @@ def concatenated_forward(
         )
     chosen_logps = all_logps[:bs]
     rejected_logps = all_logps[bs:]
-
-    logger.info(f"DEBUG [HF forward] chosen_logps={chosen_logps.tolist()} rejected_logps={rejected_logps.tolist()}")
-
     return chosen_logps, rejected_logps, aux_loss
 
 
@@ -1117,17 +1070,6 @@ def concatenated_forward_olmo(
     del output_router_logits
     bs = batch["chosen_input_ids"].shape[0]
 
-    embed_weight: torch.Tensor = model.embeddings.weight  # type: ignore[assignment,union-attr]
-    full_embed = embed_weight.full_tensor() if hasattr(embed_weight, "full_tensor") else embed_weight  # type: ignore[call-non-callable]
-    embed_sample = full_embed[0, :5].detach().float().cpu()
-    embed_mean = full_embed.detach().float().mean().cpu()
-    logger.info(
-        f"DEBUG [OLMo forward] "
-        f"embed_weight.shape={embed_weight.shape} "
-        f"embed_weight[0,:5]={embed_sample.tolist()} "
-        f"embed_weight.mean()={float(embed_mean):.6f}"
-    )
-
     if not packing:
         concatenated_batch = concatenated_inputs(batch)
         packed_input_ids, packed_labels, cu_doc_lens, max_doc_len = pack_padded_sequences(
@@ -1136,51 +1078,12 @@ def concatenated_forward_olmo(
             concatenated_batch["concatenated_attention_mask"],
         )
 
-        rejected_start = cu_doc_lens[1].item()
-        logger.info(
-            f"DEBUG [OLMo forward] "
-            f"packed_input_ids.shape={packed_input_ids.shape} "
-            f"packed_input_ids[0,:10]={packed_input_ids[0, :10].tolist()} "
-            f"cu_doc_lens={cu_doc_lens.tolist()} "
-            f"labels[0,:10]={concatenated_batch['concatenated_labels'][0, :10].tolist()} "
-            f"chosen_input[445:450]={packed_input_ids[0, 445:450].tolist()} "
-            f"rejected_input[445:450]={packed_input_ids[0, rejected_start + 445 : rejected_start + 450].tolist()}"
-        )
-
         doc_lens = cu_doc_lens.diff()
         packed_logits = model(packed_input_ids, doc_lens=doc_lens, max_doc_lens=[max_doc_len]).to(torch.float32)
-
-        logger.info(
-            f"DEBUG [OLMo forward] "
-            f"packed_logits.shape={packed_logits.shape} "
-            f"packed_logits[0,0,:5]={packed_logits[0, 0, :5].tolist()} "
-            f"packed_logits[0,-1,:5]={packed_logits[0, -1, :5].tolist()}"
-        )
 
         batch_size = concatenated_batch["concatenated_input_ids"].shape[0]
         max_seq_len = concatenated_batch["concatenated_input_ids"].shape[1]
         logits = unpack_to_padded(packed_logits, cu_doc_lens, batch_size, max_seq_len)
-
-        labels = concatenated_batch["concatenated_labels"]
-        label_mask_chosen = labels[0] != -100
-        label_mask_rejected = labels[1] != -100
-        first_label_pos_chosen = label_mask_chosen.nonzero()[0].item() if label_mask_chosen.any() else -1
-        last_label_pos_chosen = label_mask_chosen.nonzero()[-1].item() if label_mask_chosen.any() else -1
-        first_label_pos_rejected = label_mask_rejected.nonzero()[0].item() if label_mask_rejected.any() else -1
-        last_label_pos_rejected = label_mask_rejected.nonzero()[-1].item() if label_mask_rejected.any() else -1
-        logger.info(
-            f"DEBUG [OLMo forward] "
-            f"logits.shape={logits.shape} "
-            f"logits[0,0,:5]={logits[0, 0, :5].tolist()} "
-            f"logits[0,-1,:5]={logits[0, -1, :5].tolist()}"
-        )
-        logger.info(
-            f"DEBUG [OLMo forward] label positions: "
-            f"chosen=[{first_label_pos_chosen}, {last_label_pos_chosen}] "
-            f"rejected=[{first_label_pos_rejected}, {last_label_pos_rejected}] "
-            f"logits[0,{first_label_pos_chosen - 1},:5]={logits[0, int(first_label_pos_chosen) - 1, :5].tolist() if first_label_pos_chosen > 0 else 'N/A'} "
-            f"logits[1,{first_label_pos_rejected - 1},:5]={logits[1, int(first_label_pos_rejected) - 1, :5].tolist() if first_label_pos_rejected > 0 else 'N/A'}"
-        )
 
         all_logps = _get_batch_logps(
             logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
@@ -1202,9 +1105,6 @@ def concatenated_forward_olmo(
 
     chosen_logps = all_logps[:bs]
     rejected_logps = all_logps[bs:]
-
-    logger.info(f"DEBUG [OLMo forward] chosen_logps={chosen_logps.tolist()} rejected_logps={rejected_logps.tolist()}")
-
     return chosen_logps, rejected_logps, None
 
 
