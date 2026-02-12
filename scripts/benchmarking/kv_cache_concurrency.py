@@ -13,9 +13,13 @@ Usage:
 """
 
 import argparse
+import os
 
-from vllm import LLM
-from vllm.v1.core import kv_cache_utils
+# Force in-process engine core so we can access internals directly.
+os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
+
+from vllm import LLM  # noqa: E402
+from vllm.v1.core import kv_cache_utils  # noqa: E402
 
 
 def main():
