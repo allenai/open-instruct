@@ -7,6 +7,7 @@ import parameterized
 import torch
 
 import open_instruct.data_loader
+from open_instruct import dpo_utils
 
 
 def single_example_collator(examples: list[dict]) -> dict:
@@ -344,15 +345,34 @@ class TestHFDataLoader(unittest.TestCase):
             dataset=dataset, batch_size=2, seed=42, dp_rank=0, dp_world_size=2, work_dir=tempfile.gettempdir()
         )
 
-        batch_with_input_ids = {"input_ids": torch.zeros(4, 128)}
+        batch_with_input_ids = {"input_ids": torch.zeros(4, 128), "attention_mask": torch.ones(4, 128)}
         self.assertEqual(loader.global_num_tokens_in_batch(batch_with_input_ids), 4 * 128 * 2)
 
-        batch_with_dpo = {"chosen_input_ids": torch.zeros(2, 64), "rejected_input_ids": torch.zeros(2, 64)}
-        self.assertEqual(loader.global_num_tokens_in_batch(batch_with_dpo), (2 * 64 + 2 * 64) * 2)
+    def test_global_num_tokens_in_batch_excludes_padding(self, batch_size: int = 2, real_tokens: int = 5):
+        """Verify that padding tokens are excluded from the count."""
+        loader = open_instruct.data_loader.HFDataLoader(
+            dataset=make_test_dataset(batch_size * real_tokens),
+            batch_size=2,
+            seed=42,
+            dp_rank=0,
+            dp_world_size=1,
+            work_dir=tempfile.gettempdir(),
+        )
 
-        batch_without_tokens = {"labels": torch.zeros(4, 128)}
-        with self.assertRaises(ValueError):
-            loader.global_num_tokens_in_batch(batch_without_tokens)
+        for padding_amount in [0, 5, 10, 50, 100]:
+            batch = {
+                "input_ids": dpo_utils.pad_to_length(
+                    torch.ones(batch_size, real_tokens), real_tokens + padding_amount, 0
+                ),
+                "attention_mask": dpo_utils.pad_to_length(
+                    torch.ones(batch_size, real_tokens), real_tokens + padding_amount, 0
+                ),
+            }
+            self.assertEqual(
+                loader.global_num_tokens_in_batch(batch),
+                batch_size * real_tokens,
+                f"Failed for padding_amount={padding_amount}",
+            )
 
     @parameterized.parameterized.expand(
         [

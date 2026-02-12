@@ -20,6 +20,7 @@ from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from queue import Empty
 from typing import Any, Literal
 
 import numpy as np
@@ -83,6 +84,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         collator: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
         device: torch.device | None = None,
         drop_last: bool = True,
+        fs_local_rank: int | None = None,
     ) -> None:
         """Initialize the HFDataLoader.
 
@@ -99,6 +101,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             device: Device to move tensors to.
             drop_last: If True, drop the last incomplete batch. If False, pad the last batch
                 with repeated indices to fill a complete batch.
+            fs_local_rank: File system local rank. Defaults to dp_rank when None.
 
         Note:
             The dataset must have an 'index' column for tracking samples across epochs.
@@ -110,7 +113,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             global_batch_size=batch_size,
             dp_world_size=dp_world_size,
             dp_rank=dp_rank,
-            fs_local_rank=dp_rank,
+            fs_local_rank=fs_local_rank if fs_local_rank is not None else dp_rank,
         )
 
         if "index" not in dataset.column_names:
@@ -277,12 +280,9 @@ class HFDataLoader(data_loader.DataLoaderBase):
         Raises:
             ValueError: If no input_ids tensors are found in the batch.
         """
-        num_tokens = 0
-        for key, value in batch.items():
-            if "input_ids" in key and isinstance(value, torch.Tensor):
-                num_tokens += value.numel()
-        if num_tokens == 0:
-            raise ValueError("Batch contains no input_ids tensors. Cannot compute token count.")
+        # attention_mask is 1 for all non-padding tokens, and 0 otherwise.
+        # Using sum() excludes padding tokens from the count.
+        num_tokens = batch["attention_mask"].sum().item()
         return num_tokens * self.dp_world_size
 
 
@@ -374,6 +374,15 @@ class StreamingDataLoaderConfig:
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = 0.0
 
+    # Evolving rubric reward
+    apply_evolving_rubric_reward: bool = False
+    """Whether to generate and apply evolving rubrics for reward computation.
+    When enabled, a rubric buffer is automatically maintained across training steps."""
+    max_active_rubrics: int = 5
+    """Maximum number of active evolving rubrics per query."""
+    cache_evolving_rubric_data_dir: str | None = None
+    """Directory to cache evolving rubric generation data for debugging/analysis. If set, rubric data will be saved."""
+
     # Rollout saving
     save_traces: bool = False
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
@@ -407,9 +416,12 @@ class StreamingDataLoaderConfig:
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
 
-        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
-            "At least one reward must be applied!"
-        )
+        assert (
+            self.apply_verifiable_reward
+            or self.apply_r1_style_format_reward
+            or self.non_stop_penalty
+            or self.apply_evolving_rubric_reward
+        ), "At least one reward must be applied!"
 
         if self.stop_strings is None:
             self.stop_strings = []
@@ -569,6 +581,7 @@ def accumulate_inference_batches(
     training_step: int | None = None,
     verbose: bool = False,
     max_possible_score: float = 1.0,
+    requeue_on_timeout: bool = True,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -606,11 +619,22 @@ def accumulate_inference_batches(
         f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
     )
     num_prompts_sampled = 0
+    collected_results = []  # Track results for potential requeue on timeout
     while num_prompts_sampled < num_prompts:
         logger.info(
             f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts} from inference_results_Q"
         )
-        result = inference_results_Q.get(timeout=timeout)
+        try:
+            result = inference_results_Q.get(timeout=timeout)
+        except Empty:
+            if requeue_on_timeout and collected_results:
+                logger.info(
+                    f"[accumulate_inference_batches] Timeout with {len(collected_results)}/{num_prompts} results, requeuing"
+                )
+                for r in collected_results:
+                    inference_results_Q.put(r)
+            raise
+        collected_results.append(result)
         logger.info(
             f"[accumulate_inference_batches] Got result {num_prompts_sampled + 1}/{num_prompts}, type: {type(result).__name__}"
         )

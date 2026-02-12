@@ -826,7 +826,7 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
     if keep_last_n_checkpoints >= 0 and len(checkpoints) > keep_last_n_checkpoints:
         for checkpoint in checkpoints[: len(checkpoints) - keep_last_n_checkpoints]:
             logger.info(f"Removing checkpoint {checkpoint}")
-            shutil.rmtree(os.path.join(output_dir, checkpoint))
+            shutil.rmtree(os.path.join(output_dir, checkpoint), ignore_errors=True)
     logger.info("Remaining files:" + str(os.listdir(output_dir)))
 
 
@@ -847,7 +847,7 @@ def clean_last_n_checkpoints_deepspeed(output_dir: str, keep_last_n_checkpoints:
             print(f"Removing checkpoint {checkpoint}")
             checkpoint_path = os.path.join(output_dir, checkpoint)
             if os.path.isdir(checkpoint_path):
-                shutil.rmtree(checkpoint_path)
+                shutil.rmtree(checkpoint_path, ignore_errors=True)
             elif os.path.isfile(checkpoint_path):
                 os.remove(checkpoint_path)
 
@@ -1339,8 +1339,7 @@ def setup_experiment_paths(args, is_main_process: bool) -> BeakerRuntimeConfig |
 
     Modifies args in-place. Returns BeakerRuntimeConfig if on Beaker.
     """
-    if getattr(args, "add_seed_and_date_to_exp_name", False):
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.exp_name = f"{args.exp_name}__{args.seed}"
     args.output_dir = os.path.join(args.output_dir, args.exp_name)
 
     if dist.is_initialized():
@@ -1781,6 +1780,7 @@ GPU_SPECS = {
     "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 2.0e12},  # 2.0 TB/s HBM2e (80GB variant)
     "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
+    "h200": {"flops": 989e12, "memory_size": 141e9, "memory_bandwidth": 4.8e12},  # 4.8 TB/s HBM3e
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
     "l40s": {"flops": 362e12, "memory_size": 48e9, "memory_bandwidth": 864e9},  # 864 GB/s GDDR6
     "pro 6000": {"flops": 503.8e12, "memory_size": 96e9, "memory_bandwidth": 1792e9},  # 1792 GB/s GDDR7
@@ -1940,8 +1940,8 @@ class ModelDims:
                     self.attn_flops(L, L, sliding_window=self.sliding_window) + self.mlp_flops(L)
                 )
 
-            # Always include a single LM head after prefill (next-token logits)
-            total += FLOP_PER_MAC * self.hidden_size * self.vocab_size
+            # LM head is applied to each token position during training
+            total += L * FLOP_PER_MAC * self.hidden_size * self.vocab_size
 
         return total
 

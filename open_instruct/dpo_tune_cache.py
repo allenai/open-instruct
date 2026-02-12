@@ -162,17 +162,16 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # ------------------------------------------------------------
     # Set up runtime variables
-    beaker_config = maybe_get_beaker_config() if is_beaker_job() else None
-    if args.add_seed_and_date_to_exp_name:
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    else:
-        args.exp_name = args.exp_name
     if not args.do_not_randomize_output_dir:
         args.output_dir = os.path.join(args.output_dir, args.exp_name)
     logger.info("using the output directory: %s", args.output_dir)
     args.local_cache_dir = os.path.abspath(args.local_cache_dir)
     if is_beaker_job():
         args.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+    beaker_config = None
+    if is_beaker_job() and accelerator.is_main_process:
+        beaker_config = maybe_get_beaker_config()
+
     if args.push_to_hub and accelerator.is_main_process:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -227,7 +226,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     # Make one log on every process with the configuration for debugging.
     logger_utils.setup_logger()
-    logger.info(accelerator.state)
+    if accelerator.is_main_process:
+        logger.info(accelerator.state)
     if accelerator.is_local_main_process:
         datasets.utils.logging.set_verbosity_warning()
         transformers.utils.logging.set_verbosity_info()
@@ -360,7 +360,9 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
 
     if args.use_lora:
         if args.use_qlora:
-            model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+            model = prepare_model_for_kbit_training(
+                model, use_gradient_checkpointing=args.activation_memory_budget < 1
+            )
 
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(
@@ -373,7 +375,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
-    elif args.gradient_checkpointing:
+    elif args.activation_memory_budget < 1:
         model.gradient_checkpointing_enable()
 
     model_dims = ModelDims(
@@ -706,7 +708,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
                     # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
                     with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                         f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-                    if accelerator.is_local_main_process:
+                    if accelerator.is_main_process:
                         clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
                     accelerator.wait_for_everyone()
 
@@ -721,7 +723,7 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
             with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                 f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-            if accelerator.is_local_main_process:
+            if accelerator.is_main_process:
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
 
@@ -730,14 +732,13 @@ def main(args: dpo_utils.ExperimentConfig, tc: TokenizerConfig):
             accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
         )
 
-    # remove all checkpoints to save space
-    if accelerator.is_local_main_process:
-        clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
+    if accelerator.is_main_process:
+        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
     if (
         args.try_auto_save_to_beaker
         and accelerator.is_main_process
-        and is_beaker_job()
+        and beaker_config is not None
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
     ):
