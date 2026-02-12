@@ -72,7 +72,7 @@ class DPOTrainModule(TransformerTrainModule):
         self,
         model: Transformer,
         optim: OptimConfig,
-        rank_microbatch_size: int,
+        sample_microbatch_size: int,
         max_sequence_length: int,
         dpo_config: dpo_utils.ExperimentConfig,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
@@ -86,10 +86,11 @@ class DPOTrainModule(TransformerTrainModule):
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
     ) -> None:
+        rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length * 2
         super().__init__(
             model=model,
             optim=optim,
-            rank_microbatch_size=rank_microbatch_size,
+            rank_microbatch_size=rank_microbatch_size_tokens,
             max_sequence_length=max_sequence_length,
             dp_config=dp_config,
             tp_config=tp_config,
@@ -103,6 +104,7 @@ class DPOTrainModule(TransformerTrainModule):
             state_dict_load_opts=state_dict_load_opts,
         )
 
+        self.sample_microbatch_size = sample_microbatch_size
         self.dpo_config = dpo_config
         self.reference_cache: model_utils.TensorCache | None = None
 
@@ -137,7 +139,7 @@ class DPOTrainModule(TransformerTrainModule):
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
         self.model.train()
 
-        micro_batches = split_batch_dpo(batch, self.rank_microbatch_size)
+        micro_batches = split_batch_dpo(batch, self.sample_microbatch_size)
         num_micro_batches = len(micro_batches)
 
         self._total_loss.zero_()
